@@ -71,3 +71,81 @@ export async function createTrip(formData: FormData) {
 
   redirect(`/trips/${trip.slug}`)
 }
+
+export async function updateTrip(formData: FormData) {
+  const tripId    = String(formData.get('trip_id') ?? '')
+  const title     = String(formData.get('title') ?? '').trim()
+  const subtitle  = String(formData.get('subtitle') ?? '').trim()
+  const startDate = String(formData.get('start_date') ?? '').trim()
+  const endDate   = String(formData.get('end_date') ?? '').trim()
+  const status    = String(formData.get('status') ?? '').trim()
+  const memberIds = formData.getAll('members').map(String)
+
+  const supabase = await createClient()
+
+  const { data: trip } = await supabase
+    .from('trips').select('slug').eq('id', tripId).maybeSingle()
+
+  if (!trip?.slug)
+    redirect(`/trips?error=${encodeURIComponent('Reise nicht gefunden')}`)
+
+  const editPath = `/trips/${trip.slug}/edit`
+
+  if (title.length < 2)
+    redirect(`${editPath}?error=${encodeURIComponent('Reisenname: mindestens 2 Zeichen erforderlich')}`)
+  if (!startDate)
+    redirect(`${editPath}?error=${encodeURIComponent('Startdatum ist erforderlich')}`)
+  if (!endDate)
+    redirect(`${editPath}?error=${encodeURIComponent('Enddatum ist erforderlich')}`)
+  if (startDate && endDate && new Date(endDate) <= new Date(startDate))
+    redirect(`${editPath}?error=${encodeURIComponent('Enddatum muss nach dem Startdatum liegen')}`)
+  // 'archived' ist bewusst kein wählbarer Wert hier — Archivieren läuft nur über
+  // den eigenen Bestätigungs-Flow (archiveTrip), nie über dieses Dropdown.
+  if (!['planned', 'active', 'completed'].includes(status))
+    redirect(`${editPath}?error=${encodeURIComponent('Ungültiger Status')}`)
+  if (memberIds.length === 0)
+    redirect(`${editPath}?error=${encodeURIComponent('Mindestens eine Person muss ausgewählt sein')}`)
+
+  const { error } = await supabase
+    .from('trips')
+    .update({
+      title,
+      subtitle: subtitle || null,
+      status: status as 'planned' | 'active' | 'completed',
+      start_date: startDate,
+      end_date: endDate,
+    })
+    .eq('id', tripId)
+
+  if (error)
+    redirect(`${editPath}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
+
+  await supabase.from('trip_members').delete().eq('trip_id', tripId)
+  await supabase.from('trip_members').insert(
+    memberIds.map(person_id => ({ trip_id: tripId, person_id }))
+  )
+
+  redirect(`/trips/${trip.slug}`)
+}
+
+export async function archiveTrip(formData: FormData) {
+  const tripId = String(formData.get('trip_id') ?? '')
+  const supabase = await createClient()
+
+  await supabase.from('trips').update({ status: 'archived' }).eq('id', tripId)
+
+  redirect('/trips')
+}
+
+export async function restoreTrip(formData: FormData) {
+  const tripId = String(formData.get('trip_id') ?? '')
+  const supabase = await createClient()
+
+  await supabase
+    .from('trips')
+    .update({ status: 'planned' })
+    .eq('id', tripId)
+    .eq('status', 'archived')
+
+  redirect('/trips?f=archiviert')
+}

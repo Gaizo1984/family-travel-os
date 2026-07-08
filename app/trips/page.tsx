@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Map, Globe, CalendarDays } from "lucide-react";
 import { getDaysUntil, formatDateDE, getTripDuration } from "@/lib/demo-data";
 import { createClient } from "@/lib/supabase/server";
+import { restoreTrip } from "@/lib/actions/trips";
 
 const H_FG    = "#F0EBE3";
 const H_MUTED = "#A89880";
@@ -19,10 +20,11 @@ const TRIP_IMAGES: Record<string, string> = {
 };
 
 const FILTERS = [
-  { key: "alle",      label: "Alle" },
-  { key: "geplant",   label: "Geplant" },
-  { key: "aktiv",     label: "Aktiv" },
-  { key: "vergangen", label: "Vergangen" },
+  { key: "alle",       label: "Alle" },
+  { key: "geplant",    label: "Geplant" },
+  { key: "aktiv",      label: "Aktiv" },
+  { key: "vergangen",  label: "Vergangen" },
+  { key: "archiviert", label: "Archiviert" },
 ];
 
 type PersonRow = { id: string; name: string; initials: string; color: string }
@@ -46,9 +48,10 @@ function applyFilter(trips: TripRow[], f: string): { planned: TripRow[]; past: T
   const active  = trips.filter((t) => t.status === "active");
   const planned = trips.filter((t) => t.status === "planned");
   const past    = trips.filter((t) => t.status === "completed");
-  if (f === "aktiv")     return { planned: active, past: [] };
-  if (f === "geplant")   return { planned: [...active, ...planned], past: [] };
-  if (f === "vergangen") return { planned: [], past };
+  if (f === "aktiv")      return { planned: active, past: [] };
+  if (f === "geplant")    return { planned: [...active, ...planned], past: [] };
+  if (f === "vergangen")  return { planned: [], past };
+  if (f === "archiviert") return { planned: [], past: [] };
   return { planned: [...active, ...planned], past };
 }
 
@@ -275,6 +278,9 @@ export default async function TripsPage({
   const trips = (data ?? []) as unknown as TripRow[];
   const { planned, past } = applyFilter(trips, f);
 
+  const visibleTrips  = trips.filter((t) => t.status !== "archived");
+  const archivedTrips = trips.filter((t) => t.status === "archived");
+
   const completedTrips = trips.filter((t) => t.status === "completed");
   const totalDays = completedTrips.reduce((acc, t) =>
     t.start_date && t.end_date
@@ -348,6 +354,41 @@ export default async function TripsPage({
           </section>
         )}
 
+        {f === "archiviert" && (
+          <section className="mb-14">
+            <div className="mb-5" style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.24em", textTransform: "uppercase" }}>
+              Archiviert
+            </div>
+            {archivedTrips.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {archivedTrips.map((trip) => (
+                  <div key={trip.id} className="relative">
+                    <PastCard trip={trip} />
+                    <form action={restoreTrip} className="absolute top-4 right-4" style={{ zIndex: 5 }}>
+                      <input type="hidden" name="trip_id" value={trip.id} />
+                      <button
+                        type="submit"
+                        style={{
+                          fontSize: "0.58rem", letterSpacing: "0.1em", textTransform: "uppercase",
+                          color: "#F0EBE3", background: "rgba(184,154,94,0.28)",
+                          border: "1px solid rgba(184,154,94,0.4)", padding: "5px 12px",
+                          borderRadius: "20px", backdropFilter: "blur(4px)", cursor: "pointer",
+                        }}
+                      >
+                        Wiederherstellen
+                      </button>
+                    </form>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
+                Keine archivierten Reisen.
+              </p>
+            )}
+          </section>
+        )}
+
         {(f === "alle" || f === "vergangen") && (
           <section>
             <div className="mb-8" style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.24em", textTransform: "uppercase", borderTop: "1px solid var(--border)", paddingTop: "48px" }}>
@@ -355,7 +396,7 @@ export default async function TripsPage({
             </div>
             <div className="flex gap-12 md:gap-20">
               {[
-                { Icon: Map,         value: trips.length, label: "Reisen" },
+                { Icon: Map,         value: visibleTrips.length, label: "Reisen" },
                 { Icon: Globe,       value: 6,            label: "Länder" },
                 { Icon: CalendarDays, value: totalDays,   label: "Reisetage" },
               ].map(({ Icon, value, label }) => (

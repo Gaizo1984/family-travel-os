@@ -8,7 +8,7 @@ export type Json =
 
 export type BookingType     = 'flight' | 'accommodation' | 'rental_car' | 'transfer' | 'activity'
 export type BookingStatus   = 'pending' | 'confirmed' | 'cancelled'
-export type TripStatus      = 'planned' | 'active' | 'completed'
+export type TripStatus      = 'planned' | 'active' | 'completed' | 'archived'
 export type TaskStatus      = 'open' | 'done' | 'snoozed'
 export type JournalVis      = 'family' | 'private'
 export type StorageProvider = 'supabase_storage' | 'azure_blob' | 'onedrive_sharepoint'

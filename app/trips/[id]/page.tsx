@@ -74,49 +74,54 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 function StageCard({ stage, idx, slug }: { stage: StageRow; idx: number; slug: string }) {
   const imgUrl = STAGE_IMAGES[idx % STAGE_IMAGES.length];
   return (
-    <Link
-      href={`/trips/${slug}/stages/${stage.id}`}
-      className="group relative shrink-0 overflow-hidden rounded-xl block"
-      style={{ width: 210, height: 285 }}
-    >
-      {imgUrl && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={imgUrl} alt={stage.title} className="absolute inset-0 w-full h-full object-cover" />
-      )}
-      <div
-        className="absolute inset-0"
-        style={{ background: "linear-gradient(to top, rgba(10,9,7,0.96) 0%, rgba(10,9,7,0.38) 55%, transparent 100%)" }}
-      />
-      <div className="absolute top-4 left-4">
-        <span style={{ color: "rgba(240,235,227,0.4)", fontSize: "0.6rem", letterSpacing: "0.14em" }}>
-          {String(idx + 1).padStart(2, "0")}
-        </span>
-      </div>
-      <div className="absolute top-3 right-3">
+    <div className="group relative shrink-0 overflow-hidden rounded-xl" style={{ width: 210, height: 285 }}>
+      <Link href={`/trips/${slug}/stages/${stage.id}`} className="absolute inset-0 block">
+        {imgUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={imgUrl} alt={stage.title} className="absolute inset-0 w-full h-full object-cover" />
+        )}
+        <div
+          className="absolute inset-0"
+          style={{ background: "linear-gradient(to top, rgba(10,9,7,0.96) 0%, rgba(10,9,7,0.38) 55%, transparent 100%)" }}
+        />
+        <div className="absolute top-4 left-4">
+          <span style={{ color: "rgba(240,235,227,0.4)", fontSize: "0.6rem", letterSpacing: "0.14em" }}>
+            {String(idx + 1).padStart(2, "0")}
+          </span>
+        </div>
+        <div className="absolute inset-x-0 bottom-0 p-4">
+          <div className="text-base font-light mb-0.5" style={{ color: H_FG }}>{stage.title}</div>
+          <div className="text-xs mb-3" style={{ color: H_MUTED, letterSpacing: "0.08em", fontSize: "0.68rem" }}>
+            {stage.nights ?? 0} {stage.nights === 1 ? "Nacht" : "Nächte"}
+          </div>
+          <div style={{ borderTop: `1px solid ${H_BORDER}`, paddingTop: "10px" }}>
+            <div style={{ color: "rgba(240,235,227,0.35)", fontSize: "0.6rem", letterSpacing: "0.04em" }}>
+              {stage.start_date ? formatDateDE(stage.start_date) : "—"}
+            </div>
+            {stage.accommodation && (
+              <div className="mt-0.5" style={{ color: H_MUTED, fontSize: "0.62rem" }}>
+                {stage.accommodation}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+          <ChevronRight size={12} strokeWidth={1.5} style={{ color: H_MUTED }} />
+        </div>
+      </Link>
+
+      <div className="absolute top-3 right-3 flex flex-col items-end gap-1.5" style={{ zIndex: 2 }}>
         <span style={{ display: "inline-block", fontSize: "0.56rem", letterSpacing: "0.12em", textTransform: "uppercase", color: "#C8A96E", background: "rgba(10,9,7,0.55)", padding: "3px 8px", borderRadius: "20px", backdropFilter: "blur(4px)" }}>
           In Planung
         </span>
+        <Link
+          href={`/trips/${slug}/stages/${stage.id}/edit`}
+          style={{ fontSize: "0.56rem", letterSpacing: "0.1em", textTransform: "uppercase", color: H_MUTED, background: "rgba(10,9,7,0.55)", padding: "3px 8px", borderRadius: "20px", backdropFilter: "blur(4px)", textDecoration: "none" }}
+        >
+          Bearbeiten
+        </Link>
       </div>
-      <div className="absolute inset-x-0 bottom-0 p-4">
-        <div className="text-base font-light mb-0.5" style={{ color: H_FG }}>{stage.title}</div>
-        <div className="text-xs mb-3" style={{ color: H_MUTED, letterSpacing: "0.08em", fontSize: "0.68rem" }}>
-          {stage.nights ?? 0} {stage.nights === 1 ? "Nacht" : "Nächte"}
-        </div>
-        <div style={{ borderTop: `1px solid ${H_BORDER}`, paddingTop: "10px" }}>
-          <div style={{ color: "rgba(240,235,227,0.35)", fontSize: "0.6rem", letterSpacing: "0.04em" }}>
-            {stage.start_date ? formatDateDE(stage.start_date) : "—"}
-          </div>
-          {stage.accommodation && (
-            <div className="mt-0.5" style={{ color: H_MUTED, fontSize: "0.62rem" }}>
-              {stage.accommodation}
-            </div>
-          )}
-        </div>
-      </div>
-      <div className="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-        <ChevronRight size={12} strokeWidth={1.5} style={{ color: H_MUTED }} />
-      </div>
-    </Link>
+    </div>
   );
 }
 
@@ -198,10 +203,44 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
           </Link>
         </div>
 
-        <div className="absolute top-5 right-7">
+        <div className="absolute top-5 right-7 flex items-center gap-2">
           <span style={{ fontSize: "0.58rem", letterSpacing: "0.18em", textTransform: "uppercase", color: "#C8A96E", background: "rgba(184,154,94,0.14)", border: "1px solid rgba(184,154,94,0.2)", padding: "5px 12px", borderRadius: "20px" }}>
             {statusLabel}
           </span>
+
+          <details className="menu-details relative">
+            <summary
+              style={{
+                cursor: "pointer",
+                color: "rgba(240,235,227,0.6)",
+                fontSize: "0.9rem",
+                lineHeight: 1,
+                padding: "6px 10px",
+                borderRadius: "20px",
+                background: "rgba(10,9,7,0.35)",
+                border: "1px solid rgba(240,235,227,0.15)",
+              }}
+            >
+              ⋯
+            </summary>
+            <div
+              className="absolute right-0 mt-2 rounded-lg overflow-hidden"
+              style={{ background: "var(--surface)", border: "1px solid var(--border)", minWidth: "170px", zIndex: 30 }}
+            >
+              <Link
+                href={`/trips/${trip.slug}/edit`}
+                style={{ display: "block", padding: "11px 16px", color: "var(--foreground)", fontSize: "0.78rem", textDecoration: "none" }}
+              >
+                Reise bearbeiten
+              </Link>
+              <Link
+                href={`/trips/${trip.slug}/archive`}
+                style={{ display: "block", padding: "11px 16px", color: "#B5624A", fontSize: "0.78rem", textDecoration: "none", borderTop: "1px solid var(--border)" }}
+              >
+                Reise archivieren
+              </Link>
+            </div>
+          </details>
         </div>
 
         <div className="absolute inset-x-0 bottom-0 px-7 md:px-10 pb-8 md:pb-10">
@@ -242,9 +281,23 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
       <div className="flex-1" style={{ background: "var(--background)" }}>
         <div className="max-w-5xl mx-auto px-5 md:px-10 py-10 space-y-14">
 
-          {stages.length > 0 && (
-            <section>
-              <SectionLabel>Etappen · {stages.length} {stages.length === 1 ? "Destination" : "Destinationen"}</SectionLabel>
+          <section>
+            <div className="flex items-center justify-between mb-5">
+              <h2
+                className="text-xs font-medium"
+                style={{ color: "var(--muted)", letterSpacing: "0.2em", textTransform: "uppercase", fontSize: "0.65rem" }}
+              >
+                Etappen{stages.length > 0 ? ` · ${stages.length} ${stages.length === 1 ? "Destination" : "Destinationen"}` : ""}
+              </h2>
+              <Link
+                href={`/trips/${trip.slug}/stages/new`}
+                style={{ color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.08em", textDecoration: "none" }}
+              >
+                + Etappe hinzufügen
+              </Link>
+            </div>
+
+            {stages.length > 0 ? (
               <div className="overflow-x-auto -mx-1 px-1">
                 <div className="flex gap-4 pb-3" style={{ width: "max-content" }}>
                   {stages.map((stage, idx) => (
@@ -252,8 +305,17 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
                   ))}
                 </div>
               </div>
-            </section>
-          )}
+            ) : (
+              <div
+                className="rounded-xl p-6"
+                style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+              >
+                <p style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
+                  Noch keine Etappen angelegt. Jede Reise braucht mindestens eine Etappe.
+                </p>
+              </div>
+            )}
+          </section>
 
           <section>
             <SectionLabel>Reiseübersicht</SectionLabel>
