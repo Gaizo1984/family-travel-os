@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist } from "next/font/google";
 import Link from "next/link";
 import { LayoutDashboard, Plane, Users, Sun, Camera, Compass, MessageSquare } from "lucide-react";
@@ -9,6 +9,18 @@ const geist = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "Family Travel OS",
   description: "Unsere private Familien-Reise-App",
+  appleWebApp: {
+    capable: true,
+    title: "Travel OS",
+    statusBarStyle: "black-translucent",
+  },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#E8E3DA",
 };
 
 const NAV = [
@@ -69,12 +81,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </aside>
 
         {/* Main */}
-        <main className="flex-1 flex flex-col min-w-0 pb-14 md:pb-0">{children}</main>
+        <main className="flex-1 flex flex-col min-w-0 pb-safe-nav md:pb-0">{children}</main>
 
         {/* Bottom nav — mobile */}
         <nav
           className="md:hidden fixed bottom-0 left-0 right-0 flex z-50"
-          style={{ background: "var(--background)", borderTop: "1px solid var(--border)" }}
+          style={{
+            background: "var(--background)",
+            borderTop: "1px solid var(--border)",
+            paddingBottom: "env(safe-area-inset-bottom, 0px)",
+          }}
         >
           {NAV.map(({ href, label, Icon }) => (
             <Link
