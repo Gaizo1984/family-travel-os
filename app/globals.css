@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+:root {
+  --background: #E8E3DA;
+  --surface: #F3EFE8;
+  --surface-2: #D8D0C3;
+  --border: rgba(37, 33, 29, 0.1);
+  --foreground: #25211D;
+  --muted: #7C7063;
+  --accent: #B89A5E;
+  --accent-subtle: rgba(184, 154, 94, 0.12);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Sidebar nav link — pure CSS hover, no JS handlers */
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  transition: color 0.15s, background 0.15s;
+  text-decoration: none;
+}
+.nav-link:hover {
+  color: var(--foreground);
+  background: rgba(37, 33, 29, 0.06);
+}
+
+/* Button: Neue Reise */
+.btn-neue-reise {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--muted);
+  letter-spacing: 0.14em;
+  background: transparent;
+  transition: border-color 0.2s, color 0.2s;
+  cursor: pointer;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  padding: 9px 18px;
+}
+.btn-neue-reise:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(37, 33, 29, 0.15); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(37, 33, 29, 0.25); }
