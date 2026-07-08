@@ -9,6 +9,7 @@
   --muted: #7C7063;
   --accent: #B89A5E;
   --accent-subtle: rgba(184, 154, 94, 0.12);
+  --bottom-nav-height: 4.5rem;
 }
 
 body {
@@ -20,10 +21,11 @@ body {
 }
 
 /* Homescreen-Installation (iOS/Android): Platz für Home-Indicator/Gesten­leiste
-   unter der fixierten mobilen Bottom-Nav reservieren. */
+   unter der fixierten mobilen Bottom-Nav reservieren. Nutzt dieselbe Variable
+   wie die Nav-Höhe selbst, damit beide nie auseinanderlaufen. */
 @media (max-width: 767px) {
   .pb-safe-nav {
-    padding-bottom: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom, 0px));
   }
 }
 

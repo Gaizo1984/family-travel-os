@@ -503,8 +503,15 @@ export default function DiscoverPage() {
                 </div>
                 {/* Bookmark icon */}
                 <button
-                  className="absolute top-3 right-3"
-                  style={{ background: "transparent", border: "none", cursor: "pointer" }}
+                  className="absolute"
+                  style={{
+                    top: "2px",
+                    right: "2px",
+                    padding: "10px",
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                  }}
                 >
                   <BookmarkPlus
                     size={14}

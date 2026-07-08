@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist } from "next/font/google";
 import Link from "next/link";
-import { LayoutDashboard, Plane, Users, Sun, Camera, Compass, MessageSquare } from "lucide-react";
+import { LayoutDashboard, Plane, Users, Sun, Camera, Compass, MessageSquare, MoreHorizontal } from "lucide-react";
 import "./globals.css";
 
 const geist = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -31,6 +31,16 @@ const NAV = [
   { href: "/content-studio", label: "Content", Icon: Camera },
   { href: "/discover", label: "Entdecken", Icon: Compass },
   { href: "/concierge", label: "Concierge", Icon: MessageSquare },
+];
+
+// Mobile Bottom-Nav: nur die 4 häufigsten Bereiche direkt anzeigen (sonst zu
+// schmale Touch-Flächen bei 7 Icons in einer Reihe) — der Rest liegt unter „Mehr".
+const MOBILE_NAV = [
+  { href: "/", label: "Dashboard", Icon: LayoutDashboard },
+  { href: "/trips", label: "Reisen", Icon: Plane },
+  { href: "/today", label: "Heute", Icon: Sun },
+  { href: "/content-studio", label: "Content", Icon: Camera },
+  { href: "/mehr", label: "Mehr", Icon: MoreHorizontal },
 ];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -90,14 +100,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             background: "var(--background)",
             borderTop: "1px solid var(--border)",
             paddingBottom: "env(safe-area-inset-bottom, 0px)",
+            minHeight: "var(--bottom-nav-height)",
           }}
         >
-          {NAV.map(({ href, label, Icon }) => (
+          {MOBILE_NAV.map(({ href, label, Icon }) => (
             <Link
               key={href}
               href={href}
-              className="flex-1 flex flex-col items-center gap-1 py-3 text-xs transition-colors"
-              style={{ color: "var(--muted)", letterSpacing: "0.06em" }}
+              className="flex-1 flex flex-col items-center justify-center gap-1 py-3 text-xs transition-colors"
+              style={{ color: "var(--muted)", letterSpacing: "0.06em", minHeight: "44px" }}
             >
               <Icon size={16} strokeWidth={1.5} />
               <span>{label}</span>
