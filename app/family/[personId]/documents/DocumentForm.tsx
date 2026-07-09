@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { DOCUMENT_TYPE_ORDER, DOCUMENT_TYPE_CONFIG, GERMAN_MONTHS, getDateFieldRange, splitIsoDate } from "@/lib/documents";
+import { DOCUMENT_TYPE_ORDER, DOCUMENT_TYPE_CONFIG, getDateFieldRange } from "@/lib/documents";
 import type { DocumentType, DocumentDetails } from "@/lib/documents";
+import { DateSelectFields } from "@/app/family/DateSelectFields";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -11,48 +12,6 @@ const FIELD_STYLE: React.CSSProperties = {
   border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)",
   fontSize: "0.9rem", fontWeight: 300, outline: "none",
 };
-
-function DateSelectFields({
-  label,
-  namePrefix,
-  defaultIso,
-  range,
-}: {
-  label: string;
-  namePrefix: string;
-  defaultIso: string | null | undefined;
-  range: { minYear: number; maxYear: number };
-}) {
-  const { day, month, year } = splitIsoDate(defaultIso);
-  const years: number[] = [];
-  for (let y = range.maxYear; y >= range.minYear; y--) years.push(y);
-
-  return (
-    <div className="mb-5">
-      <label style={LABEL_STYLE}>{label}</label>
-      <div className="grid grid-cols-3 gap-2">
-        <select name={`${namePrefix}_day`} defaultValue={day} style={FIELD_STYLE} aria-label={`${label} – Tag`}>
-          <option value="">Tag</option>
-          {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
-            <option key={d} value={String(d).padStart(2, "0")}>{d}</option>
-          ))}
-        </select>
-        <select name={`${namePrefix}_month`} defaultValue={month} style={FIELD_STYLE} aria-label={`${label} – Monat`}>
-          <option value="">Monat</option>
-          {GERMAN_MONTHS.map((m, idx) => (
-            <option key={m} value={String(idx + 1).padStart(2, "0")}>{m}</option>
-          ))}
-        </select>
-        <select name={`${namePrefix}_year`} defaultValue={year} style={FIELD_STYLE} aria-label={`${label} – Jahr`}>
-          <option value="">Jahr</option>
-          {years.map((y) => (
-            <option key={y} value={String(y)}>{y}</option>
-          ))}
-        </select>
-      </div>
-    </div>
-  );
-}
 
 type DocumentValues = {
   label: string;
@@ -82,7 +41,7 @@ export function DocumentForm({
   errorMessage?: string;
 }) {
   const type = values?.doc_type ?? defaultType;
-  const numberLabel = DOCUMENT_TYPE_CONFIG[type].numberLabel;
+  const config = DOCUMENT_TYPE_CONFIG[type];
   const details = values?.details ?? {};
 
   return (
@@ -109,7 +68,7 @@ export function DocumentForm({
           <input
             id="doc-label" name="label" type="text" required
             defaultValue={values?.label}
-            placeholder="z. B. Reisepass Marcel"
+            placeholder="z. B. ESTA Marcel USA"
             style={FIELD_STYLE}
           />
         </div>
@@ -117,46 +76,86 @@ export function DocumentForm({
         <div className="mb-5">
           <label htmlFor="doc-type" style={LABEL_STYLE}>Dokumenttyp</label>
           <select id="doc-type" name="doc_type" defaultValue={type} style={FIELD_STYLE}>
+            {/* Falls ein bestehendes Dokument einen nicht mehr auswählbaren Typ hat
+                (z. B. 'insurance', ersetzt durch den zentralen Versicherungsbereich),
+                bleibt er hier als Option erhalten, statt beim Bearbeiten unbemerkt auf
+                den ersten Listeneintrag zu wechseln. */}
+            {!DOCUMENT_TYPE_ORDER.includes(type) && (
+              <option value={type}>{config.label}</option>
+            )}
             {DOCUMENT_TYPE_ORDER.map((key) => (
               <option key={key} value={key}>{DOCUMENT_TYPE_CONFIG[key].label}</option>
             ))}
           </select>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
-          <div>
-            <label htmlFor="doc-first-name" style={LABEL_STYLE}>Vorname</label>
-            <input id="doc-first-name" name="first_name" type="text" defaultValue={details.first_name ?? ""} style={FIELD_STYLE} />
-          </div>
-          <div>
-            <label htmlFor="doc-last-name" style={LABEL_STYLE}>Nachname</label>
-            <input id="doc-last-name" name="last_name" type="text" defaultValue={details.last_name ?? ""} style={FIELD_STYLE} />
-          </div>
-        </div>
+        {config.isIdentityType && (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+              <div>
+                <label htmlFor="doc-first-name" style={LABEL_STYLE}>Vorname</label>
+                <input id="doc-first-name" name="first_name" type="text" defaultValue={details.first_name ?? ""} style={FIELD_STYLE} />
+              </div>
+              <div>
+                <label htmlFor="doc-last-name" style={LABEL_STYLE}>Nachname</label>
+                <input id="doc-last-name" name="last_name" type="text" defaultValue={details.last_name ?? ""} style={FIELD_STYLE} />
+              </div>
+            </div>
 
-        <DateSelectFields
-          label="Geburtsdatum"
-          namePrefix="birth_date"
-          defaultIso={details.birth_date}
-          range={getDateFieldRange("birth")}
-        />
+            <DateSelectFields
+              label="Geburtsdatum"
+              namePrefix="birth_date"
+              defaultIso={details.birth_date}
+              range={getDateFieldRange("birth")}
+            />
 
-        <div className="mb-5">
-          <label htmlFor="doc-issuing-country" style={LABEL_STYLE}>Ausstellungsland</label>
-          <input id="doc-issuing-country" name="issuing_country" type="text" defaultValue={details.issuing_country ?? ""} placeholder="z. B. Deutschland" style={FIELD_STYLE} />
-        </div>
+            <div className="mb-5">
+              <label htmlFor="doc-issuing-country" style={LABEL_STYLE}>Ausstellungsland</label>
+              <input id="doc-issuing-country" name="issuing_country" type="text" defaultValue={details.issuing_country ?? ""} placeholder="z. B. Deutschland" style={FIELD_STYLE} />
+            </div>
 
-        <div className="mb-5">
-          <label htmlFor="doc-number" style={LABEL_STYLE}>{numberLabel}</label>
-          <input id="doc-number" name="passport_number" type="text" defaultValue={details.passport_number ?? ""} style={FIELD_STYLE} />
-        </div>
+            <div className="mb-5">
+              <label htmlFor="doc-number" style={LABEL_STYLE}>{config.numberLabel}</label>
+              <input id="doc-number" name="passport_number" type="text" defaultValue={details.passport_number ?? ""} style={FIELD_STYLE} />
+            </div>
 
-        <DateSelectFields
-          label="Ausstellungsdatum"
-          namePrefix="issue_date"
-          defaultIso={details.issue_date}
-          range={getDateFieldRange("issue")}
-        />
+            <DateSelectFields
+              label="Ausstellungsdatum"
+              namePrefix="issue_date"
+              defaultIso={details.issue_date}
+              range={getDateFieldRange("issue")}
+            />
+          </>
+        )}
+
+        {config.isEntryDocumentType && (
+          <>
+            <div className="mb-5">
+              <label htmlFor="doc-issuing-country" style={LABEL_STYLE}>Land / Zielgebiet</label>
+              <input id="doc-issuing-country" name="issuing_country" type="text" defaultValue={details.issuing_country ?? ""} placeholder="z. B. USA" style={FIELD_STYLE} />
+            </div>
+
+            <div className="mb-5">
+              <label htmlFor="doc-number" style={LABEL_STYLE}>{config.numberLabel}</label>
+              <input id="doc-number" name="passport_number" type="text" defaultValue={details.passport_number ?? ""} style={FIELD_STYLE} />
+            </div>
+
+            <DateSelectFields
+              label="Genehmigungsdatum"
+              namePrefix="issue_date"
+              defaultIso={details.issue_date}
+              range={getDateFieldRange("issue")}
+            />
+
+            <div className="mb-5">
+              <label htmlFor="doc-approval-status" style={LABEL_STYLE}>Status</label>
+              <select id="doc-approval-status" name="approval_status" defaultValue={details.approval_status ?? "approved"} style={FIELD_STYLE}>
+                <option value="approved">Genehmigt</option>
+                <option value="pending">Beantragt / ausstehend</option>
+              </select>
+            </div>
+          </>
+        )}
 
         <DateSelectFields
           label="Ablaufdatum"

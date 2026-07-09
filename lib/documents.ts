@@ -1,28 +1,69 @@
 import type { LucideIcon } from 'lucide-react'
-import { BadgeCheck, IdCard, FileCheck, Shield, Receipt, FileText } from 'lucide-react'
+import { BadgeCheck, IdCard, FileCheck, Stamp, Globe2, Shield, Receipt, FileText } from 'lucide-react'
 import { formatDateDE } from './demo-data'
 
-export type DocumentType = 'passport' | 'id_card' | 'visa' | 'insurance' | 'booking_document' | 'other'
+export type DocumentType = 'passport' | 'id_card' | 'visa' | 'esta' | 'eta' | 'entry_permit' | 'insurance' | 'booking_document' | 'other'
 
 export type DocumentTypeConfig = {
   value: DocumentType
   label: string
   icon: LucideIcon
   numberLabel: string
+  /** Reisepass/Personalausweis-artige Felder (Vor-/Nachname, Geburtsdatum) anzeigen. */
+  isIdentityType: boolean
+  /** Land/Zielgebiet + Genehmigungsdatum + manueller Status (beantragt/genehmigt) anzeigen. */
+  isEntryDocumentType: boolean
 }
 
-export const DOCUMENT_TYPE_ORDER: DocumentType[] = [
-  'passport', 'id_card', 'visa', 'insurance', 'booking_document', 'other',
-]
-
+/** Alle bekannten Dokumenttypen — inkl. 'insurance', das nicht mehr in DOCUMENT_TYPE_ORDER wählbar ist. */
 export const DOCUMENT_TYPE_CONFIG: Record<DocumentType, DocumentTypeConfig> = {
-  passport: { value: 'passport', label: 'Reisepass', icon: BadgeCheck, numberLabel: 'Passnummer' },
-  id_card: { value: 'id_card', label: 'Personalausweis', icon: IdCard, numberLabel: 'Ausweisnummer' },
-  visa: { value: 'visa', label: 'Visum / ESTA / eTA', icon: FileCheck, numberLabel: 'Antrags-/Referenznummer' },
-  insurance: { value: 'insurance', label: 'Versicherung', icon: Shield, numberLabel: 'Policennummer' },
-  booking_document: { value: 'booking_document', label: 'Buchungsunterlage', icon: Receipt, numberLabel: 'Referenznummer' },
-  other: { value: 'other', label: 'Sonstiges', icon: FileText, numberLabel: 'Nummer' },
+  passport: {
+    value: 'passport', label: 'Reisepass', icon: BadgeCheck, numberLabel: 'Passnummer',
+    isIdentityType: true, isEntryDocumentType: false,
+  },
+  id_card: {
+    value: 'id_card', label: 'Personalausweis', icon: IdCard, numberLabel: 'Ausweisnummer',
+    isIdentityType: true, isEntryDocumentType: false,
+  },
+  visa: {
+    value: 'visa', label: 'Visum', icon: FileCheck, numberLabel: 'Antrags-/Referenznummer',
+    isIdentityType: false, isEntryDocumentType: true,
+  },
+  esta: {
+    value: 'esta', label: 'ESTA', icon: Stamp, numberLabel: 'Antrags-/Referenznummer',
+    isIdentityType: false, isEntryDocumentType: true,
+  },
+  eta: {
+    value: 'eta', label: 'eTA', icon: Stamp, numberLabel: 'Antrags-/Referenznummer',
+    isIdentityType: false, isEntryDocumentType: true,
+  },
+  entry_permit: {
+    value: 'entry_permit', label: 'Sonstige Einreisegenehmigung', icon: Globe2, numberLabel: 'Antrags-/Referenznummer',
+    isIdentityType: false, isEntryDocumentType: true,
+  },
+  insurance: {
+    value: 'insurance', label: 'Versicherung', icon: Shield, numberLabel: 'Policennummer',
+    isIdentityType: false, isEntryDocumentType: false,
+  },
+  booking_document: {
+    value: 'booking_document', label: 'Buchungsunterlage', icon: Receipt, numberLabel: 'Referenznummer',
+    isIdentityType: false, isEntryDocumentType: false,
+  },
+  other: {
+    value: 'other', label: 'Sonstiges', icon: FileText, numberLabel: 'Nummer',
+    isIdentityType: false, isEntryDocumentType: false,
+  },
 }
+
+/**
+ * Auswählbare Typen beim Anlegen eines neuen personenbezogenen Dokuments.
+ * 'insurance' bleibt in DOCUMENT_TYPE_CONFIG (Altkompatibilität), ist hier
+ * aber bewusst nicht mehr wählbar — zentrale Versicherungen laufen über den
+ * eigenen Bereich unter /family/insurance.
+ */
+export const DOCUMENT_TYPE_ORDER: DocumentType[] = [
+  'passport', 'id_card', 'visa', 'esta', 'eta', 'entry_permit', 'other',
+]
 
 export type DocumentDetails = {
   first_name?: string
@@ -31,36 +72,73 @@ export type DocumentDetails = {
   passport_number?: string
   issuing_country?: string
   issue_date?: string
+  /** Manueller Status für Einreisedokumente — lässt sich nicht aus Daten ableiten. */
+  approval_status?: 'pending' | 'approved'
   source?: 'manual' | 'extracted'
 }
 
-export type PassportValidity = 'valid' | 'expiring_soon' | 'expired' | 'incomplete'
+export type DocumentValidity = 'valid' | 'expiring_soon' | 'expired' | 'pending' | 'incomplete'
+/** @deprecated Nutze DocumentValidity — Alias für bestehende Importe. */
+export type PassportValidity = DocumentValidity
 
-export const PASSPORT_VALIDITY_LABELS: Record<PassportValidity, string> = {
+export const DOCUMENT_VALIDITY_LABELS: Record<DocumentValidity, string> = {
   valid: 'Gültig',
   expiring_soon: 'Läuft bald ab',
   expired: 'Abgelaufen',
+  pending: 'Beantragt / ausstehend',
   incomplete: 'Unvollständig',
 }
+export const PASSPORT_VALIDITY_LABELS = DOCUMENT_VALIDITY_LABELS
 
-export const PASSPORT_VALIDITY_COLORS: Record<PassportValidity, string> = {
+export const DOCUMENT_VALIDITY_COLORS: Record<DocumentValidity, string> = {
   valid: '#4C7A5D',
   expiring_soon: '#B89A5E',
   expired: '#B5624A',
+  pending: '#B89A5E',
   incomplete: '#7C7063',
 }
+export const PASSPORT_VALIDITY_COLORS = DOCUMENT_VALIDITY_COLORS
+
+/** Zentraler Schwellwert für „läuft bald ab" — nicht mehrfach hardcoden. */
+export const EXPIRY_WARNING_DAYS = 180
 
 export function getPassportValidity(doc: {
   expires_at: string | null
   details: DocumentDetails | null
-}): PassportValidity {
+}): DocumentValidity {
   if (!doc.details?.passport_number || !doc.expires_at) return 'incomplete'
   const expiresAt = new Date(doc.expires_at)
   const today = new Date()
-  const in180Days = new Date(today.getTime() + 180 * 86400000)
+  const warningDate = new Date(today.getTime() + EXPIRY_WARNING_DAYS * 86400000)
   if (expiresAt < today) return 'expired'
-  if (expiresAt < in180Days) return 'expiring_soon'
+  if (expiresAt < warningDate) return 'expiring_soon'
   return 'valid'
+}
+
+/** Statuslogik für Visa/ESTA/eTA/Sonstige Einreisegenehmigung. */
+export function getEntryDocumentStatus(doc: {
+  expires_at: string | null
+  details: DocumentDetails | null
+}): DocumentValidity {
+  if (doc.details?.approval_status === 'pending') return 'pending'
+  if (!doc.details?.passport_number || !doc.expires_at) return 'incomplete'
+  const expiresAt = new Date(doc.expires_at)
+  const today = new Date()
+  const warningDate = new Date(today.getTime() + EXPIRY_WARNING_DAYS * 86400000)
+  if (expiresAt < today) return 'expired'
+  if (expiresAt < warningDate) return 'expiring_soon'
+  return 'valid'
+}
+
+export function getDocumentValidity(doc: {
+  doc_type: DocumentType
+  expires_at: string | null
+  details: DocumentDetails | null
+}): DocumentValidity | null {
+  const config = DOCUMENT_TYPE_CONFIG[doc.doc_type]
+  if (config.isIdentityType) return getPassportValidity(doc)
+  if (config.isEntryDocumentType) return getEntryDocumentStatus(doc)
+  return null
 }
 
 export function formatExpiresAt(expiresAt: string | null): string {

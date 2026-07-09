@@ -188,6 +188,62 @@ export interface Database {
           { foreignKeyName: "documents_booking_id_fkey"; columns: ["booking_id"]; isOneToOne: false; referencedRelation: "bookings"; referencedColumns: ["id"] }
         ]
       }
+      document_trips: {
+        Row:    { document_id: string; trip_id: string }
+        Insert: { document_id: string; trip_id: string }
+        Update: { document_id?: string; trip_id?: string }
+        Relationships: [
+          { foreignKeyName: "document_trips_document_id_fkey"; columns: ["document_id"]; isOneToOne: false; referencedRelation: "documents"; referencedColumns: ["id"] },
+          { foreignKeyName: "document_trips_trip_id_fkey";     columns: ["trip_id"];     isOneToOne: false; referencedRelation: "trips";     referencedColumns: ["id"] }
+        ]
+      }
+      insurance_policies: {
+        Row: {
+          id: string; family_id: string; label: string; provider: string | null
+          policy_type: string | null; reference_number: string | null
+          valid_from: string | null; valid_to: string | null
+          emergency_contact: string | null; notes: string | null
+          storage_bucket: string | null; storage_path: string | null
+          created_at: string; updated_at: string
+        }
+        Insert: {
+          id?: string; family_id: string; label: string; provider?: string | null
+          policy_type?: string | null; reference_number?: string | null
+          valid_from?: string | null; valid_to?: string | null
+          emergency_contact?: string | null; notes?: string | null
+          storage_bucket?: string | null; storage_path?: string | null
+          created_at?: string; updated_at?: string
+        }
+        Update: {
+          id?: string; family_id?: string; label?: string; provider?: string | null
+          policy_type?: string | null; reference_number?: string | null
+          valid_from?: string | null; valid_to?: string | null
+          emergency_contact?: string | null; notes?: string | null
+          storage_bucket?: string | null; storage_path?: string | null
+          created_at?: string; updated_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "insurance_policies_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }
+        ]
+      }
+      insurance_policy_persons: {
+        Row:    { policy_id: string; person_id: string }
+        Insert: { policy_id: string; person_id: string }
+        Update: { policy_id?: string; person_id?: string }
+        Relationships: [
+          { foreignKeyName: "insurance_policy_persons_policy_id_fkey"; columns: ["policy_id"]; isOneToOne: false; referencedRelation: "insurance_policies"; referencedColumns: ["id"] },
+          { foreignKeyName: "insurance_policy_persons_person_id_fkey"; columns: ["person_id"]; isOneToOne: false; referencedRelation: "persons"; referencedColumns: ["id"] }
+        ]
+      }
+      insurance_policy_trips: {
+        Row:    { policy_id: string; trip_id: string }
+        Insert: { policy_id: string; trip_id: string }
+        Update: { policy_id?: string; trip_id?: string }
+        Relationships: [
+          { foreignKeyName: "insurance_policy_trips_policy_id_fkey"; columns: ["policy_id"]; isOneToOne: false; referencedRelation: "insurance_policies"; referencedColumns: ["id"] },
+          { foreignKeyName: "insurance_policy_trips_trip_id_fkey";   columns: ["trip_id"];   isOneToOne: false; referencedRelation: "trips";   referencedColumns: ["id"] }
+        ]
+      }
       packing_items: {
         Row: {
           id: string; trip_id: string; person_id: string | null; label: string

@@ -351,7 +351,7 @@ export default async function FamilyPage() {
       <div className="flex-1 px-5 md:px-8 pb-16 max-w-4xl w-full mx-auto">
 
         {/* ── Header ── */}
-        <header className="flex items-start justify-between pt-9 pb-9">
+        <header className="flex items-start justify-between flex-wrap gap-4 pt-9 pb-9">
           <div>
             <h1
               className="text-2xl font-light mb-1"
@@ -366,7 +366,15 @@ export default async function FamilyPage() {
               Fünf Menschen. Fünf Arten zu reisen.
             </p>
           </div>
-          <button className="btn-neue-reise">Familie bearbeiten</button>
+          <div className="flex items-center flex-wrap gap-4">
+            <Link
+              href="/family/vault"
+              style={{ color: "var(--muted)", fontSize: "0.7rem", letterSpacing: "0.08em", textDecoration: "none" }}
+            >
+              Travel Vault
+            </Link>
+            <button className="btn-neue-reise">Familie bearbeiten</button>
+          </div>
         </header>
 
         {/* ── Familienporträts ── */}

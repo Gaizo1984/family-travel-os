@@ -3,10 +3,11 @@ import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import {
-  DOCUMENT_TYPE_CONFIG, PASSPORT_VALIDITY_LABELS, PASSPORT_VALIDITY_COLORS,
-  getPassportValidity, formatExpiresAt,
+  DOCUMENT_TYPE_CONFIG, DOCUMENT_VALIDITY_LABELS, DOCUMENT_VALIDITY_COLORS,
+  getDocumentValidity, formatExpiresAt,
 } from "@/lib/documents";
 import type { DocumentType, DocumentDetails } from "@/lib/documents";
+import { assignDocumentToTrip, unassignDocumentFromTrip } from "@/lib/actions/documents";
 
 type DocumentDetail = {
   id: string;
@@ -39,7 +40,7 @@ export default async function DocumentDetailPage({
   const supabase = await createClient();
   const { data: person } = await supabase
     .from("persons")
-    .select("id, name")
+    .select("id, name, family_id")
     .eq("id", personId)
     .maybeSingle();
 
@@ -63,7 +64,28 @@ export default async function DocumentDetailPage({
     .createSignedUrl(doc.storage_path, 3600);
 
   const isImage = /\.(jpe?g|png|webp)$/i.test(doc.storage_path);
-  const validity = doc.doc_type === "passport" ? getPassportValidity(doc) : null;
+  const validity = getDocumentValidity(doc);
+
+  const isInsurance = doc.doc_type === "insurance";
+
+  const { data: assignedTripsRaw } = isInsurance
+    ? { data: [] }
+    : await supabase
+        .from("document_trips")
+        .select("trip_id, trips ( id, slug, title )")
+        .eq("document_id", doc.id);
+
+  const assignedTrips = (assignedTripsRaw ?? [])
+    .map((r) => r.trips as unknown as { id: string; slug: string; title: string } | null)
+    .filter((t): t is { id: string; slug: string; title: string } => t !== null);
+
+  const assignedTripIds = new Set(assignedTrips.map((t) => t.id));
+
+  const { data: allTrips } = isInsurance
+    ? { data: [] }
+    : await supabase.from("trips").select("id, title").order("start_date", { ascending: false });
+
+  const availableTrips = (allTrips ?? []).filter((t) => !assignedTripIds.has(t.id));
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -86,8 +108,8 @@ export default async function DocumentDetailPage({
                 {config.label}
               </span>
               {validity && (
-                <span style={{ color: PASSPORT_VALIDITY_COLORS[validity], fontSize: "0.55rem", letterSpacing: "0.1em", textTransform: "uppercase" }}>
-                  · {PASSPORT_VALIDITY_LABELS[validity]}
+                <span style={{ color: DOCUMENT_VALIDITY_COLORS[validity], fontSize: "0.55rem", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                  · {DOCUMENT_VALIDITY_LABELS[validity]}
                 </span>
               )}
             </div>
@@ -111,12 +133,23 @@ export default async function DocumentDetailPage({
           style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
         >
           <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
-            <MetaItem label="Vorname" value={details.first_name ?? "—"} />
-            <MetaItem label="Nachname" value={details.last_name ?? "—"} />
-            <MetaItem label="Geburtsdatum" value={formatExpiresAt(details.birth_date ?? null)} />
-            <MetaItem label={config.numberLabel} value={details.passport_number ?? "—"} />
-            <MetaItem label="Ausstellungsland" value={details.issuing_country ?? "—"} />
-            <MetaItem label="Ausstellungsdatum" value={formatExpiresAt(details.issue_date ?? null)} />
+            {config.isIdentityType && (
+              <>
+                <MetaItem label="Vorname" value={details.first_name ?? "—"} />
+                <MetaItem label="Nachname" value={details.last_name ?? "—"} />
+                <MetaItem label="Geburtsdatum" value={formatExpiresAt(details.birth_date ?? null)} />
+                <MetaItem label={config.numberLabel} value={details.passport_number ?? "—"} />
+                <MetaItem label="Ausstellungsland" value={details.issuing_country ?? "—"} />
+                <MetaItem label="Ausstellungsdatum" value={formatExpiresAt(details.issue_date ?? null)} />
+              </>
+            )}
+            {config.isEntryDocumentType && (
+              <>
+                <MetaItem label="Land / Zielgebiet" value={details.issuing_country ?? "—"} />
+                <MetaItem label={config.numberLabel} value={details.passport_number ?? "—"} />
+                <MetaItem label="Genehmigungsdatum" value={formatExpiresAt(details.issue_date ?? null)} />
+              </>
+            )}
             <MetaItem label="Ablaufdatum" value={formatExpiresAt(doc.expires_at)} />
           </div>
         </div>
@@ -132,7 +165,7 @@ export default async function DocumentDetailPage({
           </div>
         )}
 
-        <div className="rounded-xl p-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+        <div className="rounded-xl p-6 mb-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
           <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: "12px" }}>
             Hinterlegte Datei
           </div>
@@ -161,6 +194,84 @@ export default async function DocumentDetailPage({
             </p>
           )}
         </div>
+
+        {!isInsurance && (
+          <div className="rounded-xl p-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+            <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: "12px" }}>
+              Zugeordnete Reisen
+            </div>
+
+            {assignedTrips.length > 0 ? (
+              <div className="space-y-2 mb-5">
+                {assignedTrips.map((trip) => (
+                  <div
+                    key={trip.id}
+                    className="flex items-center justify-between gap-3 p-3 rounded-lg"
+                    style={{ background: "var(--background)", border: "1px solid var(--border)" }}
+                  >
+                    <Link
+                      href={`/trips/${trip.slug}`}
+                      className="min-w-0 truncate"
+                      style={{ color: "var(--foreground)", fontSize: "0.82rem", textDecoration: "none" }}
+                    >
+                      {trip.title}
+                    </Link>
+                    <form action={unassignDocumentFromTrip}>
+                      <input type="hidden" name="document_id" value={doc.id} />
+                      <input type="hidden" name="person_id" value={person.id} />
+                      <input type="hidden" name="trip_id" value={trip.id} />
+                      <button
+                        type="submit"
+                        style={{
+                          fontSize: "0.6rem", letterSpacing: "0.08em", textTransform: "uppercase", color: "#B5624A",
+                          background: "transparent", border: "1px solid rgba(181,98,74,0.3)", padding: "5px 12px",
+                          borderRadius: "20px", cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
+                        }}
+                      >
+                        Entfernen
+                      </button>
+                    </form>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mb-5" style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
+                Noch keiner Reise zugeordnet.
+              </p>
+            )}
+
+            {availableTrips.length > 0 && (
+              <form action={assignDocumentToTrip} className="flex items-center gap-2 flex-wrap" style={{ borderTop: "1px solid var(--border)", paddingTop: "16px" }}>
+                <input type="hidden" name="document_id" value={doc.id} />
+                <input type="hidden" name="person_id" value={person.id} />
+                <select
+                  name="trip_id"
+                  required
+                  style={{
+                    flex: "1 1 200px", padding: "10px 14px", background: "var(--background)",
+                    border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)",
+                    fontSize: "0.82rem", outline: "none",
+                  }}
+                >
+                  <option value="">Reise wählen…</option>
+                  {availableTrips.map((t) => (
+                    <option key={t.id} value={t.id}>{t.title}</option>
+                  ))}
+                </select>
+                <button
+                  type="submit"
+                  style={{
+                    fontSize: "0.62rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--accent)",
+                    background: "transparent", border: "1px solid rgba(184,154,94,0.3)", padding: "10px 16px",
+                    borderRadius: "8px", cursor: "pointer", whiteSpace: "nowrap",
+                  }}
+                >
+                  Zuordnen
+                </button>
+              </form>
+            )}
+          </div>
+        )}
 
       </div>
     </div>

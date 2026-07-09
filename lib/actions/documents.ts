@@ -13,12 +13,13 @@ function readDateGroup(formData: FormData, prefix: string, fieldLabel: string): 
 }
 
 function readCommonFields(formData: FormData) {
-  const personId   = String(formData.get('person_id') ?? '')
-  const docType    = String(formData.get('doc_type') ?? 'other') as DocumentType
-  const label      = String(formData.get('label') ?? '').trim()
-  const expiresAt  = readDateGroup(formData, 'expires_at', 'Ablaufdatum')
-  const notes      = String(formData.get('notes') ?? '').trim()
-  const returnTo   = String(formData.get('return_to') ?? '').trim()
+  const personId    = String(formData.get('person_id') ?? '')
+  const docType     = String(formData.get('doc_type') ?? 'other') as DocumentType
+  const label       = String(formData.get('label') ?? '').trim()
+  const expiresAt   = readDateGroup(formData, 'expires_at', 'Ablaufdatum')
+  const notes       = String(formData.get('notes') ?? '').trim()
+  const returnTo    = String(formData.get('return_to') ?? '').trim()
+  const assignTrip  = String(formData.get('assign_trip') ?? '').trim()
 
   const details: DocumentDetails = { source: 'manual' }
   const firstName      = String(formData.get('first_name') ?? '').trim()
@@ -27,16 +28,18 @@ function readCommonFields(formData: FormData) {
   const passportNumber = String(formData.get('passport_number') ?? '').trim()
   const issuingCountry = String(formData.get('issuing_country') ?? '').trim()
   const issueDate      = readDateGroup(formData, 'issue_date', 'Ausstellungsdatum')
+  const approvalStatus = String(formData.get('approval_status') ?? '').trim()
   if (firstName) details.first_name = firstName
   if (lastName) details.last_name = lastName
   if (birthDate) details.birth_date = birthDate
   if (passportNumber) details.passport_number = passportNumber
   if (issuingCountry) details.issuing_country = issuingCountry
   if (issueDate) details.issue_date = issueDate
+  if (approvalStatus === 'pending' || approvalStatus === 'approved') details.approval_status = approvalStatus
 
   const file = formData.get('file')
 
-  return { personId, docType, label, expiresAt, notes, returnTo, details, file }
+  return { personId, docType, label, expiresAt, notes, returnTo, assignTrip, details, file }
 }
 
 function validateFile(file: FormDataEntryValue | null, required: boolean): { error?: string; file?: File } {
@@ -79,22 +82,29 @@ export async function createDocument(formData: FormData) {
   if (uploadError)
     redirect(`${newPath}&error=${encodeURIComponent('Upload fehlgeschlagen: ' + uploadError.message)}`)
 
-  const { error: insertError } = await supabase.from('documents').insert({
-    person_id: f.personId,
-    doc_type: f.docType,
-    label: f.label,
-    expires_at: f.expiresAt || null,
-    notes: f.notes || null,
-    details: f.details,
-    storage_provider: 'supabase_storage',
-    storage_bucket: 'documents',
-    storage_path: storagePath,
-  })
+  const { data: inserted, error: insertError } = await supabase
+    .from('documents')
+    .insert({
+      person_id: f.personId,
+      doc_type: f.docType,
+      label: f.label,
+      expires_at: f.expiresAt || null,
+      notes: f.notes || null,
+      details: f.details,
+      storage_provider: 'supabase_storage',
+      storage_bucket: 'documents',
+      storage_path: storagePath,
+    })
+    .select('id')
+    .single()
 
-  if (insertError) {
+  if (insertError || !inserted) {
     await supabase.storage.from('documents').remove([storagePath])
-    redirect(`${newPath}&error=${encodeURIComponent('Speicherfehler: ' + insertError.message)}`)
+    redirect(`${newPath}&error=${encodeURIComponent('Speicherfehler: ' + (insertError?.message ?? 'Unbekannt'))}`)
   }
+
+  if (f.assignTrip)
+    await supabase.from('document_trips').insert({ document_id: inserted.id, trip_id: f.assignTrip })
 
   redirect(f.returnTo || `/family/${f.personId}`)
 }
@@ -156,6 +166,36 @@ export async function updateDocument(formData: FormData) {
     redirect(`${editPath}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
 
   redirect(f.returnTo || `/family/${f.personId}/documents/${documentId}`)
+}
+
+export async function assignDocumentToTrip(formData: FormData) {
+  const documentId = String(formData.get('document_id') ?? '')
+  const personId    = String(formData.get('person_id') ?? '')
+  const tripId      = String(formData.get('trip_id') ?? '')
+  const detailPath  = `/family/${personId}/documents/${documentId}`
+
+  if (!tripId)
+    redirect(`${detailPath}?error=${encodeURIComponent('Bitte eine Reise auswählen')}`)
+
+  const supabase = await createClient()
+  const { error } = await supabase.from('document_trips').insert({ document_id: documentId, trip_id: tripId })
+
+  if (error)
+    redirect(`${detailPath}?error=${encodeURIComponent('Zuordnung fehlgeschlagen: ' + error.message)}`)
+
+  redirect(detailPath)
+}
+
+export async function unassignDocumentFromTrip(formData: FormData) {
+  const documentId = String(formData.get('document_id') ?? '')
+  const personId    = String(formData.get('person_id') ?? '')
+  const tripId      = String(formData.get('trip_id') ?? '')
+  const detailPath  = `/family/${personId}/documents/${documentId}`
+
+  const supabase = await createClient()
+  await supabase.from('document_trips').delete().eq('document_id', documentId).eq('trip_id', tripId)
+
+  redirect(detailPath)
 }
 
 export async function deleteDocument(formData: FormData) {
