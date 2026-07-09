@@ -236,10 +236,11 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
   const bookings  = sortBookingsChronologically(trip.bookings);
   const stageTitleById = new Map(stages.map((s) => [s.id, s.title]));
 
-  const { count: documentsCount } = await supabase
-    .from("documents")
-    .select("id", { count: "exact", head: true })
-    .eq("trip_id", trip.id);
+  const memberIds = members.map((m) => m.id);
+  const { data: passportDocs } = memberIds.length > 0
+    ? await supabase.from("documents").select("person_id").eq("doc_type", "passport").in("person_id", memberIds)
+    : { data: [] };
+  const membersWithPassport = new Set((passportDocs ?? []).map((d) => d.person_id)).size;
 
   const flightsSummary = summarizeBookingsByTypes(
     bookings, BOOKING_CATEGORIES.flight.types, "Flüge", BOOKING_CATEGORIES.flight.emptyDetail,
@@ -262,9 +263,14 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
     bookings, BOOKING_CATEGORIES.more.types, "weitere Buchungen", BOOKING_CATEGORIES.more.emptyDetail,
     hasMoreBookings ? `/trips/${trip.slug}/bookings/category/more` : `/trips/${trip.slug}/bookings/new?category=more`,
   );
-  const documentsSummary = (documentsCount ?? 0) > 0
-    ? { status: "Vorhanden", statusColor: "#B89A5E", detail: `${documentsCount} Dokument${documentsCount === 1 ? "" : "e"} hinterlegt` }
-    : { status: "Offen", statusColor: "#B5624A", detail: "Noch keine Dokumente hinterlegt" };
+  const documentsSummary = members.length === 0
+    ? { status: "Offen", statusColor: "#B5624A", detail: "Noch keine Reisepässe hinterlegt" }
+    : membersWithPassport === 0
+      ? { status: "Offen", statusColor: "#B5624A", detail: "Noch keine Reisepässe hinterlegt" }
+      : membersWithPassport === members.length
+        ? { status: "Vorhanden", statusColor: "#B89A5E", detail: "Alle Reisepässe hinterlegt" }
+        : { status: "In Planung", statusColor: "#B89A5E", detail: `${membersWithPassport} von ${members.length} Reisepässen vorhanden` };
+  const documentsHref = `/trips/${trip.slug}/documents`;
 
   const duration  = trip.start_date && trip.end_date
     ? getTripDuration(trip.start_date, trip.end_date) : 0;
@@ -463,7 +469,7 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
               <OverviewCard title="Flüge" detail={flightsSummary.detail} status={flightsSummary.status} statusColor={flightsSummary.statusColor} Icon={Plane} href={flightsSummary.href} />
               <OverviewCard title="Hotels" detail={hotelsSummary.detail} status={hotelsSummary.status} statusColor={hotelsSummary.statusColor} Icon={BedDouble} href={hotelsSummary.href} />
               <OverviewCard title="Aktivitäten" detail={activitiesSummary.detail} status={activitiesSummary.status} statusColor={activitiesSummary.statusColor} Icon={Compass} href={activitiesSummary.href} />
-              <OverviewCard title="Dokumente" detail={documentsSummary.detail} status={documentsSummary.status} statusColor={documentsSummary.statusColor} Icon={FileText} />
+              <OverviewCard title="Dokumente" detail={documentsSummary.detail} status={documentsSummary.status} statusColor={documentsSummary.statusColor} Icon={FileText} href={documentsHref} />
               <OverviewCard title="Mehr" detail={moreSummary.detail} status={moreSummary.status} statusColor={moreSummary.statusColor} Icon={MoreHorizontal} href={moreSummary.href} />
             </div>
           </section>

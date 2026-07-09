@@ -14,6 +14,7 @@ import {
   CalendarDays,
   ArrowRight,
 } from "lucide-react";
+import { createClient } from "@/lib/supabase/server";
 
 // ── Types & data ──────────────────────────────────────────────────────────────
 
@@ -335,9 +336,15 @@ function KidCard({ member }: { member: FamilyMember }) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-export default function FamilyPage() {
+export default async function FamilyPage() {
   const parents = FAMILY.filter((m) => m.id === "marcel" || m.id === "sarah");
   const kids = FAMILY.filter((m) => m.id === "lia" || m.id === "elias" || m.id === "lumi");
+
+  const supabase = await createClient();
+  const { data: persons } = await supabase.from("persons").select("id, name");
+  const personIdByName: Record<string, string> = Object.fromEntries(
+    (persons ?? []).map((p) => [p.name, p.id])
+  );
 
   return (
     <div className="flex-1 flex flex-col">
@@ -378,16 +385,28 @@ export default function FamilyPage() {
 
           {/* Parents — 2 columns */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-            {parents.map((m) => (
-              <ParentCard key={m.id} member={m} />
-            ))}
+            {parents.map((m) => {
+              const personId = personIdByName[m.name];
+              const card = <ParentCard key={m.id} member={m} />;
+              return personId ? (
+                <Link key={m.id} href={`/family/${personId}`} style={{ textDecoration: "none" }}>
+                  {card}
+                </Link>
+              ) : card;
+            })}
           </div>
 
           {/* Kids — 3 columns */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {kids.map((m) => (
-              <KidCard key={m.id} member={m} />
-            ))}
+            {kids.map((m) => {
+              const personId = personIdByName[m.name];
+              const card = <KidCard key={m.id} member={m} />;
+              return personId ? (
+                <Link key={m.id} href={`/family/${personId}`} style={{ textDecoration: "none" }}>
+                  {card}
+                </Link>
+              ) : card;
+            })}
           </div>
         </section>
 

@@ -167,17 +167,20 @@ export interface Database {
         Row: {
           id: string; trip_id: string | null; person_id: string | null; booking_id: string | null
           doc_type: string; label: string | null; expires_at: string | null
-          storage_provider: StorageProvider; storage_bucket: string; storage_path: string; created_at: string
+          storage_provider: StorageProvider; storage_bucket: string; storage_path: string
+          details: Json | null; notes: string | null; created_at: string
         }
         Insert: {
           id?: string; trip_id?: string | null; person_id?: string | null; booking_id?: string | null
           doc_type: string; label?: string | null; expires_at?: string | null
-          storage_provider?: StorageProvider; storage_bucket: string; storage_path: string; created_at?: string
+          storage_provider?: StorageProvider; storage_bucket: string; storage_path: string
+          details?: Json | null; notes?: string | null; created_at?: string
         }
         Update: {
           id?: string; trip_id?: string | null; person_id?: string | null; booking_id?: string | null
           doc_type?: string; label?: string | null; expires_at?: string | null
-          storage_provider?: StorageProvider; storage_bucket?: string; storage_path?: string; created_at?: string
+          storage_provider?: StorageProvider; storage_bucket?: string; storage_path?: string
+          details?: Json | null; notes?: string | null; created_at?: string
         }
         Relationships: [
           { foreignKeyName: "documents_trip_id_fkey";    columns: ["trip_id"];    isOneToOne: false; referencedRelation: "trips";    referencedColumns: ["id"] },
