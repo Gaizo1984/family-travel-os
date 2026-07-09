@@ -7,7 +7,9 @@ export type Json =
   | Json[]
 
 export type BookingType     = 'flight' | 'accommodation' | 'rental_car' | 'transfer' | 'activity'
-export type BookingStatus   = 'pending' | 'confirmed' | 'cancelled'
+                             | 'restaurant' | 'train' | 'ferry' | 'insurance' | 'other'
+export type BookingStatus   = 'pending' | 'confirmed' | 'cancelled' | 'reserved'
+export type PaymentStatus   = 'unpaid' | 'partial' | 'paid' | 'refunded'
 export type TripStatus      = 'planned' | 'active' | 'completed' | 'archived'
 export type TaskStatus      = 'open' | 'done' | 'snoozed'
 export type JournalVis      = 'family' | 'private'
@@ -113,20 +115,26 @@ export interface Database {
         Row: {
           id: string; trip_id: string; stage_id: string | null; type: BookingType; title: string
           provider: string | null; booking_reference: string | null; status: BookingStatus
+          payment_status: PaymentStatus
           amount: number | null; currency: string; start_datetime: string | null
-          end_datetime: string | null; details: Json | null; created_at: string; updated_at: string
+          end_datetime: string | null; details: Json | null; notes: string | null
+          created_at: string; updated_at: string
         }
         Insert: {
           id?: string; trip_id: string; stage_id?: string | null; type: BookingType; title: string
           provider?: string | null; booking_reference?: string | null; status?: BookingStatus
+          payment_status?: PaymentStatus
           amount?: number | null; currency?: string; start_datetime?: string | null
-          end_datetime?: string | null; details?: Json | null; created_at?: string; updated_at?: string
+          end_datetime?: string | null; details?: Json | null; notes?: string | null
+          created_at?: string; updated_at?: string
         }
         Update: {
           id?: string; trip_id?: string; stage_id?: string | null; type?: BookingType; title?: string
           provider?: string | null; booking_reference?: string | null; status?: BookingStatus
+          payment_status?: PaymentStatus
           amount?: number | null; currency?: string; start_datetime?: string | null
-          end_datetime?: string | null; details?: Json | null; created_at?: string; updated_at?: string
+          end_datetime?: string | null; details?: Json | null; notes?: string | null
+          created_at?: string; updated_at?: string
         }
         Relationships: [
           { foreignKeyName: "bookings_trip_id_fkey";  columns: ["trip_id"];  isOneToOne: false; referencedRelation: "trips";  referencedColumns: ["id"] },

@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { Plane, BedDouble, Compass, FileText, ChevronLeft, ChevronRight } from "lucide-react";
 import { formatDateDE, getTripDuration } from "@/lib/demo-data";
 import { createClient } from "@/lib/supabase/server";
+import { BOOKING_TYPE_CONFIG, BOOKING_STATUS_LABELS, formatDateTimeDE } from "@/lib/bookings";
+import type { BookingType, BookingStatus } from "@/lib/supabase/types";
 
 const H_FG    = "#F0EBE3";
 const H_MUTED = "#A89880";
@@ -48,6 +50,19 @@ type StageRow = {
   sort_order: number
 }
 
+type BookingRow = {
+  id: string
+  type: BookingType
+  title: string
+  provider: string | null
+  status: BookingStatus
+  amount: number | null
+  currency: string
+  start_datetime: string | null
+  stage_id: string | null
+  created_at: string
+}
+
 type TripDetail = {
   id: string
   slug: string
@@ -58,6 +73,7 @@ type TripDetail = {
   end_date: string | null
   trip_members: Array<{ persons: PersonRow | null }>
   stages: StageRow[]
+  bookings: BookingRow[]
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
@@ -123,6 +139,48 @@ function StageCard({ stage, idx, slug }: { stage: StageRow; idx: number; slug: s
   );
 }
 
+function BookingRowItem({ booking, slug, stageTitle }: { booking: BookingRow; slug: string; stageTitle: string | null }) {
+  const config = BOOKING_TYPE_CONFIG[booking.type];
+  const Icon = config.icon;
+  return (
+    <Link
+      href={`/trips/${slug}/bookings/${booking.id}`}
+      className="flex items-center gap-4 p-4 rounded-xl transition-colors"
+      style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}
+    >
+      <div
+        className="shrink-0 flex items-center justify-center rounded-lg"
+        style={{ width: 36, height: 36, background: "var(--accent-subtle)" }}
+      >
+        <Icon size={15} strokeWidth={1.4} style={{ color: "var(--accent)" }} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-medium truncate" style={{ color: "var(--foreground)" }}>{booking.title}</span>
+          {stageTitle && (
+            <span style={{ color: "var(--accent)", fontSize: "0.6rem", letterSpacing: "0.06em", background: "var(--accent-subtle)", padding: "1px 8px", borderRadius: "10px" }}>
+              {stageTitle}
+            </span>
+          )}
+        </div>
+        <div className="text-xs mt-0.5" style={{ color: "var(--muted)", fontSize: "0.7rem" }}>
+          {booking.provider ? `${booking.provider} · ` : ""}{formatDateTimeDE(booking.start_datetime)}
+        </div>
+      </div>
+      <div className="text-right shrink-0">
+        <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+          {BOOKING_STATUS_LABELS[booking.status]}
+        </div>
+        {booking.amount !== null && (
+          <div className="text-sm mt-0.5" style={{ color: "var(--foreground)" }}>
+            {booking.amount.toFixed(2)} {booking.currency}
+          </div>
+        )}
+      </div>
+    </Link>
+  );
+}
+
 function OverviewCard({ title, detail, status, statusColor, Icon }: {
   title: string; detail: string; status: string; statusColor: string;
   Icon: React.ComponentType<{ size?: number; strokeWidth?: number; style?: React.CSSProperties }>;
@@ -159,7 +217,8 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
     .select(`
       id, slug, title, subtitle, status, start_date, end_date,
       trip_members ( persons ( id, name, initials, color ) ),
-      stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order )
+      stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order ),
+      bookings ( id, type, title, provider, status, amount, currency, start_datetime, stage_id, created_at )
     `)
     .eq("slug", id)
     .maybeSingle();
@@ -177,6 +236,13 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
     if (!a.start_date && b.start_date) return 1;
     return a.sort_order - b.sort_order;
   });
+  const bookings  = [...trip.bookings].sort((a, b) => {
+    if (a.start_datetime && b.start_datetime) return a.start_datetime.localeCompare(b.start_datetime);
+    if (a.start_datetime && !b.start_datetime) return -1;
+    if (!a.start_datetime && b.start_datetime) return 1;
+    return a.created_at.localeCompare(b.created_at);
+  });
+  const stageTitleById = new Map(stages.map((s) => [s.id, s.title]));
   const duration  = trip.start_date && trip.end_date
     ? getTripDuration(trip.start_date, trip.end_date) : 0;
   const heroImage = TRIP_IMAGES[trip.slug]
@@ -319,6 +385,51 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
                 <p style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
                   Noch keine Etappen angelegt. Jede Reise braucht mindestens eine Etappe.
                 </p>
+              </div>
+            )}
+          </section>
+
+          <section>
+            <div className="flex items-center justify-between mb-5">
+              <h2
+                className="text-xs font-medium"
+                style={{ color: "var(--muted)", letterSpacing: "0.2em", textTransform: "uppercase", fontSize: "0.65rem" }}
+              >
+                Buchungen{bookings.length > 0 ? ` · ${bookings.length}` : ""}
+              </h2>
+              <Link
+                href={`/trips/${trip.slug}/bookings/new`}
+                style={{ color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.08em", textDecoration: "none" }}
+              >
+                + Buchung hinzufügen
+              </Link>
+            </div>
+
+            {bookings.length > 0 ? (
+              <div className="space-y-2">
+                {bookings.map((booking) => (
+                  <BookingRowItem
+                    key={booking.id}
+                    booking={booking}
+                    slug={trip.slug}
+                    stageTitle={booking.stage_id ? stageTitleById.get(booking.stage_id) ?? null : null}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div
+                className="rounded-xl p-6 text-center"
+                style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+              >
+                <p className="mb-4" style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
+                  Noch keine Buchungen erfasst.
+                </p>
+                <Link
+                  href={`/trips/${trip.slug}/bookings/new`}
+                  style={{ color: "var(--accent)", fontSize: "0.7rem", letterSpacing: "0.08em", textDecoration: "none" }}
+                >
+                  Erste Buchung hinzufügen →
+                </Link>
               </div>
             )}
           </section>
