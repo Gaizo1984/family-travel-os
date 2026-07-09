@@ -21,25 +21,36 @@ function readCommonFields(formData: FormData) {
   const returnTo    = String(formData.get('return_to') ?? '').trim()
   const assignTrip  = String(formData.get('assign_trip') ?? '').trim()
 
-  const details: DocumentDetails = { source: 'manual' }
+  const details: DocumentDetails = {}
   const firstName      = String(formData.get('first_name') ?? '').trim()
   const lastName       = String(formData.get('last_name') ?? '').trim()
   const birthDate      = readDateGroup(formData, 'birth_date', 'Geburtsdatum')
+  const gender         = String(formData.get('gender') ?? '').trim()
+  const nationality    = String(formData.get('nationality') ?? '').trim()
+  const birthPlace     = String(formData.get('birth_place') ?? '').trim()
   const passportNumber = String(formData.get('passport_number') ?? '').trim()
   const issuingCountry = String(formData.get('issuing_country') ?? '').trim()
   const issueDate      = readDateGroup(formData, 'issue_date', 'Ausstellungsdatum')
+  const validFrom      = readDateGroup(formData, 'valid_from', 'Gültig ab')
+  const relatedPassportNumber = String(formData.get('related_passport_number') ?? '').trim()
   const approvalStatus = String(formData.get('approval_status') ?? '').trim()
   if (firstName) details.first_name = firstName
   if (lastName) details.last_name = lastName
   if (birthDate) details.birth_date = birthDate
+  if (gender) details.gender = gender
+  if (nationality) details.nationality = nationality
+  if (birthPlace) details.birth_place = birthPlace
   if (passportNumber) details.passport_number = passportNumber
   if (issuingCountry) details.issuing_country = issuingCountry
   if (issueDate) details.issue_date = issueDate
+  if (validFrom) details.valid_from = validFrom
+  if (relatedPassportNumber) details.related_passport_number = relatedPassportNumber
   if (approvalStatus === 'pending' || approvalStatus === 'approved') details.approval_status = approvalStatus
 
   const file = formData.get('file')
+  const existingStoragePath = String(formData.get('existing_storage_path') ?? '').trim()
 
-  return { personId, docType, label, expiresAt, notes, returnTo, assignTrip, details, file }
+  return { personId, docType, label, expiresAt, notes, returnTo, assignTrip, details, file, existingStoragePath }
 }
 
 function validateFile(file: FormDataEntryValue | null, required: boolean): { error?: string; file?: File } {
@@ -69,18 +80,32 @@ export async function createDocument(formData: FormData) {
   if (f.label.length < 2)
     redirect(`${newPath}&error=${encodeURIComponent('Dokumentname: mindestens 2 Zeichen erforderlich')}`)
 
-  const { error: fileError, file } = validateFile(f.file, true)
-  if (fileError || !file)
-    redirect(`${newPath}&error=${encodeURIComponent(fileError ?? 'Datei fehlt')}`)
+  const { error: fileError, file } = validateFile(f.file, !f.existingStoragePath)
+  if (fileError)
+    redirect(`${newPath}&error=${encodeURIComponent(fileError)}`)
+  if (!file && !f.existingStoragePath)
+    redirect(`${newPath}&error=${encodeURIComponent('Datei fehlt')}`)
 
   const supabase = await createClient()
-  const storagePath = buildStoragePath(f.personId, file.name)
 
-  const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
-    contentType: file.type,
-  })
-  if (uploadError)
-    redirect(`${newPath}&error=${encodeURIComponent('Upload fehlgeschlagen: ' + uploadError.message)}`)
+  // Kommt die Datei bereits aus einer vorangegangenen KI-Auslesung (existing_storage_path),
+  // wird sie nicht erneut hochgeladen — sonst nur, wenn der Nutzer sie hier ersetzt hat.
+  let storagePath: string
+  let source: 'manual' | 'extracted'
+  if (file) {
+    storagePath = buildStoragePath(f.personId, file.name)
+    const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
+      contentType: file.type,
+    })
+    if (uploadError)
+      redirect(`${newPath}&error=${encodeURIComponent('Upload fehlgeschlagen: ' + uploadError.message)}`)
+    // Nutzer hat die automatisch ausgelesene Datei durch eine eigene ersetzt — die alte wird verwaist, also entfernen.
+    if (f.existingStoragePath) await supabase.storage.from('documents').remove([f.existingStoragePath])
+    source = 'manual'
+  } else {
+    storagePath = f.existingStoragePath
+    source = 'extracted'
+  }
 
   const { data: inserted, error: insertError } = await supabase
     .from('documents')
@@ -90,7 +115,7 @@ export async function createDocument(formData: FormData) {
       label: f.label,
       expires_at: f.expiresAt || null,
       notes: f.notes || null,
-      details: f.details,
+      details: { ...f.details, source },
       storage_provider: 'supabase_storage',
       storage_bucket: 'documents',
       storage_path: storagePath,
@@ -130,6 +155,22 @@ export async function updateDocument(formData: FormData) {
 
   const supabase = await createClient()
 
+  // Herkunft (manuell/KI) bestimmen: eigener Datei-Upload macht es wieder "manuell",
+  // eine übernommene KI-Auslesung (existing_storage_path) macht es "extracted", ohne
+  // Dateiänderung bleibt die bisherige Herkunft aus der DB unverändert erhalten.
+  let source: 'manual' | 'extracted' = 'manual'
+  let previousStoragePath: string | undefined
+  if (file || f.existingStoragePath) {
+    const { data: existing } = await supabase
+      .from('documents').select('storage_path').eq('id', documentId).maybeSingle()
+    previousStoragePath = existing?.storage_path
+    source = file ? 'manual' : 'extracted'
+  } else {
+    const { data: existing } = await supabase
+      .from('documents').select('details').eq('id', documentId).maybeSingle()
+    source = (existing?.details as DocumentDetails | null)?.source ?? 'manual'
+  }
+
   const update: {
     doc_type: string
     label: string
@@ -142,13 +183,10 @@ export async function updateDocument(formData: FormData) {
     label: f.label,
     expires_at: f.expiresAt || null,
     notes: f.notes || null,
-    details: f.details,
+    details: { ...f.details, source },
   }
 
   if (file) {
-    const { data: existing } = await supabase
-      .from('documents').select('storage_path').eq('id', documentId).maybeSingle()
-
     const storagePath = buildStoragePath(f.personId, file.name)
     const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
       contentType: file.type,
@@ -157,7 +195,10 @@ export async function updateDocument(formData: FormData) {
       redirect(`${editPath}?error=${encodeURIComponent('Upload fehlgeschlagen: ' + uploadError.message)}`)
 
     update.storage_path = storagePath
-    if (existing?.storage_path) await supabase.storage.from('documents').remove([existing.storage_path])
+    if (previousStoragePath) await supabase.storage.from('documents').remove([previousStoragePath])
+  } else if (f.existingStoragePath) {
+    update.storage_path = f.existingStoragePath
+    if (previousStoragePath) await supabase.storage.from('documents').remove([previousStoragePath])
   }
 
   const { error } = await supabase.from('documents').update(update).eq('id', documentId)
@@ -203,15 +244,22 @@ export async function deleteDocument(formData: FormData) {
   const personId    = String(formData.get('person_id') ?? '')
   const storagePath = String(formData.get('storage_path') ?? '')
   const returnTo    = String(formData.get('return_to') ?? '').trim()
+  const detailPath  = `/family/${personId}/documents/${documentId}`
 
   const supabase = await createClient()
 
-  if (storagePath) await supabase.storage.from('documents').remove([storagePath])
+  if (storagePath) {
+    const { error: storageError } = await supabase.storage.from('documents').remove([storagePath])
+    // Abbrechen statt die DB-Zeile trotzdem zu löschen — sonst bliebe die Datei als
+    // nicht mehr referenzierter Storage-Orphan zurück, unauffindbar für jeden Retry.
+    if (storageError)
+      redirect(`${detailPath}?error=${encodeURIComponent('Datei konnte nicht gelöscht werden: ' + storageError.message)}`)
+  }
 
   const { error } = await supabase.from('documents').delete().eq('id', documentId)
 
   if (error)
-    redirect(`/family/${personId}/documents/${documentId}?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)
+    redirect(`${detailPath}?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)
 
   redirect(returnTo || `/family/${personId}`)
 }

@@ -4,6 +4,7 @@ import { ChevronLeft, BadgeCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { DOCUMENT_TYPE_CONFIG } from "@/lib/documents";
 import type { DocumentType } from "@/lib/documents";
+import { unassignPolicyFromTrip } from "@/lib/actions/insurance";
 
 type PersonRow = { id: string; name: string; initials: string; color: string };
 type EntryDoc = { id: string; doc_type: DocumentType; label: string; person_id: string };
@@ -209,37 +210,54 @@ export default async function TripDocumentsPage({
               <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: "12px" }}>
                 Versicherung
               </div>
-              {assignedPolicies.length > 0 ? (
-                <div className="space-y-2">
+              {assignedPolicies.length > 0 && (
+                <div className="space-y-2 mb-4">
                   {assignedPolicies.map((policy) => (
-                    <Link
+                    <div
                       key={policy.id}
-                      href={`/family/insurance/${policy.id}`}
-                      className="flex items-center justify-between gap-3 p-4 rounded-xl transition-colors"
-                      style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}
+                      className="flex items-center justify-between gap-3 p-4 rounded-xl"
+                      style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
                     >
-                      <div>
-                        <div className="text-sm font-medium" style={{ color: "var(--foreground)" }}>{policy.label}</div>
+                      <Link
+                        href={`/family/insurance/${policy.id}`}
+                        className="min-w-0"
+                        style={{ textDecoration: "none" }}
+                      >
+                        <div className="text-sm font-medium truncate" style={{ color: "var(--foreground)" }}>{policy.label}</div>
                         <div className="text-xs mt-0.5" style={{ color: "var(--muted)", fontSize: "0.7rem" }}>
                           {policy.provider ?? "—"} · Versicherung hinterlegt
                         </div>
-                      </div>
-                    </Link>
+                      </Link>
+                      <form action={unassignPolicyFromTrip}>
+                        <input type="hidden" name="policy_id" value={policy.id} />
+                        <input type="hidden" name="trip_id" value={trip.id} />
+                        <input type="hidden" name="return_to" value={returnTo} />
+                        <button
+                          type="submit"
+                          style={{
+                            fontSize: "0.6rem", letterSpacing: "0.08em", textTransform: "uppercase", color: "#B5624A",
+                            background: "transparent", border: "1px solid rgba(181,98,74,0.3)", padding: "5px 12px",
+                            borderRadius: "20px", cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
+                          }}
+                        >
+                          Entfernen
+                        </button>
+                      </form>
+                    </div>
                   ))}
                 </div>
-              ) : (
-                <div className="rounded-xl p-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-                  <p className="mb-4" style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
-                    Noch keine Versicherung zugeordnet.
-                  </p>
-                  <Link
-                    href={`/trips/${trip.slug}/documents/insurance`}
-                    style={{ color: "var(--accent)", fontSize: "0.7rem", letterSpacing: "0.08em", textDecoration: "none" }}
-                  >
-                    Versicherung zuordnen →
-                  </Link>
-                </div>
               )}
+              {assignedPolicies.length === 0 && (
+                <p className="mb-4" style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
+                  Noch keine Versicherung zugeordnet.
+                </p>
+              )}
+              <Link
+                href={`/trips/${trip.slug}/documents/insurance`}
+                style={{ color: "var(--accent)", fontSize: "0.7rem", letterSpacing: "0.08em", textDecoration: "none" }}
+              >
+                {assignedPolicies.length > 0 ? "+ Weitere Versicherung zuordnen →" : "Bestehende Versicherung übernehmen →"}
+              </Link>
             </section>
           </>
         ) : (

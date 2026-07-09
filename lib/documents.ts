@@ -69,9 +69,16 @@ export type DocumentDetails = {
   first_name?: string
   last_name?: string
   birth_date?: string
+  gender?: string
+  nationality?: string
+  birth_place?: string
   passport_number?: string
   issuing_country?: string
   issue_date?: string
+  /** Einreisedokumente: "Gültig ab" — eigenständig von issue_date (Genehmigungsdatum). */
+  valid_from?: string
+  /** Einreisedokumente: im Dokument referenzierte Passnummer (nicht die eigene Antrags-/Referenznummer). */
+  related_passport_number?: string
   /** Manueller Status für Einreisedokumente — lässt sich nicht aus Daten ableiten. */
   approval_status?: 'pending' | 'approved'
   source?: 'manual' | 'extracted'

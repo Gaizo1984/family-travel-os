@@ -32,10 +32,13 @@ function MetaItem({ label, value }: { label: string; value: string }) {
 
 export default async function DocumentDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ personId: string; documentId: string }>;
+  searchParams: Promise<{ error?: string }>;
 }) {
   const { personId, documentId } = await params;
+  const { error } = await searchParams;
 
   const supabase = await createClient();
   const { data: person } = await supabase
@@ -100,6 +103,15 @@ export default async function DocumentDetailPage({
           {person.name}
         </Link>
 
+        {error && (
+          <div
+            className="mb-6 px-4 py-3 rounded-lg"
+            style={{ background: "rgba(181,98,74,0.12)", border: "1px solid rgba(181,98,74,0.3)", color: "#B5624A", fontSize: "0.75rem", letterSpacing: "0.02em" }}
+          >
+            {error}
+          </div>
+        )}
+
         <div className="flex items-center justify-between flex-wrap gap-4 mb-8">
           <div>
             <div className="flex items-center gap-2 mb-2">
@@ -110,6 +122,11 @@ export default async function DocumentDetailPage({
               {validity && (
                 <span style={{ color: DOCUMENT_VALIDITY_COLORS[validity], fontSize: "0.55rem", letterSpacing: "0.1em", textTransform: "uppercase" }}>
                   · {DOCUMENT_VALIDITY_LABELS[validity]}
+                </span>
+              )}
+              {details.source === "extracted" && (
+                <span style={{ color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                  · 🤖 Automatisch ausgelesen
                 </span>
               )}
             </div>
@@ -138,6 +155,9 @@ export default async function DocumentDetailPage({
                 <MetaItem label="Vorname" value={details.first_name ?? "—"} />
                 <MetaItem label="Nachname" value={details.last_name ?? "—"} />
                 <MetaItem label="Geburtsdatum" value={formatExpiresAt(details.birth_date ?? null)} />
+                <MetaItem label="Geschlecht" value={details.gender ?? "—"} />
+                <MetaItem label="Nationalität" value={details.nationality ?? "—"} />
+                <MetaItem label="Geburtsort" value={details.birth_place ?? "—"} />
                 <MetaItem label={config.numberLabel} value={details.passport_number ?? "—"} />
                 <MetaItem label="Ausstellungsland" value={details.issuing_country ?? "—"} />
                 <MetaItem label="Ausstellungsdatum" value={formatExpiresAt(details.issue_date ?? null)} />
@@ -147,6 +167,8 @@ export default async function DocumentDetailPage({
               <>
                 <MetaItem label="Land / Zielgebiet" value={details.issuing_country ?? "—"} />
                 <MetaItem label={config.numberLabel} value={details.passport_number ?? "—"} />
+                <MetaItem label="Referenzierte Passnummer" value={details.related_passport_number ?? "—"} />
+                <MetaItem label="Gültig ab" value={formatExpiresAt(details.valid_from ?? null)} />
                 <MetaItem label="Genehmigungsdatum" value={formatExpiresAt(details.issue_date ?? null)} />
               </>
             )}

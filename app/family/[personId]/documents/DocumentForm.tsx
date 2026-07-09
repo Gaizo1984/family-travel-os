@@ -23,19 +23,31 @@ type DocumentValues = {
 
 export function DocumentForm({
   action,
+  extractAction,
   hiddenFields,
   defaultType,
   values,
   fileRequired,
+  existingStoragePath,
+  infoMessage,
+  detectedName,
   submitLabel,
   cancelHref,
   errorMessage,
 }: {
   action: (formData: FormData) => void | Promise<void>;
+  /** Optionaler zweiter Submit-Button, der dieselben Formularfelder zur KI-Auslesung schickt. */
+  extractAction?: (formData: FormData) => void | Promise<void>;
   hiddenFields: Record<string, string>;
   defaultType: DocumentType;
   values?: DocumentValues;
   fileRequired: boolean;
+  /** Bereits hochgeladene Datei (z. B. aus einer vorangegangenen KI-Auslesung) — Datei-Feld wird optional. */
+  existingStoragePath?: string;
+  /** Neutraler Hinweis-Banner, z. B. "Automatisch ausgelesen — bitte prüfen". */
+  infoMessage?: string;
+  /** Nur zum Abgleich angezeigter, im Dokument erkannter Name (nicht gespeichert). */
+  detectedName?: string;
   submitLabel: string;
   cancelHref: string;
   errorMessage?: string;
@@ -43,12 +55,14 @@ export function DocumentForm({
   const type = values?.doc_type ?? defaultType;
   const config = DOCUMENT_TYPE_CONFIG[type];
   const details = values?.details ?? {};
+  const canExtract = Boolean(extractAction) && (config.isIdentityType || config.isEntryDocumentType);
 
   return (
     <form action={action} encType="multipart/form-data">
       {Object.entries(hiddenFields).map(([name, value]) => (
         <input key={name} type="hidden" name={name} value={value} />
       ))}
+      {existingStoragePath && <input type="hidden" name="existing_storage_path" value={existingStoragePath} />}
 
       <div
         className="rounded-xl p-8"
@@ -60,6 +74,16 @@ export function DocumentForm({
             style={{ background: "rgba(181,98,74,0.12)", border: "1px solid rgba(181,98,74,0.3)", color: "#B5624A", fontSize: "0.75rem", letterSpacing: "0.02em" }}
           >
             {errorMessage}
+          </div>
+        )}
+
+        {infoMessage && (
+          <div
+            className="mb-6 px-4 py-3 rounded-lg"
+            style={{ background: "rgba(184,154,94,0.12)", border: "1px solid rgba(184,154,94,0.3)", color: "var(--accent)", fontSize: "0.75rem", letterSpacing: "0.02em" }}
+          >
+            🤖 {infoMessage}
+            {detectedName && ` — im Dokument erkannter Name: „${detectedName}“, bitte mit der ausgewählten Person abgleichen.`}
           </div>
         )}
 
@@ -109,6 +133,27 @@ export function DocumentForm({
               range={getDateFieldRange("birth")}
             />
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+              <div>
+                <label htmlFor="doc-gender" style={LABEL_STYLE}>Geschlecht</label>
+                <select id="doc-gender" name="gender" defaultValue={details.gender ?? ""} style={FIELD_STYLE}>
+                  <option value="">—</option>
+                  <option value="male">Männlich</option>
+                  <option value="female">Weiblich</option>
+                  <option value="other">Divers</option>
+                </select>
+              </div>
+              <div>
+                <label htmlFor="doc-nationality" style={LABEL_STYLE}>Nationalität</label>
+                <input id="doc-nationality" name="nationality" type="text" defaultValue={details.nationality ?? ""} placeholder="z. B. Deutsch" style={FIELD_STYLE} />
+              </div>
+            </div>
+
+            <div className="mb-5">
+              <label htmlFor="doc-birth-place" style={LABEL_STYLE}>Geburtsort</label>
+              <input id="doc-birth-place" name="birth_place" type="text" defaultValue={details.birth_place ?? ""} style={FIELD_STYLE} />
+            </div>
+
             <div className="mb-5">
               <label htmlFor="doc-issuing-country" style={LABEL_STYLE}>Ausstellungsland</label>
               <input id="doc-issuing-country" name="issuing_country" type="text" defaultValue={details.issuing_country ?? ""} placeholder="z. B. Deutschland" style={FIELD_STYLE} />
@@ -139,6 +184,18 @@ export function DocumentForm({
               <label htmlFor="doc-number" style={LABEL_STYLE}>{config.numberLabel}</label>
               <input id="doc-number" name="passport_number" type="text" defaultValue={details.passport_number ?? ""} style={FIELD_STYLE} />
             </div>
+
+            <div className="mb-5">
+              <label htmlFor="doc-related-passport" style={LABEL_STYLE}>Referenzierte Passnummer (falls im Dokument genannt)</label>
+              <input id="doc-related-passport" name="related_passport_number" type="text" defaultValue={details.related_passport_number ?? ""} style={FIELD_STYLE} />
+            </div>
+
+            <DateSelectFields
+              label="Gültig ab"
+              namePrefix="valid_from"
+              defaultIso={details.valid_from}
+              range={getDateFieldRange("issue")}
+            />
 
             <DateSelectFields
               label="Genehmigungsdatum"
@@ -171,17 +228,19 @@ export function DocumentForm({
 
         <div className="mb-8">
           <label htmlFor="doc-file" style={LABEL_STYLE}>
-            {fileRequired ? "Foto aufnehmen oder Datei/PDF auswählen *" : "Neue Datei hochladen (optional, ersetzt vorhandene Datei)"}
+            {existingStoragePath
+              ? "Neues Foto/PDF hochladen (ersetzt die bereits hochgeladene Datei)"
+              : fileRequired ? "Foto aufnehmen oder Datei/PDF auswählen *" : "Neue Datei hochladen (optional, ersetzt vorhandene Datei)"}
           </label>
           <input
             id="doc-file" name="file" type="file"
             accept="image/jpeg,image/png,image/webp,application/pdf"
             capture="environment"
-            required={fileRequired}
+            required={fileRequired && !existingStoragePath}
             style={{ ...FIELD_STYLE, padding: "10px 16px" }}
           />
           <p className="mt-2" style={{ color: "var(--muted)", fontSize: "0.65rem" }}>
-            Erlaubt: JPEG, PNG, WebP oder PDF, maximal 10 MB.
+            {existingStoragePath ? "✓ Datei bereits hochgeladen. " : ""}Erlaubt: JPEG, PNG, WebP oder PDF, maximal 10 MB.
           </p>
         </div>
 
@@ -189,17 +248,33 @@ export function DocumentForm({
           <Link href={cancelHref} style={{ color: "var(--muted)", fontSize: "0.7rem", letterSpacing: "0.1em", textDecoration: "none" }}>
             Abbrechen
           </Link>
-          <button
-            type="submit"
-            style={{
-              background: "var(--foreground)", color: "var(--surface)", border: "none",
-              borderRadius: "6px", padding: "11px 20px", fontSize: "0.65rem",
-              letterSpacing: "0.16em", textTransform: "uppercase", cursor: "pointer",
-              whiteSpace: "nowrap", WebkitAppearance: "none", appearance: "none",
-            }}
-          >
-            {submitLabel}
-          </button>
+          <div className="flex items-center gap-3 flex-wrap">
+            {canExtract && !existingStoragePath && (
+              <button
+                type="submit"
+                formAction={extractAction}
+                style={{
+                  background: "transparent", color: "var(--accent)", border: "1px solid rgba(184,154,94,0.4)",
+                  borderRadius: "6px", padding: "10px 18px", fontSize: "0.65rem",
+                  letterSpacing: "0.14em", textTransform: "uppercase", cursor: "pointer",
+                  whiteSpace: "nowrap", WebkitAppearance: "none", appearance: "none",
+                }}
+              >
+                🤖 Daten automatisch auslesen
+              </button>
+            )}
+            <button
+              type="submit"
+              style={{
+                background: "var(--foreground)", color: "var(--surface)", border: "none",
+                borderRadius: "6px", padding: "11px 20px", fontSize: "0.65rem",
+                letterSpacing: "0.16em", textTransform: "uppercase", cursor: "pointer",
+                whiteSpace: "nowrap", WebkitAppearance: "none", appearance: "none",
+              }}
+            >
+              {submitLabel}
+            </button>
+          </div>
         </div>
       </div>
     </form>

@@ -3,19 +3,33 @@ import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { createDocument } from "@/lib/actions/documents";
+import { extractDocumentData } from "@/lib/actions/document-extraction";
 import { DOCUMENT_TYPE_ORDER, DOCUMENT_TYPE_CONFIG } from "@/lib/documents";
-import type { DocumentType } from "@/lib/documents";
+import type { DocumentType, DocumentDetails } from "@/lib/documents";
 import { DocumentForm } from "../DocumentForm";
+
+type DraftFields = {
+  readable?: boolean;
+  first_name?: string | null;
+  last_name?: string | null;
+  detected_name?: string | null;
+  expires_at?: string | null;
+} & Record<string, string | null | boolean | undefined>;
 
 export default async function NewDocumentPage({
   params,
   searchParams,
 }: {
   params: Promise<{ personId: string }>;
-  searchParams: Promise<{ type?: string; return_to?: string; assign_trip?: string; error?: string }>;
+  searchParams: Promise<{ type?: string; return_to?: string; assign_trip?: string; error?: string; draft?: string; storage_path?: string }>;
 }) {
   const { personId } = await params;
-  const { type, return_to, assign_trip, error } = await searchParams;
+  const { type, return_to, assign_trip, error, draft: draftRaw, storage_path } = await searchParams;
+
+  let draft: DraftFields | null = null;
+  if (draftRaw) {
+    try { draft = JSON.parse(draftRaw) as DraftFields; } catch { draft = null; }
+  }
 
   const supabase = await createClient();
   const { data: person } = await supabase
@@ -103,13 +117,25 @@ export default async function NewDocumentPage({
 
         <DocumentForm
           action={createDocument}
+          extractAction={extractDocumentData}
           hiddenFields={{
             person_id: person.id,
+            mode: "create",
             ...(return_to ? { return_to } : {}),
             ...(assign_trip ? { assign_trip } : {}),
           }}
           defaultType={config.value}
-          fileRequired
+          fileRequired={!storage_path}
+          existingStoragePath={storage_path}
+          infoMessage={draft ? "Automatisch ausgelesen — bitte prüfen und bei Bedarf korrigieren." : undefined}
+          detectedName={draft?.detected_name ?? undefined}
+          values={draft ? {
+            label: [config.label, draft.first_name, draft.last_name].filter(Boolean).join(" ") || `${config.label} ${person.name}`,
+            doc_type: config.value,
+            expires_at: (draft.expires_at as string | null) ?? null,
+            notes: null,
+            details: draft as unknown as DocumentDetails,
+          } : undefined}
           submitLabel="Dokument speichern"
           cancelHref={cancelHref}
           errorMessage={error}
