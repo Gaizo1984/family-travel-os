@@ -73,9 +73,14 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 function StageCard({ stage, idx, slug }: { stage: StageRow; idx: number; slug: string }) {
   const imgUrl = STAGE_IMAGES[idx % STAGE_IMAGES.length];
+  const dateRange = stage.start_date
+    ? stage.end_date && stage.end_date !== stage.start_date
+      ? `${formatDateDE(stage.start_date)} – ${formatDateDE(stage.end_date)}`
+      : formatDateDE(stage.start_date)
+    : "—";
   return (
     <div className="group relative shrink-0 overflow-hidden rounded-xl" style={{ width: 210, height: 285 }}>
-      <Link href={`/trips/${slug}/stages/${stage.id}`} className="absolute inset-0 block">
+      <Link href={`/trips/${slug}/stages/${stage.id}/edit`} className="absolute inset-0 block">
         {imgUrl && (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={imgUrl} alt={stage.title} className="absolute inset-0 w-full h-full object-cover" />
@@ -89,6 +94,11 @@ function StageCard({ stage, idx, slug }: { stage: StageRow; idx: number; slug: s
             {String(idx + 1).padStart(2, "0")}
           </span>
         </div>
+        <div className="absolute top-3 right-3">
+          <span style={{ display: "inline-block", fontSize: "0.56rem", letterSpacing: "0.12em", textTransform: "uppercase", color: "#C8A96E", background: "rgba(10,9,7,0.55)", padding: "3px 8px", borderRadius: "20px", backdropFilter: "blur(4px)" }}>
+            In Planung
+          </span>
+        </div>
         <div className="absolute inset-x-0 bottom-0 p-4">
           <div className="text-base font-light mb-0.5" style={{ color: H_FG }}>{stage.title}</div>
           <div className="text-xs mb-3" style={{ color: H_MUTED, letterSpacing: "0.08em", fontSize: "0.68rem" }}>
@@ -96,7 +106,7 @@ function StageCard({ stage, idx, slug }: { stage: StageRow; idx: number; slug: s
           </div>
           <div style={{ borderTop: `1px solid ${H_BORDER}`, paddingTop: "10px" }}>
             <div style={{ color: "rgba(240,235,227,0.35)", fontSize: "0.6rem", letterSpacing: "0.04em" }}>
-              {stage.start_date ? formatDateDE(stage.start_date) : "—"}
+              {dateRange}
             </div>
             {stage.accommodation && (
               <div className="mt-0.5" style={{ color: H_MUTED, fontSize: "0.62rem" }}>
@@ -109,18 +119,6 @@ function StageCard({ stage, idx, slug }: { stage: StageRow; idx: number; slug: s
           <ChevronRight size={12} strokeWidth={1.5} style={{ color: H_MUTED }} />
         </div>
       </Link>
-
-      <div className="absolute top-3 right-3 flex flex-col items-end gap-1.5" style={{ zIndex: 2 }}>
-        <span style={{ display: "inline-block", fontSize: "0.56rem", letterSpacing: "0.12em", textTransform: "uppercase", color: "#C8A96E", background: "rgba(10,9,7,0.55)", padding: "3px 8px", borderRadius: "20px", backdropFilter: "blur(4px)" }}>
-          In Planung
-        </span>
-        <Link
-          href={`/trips/${slug}/stages/${stage.id}/edit`}
-          style={{ fontSize: "0.56rem", letterSpacing: "0.1em", textTransform: "uppercase", color: H_MUTED, background: "rgba(10,9,7,0.55)", padding: "3px 8px", borderRadius: "20px", backdropFilter: "blur(4px)", textDecoration: "none" }}
-        >
-          Bearbeiten
-        </Link>
-      </div>
     </div>
   );
 }

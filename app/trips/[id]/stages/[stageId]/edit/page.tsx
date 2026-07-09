@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { updateStage, deleteStage } from "@/lib/actions/stages";
+import { StageDateFields } from "../../StageDateFields";
 
 type StageRow = {
   id: string
@@ -94,88 +95,25 @@ export default async function EditStagePage({
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-4 mb-5">
-              <div>
-                <label
-                  htmlFor="stage-title"
-                  style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px" }}
-                >
-                  Titel *
-                </label>
-                <input
-                  id="stage-title"
-                  name="title"
-                  type="text"
-                  required
-                  defaultValue={s.title}
-                  style={{ width: "100%", padding: "12px 16px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)", fontSize: "0.9rem", fontWeight: 300, outline: "none" }}
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="stage-location"
-                  style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px" }}
-                >
-                  Ort
-                </label>
-                <input
-                  id="stage-location"
-                  name="location"
-                  type="text"
-                  defaultValue={s.location ?? ""}
-                  style={{ width: "100%", padding: "12px 16px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)", fontSize: "0.9rem", fontWeight: 300, outline: "none" }}
-                />
-              </div>
+            <div className="mb-5">
+              <label
+                htmlFor="stage-title"
+                style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px" }}
+              >
+                Ziel *
+              </label>
+              <input
+                id="stage-title"
+                name="title"
+                type="text"
+                required
+                defaultValue={s.title}
+                placeholder="z. B. Dubai"
+                style={{ width: "100%", padding: "12px 16px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)", fontSize: "0.9rem", fontWeight: 300, outline: "none" }}
+              />
             </div>
 
-            <div className="grid grid-cols-3 gap-4 mb-5">
-              <div>
-                <label
-                  htmlFor="stage-start"
-                  style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px" }}
-                >
-                  Von
-                </label>
-                <input
-                  id="stage-start"
-                  name="start_date"
-                  type="date"
-                  defaultValue={s.start_date ?? ""}
-                  style={{ width: "100%", padding: "12px 16px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)", fontSize: "0.85rem", outline: "none" }}
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="stage-end"
-                  style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px" }}
-                >
-                  Bis
-                </label>
-                <input
-                  id="stage-end"
-                  name="end_date"
-                  type="date"
-                  defaultValue={s.end_date ?? ""}
-                  style={{ width: "100%", padding: "12px 16px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)", fontSize: "0.85rem", outline: "none" }}
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="stage-nights"
-                  style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px" }}
-                >
-                  Nächte
-                </label>
-                <input
-                  id="stage-nights"
-                  name="nights"
-                  type="number"
-                  min={0}
-                  defaultValue={s.nights ?? ""}
-                  style={{ width: "100%", padding: "12px 16px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)", fontSize: "0.85rem", outline: "none" }}
-                />
-              </div>
-            </div>
+            <StageDateFields defaultStartDate={s.start_date ?? ""} defaultEndDate={s.end_date ?? ""} />
 
             <div className="mb-5">
               <label

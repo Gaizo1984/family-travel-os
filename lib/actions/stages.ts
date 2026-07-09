@@ -3,21 +3,25 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 
+function computeNights(startDate: string, endDate: string): number | null {
+  if (!startDate || !endDate) return null
+  const diff = Math.round((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000)
+  return diff >= 0 ? diff : null
+}
+
 export async function createStage(formData: FormData) {
   const tripId        = String(formData.get('trip_id') ?? '')
   const slug          = String(formData.get('slug') ?? '')
   const title         = String(formData.get('title') ?? '').trim()
-  const location      = String(formData.get('location') ?? '').trim()
   const startDate     = String(formData.get('start_date') ?? '').trim()
   const endDate       = String(formData.get('end_date') ?? '').trim()
-  const nightsRaw     = String(formData.get('nights') ?? '').trim()
   const accommodation = String(formData.get('accommodation') ?? '').trim()
   const notes         = String(formData.get('notes') ?? '').trim()
 
   const newPath = `/trips/${slug}/stages/new`
 
   if (title.length < 2)
-    redirect(`${newPath}?error=${encodeURIComponent('Titel/Ort: mindestens 2 Zeichen erforderlich')}`)
+    redirect(`${newPath}?error=${encodeURIComponent('Ziel: mindestens 2 Zeichen erforderlich')}`)
   if (startDate && endDate && new Date(endDate) < new Date(startDate))
     redirect(`${newPath}?error=${encodeURIComponent('Enddatum darf nicht vor dem Startdatum liegen')}`)
 
@@ -34,10 +38,10 @@ export async function createStage(formData: FormData) {
   const { error } = await supabase.from('stages').insert({
     trip_id: tripId,
     title,
-    location: location || null,
+    location: title,
     start_date: startDate || null,
     end_date: endDate || null,
-    nights: nightsRaw ? Number(nightsRaw) : null,
+    nights: computeNights(startDate, endDate),
     accommodation: accommodation || null,
     notes: notes || null,
     sort_order: (last?.sort_order ?? -1) + 1,
@@ -53,17 +57,15 @@ export async function updateStage(formData: FormData) {
   const stageId       = String(formData.get('stage_id') ?? '')
   const slug          = String(formData.get('slug') ?? '')
   const title         = String(formData.get('title') ?? '').trim()
-  const location      = String(formData.get('location') ?? '').trim()
   const startDate     = String(formData.get('start_date') ?? '').trim()
   const endDate       = String(formData.get('end_date') ?? '').trim()
-  const nightsRaw     = String(formData.get('nights') ?? '').trim()
   const accommodation = String(formData.get('accommodation') ?? '').trim()
   const notes         = String(formData.get('notes') ?? '').trim()
 
   const editPath = `/trips/${slug}/stages/${stageId}/edit`
 
   if (title.length < 2)
-    redirect(`${editPath}?error=${encodeURIComponent('Titel/Ort: mindestens 2 Zeichen erforderlich')}`)
+    redirect(`${editPath}?error=${encodeURIComponent('Ziel: mindestens 2 Zeichen erforderlich')}`)
   if (startDate && endDate && new Date(endDate) < new Date(startDate))
     redirect(`${editPath}?error=${encodeURIComponent('Enddatum darf nicht vor dem Startdatum liegen')}`)
 
@@ -73,10 +75,10 @@ export async function updateStage(formData: FormData) {
     .from('stages')
     .update({
       title,
-      location: location || null,
+      location: title,
       start_date: startDate || null,
       end_date: endDate || null,
-      nights: nightsRaw ? Number(nightsRaw) : null,
+      nights: computeNights(startDate, endDate),
       accommodation: accommodation || null,
       notes: notes || null,
     })

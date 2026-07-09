@@ -16,20 +16,30 @@ function slugify(text: string): string {
 
 export async function createTrip(formData: FormData) {
   const title     = String(formData.get('title') ?? '').trim()
+  const subtitle  = String(formData.get('subtitle') ?? '').trim()
   const startDate = String(formData.get('start_date') ?? '').trim()
   const endDate   = String(formData.get('end_date') ?? '').trim()
+  const statusRaw = String(formData.get('status') ?? '').trim()
+  const status    = (['planned', 'active', 'completed'] as const).includes(statusRaw as 'planned' | 'active' | 'completed')
+    ? (statusRaw as 'planned' | 'active' | 'completed')
+    : 'planned'
   const memberIds = formData.getAll('members').map(String)
 
+  // Beide Einstiege ("Reise selbst anlegen" unter /trips/new und der bestehende
+  // Formular-Teil von /plan) posten hierher — Redirect-Ziel bei Fehlern richtet
+  // sich nach dem Referer, damit beide Formulare ihre eigene Fehleranzeige behalten.
+  const referer = String(formData.get('_referer') ?? '/plan')
+
   if (title.length < 2)
-    redirect(`/plan?error=${encodeURIComponent('Reisenname: mindestens 2 Zeichen erforderlich')}`)
+    redirect(`${referer}?error=${encodeURIComponent('Reisenname: mindestens 2 Zeichen erforderlich')}`)
   if (!startDate)
-    redirect(`/plan?error=${encodeURIComponent('Startdatum ist erforderlich')}`)
+    redirect(`${referer}?error=${encodeURIComponent('Startdatum ist erforderlich')}`)
   if (!endDate)
-    redirect(`/plan?error=${encodeURIComponent('Enddatum ist erforderlich')}`)
+    redirect(`${referer}?error=${encodeURIComponent('Enddatum ist erforderlich')}`)
   if (startDate && endDate && new Date(endDate) <= new Date(startDate))
-    redirect(`/plan?error=${encodeURIComponent('Enddatum muss nach dem Startdatum liegen')}`)
+    redirect(`${referer}?error=${encodeURIComponent('Enddatum muss nach dem Startdatum liegen')}`)
   if (memberIds.length === 0)
-    redirect(`/plan?error=${encodeURIComponent('Mindestens eine Person muss ausgewählt sein')}`)
+    redirect(`${referer}?error=${encodeURIComponent('Mindestens eine Person muss ausgewählt sein')}`)
 
   const supabase = await createClient()
 
@@ -37,7 +47,7 @@ export async function createTrip(formData: FormData) {
     .from('families').select('id').limit(1).single()
 
   if (!family?.id)
-    redirect(`/plan?error=${encodeURIComponent('Familiendaten nicht gefunden')}`)
+    redirect(`${referer}?error=${encodeURIComponent('Familiendaten nicht gefunden')}`)
 
   // Eindeutigen Slug sicherstellen
   const baseSlug = slugify(title) || 'reise'
@@ -55,7 +65,8 @@ export async function createTrip(formData: FormData) {
       slug,
       family_id: family.id,
       title,
-      status: 'planned' as const,
+      subtitle: subtitle || null,
+      status,
       start_date: startDate,
       end_date:   endDate,
     })
@@ -63,7 +74,7 @@ export async function createTrip(formData: FormData) {
     .single()
 
   if (error || !trip)
-    redirect(`/plan?error=${encodeURIComponent('Speicherfehler: ' + (error?.message ?? 'Unbekannt'))}`)
+    redirect(`${referer}?error=${encodeURIComponent('Speicherfehler: ' + (error?.message ?? 'Unbekannt'))}`)
 
   await supabase.from('trip_members').insert(
     memberIds.map(person_id => ({ trip_id: trip.id, person_id }))
@@ -146,6 +157,24 @@ export async function restoreTrip(formData: FormData) {
     .update({ status: 'planned' })
     .eq('id', tripId)
     .eq('status', 'archived')
+
+  redirect('/trips?f=archiviert')
+}
+
+export async function deleteTripPermanently(formData: FormData) {
+  const tripId = String(formData.get('trip_id') ?? '')
+  const supabase = await createClient()
+
+  const { data: trip } = await supabase
+    .from('trips').select('status').eq('id', tripId).maybeSingle()
+
+  // Endgültiges Löschen ist ausschließlich aus dem Archiv erreichbar — auch
+  // serverseitig erzwungen, falls die Action jemals außerhalb dieses Flows
+  // aufgerufen wird.
+  if (trip?.status !== 'archived')
+    redirect(`/trips?error=${encodeURIComponent('Nur archivierte Reisen können endgültig gelöscht werden')}`)
+
+  await supabase.from('trips').delete().eq('id', tripId)
 
   redirect('/trips?f=archiviert')
 }

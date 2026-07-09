@@ -108,10 +108,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               key={href}
               href={href}
               className="flex-1 flex flex-col items-center justify-center gap-1 py-3 text-xs transition-colors"
-              style={{ color: "var(--muted)", letterSpacing: "0.06em", minHeight: "44px" }}
+              style={{ color: "var(--muted)", letterSpacing: "0.06em", minHeight: "44px", minWidth: 0 }}
             >
-              <Icon size={16} strokeWidth={1.5} />
-              <span>{label}</span>
+              <Icon size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>
+                {label}
+              </span>
             </Link>
           ))}
         </nav>

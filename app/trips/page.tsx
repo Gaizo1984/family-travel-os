@@ -293,7 +293,7 @@ export default async function TripsPage({
     <div className="flex-1 flex flex-col">
       <div className="flex-1 px-5 md:px-8 pb-14 max-w-4xl w-full mx-auto">
 
-        <header className="flex items-start justify-between pt-9 pb-7">
+        <header className="flex items-start justify-between flex-wrap gap-4 pt-9 pb-7">
           <div>
             <h1 className="text-2xl font-light mb-1" style={{ color: "var(--foreground)", letterSpacing: "0.01em" }}>
               Unsere Reisen
@@ -302,10 +302,18 @@ export default async function TripsPage({
               Geplant, erlebt und unvergessen.
             </p>
           </div>
-          <Link href="/plan" className="btn-neue-reise">+ Neue Reise</Link>
+          <div className="flex items-center flex-wrap gap-4">
+            <Link
+              href="/plan"
+              style={{ color: "var(--muted)", fontSize: "0.7rem", letterSpacing: "0.08em", textDecoration: "none" }}
+            >
+              Reiseidee entwickeln
+            </Link>
+            <Link href="/trips/new" className="btn-neue-reise">+ Reise anlegen</Link>
+          </div>
         </header>
 
-        <div className="flex items-center gap-8 mb-11" style={{ borderBottom: "1px solid var(--border)", paddingBottom: "18px" }}>
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mb-11" style={{ borderBottom: "1px solid var(--border)", paddingBottom: "18px" }}>
           {FILTERS.map(({ key, label }) => {
             const isActive = f === key;
             return (
@@ -364,20 +372,33 @@ export default async function TripsPage({
                 {archivedTrips.map((trip) => (
                   <div key={trip.id} className="relative">
                     <PastCard trip={trip} />
-                    <form action={restoreTrip} className="absolute top-4 right-4" style={{ zIndex: 5 }}>
-                      <input type="hidden" name="trip_id" value={trip.id} />
-                      <button
-                        type="submit"
+                    <div className="absolute top-4 right-4 flex items-center gap-2" style={{ zIndex: 5 }}>
+                      <form action={restoreTrip}>
+                        <input type="hidden" name="trip_id" value={trip.id} />
+                        <button
+                          type="submit"
+                          style={{
+                            fontSize: "0.58rem", letterSpacing: "0.1em", textTransform: "uppercase",
+                            color: "#F0EBE3", background: "rgba(184,154,94,0.28)",
+                            border: "1px solid rgba(184,154,94,0.4)", padding: "5px 12px",
+                            borderRadius: "20px", backdropFilter: "blur(4px)", cursor: "pointer",
+                          }}
+                        >
+                          Wiederherstellen
+                        </button>
+                      </form>
+                      <Link
+                        href={`/trips/${trip.slug}/delete`}
                         style={{
                           fontSize: "0.58rem", letterSpacing: "0.1em", textTransform: "uppercase",
-                          color: "#F0EBE3", background: "rgba(184,154,94,0.28)",
-                          border: "1px solid rgba(184,154,94,0.4)", padding: "5px 12px",
-                          borderRadius: "20px", backdropFilter: "blur(4px)", cursor: "pointer",
+                          color: "#F0EBE3", background: "rgba(181,98,74,0.3)",
+                          border: "1px solid rgba(181,98,74,0.45)", padding: "5px 12px",
+                          borderRadius: "20px", backdropFilter: "blur(4px)", textDecoration: "none",
                         }}
                       >
-                        Wiederherstellen
-                      </button>
-                    </form>
+                        Endgültig löschen
+                      </Link>
+                    </div>
                   </div>
                 ))}
               </div>

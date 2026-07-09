@@ -1,5 +1,195 @@
-import { redirect } from "next/navigation";
+import Link from "next/link";
+import { createClient } from "@/lib/supabase/server";
+import { createTrip } from "@/lib/actions/trips";
 
-export default function NewTripPage() {
-  redirect("/plan");
+const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "planned",   label: "Geplant" },
+  { value: "active",    label: "Aktiv / schon gebucht" },
+  { value: "completed", label: "Abgeschlossen" },
+];
+
+export default async function NewTripPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const { error } = await searchParams;
+
+  const supabase = await createClient();
+  const { data: persons } = await supabase
+    .from("persons")
+    .select("id, name, initials, color")
+    .order("name");
+
+  return (
+    <div className="flex-1" style={{ background: "var(--background)" }}>
+      <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-9">
+
+        <Link
+          href="/trips"
+          style={{ color: "var(--muted)", fontSize: "0.78rem", letterSpacing: "0.04em", textDecoration: "none", display: "inline-block", marginBottom: "32px" }}
+        >
+          ← Alle Reisen
+        </Link>
+
+        <div
+          style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "12px" }}
+        >
+          Reise selbst anlegen
+        </div>
+        <h1
+          className="font-light mb-8"
+          style={{ color: "var(--foreground)", fontSize: "1.6rem", letterSpacing: "0.01em" }}
+        >
+          Für bereits gebuchte oder konkret geplante Reisen.
+        </h1>
+
+        <form action={createTrip}>
+          <input type="hidden" name="_referer" value="/trips/new" />
+
+          <div
+            className="rounded-xl p-8"
+            style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+          >
+            {error && (
+              <div
+                className="mb-6 px-4 py-3 rounded-lg"
+                style={{ background: "rgba(181,98,74,0.12)", border: "1px solid rgba(181,98,74,0.3)", color: "#B5624A", fontSize: "0.75rem", letterSpacing: "0.02em" }}
+              >
+                {error}
+              </div>
+            )}
+
+            <div className="mb-5">
+              <label
+                htmlFor="new-title"
+                style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px" }}
+              >
+                Reisetitel *
+              </label>
+              <input
+                id="new-title"
+                name="title"
+                type="text"
+                required
+                placeholder="z. B. Oman 2027"
+                style={{ width: "100%", padding: "12px 16px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)", fontSize: "0.9rem", fontWeight: 300, outline: "none" }}
+              />
+            </div>
+
+            <div className="mb-5">
+              <label
+                htmlFor="new-subtitle"
+                style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px" }}
+              >
+                Ziel / Region
+              </label>
+              <input
+                id="new-subtitle"
+                name="subtitle"
+                type="text"
+                placeholder="z. B. Muscat · Wahiba Sands · Salalah"
+                style={{ width: "100%", padding: "12px 16px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)", fontSize: "0.9rem", fontWeight: 300, outline: "none" }}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 mb-5">
+              <div>
+                <label
+                  htmlFor="new-start"
+                  style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px" }}
+                >
+                  Von *
+                </label>
+                <input
+                  id="new-start"
+                  name="start_date"
+                  type="date"
+                  required
+                  style={{ width: "100%", padding: "12px 16px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)", fontSize: "0.88rem", outline: "none" }}
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="new-end"
+                  style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px" }}
+                >
+                  Bis *
+                </label>
+                <input
+                  id="new-end"
+                  name="end_date"
+                  type="date"
+                  required
+                  style={{ width: "100%", padding: "12px 16px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)", fontSize: "0.88rem", outline: "none" }}
+                />
+              </div>
+            </div>
+
+            <div className="mb-8">
+              <label
+                htmlFor="new-status"
+                style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px" }}
+              >
+                Status
+              </label>
+              <select
+                id="new-status"
+                name="status"
+                defaultValue="planned"
+                style={{ width: "100%", padding: "12px 16px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)", fontSize: "0.88rem", outline: "none" }}
+              >
+                {STATUS_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="mb-8">
+              <div
+                style={{ color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "12px" }}
+              >
+                Wer reist mit *
+              </div>
+              <div className="flex flex-wrap gap-3">
+                {(persons ?? []).map((p) => (
+                  <label
+                    key={p.id}
+                    style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}
+                  >
+                    <input
+                      type="checkbox"
+                      name="members"
+                      value={p.id}
+                      defaultChecked
+                      style={{ accentColor: "var(--accent)", width: "14px", height: "14px", cursor: "pointer" }}
+                    />
+                    <span style={{ color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 300 }}>
+                      {p.name}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between flex-wrap gap-4" style={{ borderTop: "1px solid var(--border)", paddingTop: "24px" }}>
+              <Link
+                href="/plan"
+                style={{ color: "var(--muted)", fontSize: "0.7rem", letterSpacing: "0.1em", textDecoration: "none" }}
+              >
+                Lieber eine Reiseidee entwickeln?
+              </Link>
+              <button
+                type="submit"
+                style={{ background: "var(--foreground)", color: "var(--surface)", border: "none", borderRadius: "6px", padding: "12px 26px", fontSize: "0.65rem", letterSpacing: "0.16em", textTransform: "uppercase", cursor: "pointer" }}
+              >
+                Reise anlegen →
+              </button>
+            </div>
+          </div>
+        </form>
+
+      </div>
+    </div>
+  );
 }
