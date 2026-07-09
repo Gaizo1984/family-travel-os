@@ -23,7 +23,7 @@ const IDENTITY_SCHEMA = {
     first_name: { type: ['string', 'null'] },
     last_name: { type: ['string', 'null'] },
     birth_date: { type: ['string', 'null'], description: 'ISO 8601, JJJJ-MM-TT' },
-    gender: { type: ['string', 'null'] },
+    gender: { type: ['string', 'null'], enum: ['male', 'female', 'other', null], description: 'Muss exakt "male", "female", "other" oder null sein' },
     nationality: { type: ['string', 'null'] },
     birth_place: { type: ['string', 'null'] },
     passport_number: { type: ['string', 'null'] },
