@@ -266,8 +266,8 @@ export default function Dashboard() {
   return (
     <div className="flex-1 flex flex-col">
       {/* Header */}
-      <header className="flex items-start justify-between flex-wrap gap-4 px-7 md:px-10 pt-9 pb-7">
-        <div>
+      <header className="flex items-start justify-between gap-4 px-7 md:px-10 pt-9 pb-7">
+        <div style={{ minWidth: 0 }}>
           <h1
             className="text-lg font-light mb-1"
             style={{ color: "var(--foreground)", letterSpacing: "0.01em" }}
@@ -281,7 +281,7 @@ export default function Dashboard() {
             Eure Reisen. Eure Erinnerungen.
           </p>
         </div>
-        <Link href="/trips/new" className="btn-neue-reise">+ Neue Reise</Link>
+        <Link href="/trips/new" className="btn-neue-reise" style={{ flexShrink: 0 }}>+ Neue Reise</Link>
       </header>
 
       {/* Content */}

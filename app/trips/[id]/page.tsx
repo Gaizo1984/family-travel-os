@@ -80,7 +80,7 @@ function StageCard({ stage, idx, slug }: { stage: StageRow; idx: number; slug: s
     : "—";
   return (
     <div className="group relative shrink-0 overflow-hidden rounded-xl" style={{ width: 210, height: 285 }}>
-      <Link href={`/trips/${slug}/stages/${stage.id}/edit`} className="absolute inset-0 block">
+      <Link href={`/trips/${slug}/stages/${stage.id}`} className="absolute inset-0 block">
         {imgUrl && (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={imgUrl} alt={stage.title} className="absolute inset-0 w-full h-full object-cover" />
@@ -102,7 +102,7 @@ function StageCard({ stage, idx, slug }: { stage: StageRow; idx: number; slug: s
         <div className="absolute inset-x-0 bottom-0 p-4">
           <div className="text-base font-light mb-0.5" style={{ color: H_FG }}>{stage.title}</div>
           <div className="text-xs mb-3" style={{ color: H_MUTED, letterSpacing: "0.08em", fontSize: "0.68rem" }}>
-            {stage.nights ?? 0} {stage.nights === 1 ? "Nacht" : "Nächte"}
+            {stage.nights !== null ? `${stage.nights} ${stage.nights === 1 ? "Nacht" : "Nächte"}` : "—"}
           </div>
           <div style={{ borderTop: `1px solid ${H_BORDER}`, paddingTop: "10px" }}>
             <div style={{ color: "rgba(240,235,227,0.35)", fontSize: "0.6rem", letterSpacing: "0.04em" }}>
@@ -168,7 +168,15 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
 
   const trip = data as unknown as TripDetail;
   const members   = trip.trip_members.flatMap(tm => tm.persons ? [tm.persons] : []);
-  const stages    = [...trip.stages].sort((a, b) => a.sort_order - b.sort_order);
+  const stages    = [...trip.stages].sort((a, b) => {
+    if (a.start_date && b.start_date) {
+      const cmp = a.start_date.localeCompare(b.start_date);
+      return cmp !== 0 ? cmp : a.sort_order - b.sort_order;
+    }
+    if (a.start_date && !b.start_date) return -1;
+    if (!a.start_date && b.start_date) return 1;
+    return a.sort_order - b.sort_order;
+  });
   const duration  = trip.start_date && trip.end_date
     ? getTripDuration(trip.start_date, trip.end_date) : 0;
   const heroImage = TRIP_IMAGES[trip.slug]

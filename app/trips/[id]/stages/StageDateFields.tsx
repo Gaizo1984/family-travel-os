@@ -31,7 +31,7 @@ export function StageDateFields({
   const nights = computeNights(startDate, endDate)
 
   return (
-    <div className="grid grid-cols-3 gap-4 mb-5">
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
       <div>
         <label htmlFor="stage-start" style={LABEL_STYLE}>Von</label>
         <input

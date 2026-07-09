@@ -147,7 +147,7 @@ export default async function EditStagePage({
               />
             </div>
 
-            <div className="flex items-center justify-between" style={{ borderTop: "1px solid var(--border)", paddingTop: "24px" }}>
+            <div className="flex items-center justify-between flex-wrap gap-3" style={{ borderTop: "1px solid var(--border)", paddingTop: "24px" }}>
               <Link
                 href={`/trips/${trip.slug}`}
                 style={{ color: "var(--muted)", fontSize: "0.7rem", letterSpacing: "0.1em", textDecoration: "none" }}
@@ -156,7 +156,7 @@ export default async function EditStagePage({
               </Link>
               <button
                 type="submit"
-                style={{ background: "var(--foreground)", color: "var(--surface)", border: "none", borderRadius: "6px", padding: "12px 26px", fontSize: "0.65rem", letterSpacing: "0.16em", textTransform: "uppercase", cursor: "pointer" }}
+                style={{ background: "var(--foreground)", color: "var(--surface)", border: "none", borderRadius: "6px", padding: "11px 20px", fontSize: "0.65rem", letterSpacing: "0.16em", textTransform: "uppercase", cursor: "pointer", whiteSpace: "nowrap", WebkitAppearance: "none", appearance: "none" }}
               >
                 Änderungen speichern
               </button>
@@ -165,7 +165,7 @@ export default async function EditStagePage({
         </form>
 
         <div
-          className="rounded-xl p-6 flex items-center justify-between"
+          className="rounded-xl p-6 flex items-center justify-between flex-wrap gap-3"
           style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
         >
           <p style={{ color: "var(--muted)", fontSize: "0.78rem", maxWidth: "320px" }}>
@@ -180,7 +180,7 @@ export default async function EditStagePage({
               <input type="hidden" name="slug" value={trip.slug} />
               <button
                 type="submit"
-                style={{ background: "transparent", color: "#B5624A", border: "1px solid rgba(181,98,74,0.35)", borderRadius: "6px", padding: "10px 20px", fontSize: "0.62rem", letterSpacing: "0.14em", textTransform: "uppercase", cursor: "pointer", whiteSpace: "nowrap" }}
+                style={{ background: "transparent", color: "#B5624A", border: "1px solid rgba(181,98,74,0.35)", borderRadius: "6px", padding: "9px 18px", fontSize: "0.62rem", letterSpacing: "0.14em", textTransform: "uppercase", cursor: "pointer", whiteSpace: "nowrap", WebkitAppearance: "none", appearance: "none" }}
               >
                 Etappe löschen
               </button>

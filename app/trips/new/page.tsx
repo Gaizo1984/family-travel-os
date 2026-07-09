@@ -172,7 +172,7 @@ export default async function NewTripPage({
               </div>
             </div>
 
-            <div className="flex items-center justify-between flex-wrap gap-4" style={{ borderTop: "1px solid var(--border)", paddingTop: "24px" }}>
+            <div className="flex items-center justify-between flex-wrap gap-3" style={{ borderTop: "1px solid var(--border)", paddingTop: "24px" }}>
               <Link
                 href="/plan"
                 style={{ color: "var(--muted)", fontSize: "0.7rem", letterSpacing: "0.1em", textDecoration: "none" }}
@@ -181,7 +181,7 @@ export default async function NewTripPage({
               </Link>
               <button
                 type="submit"
-                style={{ background: "var(--foreground)", color: "var(--surface)", border: "none", borderRadius: "6px", padding: "12px 26px", fontSize: "0.65rem", letterSpacing: "0.16em", textTransform: "uppercase", cursor: "pointer" }}
+                style={{ background: "var(--foreground)", color: "var(--surface)", border: "none", borderRadius: "6px", padding: "11px 20px", fontSize: "0.65rem", letterSpacing: "0.16em", textTransform: "uppercase", cursor: "pointer", whiteSpace: "nowrap", WebkitAppearance: "none", appearance: "none" }}
               >
                 Reise anlegen →
               </button>

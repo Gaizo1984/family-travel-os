@@ -56,7 +56,7 @@ export default async function ArchiveTripPage({
             Nichts wird gelöscht — Etappen, Buchungen und Dokumente bleiben erhalten.
           </p>
 
-          <form action={archiveTrip} className="flex items-center justify-between" style={{ borderTop: "1px solid var(--border)", paddingTop: "24px" }}>
+          <form action={archiveTrip} className="flex items-center justify-between flex-wrap gap-3" style={{ borderTop: "1px solid var(--border)", paddingTop: "24px" }}>
             <input type="hidden" name="trip_id" value={trip.id} />
             <Link
               href={`/trips/${trip.slug}`}
@@ -68,8 +68,9 @@ export default async function ArchiveTripPage({
               type="submit"
               style={{
                 background: "transparent", color: "#B5624A", border: "1px solid rgba(181,98,74,0.35)",
-                borderRadius: "6px", padding: "12px 26px", fontSize: "0.65rem",
+                borderRadius: "6px", padding: "11px 20px", fontSize: "0.65rem",
                 letterSpacing: "0.16em", textTransform: "uppercase", cursor: "pointer",
+                whiteSpace: "nowrap", WebkitAppearance: "none", appearance: "none",
               }}
             >
               Ja, archivieren
