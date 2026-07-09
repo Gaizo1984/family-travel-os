@@ -253,9 +253,14 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
     bookings, BOOKING_CATEGORIES.activity.types, "Aktivitäten", BOOKING_CATEGORIES.activity.emptyDetail,
     `/trips/${trip.slug}/bookings/category/activity`,
   );
+  // "Mehr" überspringt die Zwischenansicht und führt bei komplett leerer Kategorie
+  // direkt zur Typ-Auswahl; sobald irgendeine Buchung existiert (unabhängig vom Status,
+  // damit auch stornierte oder bestehende Versicherungsbuchungen erreichbar bleiben),
+  // führt die Kachel weiterhin zur Listenansicht.
+  const hasMoreBookings = bookings.some((b) => BOOKING_CATEGORIES.more.types.includes(b.type));
   const moreSummary = summarizeBookingsByTypes(
     bookings, BOOKING_CATEGORIES.more.types, "weitere Buchungen", BOOKING_CATEGORIES.more.emptyDetail,
-    `/trips/${trip.slug}/bookings/category/more`,
+    hasMoreBookings ? `/trips/${trip.slug}/bookings/category/more` : `/trips/${trip.slug}/bookings/new?category=more`,
   );
   const documentsSummary = (documentsCount ?? 0) > 0
     ? { status: "Vorhanden", statusColor: "#B89A5E", detail: `${documentsCount} Dokument${documentsCount === 1 ? "" : "e"} hinterlegt` }
@@ -458,8 +463,8 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
               <OverviewCard title="Flüge" detail={flightsSummary.detail} status={flightsSummary.status} statusColor={flightsSummary.statusColor} Icon={Plane} href={flightsSummary.href} />
               <OverviewCard title="Hotels" detail={hotelsSummary.detail} status={hotelsSummary.status} statusColor={hotelsSummary.statusColor} Icon={BedDouble} href={hotelsSummary.href} />
               <OverviewCard title="Aktivitäten" detail={activitiesSummary.detail} status={activitiesSummary.status} statusColor={activitiesSummary.statusColor} Icon={Compass} href={activitiesSummary.href} />
-              <OverviewCard title="Mehr" detail={moreSummary.detail} status={moreSummary.status} statusColor={moreSummary.statusColor} Icon={MoreHorizontal} href={moreSummary.href} />
               <OverviewCard title="Dokumente" detail={documentsSummary.detail} status={documentsSummary.status} statusColor={documentsSummary.statusColor} Icon={FileText} />
+              <OverviewCard title="Mehr" detail={moreSummary.detail} status={moreSummary.status} statusColor={moreSummary.statusColor} Icon={MoreHorizontal} href={moreSummary.href} />
             </div>
           </section>
 

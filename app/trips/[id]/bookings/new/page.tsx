@@ -31,7 +31,7 @@ export default async function NewBookingPage({
   const config = type ? BOOKING_TYPE_CONFIG[type as BookingType] : undefined;
 
   if (!config) {
-    const typesToShow = categoryConfig ? categoryConfig.types : BOOKING_TYPE_ORDER;
+    const typesToShow = categoryConfig ? categoryConfig.pickerTypes : BOOKING_TYPE_ORDER;
     const backHref = categoryConfig ? `/trips/${trip.slug}/bookings/category/${categoryConfig.value}` : `/trips/${trip.slug}`;
     const backLabel = categoryConfig ? categoryConfig.label : trip.title;
 

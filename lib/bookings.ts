@@ -32,7 +32,10 @@ export type BookingCategory = 'flight' | 'accommodation' | 'activity' | 'more'
 export type BookingCategoryConfig = {
   value: BookingCategory
   label: string
+  /** Typen, die in dieser Kategorie angezeigt/gefiltert werden (inkl. historischer Bestandsdaten). */
   types: BookingType[]
+  /** Typen, die beim Neu-Anlegen aus dieser Kategorie heraus zur Auswahl stehen (kann enger als `types` sein). */
+  pickerTypes: BookingType[]
   emptyDetail: string
   addLabel: string
 }
@@ -41,19 +44,24 @@ export const BOOKING_CATEGORY_ORDER: BookingCategory[] = ['flight', 'accommodati
 
 export const BOOKING_CATEGORIES: Record<BookingCategory, BookingCategoryConfig> = {
   flight: {
-    value: 'flight', label: 'Flüge', types: ['flight'],
+    value: 'flight', label: 'Flüge', types: ['flight'], pickerTypes: ['flight'],
     emptyDetail: 'Noch keine Flüge gebucht', addLabel: 'Flug hinzufügen',
   },
   accommodation: {
-    value: 'accommodation', label: 'Hotels', types: ['accommodation'],
+    value: 'accommodation', label: 'Hotels', types: ['accommodation'], pickerTypes: ['accommodation'],
     emptyDetail: 'Unterkünfte noch offen', addLabel: 'Unterkunft hinzufügen',
   },
   activity: {
-    value: 'activity', label: 'Aktivitäten', types: ['activity', 'restaurant'],
+    value: 'activity', label: 'Aktivitäten', types: ['activity', 'restaurant'], pickerTypes: ['activity', 'restaurant'],
     emptyDetail: 'Noch keine Aktivitäten geplant', addLabel: 'Aktivität hinzufügen',
   },
   more: {
-    value: 'more', label: 'Mehr', types: ['rental_car', 'transfer', 'train', 'ferry', 'insurance', 'other'],
+    value: 'more', label: 'Mehr',
+    // 'insurance' bleibt hier für Filterung/Anzeige, damit bestehende Versicherungsbuchungen
+    // sichtbar/bearbeitbar bleiben — steht aber bewusst nicht mehr in pickerTypes (kein Neuanlegen
+    // von Versicherungen über "Mehr"; Versicherung bleibt über den universellen Einstieg wählbar).
+    types: ['rental_car', 'transfer', 'train', 'ferry', 'insurance', 'other'],
+    pickerTypes: ['rental_car', 'transfer', 'train', 'ferry', 'other'],
     emptyDetail: 'Noch keine weiteren Buchungen', addLabel: 'Weitere Buchung hinzufügen',
   },
 }

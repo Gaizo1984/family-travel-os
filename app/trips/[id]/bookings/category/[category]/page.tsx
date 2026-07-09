@@ -46,8 +46,8 @@ export default async function BookingCategoryPage({
 
   const bookings = sortBookingsChronologically((data ?? []) as unknown as BookingWithStage[]);
 
-  const addHref = categoryConfig.types.length === 1
-    ? `/trips/${trip.slug}/bookings/new?type=${categoryConfig.types[0]}&category=${categoryConfig.value}`
+  const addHref = categoryConfig.pickerTypes.length === 1
+    ? `/trips/${trip.slug}/bookings/new?type=${categoryConfig.pickerTypes[0]}&category=${categoryConfig.value}`
     : `/trips/${trip.slug}/bookings/new?category=${categoryConfig.value}`;
 
   return (
