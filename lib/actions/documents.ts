@@ -2,24 +2,31 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { ALLOWED_DOCUMENT_MIME_TYPES, MAX_DOCUMENT_FILE_SIZE, buildStoragePath } from '@/lib/documents'
+import { ALLOWED_DOCUMENT_MIME_TYPES, MAX_DOCUMENT_FILE_SIZE, buildStoragePath, combineIsoDate } from '@/lib/documents'
 import type { DocumentType, DocumentDetails } from '@/lib/documents'
+
+function readDateGroup(formData: FormData, prefix: string, fieldLabel: string): string | null {
+  const day   = String(formData.get(`${prefix}_day`) ?? '').trim()
+  const month = String(formData.get(`${prefix}_month`) ?? '').trim()
+  const year  = String(formData.get(`${prefix}_year`) ?? '').trim()
+  return combineIsoDate(day, month, year, fieldLabel)
+}
 
 function readCommonFields(formData: FormData) {
   const personId   = String(formData.get('person_id') ?? '')
   const docType    = String(formData.get('doc_type') ?? 'other') as DocumentType
   const label      = String(formData.get('label') ?? '').trim()
-  const expiresAt  = String(formData.get('expires_at') ?? '').trim()
+  const expiresAt  = readDateGroup(formData, 'expires_at', 'Ablaufdatum')
   const notes      = String(formData.get('notes') ?? '').trim()
   const returnTo   = String(formData.get('return_to') ?? '').trim()
 
   const details: DocumentDetails = { source: 'manual' }
   const firstName      = String(formData.get('first_name') ?? '').trim()
   const lastName       = String(formData.get('last_name') ?? '').trim()
-  const birthDate      = String(formData.get('birth_date') ?? '').trim()
+  const birthDate      = readDateGroup(formData, 'birth_date', 'Geburtsdatum')
   const passportNumber = String(formData.get('passport_number') ?? '').trim()
   const issuingCountry = String(formData.get('issuing_country') ?? '').trim()
-  const issueDate      = String(formData.get('issue_date') ?? '').trim()
+  const issueDate      = readDateGroup(formData, 'issue_date', 'Ausstellungsdatum')
   if (firstName) details.first_name = firstName
   if (lastName) details.last_name = lastName
   if (birthDate) details.birth_date = birthDate
@@ -45,8 +52,16 @@ function validateFile(file: FormDataEntryValue | null, required: boolean): { err
 }
 
 export async function createDocument(formData: FormData) {
-  const f = readCommonFields(formData)
-  const newPath = `/family/${f.personId}/documents/new?type=${f.docType}`
+  const personId = String(formData.get('person_id') ?? '')
+  const docType  = String(formData.get('doc_type') ?? 'other')
+  const newPath  = `/family/${personId}/documents/new?type=${docType}`
+
+  let f: ReturnType<typeof readCommonFields>
+  try {
+    f = readCommonFields(formData)
+  } catch (e) {
+    redirect(`${newPath}&error=${encodeURIComponent(e instanceof Error ? e.message : 'Ungültiges Datum')}`)
+  }
 
   if (f.label.length < 2)
     redirect(`${newPath}&error=${encodeURIComponent('Dokumentname: mindestens 2 Zeichen erforderlich')}`)
@@ -86,8 +101,15 @@ export async function createDocument(formData: FormData) {
 
 export async function updateDocument(formData: FormData) {
   const documentId = String(formData.get('document_id') ?? '')
-  const f = readCommonFields(formData)
-  const editPath = `/family/${f.personId}/documents/${documentId}/edit`
+  const personId    = String(formData.get('person_id') ?? '')
+  const editPath    = `/family/${personId}/documents/${documentId}/edit`
+
+  let f: ReturnType<typeof readCommonFields>
+  try {
+    f = readCommonFields(formData)
+  } catch (e) {
+    redirect(`${editPath}?error=${encodeURIComponent(e instanceof Error ? e.message : 'Ungültiges Datum')}`)
+  }
 
   if (f.label.length < 2)
     redirect(`${editPath}?error=${encodeURIComponent('Dokumentname: mindestens 2 Zeichen erforderlich')}`)

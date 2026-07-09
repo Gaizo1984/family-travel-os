@@ -67,6 +67,48 @@ export function formatExpiresAt(expiresAt: string | null): string {
   return expiresAt ? formatDateDE(expiresAt) : '—'
 }
 
+export const GERMAN_MONTHS = [
+  'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
+  'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
+]
+
+export type DateFieldRange = { minYear: number; maxYear: number }
+
+export function getDateFieldRange(kind: 'birth' | 'issue' | 'expiry'): DateFieldRange {
+  const currentYear = new Date().getFullYear()
+  if (kind === 'birth') return { minYear: currentYear - 110, maxYear: currentYear }
+  if (kind === 'issue') return { minYear: currentYear - 15, maxYear: currentYear }
+  return { minYear: currentYear, maxYear: currentYear + 15 }
+}
+
+export function splitIsoDate(iso: string | null | undefined): { day: string; month: string; year: string } {
+  if (!iso) return { day: '', month: '', year: '' }
+  const [year, month, day] = iso.split('-')
+  return { day: day ?? '', month: month ?? '', year: year ?? '' }
+}
+
+/**
+ * Kombiniert Tag/Monat/Jahr-Selects zu einem ISO-Datum. Gibt `null` zurück,
+ * wenn alle drei Teile leer sind (Feld bleibt optional). Wirft einen Fehler
+ * mit verständlicher Meldung bei unvollständiger oder ungültiger Eingabe
+ * (z. B. 31. Februar), statt eine falsche Rollover-Zeit stillschweigend zu
+ * akzeptieren.
+ */
+export function combineIsoDate(day: string, month: string, year: string, fieldLabel: string): string | null {
+  if (!day && !month && !year) return null
+  if (!day || !month || !year)
+    throw new Error(`${fieldLabel}: bitte Tag, Monat und Jahr vollständig auswählen oder freilassen`)
+
+  const d = Number(day)
+  const m = Number(month)
+  const y = Number(year)
+  const date = new Date(y, m - 1, d)
+  if (date.getFullYear() !== y || date.getMonth() !== m - 1 || date.getDate() !== d)
+    throw new Error(`${fieldLabel}: ungültiges Datum`)
+
+  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
+}
+
 export const ALLOWED_DOCUMENT_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
 export const MAX_DOCUMENT_FILE_SIZE = 10 * 1024 * 1024 // 10 MB
 
