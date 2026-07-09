@@ -181,12 +181,35 @@ function BookingRowItem({ booking, slug, stageTitle }: { booking: BookingRow; sl
   );
 }
 
-function OverviewCard({ title, detail, status, statusColor, Icon }: {
+function summarizeBookingsByType(
+  bookings: BookingRow[],
+  type: BookingType,
+  pluralLabel: string,
+  emptyDetail: string,
+): { status: string; statusColor: string; detail: string; href?: string } {
+  const active = bookings.filter((b) => b.type === type && b.status !== "cancelled");
+  if (active.length === 0) {
+    return { status: "Offen", statusColor: "#B5624A", detail: emptyDetail };
+  }
+  const allConfirmed = active.every((b) => b.status === "confirmed");
+  const detail = active.length === 1
+    ? (active[0].provider ? `${active[0].provider} · ${active[0].title}` : active[0].title)
+    : `${active.length} ${pluralLabel} gebucht`;
+  return {
+    status: allConfirmed ? "Gebucht" : "In Planung",
+    statusColor: "#B89A5E",
+    detail,
+    href: "#buchungen",
+  };
+}
+
+function OverviewCard({ title, detail, status, statusColor, Icon, href }: {
   title: string; detail: string; status: string; statusColor: string;
   Icon: React.ComponentType<{ size?: number; strokeWidth?: number; style?: React.CSSProperties }>;
+  href?: string;
 }) {
-  return (
-    <div className="p-5 rounded-xl" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+  const content = (
+    <>
       <div className="flex items-center justify-between mb-4">
         <Icon size={14} strokeWidth={1.4} style={{ color: "var(--accent)" }} />
         <span style={{ color: statusColor, fontSize: "0.56rem", letterSpacing: "0.14em", textTransform: "uppercase" }}>
@@ -195,6 +218,20 @@ function OverviewCard({ title, detail, status, statusColor, Icon }: {
       </div>
       <div className="text-sm font-medium mb-1.5" style={{ color: "var(--foreground)" }}>{title}</div>
       <div className="leading-relaxed" style={{ color: "var(--muted)", fontSize: "0.68rem" }}>{detail}</div>
+    </>
+  );
+
+  if (href) {
+    return (
+      <Link href={href} className="block p-5 rounded-xl transition-colors" style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}>
+        {content}
+      </Link>
+    );
+  }
+
+  return (
+    <div className="p-5 rounded-xl" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+      {content}
     </div>
   );
 }
@@ -243,6 +280,19 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
     return a.created_at.localeCompare(b.created_at);
   });
   const stageTitleById = new Map(stages.map((s) => [s.id, s.title]));
+
+  const { count: documentsCount } = await supabase
+    .from("documents")
+    .select("id", { count: "exact", head: true })
+    .eq("trip_id", trip.id);
+
+  const flightsSummary    = summarizeBookingsByType(bookings, "flight", "Flüge", "Noch keine Flüge gebucht");
+  const hotelsSummary     = summarizeBookingsByType(bookings, "accommodation", "Unterkünfte", "Unterkünfte noch offen");
+  const activitiesSummary = summarizeBookingsByType(bookings, "activity", "Aktivitäten", "Ideen sammeln");
+  const documentsSummary = (documentsCount ?? 0) > 0
+    ? { status: "Vorhanden", statusColor: "#B89A5E", detail: `${documentsCount} Dokument${documentsCount === 1 ? "" : "e"} hinterlegt` }
+    : { status: "Offen", statusColor: "#B5624A", detail: "Noch keine Dokumente hinterlegt" };
+
   const duration  = trip.start_date && trip.end_date
     ? getTripDuration(trip.start_date, trip.end_date) : 0;
   const heroImage = TRIP_IMAGES[trip.slug]
@@ -389,7 +439,7 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
             )}
           </section>
 
-          <section>
+          <section id="buchungen">
             <div className="flex items-center justify-between mb-5">
               <h2
                 className="text-xs font-medium"
@@ -437,10 +487,10 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
           <section>
             <SectionLabel>Reiseübersicht</SectionLabel>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <OverviewCard title="Flüge" detail="Noch keine Flüge gebucht" status="Offen" statusColor="#B5624A" Icon={Plane} />
-              <OverviewCard title="Hotels" detail="Unterkünfte noch offen" status="In Planung" statusColor="#B89A5E" Icon={BedDouble} />
-              <OverviewCard title="Aktivitäten" detail="Ideen sammeln" status="In Planung" statusColor="#B89A5E" Icon={Compass} />
-              <OverviewCard title="Dokumente" detail="Visum, Versicherung, Buchungen" status="Offen" statusColor="#B5624A" Icon={FileText} />
+              <OverviewCard title="Flüge" detail={flightsSummary.detail} status={flightsSummary.status} statusColor={flightsSummary.statusColor} Icon={Plane} href={flightsSummary.href} />
+              <OverviewCard title="Hotels" detail={hotelsSummary.detail} status={hotelsSummary.status} statusColor={hotelsSummary.statusColor} Icon={BedDouble} href={hotelsSummary.href} />
+              <OverviewCard title="Aktivitäten" detail={activitiesSummary.detail} status={activitiesSummary.status} statusColor={activitiesSummary.statusColor} Icon={Compass} href={activitiesSummary.href} />
+              <OverviewCard title="Dokumente" detail={documentsSummary.detail} status={documentsSummary.status} statusColor={documentsSummary.statusColor} Icon={FileText} />
             </div>
           </section>
 
