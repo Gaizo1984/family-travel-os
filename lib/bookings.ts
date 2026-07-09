@@ -27,6 +27,37 @@ export const BOOKING_TYPE_ORDER: BookingType[] = [
   'restaurant', 'train', 'ferry', 'insurance', 'other',
 ]
 
+export type BookingCategory = 'flight' | 'accommodation' | 'activity' | 'more'
+
+export type BookingCategoryConfig = {
+  value: BookingCategory
+  label: string
+  types: BookingType[]
+  emptyDetail: string
+  addLabel: string
+}
+
+export const BOOKING_CATEGORY_ORDER: BookingCategory[] = ['flight', 'accommodation', 'activity', 'more']
+
+export const BOOKING_CATEGORIES: Record<BookingCategory, BookingCategoryConfig> = {
+  flight: {
+    value: 'flight', label: 'Flüge', types: ['flight'],
+    emptyDetail: 'Noch keine Flüge gebucht', addLabel: 'Flug hinzufügen',
+  },
+  accommodation: {
+    value: 'accommodation', label: 'Hotels', types: ['accommodation'],
+    emptyDetail: 'Unterkünfte noch offen', addLabel: 'Unterkunft hinzufügen',
+  },
+  activity: {
+    value: 'activity', label: 'Aktivitäten', types: ['activity', 'restaurant'],
+    emptyDetail: 'Noch keine Aktivitäten geplant', addLabel: 'Aktivität hinzufügen',
+  },
+  more: {
+    value: 'more', label: 'Mehr', types: ['rental_car', 'transfer', 'train', 'ferry', 'insurance', 'other'],
+    emptyDetail: 'Noch keine weiteren Buchungen', addLabel: 'Weitere Buchung hinzufügen',
+  },
+}
+
 export const BOOKING_TYPE_CONFIG: Record<BookingType, BookingTypeConfig> = {
   flight: {
     value: 'flight', label: 'Flug', icon: Plane,
@@ -126,6 +157,17 @@ export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
   partial: 'Teilweise bezahlt',
   paid: 'Bezahlt',
   refunded: 'Erstattet',
+}
+
+export function sortBookingsChronologically<T extends { start_datetime: string | null; created_at: string }>(
+  bookings: T[],
+): T[] {
+  return [...bookings].sort((a, b) => {
+    if (a.start_datetime && b.start_datetime) return a.start_datetime.localeCompare(b.start_datetime);
+    if (a.start_datetime && !b.start_datetime) return -1;
+    if (!a.start_datetime && b.start_datetime) return 1;
+    return a.created_at.localeCompare(b.created_at);
+  });
 }
 
 export function combineDateTime(date: string, time: string): string | null {

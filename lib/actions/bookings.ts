@@ -37,11 +37,12 @@ function readCommonFields(formData: FormData) {
 }
 
 export async function createBooking(formData: FormData) {
-  const tripId = String(formData.get('trip_id') ?? '')
-  const slug   = String(formData.get('slug') ?? '')
+  const tripId   = String(formData.get('trip_id') ?? '')
+  const slug     = String(formData.get('slug') ?? '')
+  const category = String(formData.get('category') ?? '').trim()
   const f = readCommonFields(formData)
 
-  const newPath = `/trips/${slug}/bookings/new?type=${f.type}`
+  const newPath = `/trips/${slug}/bookings/new?type=${f.type}${category ? `&category=${category}` : ''}`
 
   if (!f.config)
     redirect(`/trips/${slug}?error=${encodeURIComponent('Ungültiger Buchungstyp')}`)
@@ -72,7 +73,7 @@ export async function createBooking(formData: FormData) {
   if (error)
     redirect(`${newPath}&error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
 
-  redirect(`/trips/${slug}`)
+  redirect(category ? `/trips/${slug}/bookings/category/${category}` : `/trips/${slug}`)
 }
 
 export async function updateBooking(formData: FormData) {

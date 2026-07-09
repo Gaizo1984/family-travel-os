@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Plane, BedDouble, Compass, FileText, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plane, BedDouble, Compass, FileText, MoreHorizontal, ChevronLeft, ChevronRight } from "lucide-react";
 import { formatDateDE, getTripDuration } from "@/lib/demo-data";
 import { createClient } from "@/lib/supabase/server";
-import { BOOKING_TYPE_CONFIG, BOOKING_STATUS_LABELS, formatDateTimeDE } from "@/lib/bookings";
+import { sortBookingsChronologically, BOOKING_CATEGORIES } from "@/lib/bookings";
 import type { BookingType, BookingStatus } from "@/lib/supabase/types";
+import { BookingRowItem } from "./bookings/BookingRowItem";
 
 const H_FG    = "#F0EBE3";
 const H_MUTED = "#A89880";
@@ -139,57 +140,16 @@ function StageCard({ stage, idx, slug }: { stage: StageRow; idx: number; slug: s
   );
 }
 
-function BookingRowItem({ booking, slug, stageTitle }: { booking: BookingRow; slug: string; stageTitle: string | null }) {
-  const config = BOOKING_TYPE_CONFIG[booking.type];
-  const Icon = config.icon;
-  return (
-    <Link
-      href={`/trips/${slug}/bookings/${booking.id}`}
-      className="flex items-center gap-4 p-4 rounded-xl transition-colors"
-      style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}
-    >
-      <div
-        className="shrink-0 flex items-center justify-center rounded-lg"
-        style={{ width: 36, height: 36, background: "var(--accent-subtle)" }}
-      >
-        <Icon size={15} strokeWidth={1.4} style={{ color: "var(--accent)" }} />
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-medium truncate" style={{ color: "var(--foreground)" }}>{booking.title}</span>
-          {stageTitle && (
-            <span style={{ color: "var(--accent)", fontSize: "0.6rem", letterSpacing: "0.06em", background: "var(--accent-subtle)", padding: "1px 8px", borderRadius: "10px" }}>
-              {stageTitle}
-            </span>
-          )}
-        </div>
-        <div className="text-xs mt-0.5" style={{ color: "var(--muted)", fontSize: "0.7rem" }}>
-          {booking.provider ? `${booking.provider} · ` : ""}{formatDateTimeDE(booking.start_datetime)}
-        </div>
-      </div>
-      <div className="text-right shrink-0">
-        <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.1em", textTransform: "uppercase" }}>
-          {BOOKING_STATUS_LABELS[booking.status]}
-        </div>
-        {booking.amount !== null && (
-          <div className="text-sm mt-0.5" style={{ color: "var(--foreground)" }}>
-            {booking.amount.toFixed(2)} {booking.currency}
-          </div>
-        )}
-      </div>
-    </Link>
-  );
-}
-
-function summarizeBookingsByType(
+function summarizeBookingsByTypes(
   bookings: BookingRow[],
-  type: BookingType,
+  types: BookingType[],
   pluralLabel: string,
   emptyDetail: string,
-): { status: string; statusColor: string; detail: string; href?: string } {
-  const active = bookings.filter((b) => b.type === type && b.status !== "cancelled");
+  href: string,
+): { status: string; statusColor: string; detail: string; href: string } {
+  const active = bookings.filter((b) => types.includes(b.type) && b.status !== "cancelled");
   if (active.length === 0) {
-    return { status: "Offen", statusColor: "#B5624A", detail: emptyDetail };
+    return { status: "Offen", statusColor: "#B5624A", detail: emptyDetail, href };
   }
   const allConfirmed = active.every((b) => b.status === "confirmed");
   const detail = active.length === 1
@@ -199,7 +159,7 @@ function summarizeBookingsByType(
     status: allConfirmed ? "Gebucht" : "In Planung",
     statusColor: "#B89A5E",
     detail,
-    href: "#buchungen",
+    href,
   };
 }
 
@@ -273,12 +233,7 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
     if (!a.start_date && b.start_date) return 1;
     return a.sort_order - b.sort_order;
   });
-  const bookings  = [...trip.bookings].sort((a, b) => {
-    if (a.start_datetime && b.start_datetime) return a.start_datetime.localeCompare(b.start_datetime);
-    if (a.start_datetime && !b.start_datetime) return -1;
-    if (!a.start_datetime && b.start_datetime) return 1;
-    return a.created_at.localeCompare(b.created_at);
-  });
+  const bookings  = sortBookingsChronologically(trip.bookings);
   const stageTitleById = new Map(stages.map((s) => [s.id, s.title]));
 
   const { count: documentsCount } = await supabase
@@ -286,9 +241,22 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
     .select("id", { count: "exact", head: true })
     .eq("trip_id", trip.id);
 
-  const flightsSummary    = summarizeBookingsByType(bookings, "flight", "Flüge", "Noch keine Flüge gebucht");
-  const hotelsSummary     = summarizeBookingsByType(bookings, "accommodation", "Unterkünfte", "Unterkünfte noch offen");
-  const activitiesSummary = summarizeBookingsByType(bookings, "activity", "Aktivitäten", "Ideen sammeln");
+  const flightsSummary = summarizeBookingsByTypes(
+    bookings, BOOKING_CATEGORIES.flight.types, "Flüge", BOOKING_CATEGORIES.flight.emptyDetail,
+    `/trips/${trip.slug}/bookings/category/flight`,
+  );
+  const hotelsSummary = summarizeBookingsByTypes(
+    bookings, BOOKING_CATEGORIES.accommodation.types, "Unterkünfte", BOOKING_CATEGORIES.accommodation.emptyDetail,
+    `/trips/${trip.slug}/bookings/category/accommodation`,
+  );
+  const activitiesSummary = summarizeBookingsByTypes(
+    bookings, BOOKING_CATEGORIES.activity.types, "Aktivitäten", BOOKING_CATEGORIES.activity.emptyDetail,
+    `/trips/${trip.slug}/bookings/category/activity`,
+  );
+  const moreSummary = summarizeBookingsByTypes(
+    bookings, BOOKING_CATEGORIES.more.types, "weitere Buchungen", BOOKING_CATEGORIES.more.emptyDetail,
+    `/trips/${trip.slug}/bookings/category/more`,
+  );
   const documentsSummary = (documentsCount ?? 0) > 0
     ? { status: "Vorhanden", statusColor: "#B89A5E", detail: `${documentsCount} Dokument${documentsCount === 1 ? "" : "e"} hinterlegt` }
     : { status: "Offen", statusColor: "#B5624A", detail: "Noch keine Dokumente hinterlegt" };
@@ -486,10 +454,11 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
 
           <section>
             <SectionLabel>Reiseübersicht</SectionLabel>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
               <OverviewCard title="Flüge" detail={flightsSummary.detail} status={flightsSummary.status} statusColor={flightsSummary.statusColor} Icon={Plane} href={flightsSummary.href} />
               <OverviewCard title="Hotels" detail={hotelsSummary.detail} status={hotelsSummary.status} statusColor={hotelsSummary.statusColor} Icon={BedDouble} href={hotelsSummary.href} />
               <OverviewCard title="Aktivitäten" detail={activitiesSummary.detail} status={activitiesSummary.status} statusColor={activitiesSummary.statusColor} Icon={Compass} href={activitiesSummary.href} />
+              <OverviewCard title="Mehr" detail={moreSummary.detail} status={moreSummary.status} statusColor={moreSummary.statusColor} Icon={MoreHorizontal} href={moreSummary.href} />
               <OverviewCard title="Dokumente" detail={documentsSummary.detail} status={documentsSummary.status} statusColor={documentsSummary.statusColor} Icon={FileText} />
             </div>
           </section>
