@@ -46,19 +46,22 @@ export interface Database {
           id: string; slug: string; family_id: string; title: string; subtitle: string | null
           status: TripStatus; start_date: string | null; end_date: string | null
           cover_emoji: string | null; gradient_from: string | null; gradient_via: string | null
-          gradient_to: string | null; created_at: string; updated_at: string
+          gradient_to: string | null; budget_amount: number | null; budget_currency: string
+          created_at: string; updated_at: string
         }
         Insert: {
           id?: string; slug: string; family_id: string; title: string; subtitle?: string | null
           status?: TripStatus; start_date?: string | null; end_date?: string | null
           cover_emoji?: string | null; gradient_from?: string | null; gradient_via?: string | null
-          gradient_to?: string | null; created_at?: string; updated_at?: string
+          gradient_to?: string | null; budget_amount?: number | null; budget_currency?: string
+          created_at?: string; updated_at?: string
         }
         Update: {
           id?: string; slug?: string; family_id?: string; title?: string; subtitle?: string | null
           status?: TripStatus; start_date?: string | null; end_date?: string | null
           cover_emoji?: string | null; gradient_from?: string | null; gradient_via?: string | null
-          gradient_to?: string | null; created_at?: string; updated_at?: string
+          gradient_to?: string | null; budget_amount?: number | null; budget_currency?: string
+          created_at?: string; updated_at?: string
         }
         Relationships: [
           { foreignKeyName: "trips_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }
@@ -139,6 +142,14 @@ export interface Database {
         Relationships: [
           { foreignKeyName: "bookings_trip_id_fkey";  columns: ["trip_id"];  isOneToOne: false; referencedRelation: "trips";  referencedColumns: ["id"] },
           { foreignKeyName: "bookings_stage_id_fkey"; columns: ["stage_id"]; isOneToOne: false; referencedRelation: "stages"; referencedColumns: ["id"] }
+        ]
+      }
+      trip_exchange_rates: {
+        Row:    { trip_id: string; currency: string; rate: number; source: string; updated_at: string }
+        Insert: { trip_id: string; currency: string; rate: number; source?: string; updated_at?: string }
+        Update: { trip_id?: string; currency?: string; rate?: number; source?: string; updated_at?: string }
+        Relationships: [
+          { foreignKeyName: "trip_exchange_rates_trip_id_fkey"; columns: ["trip_id"]; isOneToOne: false; referencedRelation: "trips"; referencedColumns: ["id"] }
         ]
       }
       journey_events: {

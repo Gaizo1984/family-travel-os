@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Plane, BedDouble, Compass, FileText, MoreHorizontal, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plane, BedDouble, Compass, FileText, MoreHorizontal, ChevronLeft, ChevronRight, Wallet } from "lucide-react";
 import { formatDateDE, getTripDuration } from "@/lib/demo-data";
 import { createClient } from "@/lib/supabase/server";
 import { sortBookingsChronologically, BOOKING_CATEGORIES } from "@/lib/bookings";
@@ -13,6 +13,7 @@ import {
 } from "@/lib/journey";
 import type { JourneyEventCategory, JourneyEventStatus } from "@/lib/journey-events";
 import { computeTripReadiness } from "@/lib/readiness";
+import { computeTripBudget } from "@/lib/budget";
 
 const H_FG    = "#F0EBE3";
 const H_MUTED = "#A89880";
@@ -398,6 +399,19 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
       : `${readiness.hintCount} ${readiness.hintCount === 1 ? "Punkt" : "Punkte"} prüfen`;
   const readinessColor = readiness.status === "ready" ? "#4C7A5D" : readiness.status === "conflicts" ? "#B5624A" : "#B89A5E";
 
+  const budget = await computeTripBudget(trip.id);
+  const budgetSummary = budget.budgetAmount !== null
+    ? {
+        status: (budget.percentUsed ?? 0) > 100 ? "Überschritten" : "In Budget",
+        statusColor: (budget.percentUsed ?? 0) > 100 ? "#B5624A" : "#B89A5E",
+        detail: `${budget.totalConverted.toFixed(2)} von ${budget.budgetAmount.toFixed(2)} ${budget.tripCurrency}`,
+      }
+    : {
+        status: budget.items.length > 0 ? "Erfasst" : "Offen",
+        statusColor: "#B89A5E",
+        detail: budget.items.length > 0 ? `${budget.totalConverted.toFixed(2)} ${budget.tripCurrency} bisher` : "Noch keine Kosten erfasst",
+      };
+
   return (
     <div className="flex-1 flex flex-col">
 
@@ -410,31 +424,46 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
           style={{ background: "linear-gradient(to top, rgba(10,9,7,0.97) 0%, rgba(10,9,7,0.62) 45%, rgba(10,9,7,0.18) 100%)" }}
         />
 
-        <div className="absolute top-6 left-7">
+        <div className="absolute top-6 left-7" style={{ maxWidth: "calc(100% - 130px)" }}>
           <Link
             href="/trips"
             className="flex items-center gap-2 transition-opacity hover:opacity-70"
-            style={{ color: "rgba(240,235,227,0.5)", fontSize: "0.78rem", letterSpacing: "0.04em" }}
+            style={{ color: "rgba(240,235,227,0.5)", fontSize: "0.78rem", letterSpacing: "0.04em", whiteSpace: "nowrap" }}
           >
             <ChevronLeft size={13} strokeWidth={1.5} />
             Alle Reisen
           </Link>
         </div>
 
-        <div className="absolute top-5 right-7 flex items-center gap-2">
-          <span style={{ fontSize: "0.58rem", letterSpacing: "0.18em", textTransform: "uppercase", color: "#C8A96E", background: "rgba(184,154,94,0.14)", border: "1px solid rgba(184,154,94,0.2)", padding: "5px 12px", borderRadius: "20px" }}>
+        <div className="absolute top-5 right-7 flex flex-wrap items-center justify-end gap-2 max-w-[52vw] sm:max-w-none">
+          <span style={{ fontSize: "0.58rem", letterSpacing: "0.18em", textTransform: "uppercase", color: "#C8A96E", background: "rgba(184,154,94,0.14)", border: "1px solid rgba(184,154,94,0.2)", padding: "5px 12px", borderRadius: "20px", whiteSpace: "nowrap" }}>
             {statusLabel}
           </span>
 
           <Link
             href={`/trips/${trip.slug}/ready-to-travel`}
+            className="flex flex-col"
             style={{
-              fontSize: "0.58rem", letterSpacing: "0.18em", textTransform: "uppercase", color: readinessColor,
-              background: "rgba(10,9,7,0.35)", border: `1px solid ${readinessColor}55`, padding: "5px 12px",
-              borderRadius: "20px", textDecoration: "none", whiteSpace: "nowrap",
+              alignItems: readiness.status === "ready" ? "center" : "flex-start",
+              gap: "2px",
+              background: "rgba(10,9,7,0.6)",
+              backdropFilter: "blur(8px)",
+              WebkitBackdropFilter: "blur(8px)",
+              border: `1px solid ${readinessColor}66`,
+              padding: readiness.status === "ready" ? "6px 14px" : "5px 14px",
+              borderRadius: "14px",
+              textDecoration: "none",
+              whiteSpace: "nowrap",
             }}
           >
-            {readinessLabel}
+            {readiness.status !== "ready" && (
+              <span style={{ fontSize: "0.48rem", letterSpacing: "0.14em", textTransform: "uppercase", color: "rgba(240,235,227,0.55)" }}>
+                Reisestatus
+              </span>
+            )}
+            <span style={{ fontSize: "0.6rem", letterSpacing: "0.12em", textTransform: "uppercase", color: readinessColor, fontWeight: 500 }}>
+              {readiness.status === "ready" ? "Ready to Travel ✓" : readinessLabel}
+            </span>
           </Link>
 
           <details className="menu-details relative">
@@ -650,6 +679,7 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
               <OverviewCard title="Hotels" detail={hotelsSummary.detail} status={hotelsSummary.status} statusColor={hotelsSummary.statusColor} Icon={BedDouble} href={hotelsSummary.href} />
               <OverviewCard title="Aktivitäten" detail={activitiesSummary.detail} status={activitiesSummary.status} statusColor={activitiesSummary.statusColor} Icon={Compass} href={activitiesSummary.href} />
               <OverviewCard title="Dokumente" detail={documentsSummary.detail} status={documentsSummary.status} statusColor={documentsSummary.statusColor} Icon={FileText} href={documentsHref} />
+              <OverviewCard title="Budget" detail={budgetSummary.detail} status={budgetSummary.status} statusColor={budgetSummary.statusColor} Icon={Wallet} href={`/trips/${trip.slug}/budget`} />
               <OverviewCard title="Mehr" detail={moreSummary.detail} status={moreSummary.status} statusColor={moreSummary.statusColor} Icon={MoreHorizontal} href={moreSummary.href} />
             </div>
           </section>
