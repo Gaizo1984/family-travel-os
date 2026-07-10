@@ -141,6 +141,27 @@ export interface Database {
           { foreignKeyName: "bookings_stage_id_fkey"; columns: ["stage_id"]; isOneToOne: false; referencedRelation: "stages"; referencedColumns: ["id"] }
         ]
       }
+      journey_events: {
+        Row: {
+          id: string; trip_id: string; stage_id: string | null; date: string; time: string | null
+          category: string; title: string; location: string | null; notes: string | null
+          status: string; created_at: string; updated_at: string
+        }
+        Insert: {
+          id?: string; trip_id: string; stage_id?: string | null; date: string; time?: string | null
+          category: string; title: string; location?: string | null; notes?: string | null
+          status?: string; created_at?: string; updated_at?: string
+        }
+        Update: {
+          id?: string; trip_id?: string; stage_id?: string | null; date?: string; time?: string | null
+          category?: string; title?: string; location?: string | null; notes?: string | null
+          status?: string; created_at?: string; updated_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "journey_events_trip_id_fkey";  columns: ["trip_id"];  isOneToOne: false; referencedRelation: "trips";  referencedColumns: ["id"] },
+          { foreignKeyName: "journey_events_stage_id_fkey"; columns: ["stage_id"]; isOneToOne: false; referencedRelation: "stages"; referencedColumns: ["id"] }
+        ]
+      }
       budget_items: {
         Row: {
           id: string; trip_id: string; stage_id: string | null; booking_id: string | null

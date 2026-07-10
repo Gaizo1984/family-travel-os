@@ -6,6 +6,12 @@ import { createClient } from "@/lib/supabase/server";
 import { sortBookingsChronologically, BOOKING_CATEGORIES } from "@/lib/bookings";
 import type { BookingType, BookingStatus } from "@/lib/supabase/types";
 import { BookingRowItem } from "./bookings/BookingRowItem";
+import { DayRow } from "./JourneyDayRow";
+import {
+  sortStagesChronologically, buildJourneyTimeline, buildRouteChips,
+  type TimelineSegment,
+} from "@/lib/journey";
+import type { JourneyEventCategory, JourneyEventStatus } from "@/lib/journey-events";
 
 const H_FG    = "#F0EBE3";
 const H_MUTED = "#A89880";
@@ -60,8 +66,21 @@ type BookingRow = {
   amount: number | null
   currency: string
   start_datetime: string | null
+  end_datetime: string | null
   stage_id: string | null
+  details: Record<string, string> | null
   created_at: string
+}
+
+type JourneyEventRow = {
+  id: string
+  stage_id: string | null
+  date: string
+  time: string | null
+  category: JourneyEventCategory
+  title: string
+  location: string | null
+  status: JourneyEventStatus
 }
 
 type TripDetail = {
@@ -75,6 +94,7 @@ type TripDetail = {
   trip_members: Array<{ persons: PersonRow | null }>
   stages: StageRow[]
   bookings: BookingRow[]
+  journey_events: JourneyEventRow[]
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
@@ -196,6 +216,83 @@ function OverviewCard({ title, detail, status, statusColor, Icon, href }: {
   );
 }
 
+function RouteChips({ chips }: { chips: string[] }) {
+  if (chips.length === 0) return null;
+  return (
+    <div className="overflow-x-auto -mx-1 px-1">
+      <div className="flex items-center gap-2 flex-nowrap" style={{ width: "max-content" }}>
+        {chips.map((chip, idx) => (
+          <div key={idx} className="flex items-center gap-2 shrink-0">
+            <span style={{ color: H_FG, fontSize: "0.75rem", letterSpacing: "0.02em", whiteSpace: "nowrap" }}>{chip}</span>
+            {idx < chips.length - 1 && (
+              <ChevronRight size={11} strokeWidth={1.5} style={{ color: H_MUTED, flexShrink: 0 }} />
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StaySegmentCard({ segment, slug }: { segment: Extract<TimelineSegment, { kind: "stay" }>; slug: string }) {
+  const { stage, days } = segment;
+  const dateRange = stage.start_date && stage.end_date
+    ? `${formatDateDE(stage.start_date)} – ${formatDateDE(stage.end_date)}`
+    : "—";
+
+  const importantDays = days.filter((d) => d.isStageStart || d.isStageEnd || d.bookings.length + d.events.length > 0);
+  const quietDays = days.filter((d) => !d.isStageStart && !d.isStageEnd && d.bookings.length + d.events.length === 0);
+
+  return (
+    <div className="rounded-xl overflow-hidden" style={{ border: "1px solid var(--border)" }}>
+      <div className="p-5" style={{ background: "var(--surface)" }}>
+        <div className="flex items-center justify-between flex-wrap gap-3 mb-1">
+          <div className="text-sm font-medium" style={{ color: "var(--foreground)" }}>
+            {stage.accommodation || stage.title}
+          </div>
+          <Link href={`/trips/${slug}/stages/${stage.id}`} style={{ color: "var(--accent)", fontSize: "0.65rem", letterSpacing: "0.08em", textDecoration: "none" }}>
+            Aufenthalt planen →
+          </Link>
+        </div>
+        <div style={{ color: "var(--muted)", fontSize: "0.72rem" }}>
+          {(stage.location ?? stage.title)} · {dateRange} · {stage.nights} {stage.nights === 1 ? "Nacht" : "Nächte"}
+        </div>
+      </div>
+      <div className="px-5" style={{ background: "var(--background)" }}>
+        {importantDays.map((day) => (
+          <DayRow key={day.date} day={day} slug={slug} />
+        ))}
+        {quietDays.length > 0 && (
+          <details className="py-2">
+            <summary style={{ cursor: "pointer", color: "var(--muted)", fontSize: "0.68rem", letterSpacing: "0.04em" }}>
+              {quietDays.length} ruhige {quietDays.length === 1 ? "Tag" : "Tage"} ohne Programm
+            </summary>
+            <div className="pt-2">
+              {quietDays.map((day) => (
+                <DayRow key={day.date} day={day} slug={slug} />
+              ))}
+            </div>
+          </details>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DaySegmentCard({ segment, slug }: { segment: Extract<TimelineSegment, { kind: "day" }>; slug: string }) {
+  const { day } = segment;
+  return (
+    <div className="rounded-xl p-5" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+      {day.stage && (
+        <div className="mb-2">
+          <span style={{ color: "var(--muted)", fontSize: "0.68rem" }}>{day.stage.location ?? day.stage.title}</span>
+        </div>
+      )}
+      <DayRow day={day} slug={slug} />
+    </div>
+  );
+}
+
 function NextStepItem({ text, isLast }: { text: string; isLast: boolean }) {
   return (
     <div className="flex items-start gap-4 py-4" style={{ borderBottom: isLast ? "none" : "1px solid var(--border)" }}>
@@ -215,7 +312,8 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
       id, slug, title, subtitle, status, start_date, end_date,
       trip_members ( persons ( id, name, initials, color ) ),
       stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order ),
-      bookings ( id, type, title, provider, status, amount, currency, start_datetime, stage_id, created_at )
+      bookings ( id, type, title, provider, status, amount, currency, start_datetime, end_datetime, stage_id, details, created_at ),
+      journey_events ( id, stage_id, date, time, category, title, location, status )
     `)
     .eq("slug", id)
     .maybeSingle();
@@ -224,17 +322,22 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
 
   const trip = data as unknown as TripDetail;
   const members   = trip.trip_members.flatMap(tm => tm.persons ? [tm.persons] : []);
-  const stages    = [...trip.stages].sort((a, b) => {
-    if (a.start_date && b.start_date) {
-      const cmp = a.start_date.localeCompare(b.start_date);
-      return cmp !== 0 ? cmp : a.sort_order - b.sort_order;
-    }
-    if (a.start_date && !b.start_date) return -1;
-    if (!a.start_date && b.start_date) return 1;
-    return a.sort_order - b.sort_order;
-  });
+  const stages    = sortStagesChronologically(trip.stages);
   const bookings  = sortBookingsChronologically(trip.bookings);
+  const journeyEvents = trip.journey_events ?? [];
   const stageTitleById = new Map(stages.map((s) => [s.id, s.title]));
+
+  const totalNights = stages.reduce((sum, s) => sum + (s.nights ?? 0), 0);
+  const routeChips = buildRouteChips(
+    stages,
+    bookings.filter((b) => b.type === "flight"),
+  );
+  const journeyTimeline = buildJourneyTimeline(
+    { start_date: trip.start_date, end_date: trip.end_date },
+    stages,
+    bookings,
+    journeyEvents,
+  );
 
   const memberIds = members.map((m) => m.id);
   const { data: passportDocs } = memberIds.length > 0
@@ -280,6 +383,11 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
   const statusLabel = trip.status === "active" ? "Aktive Reise"
     : trip.status === "completed" ? "Erlebt"
     : "In Planung";
+
+  const heroMetaParts = [
+    totalNights > 0 ? `${totalNights} ${totalNights === 1 ? "Nacht" : "Nächte"}` : null,
+    stages.length > 0 ? `${stages.length} ${stages.length === 1 ? "Aufenthalt" : "Aufenthalte"}` : null,
+  ].filter(Boolean).join(" · ");
 
   return (
     <div className="flex-1 flex flex-col">
@@ -345,17 +453,31 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
         </div>
 
         <div className="absolute inset-x-0 bottom-0 px-7 md:px-10 pb-8 md:pb-10">
+          <div style={{ color: "#C8A96E", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "10px" }}>
+            Eure Reise
+          </div>
           <h1
             className="text-4xl md:text-5xl font-light leading-tight mb-2"
             style={{ color: H_FG, letterSpacing: "-0.01em" }}
           >
             {trip.title}
           </h1>
-          <p className="text-sm font-light mb-6" style={{ color: H_MUTED, letterSpacing: "0.04em" }}>
+          <p className="text-sm font-light mb-1" style={{ color: H_MUTED, letterSpacing: "0.04em" }}>
             {trip.start_date ? formatDateDE(trip.start_date) : "—"}
             {trip.end_date ? ` – ${formatDateDE(trip.end_date)}` : ""}
             {duration ? ` · ${duration} Tage` : ""}
           </p>
+          {heroMetaParts && (
+            <p className="text-sm font-light mb-5" style={{ color: H_MUTED, letterSpacing: "0.04em" }}>
+              {heroMetaParts}
+            </p>
+          )}
+
+          {routeChips.length > 0 && (
+            <div className="mb-5">
+              <RouteChips chips={routeChips} />
+            </div>
+          )}
 
           <div className="mb-5" style={{ height: "1px", background: H_BORDER }} />
 
@@ -381,6 +503,44 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
       {/* ── LIGHT CONTENT ── */}
       <div className="flex-1" style={{ background: "var(--background)" }}>
         <div className="max-w-5xl mx-auto px-5 md:px-10 py-10 space-y-14">
+
+          <section>
+            <div className="flex items-center justify-between mb-5">
+              <h2
+                className="text-xs font-medium"
+                style={{ color: "var(--muted)", letterSpacing: "0.2em", textTransform: "uppercase", fontSize: "0.65rem" }}
+              >
+                Journey
+              </h2>
+              <Link
+                href={`/trips/${trip.slug}/journey-events/new`}
+                style={{ color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.08em", textDecoration: "none" }}
+              >
+                + Journey-Termin
+              </Link>
+            </div>
+
+            {journeyTimeline.length > 0 ? (
+              <div className="space-y-3">
+                {journeyTimeline.map((segment) =>
+                  segment.kind === "stay" ? (
+                    <StaySegmentCard key={segment.stage.id} segment={segment} slug={trip.slug} />
+                  ) : (
+                    <DaySegmentCard key={segment.day.date} segment={segment} slug={trip.slug} />
+                  )
+                )}
+              </div>
+            ) : (
+              <div
+                className="rounded-xl p-6"
+                style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+              >
+                <p style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
+                  Sobald Reisedaten und Etappen feststehen, entsteht hier automatisch eure Reiseerzählung.
+                </p>
+              </div>
+            )}
+          </section>
 
           <section>
             <div className="flex items-center justify-between mb-5">

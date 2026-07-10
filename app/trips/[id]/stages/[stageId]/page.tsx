@@ -3,6 +3,9 @@ import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { formatDateDE } from "@/lib/demo-data";
 import { createClient } from "@/lib/supabase/server";
+import { buildStageDays } from "@/lib/journey";
+import type { TimelineBooking, TimelineEvent } from "@/lib/journey";
+import { DayRow } from "../../JourneyDayRow";
 
 const H_FG = "#F0EBE3";
 const H_MUTED = "#A89880";
@@ -63,13 +66,29 @@ export default async function StageDetailPage({
 
   const { data: stage } = await supabase
     .from("stages")
-    .select("id, trip_id, title, start_date, end_date, nights, accommodation, notes")
+    .select("id, trip_id, title, location, start_date, end_date, nights, accommodation, notes, sort_order")
     .eq("id", stageId)
     .eq("trip_id", trip.id)
     .maybeSingle();
 
   if (!stage) notFound();
-  const s = stage as StageDetail;
+  const s = stage as StageDetail & { location: string | null; sort_order: number };
+
+  const { data: stageBookings } = await supabase
+    .from("bookings")
+    .select("id, type, title, provider, status, start_datetime, end_datetime")
+    .eq("stage_id", s.id);
+
+  const { data: stageEvents } = await supabase
+    .from("journey_events")
+    .select("id, date, time, category, title, location, status")
+    .eq("stage_id", s.id);
+
+  const days = buildStageDays(
+    s,
+    (stageBookings ?? []) as TimelineBooking[],
+    (stageEvents ?? []) as TimelineEvent[],
+  );
 
   const heroImage = STAGE_IMAGES[hashIndex(s.id, STAGE_IMAGES.length)];
   const dateRange = s.start_date
@@ -77,6 +96,7 @@ export default async function StageDetailPage({
       ? `${formatDateDE(s.start_date)} – ${formatDateDE(s.end_date)}`
       : formatDateDE(s.start_date)
     : "—";
+  const returnTo = `/trips/${trip.slug}/stages/${s.id}`;
 
   return (
     <div className="flex-1 flex flex-col">
@@ -160,6 +180,35 @@ export default async function StageDetailPage({
                 <p className="leading-relaxed" style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
                   {s.notes}
                 </p>
+              </div>
+            </section>
+          )}
+
+          {days.length > 0 && (
+            <section>
+              <div className="flex items-center justify-between mb-3">
+                <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase" }}>
+                  Tage in diesem Aufenthalt
+                </div>
+                <Link
+                  href={`/trips/${trip.slug}/journey-events/new?stage_id=${s.id}&return_to=${encodeURIComponent(returnTo)}`}
+                  style={{ color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.08em", textDecoration: "none" }}
+                >
+                  + Journey-Termin
+                </Link>
+              </div>
+              <div
+                className="rounded-xl px-6"
+                style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+              >
+                {days.map((day) => (
+                  <DayRow
+                    key={day.date}
+                    day={day}
+                    slug={trip.slug}
+                    dayHref={`/trips/${trip.slug}/stages/${s.id}/days/${day.date}`}
+                  />
+                ))}
               </div>
             </section>
           )}
