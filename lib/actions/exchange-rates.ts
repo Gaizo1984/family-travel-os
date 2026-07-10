@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
+import { resolveQuickCurrency } from '@/app/trips/[id]/CurrencyQuickSelect'
 
 /**
  * Holt einen aktuellen Wechselkurs von EODHD (Forex-Endpoint, bereits vorhandener,
@@ -13,7 +14,7 @@ import { redirect } from 'next/navigation'
 export async function refreshExchangeRate(formData: FormData) {
   const tripId = String(formData.get('trip_id') ?? '')
   const slug = String(formData.get('slug') ?? '')
-  const currency = String(formData.get('currency') ?? '').trim().toUpperCase()
+  const currency = resolveQuickCurrency(formData, 'currency', '')
   const returnTo = String(formData.get('return_to') ?? '').trim()
   const detailPath = returnTo || `/trips/${slug}/budget`
 
@@ -56,7 +57,7 @@ export async function refreshExchangeRate(formData: FormData) {
 export async function setManualExchangeRate(formData: FormData) {
   const tripId = String(formData.get('trip_id') ?? '')
   const slug = String(formData.get('slug') ?? '')
-  const currency = String(formData.get('currency') ?? '').trim().toUpperCase()
+  const currency = resolveQuickCurrency(formData, 'currency', '')
   const rateRaw = String(formData.get('rate') ?? '').trim().replace(',', '.')
   const returnTo = String(formData.get('return_to') ?? '').trim()
   const detailPath = returnTo || `/trips/${slug}/budget`

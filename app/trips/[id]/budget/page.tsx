@@ -6,6 +6,8 @@ import { computeTripBudget, BUDGET_CATEGORY_ORDER, BUDGET_CATEGORY_LABELS } from
 import type { BudgetCategory } from "@/lib/budget";
 import { setTripBudget } from "@/lib/actions/budget-items";
 import { refreshExchangeRate, setManualExchangeRate } from "@/lib/actions/exchange-rates";
+import { suggestTripCurrencies } from "@/lib/currency-suggestions";
+import { CurrencyQuickSelect } from "../CurrencyQuickSelect";
 
 const CATEGORY_ICONS: Record<BudgetCategory, typeof Plane> = {
   flights: Plane,
@@ -45,7 +47,7 @@ export default async function BudgetPage({
   const supabase = await createClient();
   const { data: trip } = await supabase
     .from("trips")
-    .select("id, slug, title, budget_amount, budget_currency")
+    .select("id, slug, title, subtitle, budget_amount, budget_currency")
     .eq("slug", id)
     .maybeSingle();
 
@@ -59,6 +61,20 @@ export default async function BudgetPage({
     .select("currency, rate, source, updated_at")
     .eq("trip_id", trip.id)
     .order("currency");
+
+  const { data: stagesForCurrency } = await supabase
+    .from("stages")
+    .select("title, location")
+    .eq("trip_id", trip.id);
+
+  const tripCurrencyOptions = Array.from(new Set([
+    trip.budget_currency, "EUR", "USD", "CHF", "GBP",
+    ...suggestTripCurrencies(trip, stagesForCurrency ?? []),
+  ]));
+  const foreignCurrencySuggestions = Array.from(new Set([
+    ...suggestTripCurrencies(trip, stagesForCurrency ?? [], trip.budget_currency),
+    "USD", "CHF", "GBP",
+  ])).filter((c) => c !== trip.budget_currency);
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -152,11 +168,12 @@ export default async function BudgetPage({
                   style={{ ...FIELD_STYLE, width: "140px" }}
                 />
               </div>
-              <div>
-                <label htmlFor="budget-currency" style={LABEL_STYLE}>Reisewährung</label>
-                <input
-                  id="budget-currency" name="budget_currency" type="text"
-                  defaultValue={trip.budget_currency} style={{ ...FIELD_STYLE, width: "90px" }}
+              <div style={{ minWidth: "140px" }}>
+                <CurrencyQuickSelect
+                  name="budget_currency"
+                  label="Reisewährung"
+                  suggestions={tripCurrencyOptions}
+                  defaultValue={trip.budget_currency}
                 />
               </div>
               <button
@@ -190,37 +207,44 @@ export default async function BudgetPage({
               ))}
             </div>
           )}
+          <form action={refreshExchangeRate} className="flex items-end gap-3 flex-wrap mb-4">
+            <input type="hidden" name="trip_id" value={trip.id} />
+            <input type="hidden" name="slug" value={trip.slug} />
+            <input type="hidden" name="return_to" value={returnTo} />
+            <div style={{ minWidth: "140px" }}>
+              <CurrencyQuickSelect
+                name="currency"
+                label="Fremdwährung"
+                suggestions={foreignCurrencySuggestions.length > 0 ? foreignCurrencySuggestions : ["USD", "CHF", "GBP"]}
+              />
+            </div>
+            <button
+              type="submit"
+              style={{
+                background: "var(--accent)", color: "var(--surface)", border: "none",
+                borderRadius: "6px", padding: "11px 16px", fontSize: "0.62rem", letterSpacing: "0.1em",
+                textTransform: "uppercase", cursor: "pointer", whiteSpace: "nowrap",
+              }}
+            >
+              Kurs abrufen (EODHD)
+            </button>
+          </form>
+
           <details>
-            <summary style={{ cursor: "pointer", color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.08em" }}>
-              Kurs abrufen / manuell eintragen
+            <summary style={{ cursor: "pointer", color: "var(--muted)", fontSize: "0.65rem", letterSpacing: "0.08em" }}>
+              Kurs manuell eintragen (Fallback)
             </summary>
-            <div className="mt-4 space-y-4">
-              <form action={refreshExchangeRate} className="flex items-end gap-3 flex-wrap">
-                <input type="hidden" name="trip_id" value={trip.id} />
-                <input type="hidden" name="slug" value={trip.slug} />
-                <input type="hidden" name="return_to" value={returnTo} />
-                <div>
-                  <label htmlFor="refresh-currency" style={LABEL_STYLE}>Fremdwährung</label>
-                  <input id="refresh-currency" name="currency" type="text" placeholder="z. B. USD" style={{ ...FIELD_STYLE, width: "100px" }} />
-                </div>
-                <button
-                  type="submit"
-                  style={{
-                    background: "transparent", color: "var(--accent)", border: "1px solid rgba(184,154,94,0.4)",
-                    borderRadius: "6px", padding: "10px 16px", fontSize: "0.62rem", letterSpacing: "0.1em",
-                    textTransform: "uppercase", cursor: "pointer", whiteSpace: "nowrap",
-                  }}
-                >
-                  Kurs abrufen (EODHD)
-                </button>
-              </form>
+            <div className="mt-4">
               <form action={setManualExchangeRate} className="flex items-end gap-3 flex-wrap">
                 <input type="hidden" name="trip_id" value={trip.id} />
                 <input type="hidden" name="slug" value={trip.slug} />
                 <input type="hidden" name="return_to" value={returnTo} />
-                <div>
-                  <label htmlFor="manual-currency" style={LABEL_STYLE}>Fremdwährung</label>
-                  <input id="manual-currency" name="currency" type="text" placeholder="z. B. USD" style={{ ...FIELD_STYLE, width: "100px" }} />
+                <div style={{ minWidth: "140px" }}>
+                  <CurrencyQuickSelect
+                    name="currency"
+                    label="Fremdwährung"
+                    suggestions={foreignCurrencySuggestions.length > 0 ? foreignCurrencySuggestions : ["USD", "CHF", "GBP"]}
+                  />
                 </div>
                 <div>
                   <label htmlFor="manual-rate" style={LABEL_STYLE}>Kurs (1 Fremdwährung = ? {trip.budget_currency})</label>

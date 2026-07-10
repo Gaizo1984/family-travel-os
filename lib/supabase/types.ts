@@ -177,17 +177,20 @@ export interface Database {
         Row: {
           id: string; trip_id: string; stage_id: string | null; booking_id: string | null
           category: string; label: string; amount_planned: number | null; amount_actual: number | null
-          currency: string; created_at: string
+          currency: string; storage_bucket: string | null; storage_path: string | null
+          details: Json | null; created_at: string
         }
         Insert: {
           id?: string; trip_id: string; stage_id?: string | null; booking_id?: string | null
           category: string; label: string; amount_planned?: number | null; amount_actual?: number | null
-          currency?: string; created_at?: string
+          currency?: string; storage_bucket?: string | null; storage_path?: string | null
+          details?: Json | null; created_at?: string
         }
         Update: {
           id?: string; trip_id?: string; stage_id?: string | null; booking_id?: string | null
           category?: string; label?: string; amount_planned?: number | null; amount_actual?: number | null
-          currency?: string; created_at?: string
+          currency?: string; storage_bucket?: string | null; storage_path?: string | null
+          details?: Json | null; created_at?: string
         }
         Relationships: [
           { foreignKeyName: "budget_items_trip_id_fkey";    columns: ["trip_id"];    isOneToOne: false; referencedRelation: "trips";    referencedColumns: ["id"] },

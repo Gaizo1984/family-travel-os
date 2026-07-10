@@ -435,34 +435,30 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
           </Link>
         </div>
 
-        <div className="absolute top-5 right-7 flex flex-wrap items-center justify-end gap-2 max-w-[52vw] sm:max-w-none">
-          <span style={{ fontSize: "0.58rem", letterSpacing: "0.18em", textTransform: "uppercase", color: "#C8A96E", background: "rgba(184,154,94,0.14)", border: "1px solid rgba(184,154,94,0.2)", padding: "5px 12px", borderRadius: "20px", whiteSpace: "nowrap" }}>
+        <div className="absolute top-5 right-7 flex flex-wrap items-center justify-end gap-1.5 max-w-[60vw] sm:max-w-none">
+          <span style={{ fontSize: "0.52rem", letterSpacing: "0.14em", textTransform: "uppercase", color: "rgba(200,169,110,0.75)", background: "rgba(184,154,94,0.08)", border: "1px solid rgba(184,154,94,0.14)", padding: "4px 10px", borderRadius: "20px", whiteSpace: "nowrap" }}>
             {statusLabel}
           </span>
 
           <Link
             href={`/trips/${trip.slug}/ready-to-travel`}
-            className="flex flex-col"
+            className="max-w-[170px] sm:max-w-none"
             style={{
-              alignItems: readiness.status === "ready" ? "center" : "flex-start",
-              gap: "2px",
-              background: "rgba(10,9,7,0.6)",
+              display: "inline-block",
+              background: "rgba(10,9,7,0.62)",
               backdropFilter: "blur(8px)",
               WebkitBackdropFilter: "blur(8px)",
               border: `1px solid ${readinessColor}66`,
-              padding: readiness.status === "ready" ? "6px 14px" : "5px 14px",
-              borderRadius: "14px",
+              padding: "4px 10px",
+              borderRadius: "20px",
               textDecoration: "none",
               whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
             }}
           >
-            {readiness.status !== "ready" && (
-              <span style={{ fontSize: "0.48rem", letterSpacing: "0.14em", textTransform: "uppercase", color: "rgba(240,235,227,0.55)" }}>
-                Reisestatus
-              </span>
-            )}
-            <span style={{ fontSize: "0.6rem", letterSpacing: "0.12em", textTransform: "uppercase", color: readinessColor, fontWeight: 500 }}>
-              {readiness.status === "ready" ? "Ready to Travel ✓" : readinessLabel}
+            <span style={{ fontSize: "0.56rem", letterSpacing: "0.1em", textTransform: "uppercase", color: readinessColor, fontWeight: 500 }}>
+              {readiness.status === "ready" ? "Ready to Travel ✓" : `Reisestatus · ${readinessLabel}`}
             </span>
           </Link>
 
