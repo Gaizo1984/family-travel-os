@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { Map as MapIcon, Globe, CalendarDays, ArrowRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { getTripDuration } from "@/lib/demo-data";
 import { COMPASS_CATEGORY_ORDER, COMPASS_CATEGORY_LABELS } from "@/lib/family-dna";
+import { buildWorldStats } from "@/lib/world-stats";
 import { WorldMap } from "@/components/WorldMap";
 
 type PersonRow = {
@@ -62,11 +62,10 @@ export default async function FamilyPage() {
   const { data: family } = await supabase.from("families").select("id").limit(1).single();
   const familyId = family?.id ?? "";
 
-  const [{ data: personsRaw }, { data: preferences }, { data: trips }, { data: pastTrips }] = await Promise.all([
+  const [{ data: personsRaw }, { data: preferences }, worldStats] = await Promise.all([
     supabase.from("persons").select("id, name, initials, is_minor, role_label, description, interest_tags, travel_needs, photo_storage_path").eq("family_id", familyId).order("is_minor"),
     supabase.from("family_preference_categories").select("category_key, weight, note").eq("family_id", familyId),
-    supabase.from("trips").select("id, title, start_date, end_date, status").eq("family_id", familyId),
-    supabase.from("past_trips").select("id, country_or_region, country_code, year, duration_days").eq("family_id", familyId),
+    buildWorldStats(familyId),
   ]);
 
   const persons = (personsRaw ?? []) as PersonRow[];
@@ -83,27 +82,13 @@ export default async function FamilyPage() {
 
   const prefByKey = new Map((preferences ?? []).map((p) => [p.category_key, p]));
 
-  const activeTrips = (trips ?? []).filter((t) => t.status !== "archived");
-  const { data: stageCountries } = await supabase
-    .from("stages")
-    .select("country_code, trip_id")
-    .in("trip_id", activeTrips.map((t) => t.id).length > 0 ? activeTrips.map((t) => t.id) : ["00000000-0000-0000-0000-000000000000"]);
-
-  const countryCodes = new Set<string>();
-  (stageCountries ?? []).forEach((s) => { if (s.country_code) countryCodes.add(s.country_code); });
-  (pastTrips ?? []).forEach((p) => { if (p.country_code) countryCodes.add(p.country_code); });
-
-  const travelDays =
-    activeTrips.reduce((sum, t) => sum + (t.start_date && t.end_date ? getTripDuration(t.start_date, t.end_date) : 0), 0) +
-    (pastTrips ?? []).reduce((sum, p) => sum + (p.duration_days ?? 0), 0);
-
-  const tripsCount = activeTrips.length + (pastTrips ?? []).length;
+  const { trips: activeTrips, pastTrips, tripsCount, countryCodes, travelDays } = worldStats;
 
   const timelineEntries = [
     ...activeTrips
       .filter((t) => t.status === "completed" || t.status === "active")
       .map((t) => ({ key: `trip-${t.id}`, year: t.start_date ? new Date(t.start_date).getFullYear() : 0, label: t.title, isNext: t.status === "active" })),
-    ...(pastTrips ?? []).map((p) => ({ key: `past-${p.id}`, year: p.year, label: p.country_or_region, isNext: false })),
+    ...pastTrips.map((p) => ({ key: `past-${p.id}`, year: p.year, label: p.country_or_region, isNext: false })),
   ].sort((a, b) => a.year - b.year).slice(-5);
 
   return (
@@ -186,7 +171,7 @@ export default async function FamilyPage() {
         </section>
 
         {/* ── 3. Unsere Welt ── */}
-        <section className="mb-14">
+        <section id="unsere-welt" className="mb-14" style={{ scrollMarginTop: "16px" }}>
           <h2 className="text-xl font-light mb-7" style={{ color: "var(--foreground)", letterSpacing: "0.01em" }}>
             Unsere Welt
           </h2>

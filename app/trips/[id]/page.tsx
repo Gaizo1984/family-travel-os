@@ -12,7 +12,7 @@ import {
 } from "@/lib/journey";
 import type { JourneyEventCategory, JourneyEventStatus } from "@/lib/journey-events";
 import { computeTripReadiness } from "@/lib/readiness";
-import type { ReadinessFinding } from "@/lib/readiness";
+import type { ReadinessFinding, ReadinessSeverity } from "@/lib/readiness";
 
 const H_FG    = "#F0EBE3";
 const H_MUTED = "#A89880";
@@ -29,13 +29,18 @@ const TRIP_IMAGES: Record<string, string> = {
     "https://images.unsplash.com/photo-1780581800373-4fd4961743cd?auto=format&fit=crop&w=1920&q=80",
 };
 
-const STAGE_IMAGES = [
-  "https://images.unsplash.com/photo-1512453979798-5ea266f8880c?auto=format&fit=crop&w=800&q=80",
-  "https://images.unsplash.com/photo-1539367628448-4bc5c9d171c8?auto=format&fit=crop&w=800&q=80",
-  "https://images.unsplash.com/photo-1476673160081-cf065607f449?auto=format&fit=crop&w=800&q=80",
-  "https://images.unsplash.com/photo-1592364395653-83e648b20cc2?auto=format&fit=crop&w=800&q=80",
-  "https://images.unsplash.com/photo-1512453979798-5ea266f8880c?auto=format&fit=crop&w=800&q=80",
-];
+// Etappen-Bilder werden über das echte Länderkürzel der Etappe (stages.country_code,
+// siehe lib/geo-suggestions.ts) ausgewählt — NICHT mehr über die Listenposition der
+// Etappe. Die alte Index-basierte Zuordnung (STAGE_IMAGES[idx % length]) war die
+// Ursache dafür, dass z. B. "Atlanta" ein zufälliges, thematisch unpassendes Bild
+// (u. a. Dubai-artig wirkend) zeigte, obwohl die Etappe gar nichts mit Dubai zu tun hat.
+const COUNTRY_STAGE_IMAGES: Record<string, string> = {
+  CR: "https://images.unsplash.com/photo-1581129724980-2ab2153c3d8d?auto=format&fit=crop&w=800&q=80", // Costa Rica
+  ID: "https://images.unsplash.com/photo-1537996194471-e657df975ab4?auto=format&fit=crop&w=800&q=80", // Indonesien/Bali
+  AE: "https://images.unsplash.com/photo-1539367628448-4bc5c9d171c8?auto=format&fit=crop&w=800&q=80", // Dubai/VAE
+  IT: "https://images.unsplash.com/photo-1780581800373-4fd4961743cd?auto=format&fit=crop&w=800&q=80", // Sardinien/Italien
+};
+const FALLBACK_STAGE_IMAGE = "https://images.unsplash.com/photo-1512453979798-5ea266f8880c?auto=format&fit=crop&w=800&q=80";
 
 type PersonRow = { id: string; name: string; initials: string; color: string }
 
@@ -48,6 +53,7 @@ type StageRow = {
   end_date: string | null
   accommodation: string | null
   sort_order: number
+  country_code: string | null
 }
 
 type BookingRow = {
@@ -102,7 +108,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 }
 
 function StageCard({ stage, idx, slug }: { stage: StageRow; idx: number; slug: string }) {
-  const imgUrl = STAGE_IMAGES[idx % STAGE_IMAGES.length];
+  const imgUrl = (stage.country_code && COUNTRY_STAGE_IMAGES[stage.country_code]) || FALLBACK_STAGE_IMAGE;
   const dateRange = stage.start_date
     ? stage.end_date && stage.end_date !== stage.start_date
       ? `${formatDateDE(stage.start_date)} – ${formatDateDE(stage.end_date)}`
@@ -160,20 +166,23 @@ function QuickNavItem({ Icon, label, href, active }: {
   return (
     <Link
       href={href}
-      className="flex flex-col items-center justify-center gap-1.5 shrink-0 transition-opacity hover:opacity-80"
-      style={{ width: 68, textDecoration: "none" }}
+      className="flex flex-col items-center justify-center gap-1.5 transition-opacity hover:opacity-80"
+      style={{ textDecoration: "none" }}
     >
       <div
-        className="w-11 h-11 rounded-full flex items-center justify-center"
-        style={active
-          ? { background: "var(--accent)", border: "1px solid var(--accent)" }
-          : { background: "var(--surface)", border: "1px solid var(--border)" }}
+        className="aspect-square w-full mx-auto rounded-full flex items-center justify-center"
+        style={{
+          maxWidth: 72,
+          ...(active
+            ? { background: "var(--accent)", border: "1px solid var(--accent)" }
+            : { background: "var(--surface)", border: "1px solid var(--border)" }),
+        }}
       >
-        <Icon size={16} strokeWidth={1.6} style={{ color: active ? "var(--surface)" : "var(--accent)" }} />
+        <Icon size={22} strokeWidth={1.5} style={{ color: active ? "var(--surface)" : "var(--accent)" }} />
       </div>
       <span
         className="text-center leading-tight"
-        style={{ color: active ? "var(--foreground)" : "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.02em", fontWeight: active ? 500 : 400 }}
+        style={{ color: active ? "var(--foreground)" : "var(--muted)", fontSize: "0.62rem", letterSpacing: "0.02em", fontWeight: active ? 500 : 400 }}
       >
         {label}
       </span>
@@ -287,7 +296,62 @@ function groupJourneyBlocks(segments: TimelineSegment[]): DisplayBlock[] {
   return blocks;
 }
 
-function ReadinessStepItem({ finding, isLast }: { finding: ReadinessFinding; isLast: boolean }) {
+type DisplayFinding = { key: string; message: string; href: string; severity: ReadinessSeverity };
+
+/**
+ * Gruppiert gleichartige, sich wiederholende Befunde (z. B. eine "X hat keinen
+ * Reisepass hinterlegt."-Zeile pro Familienmitglied) zu einer einzigen kompakten
+ * Zeile statt N nahezu identischer Zeilen. Andere Befundarten (Etappenkonflikte,
+ * fehlende Flüge etc.) bleiben unverändert einzeln sichtbar, da sie in der Praxis
+ * nicht in dieser Häufigkeit auftreten.
+ */
+function groupReadinessFindings(findings: ReadinessFinding[]): DisplayFinding[] {
+  const missingPassport: ReadinessFinding[] = [];
+  const expiringPassport: ReadinessFinding[] = [];
+  const rest: ReadinessFinding[] = [];
+
+  for (const f of findings) {
+    if (f.theme === "documents" && / hat keinen Reisepass hinterlegt\.$/.test(f.message)) {
+      missingPassport.push(f);
+    } else if (f.theme === "documents" && /^Reisepass von .+ läuft/.test(f.message)) {
+      expiringPassport.push(f);
+    } else {
+      rest.push(f);
+    }
+  }
+
+  const result: DisplayFinding[] = [];
+
+  if (missingPassport.length >= 2) {
+    const names = missingPassport.map((f) => f.message.match(/^(.+?) hat keinen Reisepass/)?.[1]).filter(Boolean);
+    result.push({
+      key: "missing-passports",
+      message: `${missingPassport.length} Reisepässe fehlen · ${names.join(" · ")}`,
+      href: "/family",
+      severity: "conflict",
+    });
+  } else {
+    missingPassport.forEach((f, i) => result.push({ key: `mp-${i}`, message: f.message, href: f.href, severity: f.severity }));
+  }
+
+  if (expiringPassport.length >= 2) {
+    const names = expiringPassport.map((f) => f.message.match(/^Reisepass von (.+?) läuft/)?.[1]).filter(Boolean);
+    result.push({
+      key: "expiring-passports",
+      message: `${expiringPassport.length} Reisepässe laufen bald ab · ${names.join(" · ")}`,
+      href: "/family",
+      severity: "conflict",
+    });
+  } else {
+    expiringPassport.forEach((f, i) => result.push({ key: `ep-${i}`, message: f.message, href: f.href, severity: f.severity }));
+  }
+
+  rest.forEach((f, i) => result.push({ key: `r-${i}`, message: f.message, href: f.href, severity: f.severity }));
+
+  return result;
+}
+
+function ReadinessStepItem({ finding, isLast }: { finding: DisplayFinding; isLast: boolean }) {
   const color = finding.severity === "conflict" ? "#B5624A" : "#B89A5E";
   return (
     <Link
@@ -310,7 +374,7 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
     .select(`
       id, slug, title, subtitle, status, start_date, end_date,
       trip_members ( persons ( id, name, initials, color ) ),
-      stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order ),
+      stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code ),
       bookings ( id, type, title, provider, status, amount, currency, start_datetime, end_datetime, stage_id, details, created_at ),
       journey_events ( id, stage_id, date, time, category, title, location, status )
     `)
@@ -388,11 +452,18 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
   ].filter(Boolean).join(" · ");
 
   const readiness = await computeTripReadiness(trip.id);
+  const groupedFindings = groupReadinessFindings(readiness.findings);
+  // Konflikte und Hinweise nicht mehr vermischen/verschweigen: Sind beide Arten
+  // vorhanden, zeigt die Hero-Pille beide Zahlen statt nur die eine Kategorie —
+  // sonst könnte "5 Konflikte" stehen, während unten zusätzlich Hinweise (z. B.
+  // fehlende Flugbuchung) existieren, ohne dass die Zahl das widerspiegelt.
   const readinessLabel = readiness.status === "ready"
     ? "Reisebereit"
-    : readiness.status === "conflicts"
-      ? `${readiness.conflictCount} ${readiness.conflictCount === 1 ? "Konflikt" : "Konflikte"}`
-      : `${readiness.hintCount} ${readiness.hintCount === 1 ? "Punkt" : "Punkte"} prüfen`;
+    : readiness.conflictCount > 0 && readiness.hintCount > 0
+      ? `${readiness.conflictCount} ${readiness.conflictCount === 1 ? "Konflikt" : "Konflikte"} · ${readiness.hintCount} ${readiness.hintCount === 1 ? "Hinweis" : "Hinweise"}`
+      : readiness.conflictCount > 0
+        ? `${readiness.conflictCount} ${readiness.conflictCount === 1 ? "Konflikt" : "Konflikte"}`
+        : `${readiness.hintCount} ${readiness.hintCount === 1 ? "Hinweis" : "Hinweise"}`;
   const readinessColor = readiness.status === "ready" ? "#4C7A5D" : readiness.status === "conflicts" ? "#B5624A" : "#B89A5E";
 
   return (
@@ -542,19 +613,17 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
         <div className="max-w-5xl mx-auto px-5 md:px-10 py-10 space-y-14">
 
           <div
-            className="sticky top-0 z-20 -mx-5 md:-mx-10 px-5 md:px-10 -mt-2"
+            className="sticky top-0 z-20 -mx-5 md:-mx-10 px-5 md:px-10 -mt-2 py-2.5"
             style={{ background: "var(--background)", borderBottom: "1px solid var(--border)" }}
           >
-            <div className="overflow-x-auto scroll-hide -mx-1 px-1 py-3">
-              <div className="flex gap-1 sm:gap-3 flex-nowrap sm:flex-wrap sm:justify-between pr-6" style={{ width: "max-content", minWidth: "100%" }}>
-                <QuickNavItem Icon={Route} label="Journey" href="#journey" active />
-                <QuickNavItem Icon={Plane} label="Flüge" href={`/trips/${trip.slug}/bookings/category/flight`} />
-                <QuickNavItem Icon={BedDouble} label="Hotels" href={`/trips/${trip.slug}/bookings/category/accommodation`} />
-                <QuickNavItem Icon={Compass} label="Aktivitäten" href={`/trips/${trip.slug}/bookings/category/activity`} />
-                <QuickNavItem Icon={FileText} label="Dokumente" href={`/trips/${trip.slug}/documents`} />
-                <QuickNavItem Icon={Wallet} label="Budget" href={`/trips/${trip.slug}/budget`} />
-                <QuickNavItem Icon={MoreHorizontal} label="Mehr" href={moreHref} />
-              </div>
+            <div className="grid grid-cols-4 gap-x-2 gap-y-3">
+              <QuickNavItem Icon={Route} label="Journey" href="#journey" active />
+              <QuickNavItem Icon={Plane} label="Flüge" href={`/trips/${trip.slug}/bookings/category/flight`} />
+              <QuickNavItem Icon={BedDouble} label="Hotels" href={`/trips/${trip.slug}/bookings/category/accommodation`} />
+              <QuickNavItem Icon={Compass} label="Aktivitäten" href={`/trips/${trip.slug}/bookings/category/activity`} />
+              <QuickNavItem Icon={FileText} label="Dokumente" href={`/trips/${trip.slug}/documents`} />
+              <QuickNavItem Icon={Wallet} label="Budget" href={`/trips/${trip.slug}/budget`} />
+              <QuickNavItem Icon={MoreHorizontal} label="Mehr" href={moreHref} />
             </div>
           </div>
 
@@ -613,10 +682,7 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
             </div>
 
             {stages.length > 0 ? (
-              <div
-                className="overflow-x-auto scroll-hide -mx-1 px-1"
-                style={{ WebkitMaskImage: "linear-gradient(to right, transparent 0, black 12px, black calc(100% - 28px), transparent 100%)", maskImage: "linear-gradient(to right, transparent 0, black 12px, black calc(100% - 28px), transparent 100%)" }}
-              >
+              <div className="overflow-x-auto scroll-hide -mx-1 px-1">
                 <div className="flex gap-4 pb-3" style={{ width: "max-content" }}>
                   {stages.map((stage, idx) => (
                     <StageCard key={stage.id} stage={stage} idx={idx} slug={trip.slug} />
@@ -681,12 +747,12 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
             )}
           </section>
 
-          {readiness.findings.length > 0 && (
+          {groupedFindings.length > 0 && (
             <section>
               <SectionLabel>Nächste Schritte</SectionLabel>
               <div className="rounded-xl px-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-                {readiness.findings.map((finding, idx) => (
-                  <ReadinessStepItem key={idx} finding={finding} isLast={idx === readiness.findings.length - 1} />
+                {groupedFindings.map((finding, idx) => (
+                  <ReadinessStepItem key={finding.key} finding={finding} isLast={idx === groupedFindings.length - 1} />
                 ))}
               </div>
             </section>
