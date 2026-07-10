@@ -3,6 +3,7 @@ import { Map as MapIcon, Globe, CalendarDays, ArrowRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { COMPASS_CATEGORY_ORDER, COMPASS_CATEGORY_LABELS } from "@/lib/family-dna";
 import { buildWorldStats } from "@/lib/world-stats";
+import { isTripHistorical, isTripCurrentlyRunning } from "@/lib/trip-status";
 import { WorldMap } from "@/components/WorldMap";
 
 type PersonRow = {
@@ -86,8 +87,8 @@ export default async function FamilyPage() {
 
   const timelineEntries = [
     ...activeTrips
-      .filter((t) => t.status === "completed" || t.status === "active")
-      .map((t) => ({ key: `trip-${t.id}`, year: t.start_date ? new Date(t.start_date).getFullYear() : 0, label: t.title, isNext: t.status === "active" })),
+      .filter((t) => isTripHistorical(t) || isTripCurrentlyRunning(t))
+      .map((t) => ({ key: `trip-${t.id}`, year: t.start_date ? new Date(t.start_date).getFullYear() : 0, label: t.title, isNext: isTripCurrentlyRunning(t) })),
     ...pastTrips.map((p) => ({ key: `past-${p.id}`, year: p.year, label: p.country_or_region, isNext: false })),
   ].sort((a, b) => a.year - b.year).slice(-5);
 

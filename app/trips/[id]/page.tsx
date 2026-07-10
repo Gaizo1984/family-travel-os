@@ -13,6 +13,7 @@ import {
 import type { JourneyEventCategory, JourneyEventStatus } from "@/lib/journey-events";
 import { computeTripReadiness } from "@/lib/readiness";
 import type { ReadinessFinding, ReadinessSeverity } from "@/lib/readiness";
+import { isTripHistorical, isTripCurrentlyRunning } from "@/lib/trip-status";
 
 const H_FG    = "#F0EBE3";
 const H_MUTED = "#A89880";
@@ -421,13 +422,8 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
   // stattdessen "Bevorstehende Reise"; Reisen, deren Enddatum bereits vergangen
   // ist (auch wenn der Status nie manuell auf "completed" gesetzt wurde), gelten
   // als "Erlebt" statt fälschlich als bevorstehend.
-  const todayIso = new Date().toISOString().slice(0, 10);
-  const isCurrentlyRunning = Boolean(
-    trip.start_date && trip.end_date && todayIso >= trip.start_date && todayIso <= trip.end_date,
-  );
-  const isPastEnd = Boolean(trip.end_date && todayIso > trip.end_date);
-  const statusLabel = trip.status === "completed" || isPastEnd ? "Erlebt"
-    : isCurrentlyRunning ? "Aktive Reise"
+  const statusLabel = isTripHistorical(trip) ? "Erlebt"
+    : isTripCurrentlyRunning(trip) ? "Aktive Reise"
     : "Bevorstehende Reise";
 
   const bookingCategorySummaries = BOOKING_CATEGORY_ORDER.map((cat) => {

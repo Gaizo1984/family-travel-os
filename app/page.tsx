@@ -3,6 +3,7 @@ import { Map, Globe, CalendarDays, Users } from "lucide-react";
 import { getDaysUntil, formatDateDE, getTripDuration } from "@/lib/demo-data";
 import { createClient } from "@/lib/supabase/server";
 import { buildWorldStats } from "@/lib/world-stats";
+import { isTripPastEnd, isTripHistorical } from "@/lib/trip-status";
 
 const TRIP_IMAGES: Record<string, string> = {
   "costa-rica-2026":
@@ -202,11 +203,9 @@ export default async function Dashboard() {
   // Nicht allein auf den (oft veralteten) Status verlassen: Eine Reise, deren
   // Enddatum bereits vergangen ist, darf nie als "Nächste Reise" erscheinen,
   // selbst wenn sie nie manuell auf "completed" gesetzt wurde.
-  const todayIso = new Date().toISOString().slice(0, 10);
-  const isPastEnd = (t: TripRow) => Boolean(t.end_date && todayIso > t.end_date);
-  const upcoming = trips.filter((t) => (t.status === "active" || t.status === "planned") && !isPastEnd(t));
+  const upcoming = trips.filter((t) => (t.status === "active" || t.status === "planned") && !isTripPastEnd(t));
   const nextTrip = upcoming[0] ?? trips[0];
-  const pastTrips = trips.filter((t) => t.status === "completed" || (t.status !== "active" && isPastEnd(t)));
+  const pastTrips = trips.filter((t) => isTripHistorical(t));
 
   if (!nextTrip) {
     return (

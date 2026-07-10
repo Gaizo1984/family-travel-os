@@ -38,11 +38,14 @@ export default async function NewPastTripPage({
         </Link>
 
         <div style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "12px" }}>
-          Reise ergänzen
+          Reise oder Land ergänzen
         </div>
-        <h1 className="font-light mb-8" style={{ color: "var(--foreground)", fontSize: "1.4rem", letterSpacing: "0.01em" }}>
+        <h1 className="font-light mb-2" style={{ color: "var(--foreground)", fontSize: "1.4rem", letterSpacing: "0.01em" }}>
           Vergangene Reise erfassen
         </h1>
+        <p className="mb-8" style={{ color: "var(--muted)", fontSize: "0.74rem" }}>
+          Nur Land/Region und Jahr sind Pflicht — reicht auch, um einfach ein besuchtes Land zu ergänzen.
+        </p>
 
         <form action={createPastTrip} encType="multipart/form-data">
           <input type="hidden" name="family_id" value={family?.id ?? ""} />
