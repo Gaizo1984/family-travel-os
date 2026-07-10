@@ -82,3 +82,13 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(37, 33, 29, 0.15); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(37, 33, 29, 0.25); }
+
+/* Horizontale Swipe-Container (Schnellnav, Etappen-Karussell): Scroll-Funktion
+   bleibt erhalten, aber ohne sichtbare native Scrollleiste. */
+.scroll-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scroll-hide::-webkit-scrollbar {
+  display: none;
+}

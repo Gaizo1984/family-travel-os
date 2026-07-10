@@ -1,18 +1,18 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Plane, BedDouble, Compass, FileText, MoreHorizontal, ChevronLeft, ChevronRight, Wallet, Route } from "lucide-react";
+import { Plane, BedDouble, Compass, FileText, MoreHorizontal, ChevronLeft, ChevronRight, Wallet, Route, Pencil } from "lucide-react";
 import { formatDateDE, getTripDuration } from "@/lib/demo-data";
 import { createClient } from "@/lib/supabase/server";
-import { sortBookingsChronologically, BOOKING_CATEGORIES } from "@/lib/bookings";
+import { sortBookingsChronologically, BOOKING_CATEGORIES, BOOKING_CATEGORY_ORDER } from "@/lib/bookings";
 import type { BookingType, BookingStatus } from "@/lib/supabase/types";
-import { BookingRowItem } from "./bookings/BookingRowItem";
 import { DayRow } from "./JourneyDayRow";
 import {
   sortStagesChronologically, buildJourneyTimeline, buildRouteChips,
-  type TimelineSegment,
+  type TimelineSegment, type TimelineDay,
 } from "@/lib/journey";
 import type { JourneyEventCategory, JourneyEventStatus } from "@/lib/journey-events";
 import { computeTripReadiness } from "@/lib/readiness";
+import type { ReadinessFinding } from "@/lib/readiness";
 
 const H_FG    = "#F0EBE3";
 const H_MUTED = "#A89880";
@@ -35,14 +35,6 @@ const STAGE_IMAGES = [
   "https://images.unsplash.com/photo-1476673160081-cf065607f449?auto=format&fit=crop&w=800&q=80",
   "https://images.unsplash.com/photo-1592364395653-83e648b20cc2?auto=format&fit=crop&w=800&q=80",
   "https://images.unsplash.com/photo-1512453979798-5ea266f8880c?auto=format&fit=crop&w=800&q=80",
-];
-
-const NEXT_STEPS = [
-  "Flüge buchen und Reiseversicherung abschließen",
-  "Hotels und Unterkünfte finalisieren",
-  "Aktivitäten und Ausflüge planen",
-  "Dokumente und Visa beantragen",
-  "Packliste erstellen",
 ];
 
 type PersonRow = { id: string; name: string; initials: string; color: string }
@@ -161,25 +153,27 @@ function StageCard({ stage, idx, slug }: { stage: StageRow; idx: number; slug: s
   );
 }
 
-function QuickNavItem({ Icon, label, href }: {
+function QuickNavItem({ Icon, label, href, active }: {
   Icon: React.ComponentType<{ size?: number; strokeWidth?: number; style?: React.CSSProperties }>;
-  label: string; href: string;
+  label: string; href: string; active?: boolean;
 }) {
   return (
     <Link
       href={href}
-      className="flex flex-col items-center justify-center gap-1.5 shrink-0 transition-opacity hover:opacity-70"
+      className="flex flex-col items-center justify-center gap-1.5 shrink-0 transition-opacity hover:opacity-80"
       style={{ width: 68, textDecoration: "none" }}
     >
       <div
         className="w-11 h-11 rounded-full flex items-center justify-center"
-        style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+        style={active
+          ? { background: "var(--accent)", border: "1px solid var(--accent)" }
+          : { background: "var(--surface)", border: "1px solid var(--border)" }}
       >
-        <Icon size={16} strokeWidth={1.4} style={{ color: "var(--accent)" }} />
+        <Icon size={16} strokeWidth={1.6} style={{ color: active ? "var(--surface)" : "var(--accent)" }} />
       </div>
       <span
         className="text-center leading-tight"
-        style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.02em" }}
+        style={{ color: active ? "var(--foreground)" : "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.02em", fontWeight: active ? 500 : 400 }}
       >
         {label}
       </span>
@@ -250,26 +244,60 @@ function StaySegmentCard({ segment, slug }: { segment: Extract<TimelineSegment, 
   );
 }
 
-function DaySegmentCard({ segment, slug }: { segment: Extract<TimelineSegment, { kind: "day" }>; slug: string }) {
-  const { day } = segment;
+/** Kompakte Zusammenfassung aufeinanderfolgender kurzer Tages-Segmente (0–1-Nacht-
+ * Stopps, etappenlose Tage) in einer einzigen Karte statt einer Karte pro Tag —
+ * Aufenthalte/Hotels bleiben dadurch die visuell stärkeren Ankerpunkte. */
+function DayGroupCard({ days, slug }: { days: TimelineDay[]; slug: string }) {
   return (
-    <div className="rounded-xl p-5" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-      {day.stage && (
-        <div className="mb-2">
-          <span style={{ color: "var(--muted)", fontSize: "0.68rem" }}>{day.stage.location ?? day.stage.title}</span>
+    <div className="rounded-xl overflow-hidden px-5" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+      {days.map((day) => (
+        <div key={day.date}>
+          {day.stage && (
+            <div className="pt-2.5" style={{ color: "var(--muted)", fontSize: "0.64rem", letterSpacing: "0.04em" }}>
+              {day.stage.location ?? day.stage.title}
+            </div>
+          )}
+          <DayRow day={day} slug={slug} />
         </div>
-      )}
-      <DayRow day={day} slug={slug} />
+      ))}
     </div>
   );
 }
 
-function NextStepItem({ text, isLast }: { text: string; isLast: boolean }) {
+/** Fasst aufeinanderfolgende 'day'-Segmente zu einem gemeinsamen Block zusammen —
+ * reine Anzeigegruppierung, verändert keine Daten. */
+type DisplayBlock =
+  | { kind: "stay"; segment: Extract<TimelineSegment, { kind: "stay" }> }
+  | { kind: "dayGroup"; days: TimelineDay[] };
+
+function groupJourneyBlocks(segments: TimelineSegment[]): DisplayBlock[] {
+  const blocks: DisplayBlock[] = [];
+  for (const segment of segments) {
+    if (segment.kind === "stay") {
+      blocks.push({ kind: "stay", segment });
+      continue;
+    }
+    const last = blocks[blocks.length - 1];
+    if (last && last.kind === "dayGroup") {
+      last.days.push(segment.day);
+    } else {
+      blocks.push({ kind: "dayGroup", days: [segment.day] });
+    }
+  }
+  return blocks;
+}
+
+function ReadinessStepItem({ finding, isLast }: { finding: ReadinessFinding; isLast: boolean }) {
+  const color = finding.severity === "conflict" ? "#B5624A" : "#B89A5E";
   return (
-    <div className="flex items-start gap-4 py-4" style={{ borderBottom: isLast ? "none" : "1px solid var(--border)" }}>
-      <div className="w-5 h-5 rounded-full shrink-0 mt-0.5" style={{ border: "1px solid var(--border)", flexShrink: 0 }} />
-      <span className="text-sm leading-relaxed" style={{ color: "var(--muted)" }}>{text}</span>
-    </div>
+    <Link
+      href={finding.href}
+      className="flex items-start gap-4 py-4 transition-opacity hover:opacity-70"
+      style={{ borderBottom: isLast ? "none" : "1px solid var(--border)", textDecoration: "none" }}
+    >
+      <div className="w-2 h-2 rounded-full shrink-0 mt-1.5" style={{ background: color, flexShrink: 0 }} />
+      <span className="text-sm leading-relaxed flex-1" style={{ color: "var(--foreground)" }}>{finding.message}</span>
+    </Link>
   );
 }
 
@@ -296,7 +324,6 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
   const stages    = sortStagesChronologically(trip.stages);
   const bookings  = sortBookingsChronologically(trip.bookings);
   const journeyEvents = trip.journey_events ?? [];
-  const stageTitleById = new Map(stages.map((s) => [s.id, s.title]));
 
   const totalNights = stages.reduce((sum, s) => sum + (s.nights ?? 0), 0);
   const routeChips = buildRouteChips(
@@ -309,6 +336,7 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
     bookings,
     journeyEvents,
   );
+  const journeyBlocks = groupJourneyBlocks(journeyTimeline);
 
   // "Mehr" überspringt die Zwischenansicht und führt bei komplett leerer Kategorie
   // direkt zur Typ-Auswahl; sobald irgendeine Buchung existiert (unabhängig vom Status,
@@ -324,9 +352,35 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
   const heroImage = TRIP_IMAGES[trip.slug]
     ?? "https://images.unsplash.com/photo-1537996194471-e657df975ab4?auto=format&fit=crop&w=1920&q=80";
 
-  const statusLabel = trip.status === "active" ? "Aktive Reise"
-    : trip.status === "completed" ? "Erlebt"
-    : "In Planung";
+  // "Aktive Reise" nur, wenn die Reise anhand der echten Daten gerade läuft —
+  // nicht allein anhand des manuell gesetzten Status. Zukünftige Reisen zeigen
+  // stattdessen "Bevorstehende Reise"; Reisen, deren Enddatum bereits vergangen
+  // ist (auch wenn der Status nie manuell auf "completed" gesetzt wurde), gelten
+  // als "Erlebt" statt fälschlich als bevorstehend.
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const isCurrentlyRunning = Boolean(
+    trip.start_date && trip.end_date && todayIso >= trip.start_date && todayIso <= trip.end_date,
+  );
+  const isPastEnd = Boolean(trip.end_date && todayIso > trip.end_date);
+  const statusLabel = trip.status === "completed" || isPastEnd ? "Erlebt"
+    : isCurrentlyRunning ? "Aktive Reise"
+    : "Bevorstehende Reise";
+
+  const bookingCategorySummaries = BOOKING_CATEGORY_ORDER.map((cat) => {
+    const config = BOOKING_CATEGORIES[cat];
+    const active = bookings.filter((b) => config.types.includes(b.type) && b.status !== "cancelled");
+    const href = cat === "more" ? moreHref : `/trips/${trip.slug}/bookings/category/${cat}`;
+    if (active.length === 0) {
+      return { label: config.label, href, detail: config.emptyDetail, color: "var(--muted)" };
+    }
+    const allConfirmed = active.every((b) => b.status === "confirmed");
+    return {
+      label: config.label,
+      href,
+      detail: `${active.length} ${allConfirmed ? "bestätigt" : "in Planung"}`,
+      color: allConfirmed ? "#4C7A5D" : "#B89A5E",
+    };
+  });
 
   const heroMetaParts = [
     totalNights > 0 ? `${totalNights} ${totalNights === 1 ? "Nacht" : "Nächte"}` : null,
@@ -364,31 +418,45 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
           </Link>
         </div>
 
-        <div className="absolute top-5 right-7 flex flex-wrap items-center justify-end gap-1.5 max-w-[60vw] sm:max-w-none">
-          <span style={{ fontSize: "0.52rem", letterSpacing: "0.14em", textTransform: "uppercase", color: "rgba(200,169,110,0.75)", background: "rgba(184,154,94,0.08)", border: "1px solid rgba(184,154,94,0.14)", padding: "4px 10px", borderRadius: "20px", whiteSpace: "nowrap" }}>
+        <div className="absolute top-5 right-7 flex flex-wrap items-center justify-end gap-2">
+          <span
+            style={{
+              fontSize: "0.58rem", letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 500,
+              color: "#F0EBE3", background: "rgba(10,9,7,0.5)", border: "1px solid rgba(240,235,227,0.16)",
+              padding: "5px 11px", borderRadius: "20px", whiteSpace: "nowrap",
+            }}
+          >
             {statusLabel}
           </span>
 
           <Link
             href={`/trips/${trip.slug}/ready-to-travel`}
-            className="max-w-[170px] sm:max-w-none"
+            className="flex items-center gap-2 transition-opacity hover:opacity-80"
             style={{
-              display: "inline-block",
-              background: "rgba(10,9,7,0.62)",
-              backdropFilter: "blur(8px)",
-              WebkitBackdropFilter: "blur(8px)",
-              border: `1px solid ${readinessColor}66`,
-              padding: "4px 10px",
+              background: "rgba(10,9,7,0.82)",
+              border: `1px solid ${readinessColor}55`,
+              padding: "5px 12px",
               borderRadius: "20px",
               textDecoration: "none",
               whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
             }}
           >
-            <span style={{ fontSize: "0.56rem", letterSpacing: "0.1em", textTransform: "uppercase", color: readinessColor, fontWeight: 500 }}>
-              {readiness.status === "ready" ? "Ready to Travel ✓" : `Reisestatus · ${readinessLabel}`}
+            <span className="rounded-full shrink-0" style={{ width: 6, height: 6, background: readinessColor }} />
+            <span style={{ fontSize: "0.64rem", letterSpacing: "0.04em", fontWeight: 500, color: "#F0EBE3" }}>
+              {readiness.status === "ready" ? "Ready to Travel" : readinessLabel}
             </span>
+          </Link>
+
+          <Link
+            href={`/trips/${trip.slug}/edit`}
+            aria-label="Reise bearbeiten"
+            className="flex items-center justify-center shrink-0 transition-opacity hover:opacity-80"
+            style={{
+              width: 36, height: 36, borderRadius: "50%",
+              background: "rgba(10,9,7,0.5)", border: "1px solid rgba(240,235,227,0.18)",
+            }}
+          >
+            <Pencil size={14} strokeWidth={1.6} style={{ color: "#F0EBE3" }} />
           </Link>
 
           <details className="menu-details relative">
@@ -398,8 +466,9 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
                 color: "rgba(240,235,227,0.6)",
                 fontSize: "0.9rem",
                 lineHeight: 1,
-                padding: "6px 10px",
-                borderRadius: "20px",
+                width: 36, height: 36,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                borderRadius: "50%",
                 background: "rgba(10,9,7,0.35)",
                 border: "1px solid rgba(240,235,227,0.15)",
               }}
@@ -411,14 +480,8 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
               style={{ background: "var(--surface)", border: "1px solid var(--border)", minWidth: "170px", zIndex: 30 }}
             >
               <Link
-                href={`/trips/${trip.slug}/edit`}
-                style={{ display: "block", padding: "11px 16px", color: "var(--foreground)", fontSize: "0.78rem", textDecoration: "none" }}
-              >
-                Reise bearbeiten
-              </Link>
-              <Link
                 href={`/trips/${trip.slug}/archive`}
-                style={{ display: "block", padding: "11px 16px", color: "#B5624A", fontSize: "0.78rem", textDecoration: "none", borderTop: "1px solid var(--border)" }}
+                style={{ display: "block", padding: "11px 16px", color: "#B5624A", fontSize: "0.78rem", textDecoration: "none" }}
               >
                 Reise archivieren
               </Link>
@@ -478,15 +541,20 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
       <div className="flex-1" style={{ background: "var(--background)" }}>
         <div className="max-w-5xl mx-auto px-5 md:px-10 py-10 space-y-14">
 
-          <div className="overflow-x-auto -mx-1 px-1 -mt-2">
-            <div className="flex gap-1 sm:gap-3 flex-nowrap sm:flex-wrap sm:justify-between" style={{ width: "max-content", minWidth: "100%" }}>
-              <QuickNavItem Icon={Route} label="Journey" href="#journey" />
-              <QuickNavItem Icon={Plane} label="Flüge" href={`/trips/${trip.slug}/bookings/category/flight`} />
-              <QuickNavItem Icon={BedDouble} label="Hotels" href={`/trips/${trip.slug}/bookings/category/accommodation`} />
-              <QuickNavItem Icon={Compass} label="Aktivitäten" href={`/trips/${trip.slug}/bookings/category/activity`} />
-              <QuickNavItem Icon={FileText} label="Dokumente" href={`/trips/${trip.slug}/documents`} />
-              <QuickNavItem Icon={Wallet} label="Budget" href={`/trips/${trip.slug}/budget`} />
-              <QuickNavItem Icon={MoreHorizontal} label="Mehr" href={moreHref} />
+          <div
+            className="sticky top-0 z-20 -mx-5 md:-mx-10 px-5 md:px-10 -mt-2"
+            style={{ background: "var(--background)", borderBottom: "1px solid var(--border)" }}
+          >
+            <div className="overflow-x-auto scroll-hide -mx-1 px-1 py-3">
+              <div className="flex gap-1 sm:gap-3 flex-nowrap sm:flex-wrap sm:justify-between pr-6" style={{ width: "max-content", minWidth: "100%" }}>
+                <QuickNavItem Icon={Route} label="Journey" href="#journey" active />
+                <QuickNavItem Icon={Plane} label="Flüge" href={`/trips/${trip.slug}/bookings/category/flight`} />
+                <QuickNavItem Icon={BedDouble} label="Hotels" href={`/trips/${trip.slug}/bookings/category/accommodation`} />
+                <QuickNavItem Icon={Compass} label="Aktivitäten" href={`/trips/${trip.slug}/bookings/category/activity`} />
+                <QuickNavItem Icon={FileText} label="Dokumente" href={`/trips/${trip.slug}/documents`} />
+                <QuickNavItem Icon={Wallet} label="Budget" href={`/trips/${trip.slug}/budget`} />
+                <QuickNavItem Icon={MoreHorizontal} label="Mehr" href={moreHref} />
+              </div>
             </div>
           </div>
 
@@ -506,13 +574,13 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
               </Link>
             </div>
 
-            {journeyTimeline.length > 0 ? (
-              <div className="space-y-3">
-                {journeyTimeline.map((segment) =>
-                  segment.kind === "stay" ? (
-                    <StaySegmentCard key={segment.stage.id} segment={segment} slug={trip.slug} />
+            {journeyBlocks.length > 0 ? (
+              <div className="space-y-2.5">
+                {journeyBlocks.map((block) =>
+                  block.kind === "stay" ? (
+                    <StaySegmentCard key={block.segment.stage.id} segment={block.segment} slug={trip.slug} />
                   ) : (
-                    <DaySegmentCard key={segment.day.date} segment={segment} slug={trip.slug} />
+                    <DayGroupCard key={block.days[0].date} days={block.days} slug={trip.slug} />
                   )
                 )}
               </div>
@@ -545,7 +613,10 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
             </div>
 
             {stages.length > 0 ? (
-              <div className="overflow-x-auto -mx-1 px-1">
+              <div
+                className="overflow-x-auto scroll-hide -mx-1 px-1"
+                style={{ WebkitMaskImage: "linear-gradient(to right, transparent 0, black 12px, black calc(100% - 28px), transparent 100%)", maskImage: "linear-gradient(to right, transparent 0, black 12px, black calc(100% - 28px), transparent 100%)" }}
+              >
                 <div className="flex gap-4 pb-3" style={{ width: "max-content" }}>
                   {stages.map((stage, idx) => (
                     <StageCard key={stage.id} stage={stage} idx={idx} slug={trip.slug} />
@@ -572,51 +643,54 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
               >
                 Buchungen{bookings.length > 0 ? ` · ${bookings.length}` : ""}
               </h2>
-              <Link
-                href={`/trips/${trip.slug}/bookings/new`}
-                style={{ color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.08em", textDecoration: "none" }}
-              >
-                + Buchung hinzufügen
-              </Link>
+              {bookings.length > 0 && (
+                <Link
+                  href={`/trips/${trip.slug}/bookings/new`}
+                  style={{ color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.08em", textDecoration: "none" }}
+                >
+                  + Buchung hinzufügen
+                </Link>
+              )}
             </div>
 
             {bookings.length > 0 ? (
-              <div className="space-y-2">
-                {bookings.map((booking) => (
-                  <BookingRowItem
-                    key={booking.id}
-                    booking={booking}
-                    slug={trip.slug}
-                    stageTitle={booking.stage_id ? stageTitleById.get(booking.stage_id) ?? null : null}
-                  />
+              <div className="rounded-xl overflow-hidden" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+                {bookingCategorySummaries.map((cat, idx) => (
+                  <Link
+                    key={cat.label}
+                    href={cat.href}
+                    className="flex items-center justify-between px-5 py-3.5 transition-opacity hover:opacity-70"
+                    style={{ borderBottom: idx < bookingCategorySummaries.length - 1 ? "1px solid var(--border)" : "none", textDecoration: "none" }}
+                  >
+                    <span style={{ color: "var(--foreground)", fontSize: "0.82rem" }}>{cat.label}</span>
+                    <span style={{ color: cat.color, fontSize: "0.7rem" }}>{cat.detail}</span>
+                  </Link>
                 ))}
               </div>
             ) : (
-              <div
-                className="rounded-xl p-6 text-center"
-                style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+              <Link
+                href={`/trips/${trip.slug}/bookings/new`}
+                className="flex items-center justify-between rounded-xl px-5 py-4 transition-opacity hover:opacity-80"
+                style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}
               >
-                <p className="mb-4" style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
-                  Noch keine Buchungen erfasst.
-                </p>
-                <Link
-                  href={`/trips/${trip.slug}/bookings/new`}
-                  style={{ color: "var(--accent)", fontSize: "0.7rem", letterSpacing: "0.08em", textDecoration: "none" }}
-                >
+                <span style={{ color: "var(--muted)", fontSize: "0.78rem" }}>Noch keine Buchungen erfasst.</span>
+                <span style={{ color: "var(--accent)", fontSize: "0.7rem", letterSpacing: "0.08em", whiteSpace: "nowrap" }}>
                   Erste Buchung hinzufügen →
-                </Link>
-              </div>
+                </span>
+              </Link>
             )}
           </section>
 
-          <section>
-            <SectionLabel>Nächste Schritte</SectionLabel>
-            <div className="rounded-xl px-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-              {NEXT_STEPS.map((step, idx) => (
-                <NextStepItem key={idx} text={step} isLast={idx === NEXT_STEPS.length - 1} />
-              ))}
-            </div>
-          </section>
+          {readiness.findings.length > 0 && (
+            <section>
+              <SectionLabel>Nächste Schritte</SectionLabel>
+              <div className="rounded-xl px-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+                {readiness.findings.map((finding, idx) => (
+                  <ReadinessStepItem key={idx} finding={finding} isLast={idx === readiness.findings.length - 1} />
+                ))}
+              </div>
+            </section>
+          )}
 
         </div>
       </div>
