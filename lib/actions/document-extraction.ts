@@ -58,17 +58,47 @@ const ENTRY_SCHEMA = {
   additionalProperties: false,
 }
 
-function buildPrompt(config: { label: string; isIdentityType: boolean }): string {
+const ESTA_SCHEMA = {
+  type: 'object',
+  properties: {
+    readable: { type: 'boolean', description: 'false, wenn das Dokument nicht sinnvoll lesbar ist' },
+    first_name: { type: ['string', 'null'] },
+    last_name: { type: ['string', 'null'] },
+    birth_date: { type: ['string', 'null'], description: 'ISO 8601, JJJJ-MM-TT' },
+    issuing_country: { type: ['string', 'null'], description: 'Zielland/Zielgebiet, für ESTA i. d. R. "United States"' },
+    application_number: { type: ['string', 'null'], description: 'Die ESTA Application Number — NICHT die Passnummer' },
+    traveler_passport_number: { type: ['string', 'null'], description: 'Die im Dokument genannte Passnummer des Reisenden — NICHT die Application Number' },
+    expires_at: { type: ['string', 'null'], description: 'Gültig bis, ISO 8601' },
+  },
+  required: [
+    'readable', 'first_name', 'last_name', 'birth_date', 'issuing_country',
+    'application_number', 'traveler_passport_number', 'expires_at',
+  ],
+  additionalProperties: false,
+}
+
+function buildPrompt(config: { label: string; isIdentityType: boolean; value: string }): string {
   const kind = config.isIdentityType
     ? 'Reisepass oder Personalausweis'
     : `Einreisedokument (${config.label})`
-  return (
+  const base = (
     `Du liest einen ${kind} aus einem Foto oder PDF aus und extrahierst ausschließlich Daten, ` +
     `die im Dokument tatsächlich sichtbar sind. Erfinde niemals Werte — wenn ein Feld nicht ` +
     `erkennbar ist, setze es auf null. Falls eine maschinenlesbare Zone (MRZ) sichtbar ist, nutze ` +
     `sie zusätzlich zur Plausibilitätsprüfung von Namen, Geburtsdatum, Dokumentnummer und ` +
     `Ablaufdatum. Setze "readable" auf false, wenn das Dokument nicht sinnvoll lesbar ist (z. B. ` +
     `zu unscharf, falsches Dokument, leere Seite). Alle Datumsangaben im Format JJJJ-MM-TT.`
+  )
+  if (config.value !== 'esta') return base
+  return (
+    base +
+    ` Ein ESTA-Dokument enthält zwei unterschiedliche, getrennt aufgedruckte Nummern: die ` +
+    `"Application Number" (die eigene Antragsnummer des ESTA) und die "Passport Number" (die ` +
+    `Nummer des zugrunde liegenden Reisepasses des Antragstellers). Verwechsle diese beiden ` +
+    `Nummern niemals — trage die Antragsnummer in "application_number" und die Passnummer in ` +
+    `"traveler_passport_number" ein. Falls Vor- und Nachname getrennt aufgeführt sind, übernimm ` +
+    `sie direkt; andernfalls versuche einen zusammenhängenden Namen sinnvoll in Vor- und ` +
+    `Nachname aufzuteilen.`
   )
 }
 
@@ -125,7 +155,7 @@ export async function extractDocumentData(formData: FormData) {
   const bytes = Buffer.from(await file.arrayBuffer())
   const base64 = bytes.toString('base64')
   const isPdf = file.type === 'application/pdf'
-  const schema = config.isIdentityType ? IDENTITY_SCHEMA : ENTRY_SCHEMA
+  const schema = config.isIdentityType ? IDENTITY_SCHEMA : docType === 'esta' ? ESTA_SCHEMA : ENTRY_SCHEMA
 
   let parsed: ExtractionResult
   try {
@@ -157,6 +187,18 @@ export async function extractDocumentData(formData: FormData) {
 
   if (!parsed.readable)
     fail('Das Dokument konnte nicht zuverlässig ausgelesen werden. Bitte ein anderes Foto/PDF hochladen oder die Daten manuell eingeben.', storagePath)
+
+  // ESTA nutzt eigene, eindeutige KI-Feldnamen (application_number/traveler_passport_number),
+  // um Application Number und Passnummer nie zu verwechseln — hier auf die kanonischen
+  // DocumentDetails-Feldnamen abbilden, die die new/edit-Seiten generisch weiterverarbeiten.
+  if (docType === 'esta') {
+    const { application_number, traveler_passport_number, ...rest } = parsed
+    parsed = {
+      ...rest,
+      passport_number: application_number ?? null,
+      related_passport_number: traveler_passport_number ?? null,
+    }
+  }
 
   const params = new URLSearchParams(passthrough)
   if (mode !== 'edit') params.set('type', docType)

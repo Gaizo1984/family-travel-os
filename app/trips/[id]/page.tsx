@@ -12,6 +12,7 @@ import {
   type TimelineSegment,
 } from "@/lib/journey";
 import type { JourneyEventCategory, JourneyEventStatus } from "@/lib/journey-events";
+import { computeTripReadiness } from "@/lib/readiness";
 
 const H_FG    = "#F0EBE3";
 const H_MUTED = "#A89880";
@@ -389,6 +390,14 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
     stages.length > 0 ? `${stages.length} ${stages.length === 1 ? "Aufenthalt" : "Aufenthalte"}` : null,
   ].filter(Boolean).join(" · ");
 
+  const readiness = await computeTripReadiness(trip.id);
+  const readinessLabel = readiness.status === "ready"
+    ? "Reisebereit"
+    : readiness.status === "conflicts"
+      ? `${readiness.conflictCount} ${readiness.conflictCount === 1 ? "Konflikt" : "Konflikte"}`
+      : `${readiness.hintCount} ${readiness.hintCount === 1 ? "Punkt" : "Punkte"} prüfen`;
+  const readinessColor = readiness.status === "ready" ? "#4C7A5D" : readiness.status === "conflicts" ? "#B5624A" : "#B89A5E";
+
   return (
     <div className="flex-1 flex flex-col">
 
@@ -416,6 +425,17 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
           <span style={{ fontSize: "0.58rem", letterSpacing: "0.18em", textTransform: "uppercase", color: "#C8A96E", background: "rgba(184,154,94,0.14)", border: "1px solid rgba(184,154,94,0.2)", padding: "5px 12px", borderRadius: "20px" }}>
             {statusLabel}
           </span>
+
+          <Link
+            href={`/trips/${trip.slug}/ready-to-travel`}
+            style={{
+              fontSize: "0.58rem", letterSpacing: "0.18em", textTransform: "uppercase", color: readinessColor,
+              background: "rgba(10,9,7,0.35)", border: `1px solid ${readinessColor}55`, padding: "5px 12px",
+              borderRadius: "20px", textDecoration: "none", whiteSpace: "nowrap",
+            }}
+          >
+            {readinessLabel}
+          </Link>
 
           <details className="menu-details relative">
             <summary

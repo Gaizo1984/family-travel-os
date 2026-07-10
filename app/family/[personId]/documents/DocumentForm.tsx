@@ -173,7 +173,44 @@ export function DocumentForm({
           </>
         )}
 
-        {config.isEntryDocumentType && (
+        {type === "esta" && (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+              <div>
+                <label htmlFor="doc-first-name" style={LABEL_STYLE}>Vorname</label>
+                <input id="doc-first-name" name="first_name" type="text" defaultValue={details.first_name ?? ""} style={FIELD_STYLE} />
+              </div>
+              <div>
+                <label htmlFor="doc-last-name" style={LABEL_STYLE}>Nachname</label>
+                <input id="doc-last-name" name="last_name" type="text" defaultValue={details.last_name ?? ""} style={FIELD_STYLE} />
+              </div>
+            </div>
+
+            <DateSelectFields
+              label="Geburtsdatum"
+              namePrefix="birth_date"
+              defaultIso={details.birth_date}
+              range={getDateFieldRange("birth")}
+            />
+
+            <div className="mb-5">
+              <label htmlFor="doc-issuing-country" style={LABEL_STYLE}>Zielland</label>
+              <input id="doc-issuing-country" name="issuing_country" type="text" defaultValue={details.issuing_country ?? "United States"} style={FIELD_STYLE} />
+            </div>
+
+            <div className="mb-5">
+              <label htmlFor="doc-application-number" style={LABEL_STYLE}>Application Number</label>
+              <input id="doc-application-number" name="passport_number" type="text" defaultValue={details.passport_number ?? ""} style={FIELD_STYLE} />
+            </div>
+
+            <div className="mb-5">
+              <label htmlFor="doc-passport-number" style={LABEL_STYLE}>Passnummer</label>
+              <input id="doc-passport-number" name="related_passport_number" type="text" defaultValue={details.related_passport_number ?? ""} style={FIELD_STYLE} />
+            </div>
+          </>
+        )}
+
+        {config.isEntryDocumentType && type !== "esta" && (
           <>
             <div className="mb-5">
               <label htmlFor="doc-issuing-country" style={LABEL_STYLE}>Land / Zielgebiet</label>

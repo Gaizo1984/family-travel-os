@@ -137,11 +137,26 @@ export function getEntryDocumentStatus(doc: {
   return 'valid'
 }
 
+/** Statuslogik speziell für ESTA — kein manueller Status, kein "Gültig ab": wir speichern nur genehmigte ESTAs. */
+export function getEstaStatus(doc: {
+  expires_at: string | null
+  details: DocumentDetails | null
+}): DocumentValidity {
+  if (!doc.details?.passport_number || !doc.expires_at) return 'incomplete'
+  const expiresAt = new Date(doc.expires_at)
+  const today = new Date()
+  const warningDate = new Date(today.getTime() + EXPIRY_WARNING_DAYS * 86400000)
+  if (expiresAt < today) return 'expired'
+  if (expiresAt < warningDate) return 'expiring_soon'
+  return 'valid'
+}
+
 export function getDocumentValidity(doc: {
   doc_type: DocumentType
   expires_at: string | null
   details: DocumentDetails | null
 }): DocumentValidity | null {
+  if (doc.doc_type === 'esta') return getEstaStatus(doc)
   const config = DOCUMENT_TYPE_CONFIG[doc.doc_type]
   if (config.isIdentityType) return getPassportValidity(doc)
   if (config.isEntryDocumentType) return getEntryDocumentStatus(doc)

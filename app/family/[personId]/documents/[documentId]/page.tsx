@@ -163,7 +163,17 @@ export default async function DocumentDetailPage({
                 <MetaItem label="Ausstellungsdatum" value={formatExpiresAt(details.issue_date ?? null)} />
               </>
             )}
-            {config.isEntryDocumentType && (
+            {doc.doc_type === "esta" && (
+              <>
+                <MetaItem label="Vorname" value={details.first_name ?? "—"} />
+                <MetaItem label="Nachname" value={details.last_name ?? "—"} />
+                <MetaItem label="Geburtsdatum" value={formatExpiresAt(details.birth_date ?? null)} />
+                <MetaItem label="Zielland" value={details.issuing_country ?? "—"} />
+                <MetaItem label="Application Number" value={details.passport_number ?? "—"} />
+                <MetaItem label="Passnummer" value={details.related_passport_number ?? "—"} />
+              </>
+            )}
+            {config.isEntryDocumentType && doc.doc_type !== "esta" && (
               <>
                 <MetaItem label="Land / Zielgebiet" value={details.issuing_country ?? "—"} />
                 <MetaItem label={config.numberLabel} value={details.passport_number ?? "—"} />
