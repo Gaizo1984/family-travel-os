@@ -4,6 +4,31 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { BOOKING_TYPE_CONFIG, combineDateTime } from '@/lib/bookings'
 import type { BookingType, BookingStatus, PaymentStatus } from '@/lib/supabase/types'
+import type { SupabaseClient } from '@supabase/supabase-js'
+
+/**
+ * Deterministische Etappen-Zuordnung (kein Raten): Wenn keine Etappe manuell
+ * gewählt wurde, aber der Startzeitpunkt eindeutig in genau eine bestehende
+ * Etappe fällt, wird diese automatisch übernommen. Bei mehreren möglichen
+ * Treffern oder keinem Treffer bleibt die Buchung unzugeordnet — die
+ * manuelle Auswahl im Formular hat immer Vorrang.
+ */
+async function suggestStageId(
+  supabase: SupabaseClient,
+  tripId: string,
+  startDate: string,
+): Promise<string | null> {
+  if (!startDate) return null
+  const { data: stages } = await supabase
+    .from('stages')
+    .select('id, start_date, end_date')
+    .eq('trip_id', tripId)
+
+  const matches = (stages ?? []).filter(
+    (s) => s.start_date && s.end_date && startDate >= s.start_date && startDate <= s.end_date,
+  )
+  return matches.length === 1 ? matches[0].id : null
+}
 
 function readCommonFields(formData: FormData) {
   const type = String(formData.get('type') ?? '') as BookingType
@@ -52,10 +77,11 @@ export async function createBooking(formData: FormData) {
     redirect(`${newPath}&error=${encodeURIComponent(`${f.config.startLabel}: Datum ist erforderlich`)}`)
 
   const supabase = await createClient()
+  const stageId = f.stageId || await suggestStageId(supabase, tripId, f.startDate)
 
   const { error } = await supabase.from('bookings').insert({
     trip_id: tripId,
-    stage_id: f.stageId || null,
+    stage_id: stageId,
     type: f.type,
     title: f.title,
     provider: f.provider || null,
@@ -92,10 +118,16 @@ export async function updateBooking(formData: FormData) {
 
   const supabase = await createClient()
 
+  let stageId = f.stageId || null
+  if (!stageId) {
+    const { data: existing } = await supabase.from('bookings').select('trip_id').eq('id', bookingId).maybeSingle()
+    if (existing?.trip_id) stageId = await suggestStageId(supabase, existing.trip_id, f.startDate)
+  }
+
   const { error } = await supabase
     .from('bookings')
     .update({
-      stage_id: f.stageId || null,
+      stage_id: stageId,
       title: f.title,
       provider: f.provider || null,
       booking_reference: f.bookingReference || null,

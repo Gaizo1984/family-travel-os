@@ -3,11 +3,55 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { suggestCountryCode } from '@/lib/geo-suggestions'
+import type { SupabaseClient } from '@supabase/supabase-js'
 
 function computeNights(startDate: string, endDate: string): number | null {
   if (!startDate || !endDate) return null
   const diff = Math.round((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000)
   return diff >= 0 ? diff : null
+}
+
+/**
+ * Zentrale Domänenregel "ein Datensatz – mehrere Ansichten": Wenn eine Etappe
+ * einen Unterkunftsnamen im Freitextfeld erhält, aber noch keine echte
+ * Buchung dafür existiert, wird automatisch eine (unbestätigte) Buchung
+ * angelegt, damit dieselbe Unterkunft auch unter "Hotels" erscheint — ohne
+ * das Etappenformular selbst zu verändern. Existiert bereits eine Buchung
+ * für diese Etappe, wird sie NICHT überschrieben (keine stille
+ * Datenüberschreibung manuell gepflegter Buchungsdetails).
+ */
+async function ensureAccommodationBooking(
+  supabase: SupabaseClient,
+  tripId: string,
+  stageId: string,
+  accommodation: string,
+  startDate: string,
+  endDate: string,
+): Promise<void> {
+  if (!accommodation) return
+
+  const { data: existing } = await supabase
+    .from('bookings')
+    .select('id')
+    .eq('stage_id', stageId)
+    .eq('type', 'accommodation')
+    .limit(1)
+    .maybeSingle()
+
+  if (existing) return
+
+  await supabase.from('bookings').insert({
+    trip_id: tripId,
+    stage_id: stageId,
+    type: 'accommodation',
+    title: accommodation,
+    status: 'pending',
+    payment_status: 'unpaid',
+    currency: 'EUR',
+    start_datetime: startDate ? `${startDate}T00:00:00` : null,
+    end_datetime: endDate ? `${endDate}T00:00:00` : null,
+    notes: 'Automatisch aus dem Etappen-Unterkunftsfeld angelegt — bitte Details ergänzen.',
+  })
 }
 
 export async function createStage(formData: FormData) {
@@ -40,21 +84,28 @@ export async function createStage(formData: FormData) {
   const countryCode = suggestCountryCode(`${title} ${accommodation}`)
     ?? suggestCountryCode(`${trip?.title ?? ''} ${trip?.subtitle ?? ''}`)
 
-  const { error } = await supabase.from('stages').insert({
-    trip_id: tripId,
-    title,
-    location: title,
-    start_date: startDate || null,
-    end_date: endDate || null,
-    nights: computeNights(startDate, endDate),
-    accommodation: accommodation || null,
-    notes: notes || null,
-    sort_order: (last?.sort_order ?? -1) + 1,
-    country_code: countryCode,
-  })
+  const { data: created, error } = await supabase
+    .from('stages')
+    .insert({
+      trip_id: tripId,
+      title,
+      location: title,
+      start_date: startDate || null,
+      end_date: endDate || null,
+      nights: computeNights(startDate, endDate),
+      accommodation: accommodation || null,
+      notes: notes || null,
+      sort_order: (last?.sort_order ?? -1) + 1,
+      country_code: countryCode,
+    })
+    .select('id')
+    .single()
 
   if (error)
     redirect(`${newPath}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
+
+  if (accommodation)
+    await ensureAccommodationBooking(supabase, tripId, created.id, accommodation, startDate, endDate)
 
   redirect(`/trips/${slug}`)
 }
@@ -100,6 +151,9 @@ export async function updateStage(formData: FormData) {
 
   if (error)
     redirect(`${editPath}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
+
+  if (accommodation && stage)
+    await ensureAccommodationBooking(supabase, stage.trip_id, stageId, accommodation, startDate, endDate)
 
   redirect(`/trips/${slug}`)
 }
