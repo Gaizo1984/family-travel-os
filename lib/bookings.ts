@@ -88,7 +88,7 @@ export const BOOKING_TYPE_CONFIG: Record<BookingType, BookingTypeConfig> = {
   transfer: {
     value: 'transfer', label: 'Transfer', icon: Car,
     providerLabel: 'Anbieter', titleLabel: 'Titel / Bezeichnung', titlePlaceholder: 'z. B. Flughafentransfer',
-    showEnd: false, startLabel: 'Abholzeit', endLabel: '',
+    showEnd: true, startLabel: 'Abholung', endLabel: 'Ankunft',
     detailFields: [
       { key: 'from', label: 'Abholort', placeholder: 'z. B. Flughafen Dubai' },
       { key: 'to', label: 'Zielort', placeholder: 'z. B. Hotel' },

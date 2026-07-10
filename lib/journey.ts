@@ -1,5 +1,6 @@
 import type { BookingType, BookingStatus } from './supabase/types'
 import type { JourneyEventCategory, JourneyEventStatus } from './journey-events'
+import { BOOKING_TYPE_CONFIG } from './bookings'
 
 export type StageInput = {
   id: string
@@ -56,6 +57,32 @@ export type TimelineBooking = {
   end_datetime: string | null
 }
 
+/**
+ * Domänenregel "ein Buchungsdatensatz erzeugt mehrere datumsbezogene Ereignisse":
+ * Für Buchungstypen mit separatem End-Zeitpunkt (Mietwagen Abholung/Rückgabe,
+ * Bahn/Fähre Abfahrt/Ankunft, Transfer, Flug, ...) wird — sofern Start und Ende
+ * auf unterschiedliche Kalendertage fallen — neben dem Start-Eintrag ein zweiter,
+ * als solcher beschrifteter Eintrag am End-Datum in die Journey einsortiert.
+ * Dieselbe zugrunde liegende Buchung (gleiche id), kein zweiter Datensatz.
+ */
+function expandBookingOccurrences(bookings: TimelineBooking[]): Array<{ date: string; booking: TimelineBooking }> {
+  const occurrences: Array<{ date: string; booking: TimelineBooking }> = []
+  for (const b of bookings) {
+    const startDate = dateOnly(b.start_datetime)
+    if (startDate) occurrences.push({ date: startDate, booking: b })
+
+    const config = BOOKING_TYPE_CONFIG[b.type]
+    const endDate = dateOnly(b.end_datetime)
+    if (config?.showEnd && endDate && endDate !== startDate) {
+      occurrences.push({
+        date: endDate,
+        booking: { ...b, title: `${b.title} · ${config.endLabel}`, start_datetime: b.end_datetime },
+      })
+    }
+  }
+  return occurrences
+}
+
 export type TimelineEvent = {
   id: string
   date: string
@@ -104,12 +131,10 @@ export function buildJourneyTimeline(
   const allDates = eachDateInRange(rangeStart, rangeEnd)
 
   const bookingsByDate = new Map<string, TimelineBooking[]>()
-  for (const b of bookings) {
-    const d = dateOnly(b.start_datetime)
-    if (!d) continue
-    const list = bookingsByDate.get(d) ?? []
-    list.push(b)
-    bookingsByDate.set(d, list)
+  for (const { date, booking } of expandBookingOccurrences(bookings)) {
+    const list = bookingsByDate.get(date) ?? []
+    list.push(booking)
+    bookingsByDate.set(date, list)
   }
 
   const eventsByDate = new Map<string, TimelineEvent[]>()
@@ -181,12 +206,10 @@ export function buildStageDays(
   if (!stage.start_date || !stage.end_date) return []
 
   const bookingsByDate = new Map<string, TimelineBooking[]>()
-  for (const b of bookings) {
-    const d = dateOnly(b.start_datetime)
-    if (!d) continue
-    const list = bookingsByDate.get(d) ?? []
-    list.push(b)
-    bookingsByDate.set(d, list)
+  for (const { date, booking } of expandBookingOccurrences(bookings)) {
+    const list = bookingsByDate.get(date) ?? []
+    list.push(booking)
+    bookingsByDate.set(date, list)
   }
 
   const eventsByDate = new Map<string, TimelineEvent[]>()

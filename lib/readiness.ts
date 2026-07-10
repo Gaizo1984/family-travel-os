@@ -1,5 +1,7 @@
 import { createClient } from './supabase/server'
 import type { DocumentType } from './documents'
+import { detectFlightStopoverSuggestions } from './flight-stopovers'
+import { formatDateDE } from './demo-data'
 
 export type ReadinessSeverity = 'conflict' | 'hint'
 export type ReadinessTheme = 'documents' | 'entry' | 'insurance' | 'itinerary' | 'bookings'
@@ -228,6 +230,16 @@ export async function computeTripReadiness(tripId: string): Promise<ReadinessRes
         })
       }
     }
+  }
+
+  // ── Zwischenstopps mit nötiger Übernachtung, für die noch keine Etappe existiert ──
+  const stopoverSuggestions = await detectFlightStopoverSuggestions(tripId)
+  for (const s of stopoverSuggestions) {
+    findings.push({
+      severity: 'hint', theme: 'itinerary',
+      message: `Zwischenstopp mit Übernachtung erkannt: ${s.location}, ${formatDateDE(s.startDate)}–${formatDateDE(s.endDate)}. Als Etappe hinzufügen?`,
+      href: `/trips/${slug}/stages/confirm-stopover?location=${encodeURIComponent(s.location)}&start=${s.startDate}&end=${s.endDate}`,
+    })
   }
 
   const conflictCount = findings.filter((f) => f.severity === 'conflict').length
