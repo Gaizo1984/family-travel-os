@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { X } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { sortForBoardingPassViewer } from "@/lib/boarding-passes";
+import { OfflineDocumentViewer } from "@/components/OfflineDocumentViewer";
 
 export default async function BoardingPassViewerPage({
   params,
@@ -22,12 +23,13 @@ export default async function BoardingPassViewerPage({
 
   const { data: booking } = await supabase
     .from("bookings")
-    .select("id, title, type")
+    .select("id, title, type, start_datetime, end_datetime")
     .eq("id", bookingId)
     .eq("trip_id", trip.id)
     .maybeSingle();
 
   if (!booking || booking.type !== "flight") notFound();
+  const referenceDateIso = booking.end_datetime ?? booking.start_datetime ?? new Date().toISOString();
 
   const { data: docsRaw } = await supabase
     .from("documents")
@@ -83,24 +85,15 @@ export default async function BoardingPassViewerPage({
             {index + 1} von {withUrl.length} · {pass.name}
           </div>
 
-          {pass.url ? (
-            pass.isPdf ? (
-              <iframe
-                src={pass.url}
-                title={`Boardingpass ${pass.name}`}
-                style={{ width: "100%", maxWidth: "560px", height: "70vh", border: "none", borderRadius: "12px", background: "#fff" }}
-              />
-            ) : (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={pass.url}
-                alt={`Boardingpass ${pass.name}`}
-                style={{ maxWidth: "100%", maxHeight: "80vh", borderRadius: "12px", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }}
-              />
-            )
-          ) : (
-            <p style={{ color: "rgba(255,255,255,0.6)", fontSize: "0.82rem" }}>Datei konnte nicht geladen werden.</p>
-          )}
+          <OfflineDocumentViewer
+            documentId={pass.id}
+            sourceUrl={pass.url}
+            fileName={`boardingpass-${pass.name}${pass.isPdf ? ".pdf" : ""}`}
+            mimeType={pass.isPdf ? "application/pdf" : "image/jpeg"}
+            isPdf={pass.isPdf}
+            referenceDateIso={referenceDateIso}
+            altText={`Boardingpass ${pass.name}`}
+          />
         </section>
       ))}
     </div>

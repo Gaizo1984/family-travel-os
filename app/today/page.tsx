@@ -1,5 +1,41 @@
 import Link from "next/link";
-import { Sun, Car, Clock, CloudRain, ArrowRight, MapPin, Compass } from "lucide-react";
+import { Sun, Car, Clock, CloudRain, ArrowRight, MapPin, Compass, Ticket } from "lucide-react";
+import { createClient } from "@/lib/supabase/server";
+
+type FlightWithPasses = { id: string; title: string; slug: string };
+
+/**
+ * §7.2: prominenter Schnellzugriff auf Boardingpässe am Flugtag, ohne Umweg über
+ * Reise → Flüge → Flugdetail. Nur relevant, wenn heute wirklich ein Abflug- oder
+ * Ankunftstag ist UND für diesen Flug bereits mindestens ein Boardingpass
+ * hochgeladen wurde — sonst bliebe der Zugriff leer/irreführend.
+ */
+async function findTodaysFlightWithBoardingPasses(): Promise<FlightWithPasses | null> {
+  const supabase = await createClient();
+  const todayIso = new Date().toISOString().slice(0, 10);
+
+  const { data: flights } = await supabase
+    .from("bookings")
+    .select("id, title, start_datetime, end_datetime, trips ( slug )")
+    .eq("type", "flight")
+    .neq("status", "cancelled");
+
+  const todaysFlights = (flights ?? [])
+    .filter((f) => f.start_datetime?.slice(0, 10) === todayIso || f.end_datetime?.slice(0, 10) === todayIso)
+    .map((f) => ({ id: f.id, title: f.title, slug: (f.trips as unknown as { slug: string } | null)?.slug ?? null }))
+    .filter((f): f is FlightWithPasses => f.slug !== null);
+
+  if (todaysFlights.length === 0) return null;
+
+  const { data: passDocs } = await supabase
+    .from("documents")
+    .select("booking_id")
+    .eq("doc_type", "boarding_pass")
+    .in("booking_id", todaysFlights.map((f) => f.id));
+
+  const bookingIdsWithPasses = new Set((passDocs ?? []).map((d) => d.booking_id));
+  return todaysFlights.find((f) => bookingIdsWithPasses.has(f.id)) ?? null;
+}
 
 // ── Verified Unsplash photos ──────────────────────────────────────────────────
 
@@ -383,9 +419,25 @@ function TimelineItem({ item }: { item: (typeof TIMELINE)[0] }) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-export default function TodayPage() {
+export default async function TodayPage() {
+  const flightToday = await findTodaysFlightWithBoardingPasses();
+
   return (
     <div className="flex-1 flex flex-col" style={{ background: "var(--background)" }}>
+
+      {flightToday && (
+        <Link
+          href={`/trips/${flightToday.slug}/bookings/${flightToday.id}/boarding-passes`}
+          className="flex items-center gap-3 px-5 md:px-8 py-3"
+          style={{ background: "var(--accent)", color: "var(--surface)", textDecoration: "none" }}
+        >
+          <Ticket size={15} strokeWidth={1.6} style={{ flexShrink: 0 }} />
+          <span className="flex-1 min-w-0 truncate" style={{ fontSize: "0.8rem", letterSpacing: "0.02em" }}>
+            Heute ist Flugtag · {flightToday.title} — Boardingpässe öffnen
+          </span>
+          <ArrowRight size={14} strokeWidth={1.6} style={{ flexShrink: 0 }} />
+        </Link>
+      )}
 
       {/* ── 1. Cinematic Hero ── */}
       <div className="relative" style={{ height: "420px", flexShrink: 0 }}>
