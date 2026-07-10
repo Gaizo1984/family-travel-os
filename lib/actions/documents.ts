@@ -290,6 +290,107 @@ export async function uploadBookingDocument(formData: FormData) {
   redirect(detailPath)
 }
 
+/**
+ * §7.1: Boardingpass einer Person zu einem Flug. Anders als generische
+ * Buchungsunterlagen (person_id leer) ist hier person_id zwingend gesetzt —
+ * ein Boardingpass gehört immer einem konkreten Familienmitglied.
+ */
+export async function uploadBoardingPass(formData: FormData) {
+  const tripId    = String(formData.get('trip_id') ?? '')
+  const bookingId = String(formData.get('booking_id') ?? '')
+  const slug      = String(formData.get('slug') ?? '')
+  const personId  = String(formData.get('person_id') ?? '')
+  const detailPath = `/trips/${slug}/bookings/${bookingId}`
+
+  if (!personId)
+    redirect(`${detailPath}?error=${encodeURIComponent('Bitte eine Person auswählen')}`)
+
+  const { error: fileError, file } = validateFile(formData.get('file'), true)
+  if (fileError)
+    redirect(`${detailPath}?error=${encodeURIComponent(fileError)}`)
+  if (!file)
+    redirect(`${detailPath}?error=${encodeURIComponent('Datei fehlt')}`)
+
+  const supabase = await createClient()
+  const { data: person } = await supabase.from('persons').select('name').eq('id', personId).maybeSingle()
+
+  const storagePath = buildStoragePath(personId, file.name)
+  const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
+    contentType: file.type,
+  })
+  if (uploadError)
+    redirect(`${detailPath}?error=${encodeURIComponent('Upload fehlgeschlagen: ' + uploadError.message)}`)
+
+  const { error: insertError } = await supabase.from('documents').insert({
+    trip_id: tripId,
+    booking_id: bookingId,
+    person_id: personId,
+    doc_type: 'boarding_pass',
+    label: person?.name ? `Boardingpass ${person.name}` : 'Boardingpass',
+    details: { source: 'manual' },
+    storage_provider: 'supabase_storage',
+    storage_bucket: 'documents',
+    storage_path: storagePath,
+  })
+
+  if (insertError) {
+    await supabase.storage.from('documents').remove([storagePath])
+    redirect(`${detailPath}?error=${encodeURIComponent('Speicherfehler: ' + insertError.message)}`)
+  }
+
+  redirect(detailPath)
+}
+
+/** §7.1: Gepäckbeleg — Zuordnung zu Person + optional Gepäckstück-Bezeichnung, separat von Boardingpässen. */
+export async function uploadBaggageTag(formData: FormData) {
+  const tripId    = String(formData.get('trip_id') ?? '')
+  const bookingId = String(formData.get('booking_id') ?? '')
+  const slug      = String(formData.get('slug') ?? '')
+  const personId  = String(formData.get('person_id') ?? '')
+  const bagLabel  = String(formData.get('bag_label') ?? '').trim()
+  const detailPath = `/trips/${slug}/bookings/${bookingId}`
+
+  if (!personId)
+    redirect(`${detailPath}?error=${encodeURIComponent('Bitte eine Person auswählen')}`)
+
+  const { error: fileError, file } = validateFile(formData.get('file'), true)
+  if (fileError)
+    redirect(`${detailPath}?error=${encodeURIComponent(fileError)}`)
+  if (!file)
+    redirect(`${detailPath}?error=${encodeURIComponent('Datei fehlt')}`)
+
+  const supabase = await createClient()
+  const { data: person } = await supabase.from('persons').select('name').eq('id', personId).maybeSingle()
+
+  const storagePath = buildStoragePath(personId, file.name)
+  const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
+    contentType: file.type,
+  })
+  if (uploadError)
+    redirect(`${detailPath}?error=${encodeURIComponent('Upload fehlgeschlagen: ' + uploadError.message)}`)
+
+  const label = bagLabel || (person?.name ? `Gepäckbeleg ${person.name}` : 'Gepäckbeleg')
+
+  const { error: insertError } = await supabase.from('documents').insert({
+    trip_id: tripId,
+    booking_id: bookingId,
+    person_id: personId,
+    doc_type: 'baggage_tag',
+    label,
+    details: { source: 'manual' },
+    storage_provider: 'supabase_storage',
+    storage_bucket: 'documents',
+    storage_path: storagePath,
+  })
+
+  if (insertError) {
+    await supabase.storage.from('documents').remove([storagePath])
+    redirect(`${detailPath}?error=${encodeURIComponent('Speicherfehler: ' + insertError.message)}`)
+  }
+
+  redirect(detailPath)
+}
+
 export async function deleteBookingDocument(formData: FormData) {
   const documentId  = String(formData.get('document_id') ?? '')
   const storagePath = String(formData.get('storage_path') ?? '')

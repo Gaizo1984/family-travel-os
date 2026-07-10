@@ -1,8 +1,8 @@
 import type { LucideIcon } from 'lucide-react'
-import { BadgeCheck, IdCard, FileCheck, Stamp, Globe2, Shield, Receipt, FileText } from 'lucide-react'
+import { BadgeCheck, IdCard, FileCheck, Stamp, Globe2, Shield, Receipt, FileText, Ticket, Luggage } from 'lucide-react'
 import { formatDateDE } from './demo-data'
 
-export type DocumentType = 'passport' | 'id_card' | 'visa' | 'esta' | 'eta' | 'entry_permit' | 'insurance' | 'booking_document' | 'other'
+export type DocumentType = 'passport' | 'id_card' | 'visa' | 'esta' | 'eta' | 'entry_permit' | 'insurance' | 'booking_document' | 'boarding_pass' | 'baggage_tag' | 'other'
 
 export type DocumentTypeConfig = {
   value: DocumentType
@@ -47,6 +47,14 @@ export const DOCUMENT_TYPE_CONFIG: Record<DocumentType, DocumentTypeConfig> = {
   },
   booking_document: {
     value: 'booking_document', label: 'Buchungsunterlage', icon: Receipt, numberLabel: 'Referenznummer',
+    isIdentityType: false, isEntryDocumentType: false,
+  },
+  boarding_pass: {
+    value: 'boarding_pass', label: 'Boardingpass', icon: Ticket, numberLabel: 'Sitzplatznummer',
+    isIdentityType: false, isEntryDocumentType: false,
+  },
+  baggage_tag: {
+    value: 'baggage_tag', label: 'Gepäckbeleg', icon: Luggage, numberLabel: 'Gepäcknummer',
     isIdentityType: false, isEntryDocumentType: false,
   },
   other: {
