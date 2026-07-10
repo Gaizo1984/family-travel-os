@@ -11,6 +11,8 @@ export type StageInput = {
   nights: number | null
   accommodation: string | null
   sort_order: number
+  /** Optional, da nicht jede Aufrufstelle die Spalte selektiert (z. B. Etappen-Unterseiten ohne Bildauswahl). */
+  country_code?: string | null
 }
 
 /** Gleiche Sortierlogik wie bisher inline auf der Trip-Detailseite — hier zentral, damit Journey und Trip-Seite dieselbe Reihenfolge verwenden. */
@@ -55,6 +57,8 @@ export type TimelineBooking = {
   status: BookingStatus
   start_datetime: string | null
   end_datetime: string | null
+  /** Optional, da nicht jede Aufrufstelle die Spalte selektiert. */
+  details?: Record<string, string> | null
 }
 
 /**

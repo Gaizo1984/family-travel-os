@@ -14,6 +14,7 @@ import type { JourneyEventCategory, JourneyEventStatus } from "@/lib/journey-eve
 import { computeTripReadiness } from "@/lib/readiness";
 import type { ReadinessFinding, ReadinessSeverity } from "@/lib/readiness";
 import { isTripHistorical, isTripCurrentlyRunning } from "@/lib/trip-status";
+import { COUNTRY_STAGE_IMAGES, FALLBACK_STAGE_IMAGE } from "@/lib/stage-images";
 
 const H_FG    = "#F0EBE3";
 const H_MUTED = "#A89880";
@@ -29,19 +30,6 @@ const TRIP_IMAGES: Record<string, string> = {
   "sardinien-2024":
     "https://images.unsplash.com/photo-1780581800373-4fd4961743cd?auto=format&fit=crop&w=1920&q=80",
 };
-
-// Etappen-Bilder werden über das echte Länderkürzel der Etappe (stages.country_code,
-// siehe lib/geo-suggestions.ts) ausgewählt — NICHT mehr über die Listenposition der
-// Etappe. Die alte Index-basierte Zuordnung (STAGE_IMAGES[idx % length]) war die
-// Ursache dafür, dass z. B. "Atlanta" ein zufälliges, thematisch unpassendes Bild
-// (u. a. Dubai-artig wirkend) zeigte, obwohl die Etappe gar nichts mit Dubai zu tun hat.
-const COUNTRY_STAGE_IMAGES: Record<string, string> = {
-  CR: "https://images.unsplash.com/photo-1581129724980-2ab2153c3d8d?auto=format&fit=crop&w=800&q=80", // Costa Rica
-  ID: "https://images.unsplash.com/photo-1537996194471-e657df975ab4?auto=format&fit=crop&w=800&q=80", // Indonesien/Bali
-  AE: "https://images.unsplash.com/photo-1539367628448-4bc5c9d171c8?auto=format&fit=crop&w=800&q=80", // Dubai/VAE
-  IT: "https://images.unsplash.com/photo-1780581800373-4fd4961743cd?auto=format&fit=crop&w=800&q=80", // Sardinien/Italien
-};
-const FALLBACK_STAGE_IMAGE = "https://images.unsplash.com/photo-1512453979798-5ea266f8880c?auto=format&fit=crop&w=800&q=80";
 
 type PersonRow = { id: string; name: string; initials: string; color: string }
 
