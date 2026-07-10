@@ -38,7 +38,7 @@ export function BookingRowItem({
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-medium truncate" style={{ color: "var(--foreground)" }}>{booking.title}</span>
+          <span className="text-sm font-medium" style={{ color: "var(--foreground)" }}>{booking.title}</span>
           {stageTitle && (
             <span style={{ color: "var(--accent)", fontSize: "0.6rem", letterSpacing: "0.06em", background: "var(--accent-subtle)", padding: "1px 8px", borderRadius: "10px" }}>
               {stageTitle}
@@ -55,7 +55,7 @@ export function BookingRowItem({
         </div>
         {booking.amount !== null && (
           <div className="text-sm mt-0.5" style={{ color: "var(--foreground)" }}>
-            {booking.amount.toFixed(2)} {booking.currency}
+            {booking.amount.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {booking.currency}
           </div>
         )}
       </div>
