@@ -24,6 +24,7 @@ export async function createTrip(formData: FormData) {
     ? (statusRaw as 'planned' | 'active' | 'completed')
     : 'planned'
   const memberIds = formData.getAll('members').map(String)
+  const sourceTripIdeaId = String(formData.get('source_trip_idea_id') ?? '').trim()
 
   // Beide Einstiege ("Reise selbst anlegen" unter /trips/new und der bestehende
   // Formular-Teil von /plan) posten hierher — Redirect-Ziel bei Fehlern richtet
@@ -79,6 +80,15 @@ export async function createTrip(formData: FormData) {
   await supabase.from('trip_members').insert(
     memberIds.map(person_id => ({ trip_id: trip.id, person_id }))
   )
+
+  // Reiseidee → echte Reise: nur Nachverfolgung (converted_trip_id), keine
+  // Doppelanlage und keine Änderung an der neu angelegten Reise selbst.
+  if (sourceTripIdeaId) {
+    const { data: idea } = await supabase.from('trip_ideas').select('session_id').eq('id', sourceTripIdeaId).maybeSingle()
+    await supabase.from('trip_ideas').update({ converted_trip_id: trip.id, is_chosen: true }).eq('id', sourceTripIdeaId)
+    if (idea?.session_id)
+      await supabase.from('trip_idea_sessions').update({ status: 'converted' }).eq('id', idea.session_id)
+  }
 
   redirect(`/trips/${trip.slug}`)
 }

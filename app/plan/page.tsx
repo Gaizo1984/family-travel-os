@@ -2,6 +2,8 @@ import Link from "next/link";
 import { ArrowRight, Users, Clock, CalendarDays, Plane } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { createTrip } from "@/lib/actions/trips";
+import { generateTripIdeas } from "@/lib/actions/trip-idea-generation";
+import { COMPASS_CATEGORY_LABELS } from "@/lib/family-dna";
 
 // ── Verified Unsplash photos ──────────────────────────────────────────────────
 
@@ -15,12 +17,6 @@ const INSPO_PHOTOS = {
   hotel:  P("photo-1561501900-3701fa6a0864"),       // infinity pool architecture
   travel: P("photo-1594937113195-27f8b9046013"),   // airplane window, clouds
   free:   P("photo-1762236097035-97d69c6e89f8"),   // woman on road, mountains
-};
-
-const DEST_PHOTOS = {
-  oman:       P("photo-1682197291565-2231d4b4f616"), // mountain range, lake
-  srilanka:   P("photo-1775479788389-76251f360d9d"), // tea plantations, hills
-  seychellen: P("photo-1553829176-61484f865ac3"),    // granite boulders, turquoise
 };
 
 // ── Light-on-dark constants ───────────────────────────────────────────────────
@@ -61,62 +57,6 @@ const INSPIRATIONS = [
     tags:  "Wenig Planung · schnell weg",
     photo: INSPO_PHOTOS.free,
   },
-];
-
-const DESTINATIONS = [
-  {
-    id:        "oman",
-    name:      "Oman",
-    tags:      "Wüste · Berge · Meer",
-    desc:      "Große Landschaften, außergewöhnliche Hotels und wenig Zeitverschiebung.",
-    hints:     [
-      "Sehr gut als Familie",
-      "Wenige Ortswechsel nötig",
-      "Kurze Reisezeiten vor Ort",
-    ],
-    photo:     DEST_PHOTOS.oman,
-    href:      "/plan/oman",
-    recommended: true,
-    reason:
-      "Oman passt besonders gut zu euch, weil die Reise außergewöhnliche Hotels, große Landschaften und ein ruhiges Reisetempo verbindet – ohne dass Lumi zu viele lange Transfers mitmachen muss.",
-  },
-  {
-    id:       "srilanka",
-    name:     "Sri Lanka",
-    tags:     "Natur · Tiere · Kultur · Strand",
-    desc:     "Mehr Abwechslung und Abenteuer – mit einer bewusst ruhigen Route.",
-    hints:    [
-      "Besonders für Lia und Elias",
-      "Route muss mit Lumi gut geplant werden",
-      "3 Stationen ideal",
-    ],
-    photo:    DEST_PHOTOS.srilanka,
-    recommended: false,
-    reason:   null,
-  },
-  {
-    id:       "seychellen",
-    name:     "Seychellen",
-    tags:     "Inseln · Natur · Meer",
-    desc:     "Weniger Programm. Mehr gemeinsames Erleben.",
-    hints:    [
-      "Sehr entspanntes Tempo",
-      "Außergewöhnliche Natur",
-      "Wenig Organisationsaufwand",
-    ],
-    photo:    DEST_PHOTOS.seychellen,
-    recommended: false,
-    reason:   null,
-  },
-];
-
-const FAMILY_PREFS = [
-  "Außergewöhnliche Hotels",
-  "Genug Zeit an jedem Ort",
-  "Natur und besondere Landschaften",
-  "Erlebnisse für Lia und Elias",
-  "Ein Rhythmus, der mit Lumi funktioniert",
-  "Keine überladene Rundreise",
 ];
 
 // ── Components ────────────────────────────────────────────────────────────────
@@ -179,164 +119,33 @@ function InspirationCard({ title, tags, photo }: (typeof INSPIRATIONS)[0]) {
   );
 }
 
-function DestinationCard({ dest }: { dest: (typeof DESTINATIONS)[0] }) {
-  return (
-    <div
-      className="rounded-xl overflow-hidden flex flex-col"
-      style={{
-        border: dest.recommended
-          ? "1px solid var(--accent)"
-          : "1px solid var(--border)",
-        background: "var(--surface)",
-      }}
-    >
-      {/* Photo */}
-      <div className="relative" style={{ height: "170px", flexShrink: 0 }}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={dest.photo}
-          alt={dest.name}
-          className="w-full h-full object-cover"
-        />
-        <div
-          className="absolute inset-0"
-          style={{
-            background:
-              "linear-gradient(to top, rgba(10,9,7,0.85) 0%, rgba(10,9,7,0.18) 60%, transparent 100%)",
-          }}
-        />
-        {/* Name + recommended badge */}
-        <div className="absolute inset-x-0 bottom-0 px-5 pb-4 flex items-end justify-between gap-3">
-          <div>
-            <div
-              style={{
-                color: H_MUTED,
-                fontSize: "0.55rem",
-                letterSpacing: "0.16em",
-                textTransform: "uppercase",
-                marginBottom: "4px",
-              }}
-            >
-              {dest.tags}
-            </div>
-            <div
-              className="text-xl font-light"
-              style={{ color: H_FG, letterSpacing: "0.01em" }}
-            >
-              {dest.name}
-            </div>
-          </div>
-          {dest.recommended && (
-            <span
-              style={{
-                flexShrink: 0,
-                fontSize: "0.52rem",
-                letterSpacing: "0.14em",
-                textTransform: "uppercase",
-                color: "var(--accent)",
-                background: "rgba(10,9,7,0.6)",
-                border: "1px solid rgba(184,154,94,0.4)",
-                padding: "3px 9px",
-                borderRadius: "20px",
-                backdropFilter: "blur(4px)",
-              }}
-            >
-              Passt besonders gut
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Text content */}
-      <div className="p-5 flex flex-col flex-1">
-        <p
-          className="leading-relaxed mb-4"
-          style={{ color: "var(--muted)", fontSize: "0.78rem" }}
-        >
-          {dest.desc}
-        </p>
-
-        {/* Hints */}
-        <div className="space-y-2 mb-4">
-          {dest.hints.map((hint) => (
-            <div key={hint} className="flex items-start gap-2.5">
-              <div
-                style={{
-                  width: "3px",
-                  height: "3px",
-                  borderRadius: "50%",
-                  background: "var(--accent)",
-                  flexShrink: 0,
-                  marginTop: "7px",
-                }}
-              />
-              <span style={{ color: "var(--muted)", fontSize: "0.72rem" }}>
-                {hint}
-              </span>
-            </div>
-          ))}
-        </div>
-
-        {/* Recommendation explanation + link */}
-        {dest.recommended && dest.reason && (
-          <div
-            className="mt-auto pt-4"
-            style={{ borderTop: "1px solid var(--border)" }}
-          >
-            <div
-              style={{
-                color: "var(--accent)",
-                fontSize: "0.55rem",
-                letterSpacing: "0.18em",
-                textTransform: "uppercase",
-                marginBottom: "6px",
-              }}
-            >
-              Warum Oman zu euch passt
-            </div>
-            <p
-              className="leading-relaxed mb-4"
-              style={{ color: "var(--foreground)", fontSize: "0.75rem", fontStyle: "italic" }}
-            >
-              {dest.reason}
-            </p>
-            {"href" in dest && dest.href && (
-              <Link
-                href={dest.href as string}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "5px",
-                  color: "var(--accent)",
-                  fontSize: "0.62rem",
-                  letterSpacing: "0.1em",
-                  textDecoration: "none",
-                }}
-              >
-                Routenoptionen ansehen →
-              </Link>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default async function PlanPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; from_idea?: string }>;
 }) {
-  const { error } = await searchParams;
+  const { error, from_idea } = await searchParams;
 
   const supabase = await createClient();
   const { data: persons } = await supabase
     .from("persons")
     .select("id, name, initials, color")
     .order("name");
+
+  const { data: family } = await supabase.from("families").select("id").limit(1).single();
+  const { data: preferences } = await supabase
+    .from("family_preference_categories")
+    .select("category_key, weight, note")
+    .eq("family_id", family?.id ?? "")
+    .order("weight", { ascending: false });
+
+  let fromIdea: { destination: string; route_summary: string | null } | null = null;
+  if (from_idea) {
+    const { data: idea } = await supabase.from("trip_ideas").select("destination, route_summary").eq("id", from_idea).maybeSingle();
+    fromIdea = idea ?? null;
+  }
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -373,66 +182,125 @@ export default async function PlanPage({
           </p>
         </div>
 
-        {/* ── 2. Textarea ── */}
+        {/* ── 2. Freitext + optionale Eckdaten → echter KI-Flow ── */}
         <section className="mb-16">
-          <div
-            className="rounded-xl"
-            style={{
-              background: "var(--surface)",
-              border: "1px solid var(--border)",
-              overflow: "hidden",
-            }}
-          >
-            <textarea
-              placeholder="Zum Beispiel: Wir möchten im Oktober etwa zwei Wochen weg. Warm, außergewöhnlich und mit genug Zeit zum Genießen. Die Kinder sollen etwas erleben, aber wir möchten keinen stressigen Rundreise-Marathon."
-              rows={7}
-              style={{
-                width: "100%",
-                padding: "28px 32px",
-                background: "transparent",
-                border: "none",
-                outline: "none",
-                resize: "none",
-                color: "var(--foreground)",
-                fontSize: "0.92rem",
-                lineHeight: 1.8,
-                fontWeight: 300,
-                letterSpacing: "0.01em",
-              }}
-            />
+          <form action={generateTripIdeas}>
             <div
-              className="flex items-center justify-between px-6 pb-5 pt-1"
-              style={{ borderTop: "1px solid var(--border)" }}
+              className="rounded-xl mb-4"
+              style={{ background: "var(--surface)", border: "1px solid var(--border)", overflow: "hidden" }}
             >
-              <p
+              {error && (
+                <div
+                  className="mx-6 mt-6 px-4 py-3 rounded-lg"
+                  style={{ background: "rgba(181,98,74,0.12)", border: "1px solid rgba(181,98,74,0.3)", color: "#B5624A", fontSize: "0.75rem", letterSpacing: "0.02em" }}
+                >
+                  {error}
+                </div>
+              )}
+              <textarea
+                name="wish_text"
+                required
+                placeholder="Zum Beispiel: Wir möchten im Oktober etwa zwei Wochen weg. Warm, außergewöhnlich und mit genug Zeit zum Genießen. Die Kinder sollen etwas erleben, aber wir möchten keinen stressigen Rundreise-Marathon."
+                rows={7}
                 style={{
-                  color: "var(--muted)",
-                  fontSize: "0.68rem",
-                  fontStyle: "italic",
-                  letterSpacing: "0.02em",
+                  width: "100%", padding: "28px 32px", background: "transparent", border: "none",
+                  outline: "none", resize: "none", color: "var(--foreground)", fontSize: "0.92rem",
+                  lineHeight: 1.8, fontWeight: 300, letterSpacing: "0.01em",
                 }}
-              >
-                Schreibt einfach so, wie ihr es mir erzählen würdet.
-              </p>
-              <button
-                style={{
-                  background: "var(--foreground)",
-                  color: "var(--surface)",
-                  border: "none",
-                  borderRadius: "6px",
-                  padding: "10px 22px",
-                  fontSize: "0.65rem",
-                  letterSpacing: "0.16em",
-                  textTransform: "uppercase",
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                  flexShrink: 0,
-                }}
-              >
-                Reiseidee entwickeln
-              </button>
+              />
+              <div className="flex items-center justify-between px-6 pb-5 pt-1" style={{ borderTop: "1px solid var(--border)" }}>
+                <p style={{ color: "var(--muted)", fontSize: "0.68rem", fontStyle: "italic", letterSpacing: "0.02em" }}>
+                  Schreibt einfach so, wie ihr es mir erzählen würdet.
+                </p>
+                <button
+                  type="submit"
+                  style={{
+                    background: "var(--foreground)", color: "var(--surface)", border: "none", borderRadius: "6px",
+                    padding: "10px 22px", fontSize: "0.65rem", letterSpacing: "0.16em", textTransform: "uppercase",
+                    cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0, WebkitAppearance: "none", appearance: "none",
+                  }}
+                >
+                  Reiseidee entwickeln
+                </button>
+              </div>
             </div>
-          </div>
+
+            <SectionLabel>Was wisst ihr schon? (optional)</SectionLabel>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+              <div className="p-4 rounded-xl" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+                <div className="flex items-center gap-2 mb-3">
+                  <CalendarDays size={10} strokeWidth={1.5} style={{ color: "var(--accent)" }} />
+                  <span style={{ color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.16em", textTransform: "uppercase" }}>Wann</span>
+                </div>
+                <input
+                  name="rough_timeframe" type="text" placeholder="z. B. Oktober 2028"
+                  style={{ width: "100%", background: "transparent", border: "none", outline: "none", color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 300 }}
+                />
+              </div>
+
+              <div className="p-4 rounded-xl" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+                <div className="flex items-center gap-2 mb-3">
+                  <Clock size={10} strokeWidth={1.5} style={{ color: "var(--accent)" }} />
+                  <span style={{ color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.16em", textTransform: "uppercase" }}>Wie lange</span>
+                </div>
+                <input
+                  name="duration_days" type="number" min="1" placeholder="z. B. 14 Tage"
+                  style={{ width: "100%", background: "transparent", border: "none", outline: "none", color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 300 }}
+                />
+              </div>
+
+              <div className="p-4 rounded-xl" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+                <div className="flex items-center gap-2 mb-3">
+                  <Users size={10} strokeWidth={1.5} style={{ color: "var(--accent)" }} />
+                  <span style={{ color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.16em", textTransform: "uppercase" }}>Wer reist mit</span>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  {(persons ?? []).map((p) => (
+                    <label key={p.id} style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
+                      <input type="checkbox" name="traveler_ids" value={p.id} defaultChecked style={{ accentColor: "var(--accent)", width: "12px", height: "12px", cursor: "pointer" }} />
+                      <span style={{ color: "var(--foreground)", fontSize: "0.78rem", fontWeight: 300 }}>{p.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+                <div className="flex items-center gap-2 mb-3">
+                  <Plane size={10} strokeWidth={1.5} style={{ color: "var(--accent)" }} />
+                  <span style={{ color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.16em", textTransform: "uppercase" }}>Abflug</span>
+                </div>
+                <input
+                  name="departure_city" type="text" placeholder="z. B. Frankfurt"
+                  style={{ width: "100%", background: "transparent", border: "none", outline: "none", color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 300 }}
+                />
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+              <div style={{ color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: "10px" }}>
+                Budget (optional)
+              </div>
+              <div className="flex items-center gap-3 flex-wrap">
+                <input
+                  name="budget_amount" type="number" min="0" step="100" placeholder="Gesamtbudget"
+                  style={{ width: 140, padding: "8px 12px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: "6px", color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 300, outline: "none" }}
+                />
+                <select
+                  name="budget_currency" defaultValue="EUR"
+                  style={{ padding: "8px 12px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: "6px", color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 300, outline: "none" }}
+                >
+                  <option value="EUR">EUR</option>
+                  <option value="USD">USD</option>
+                  <option value="CHF">CHF</option>
+                  <option value="GBP">GBP</option>
+                </select>
+                <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
+                  <input type="checkbox" name="includes_flights" style={{ accentColor: "var(--accent)", width: "12px", height: "12px", cursor: "pointer" }} />
+                  <span style={{ color: "var(--muted)", fontSize: "0.78rem" }}>inkl. Flüge</span>
+                </label>
+              </div>
+            </div>
+          </form>
         </section>
 
         {/* ── 3. Inspiration Cards ── */}
@@ -442,187 +310,6 @@ export default async function PlanPage({
             {INSPIRATIONS.map((inspo) => (
               <InspirationCard key={inspo.title} {...inspo} />
             ))}
-          </div>
-        </section>
-
-        {/* ── 4. Was steht schon fest? ── */}
-        <section className="mb-16">
-          <SectionLabel>Was wisst ihr schon?</SectionLabel>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-
-            {/* Wann */}
-            <div
-              className="p-4 rounded-xl"
-              style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
-            >
-              <div className="flex items-center gap-2 mb-3">
-                <CalendarDays
-                  size={10}
-                  strokeWidth={1.5}
-                  style={{ color: "var(--accent)" }}
-                />
-                <span
-                  style={{
-                    color: "var(--muted)",
-                    fontSize: "0.55rem",
-                    letterSpacing: "0.16em",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  Wann
-                </span>
-              </div>
-              <div
-                className="font-light mb-3"
-                style={{ color: "var(--foreground)", fontSize: "0.85rem" }}
-              >
-                Oktober 2028
-              </div>
-              <div
-                style={{
-                  color: "var(--accent)",
-                  fontSize: "0.55rem",
-                  letterSpacing: "0.1em",
-                  cursor: "pointer",
-                }}
-              >
-                ändern
-              </div>
-            </div>
-
-            {/* Wie lange */}
-            <div
-              className="p-4 rounded-xl"
-              style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
-            >
-              <div className="flex items-center gap-2 mb-3">
-                <Clock
-                  size={10}
-                  strokeWidth={1.5}
-                  style={{ color: "var(--accent)" }}
-                />
-                <span
-                  style={{
-                    color: "var(--muted)",
-                    fontSize: "0.55rem",
-                    letterSpacing: "0.16em",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  Wie lange
-                </span>
-              </div>
-              <div
-                className="font-light mb-3"
-                style={{ color: "var(--foreground)", fontSize: "0.85rem" }}
-              >
-                Etwa 14 Tage
-              </div>
-              <div
-                style={{
-                  color: "var(--accent)",
-                  fontSize: "0.55rem",
-                  letterSpacing: "0.1em",
-                  cursor: "pointer",
-                }}
-              >
-                ändern
-              </div>
-            </div>
-
-            {/* Wer reist mit */}
-            <div
-              className="p-4 rounded-xl"
-              style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
-            >
-              <div className="flex items-center gap-2 mb-3">
-                <Users
-                  size={10}
-                  strokeWidth={1.5}
-                  style={{ color: "var(--accent)" }}
-                />
-                <span
-                  style={{
-                    color: "var(--muted)",
-                    fontSize: "0.55rem",
-                    letterSpacing: "0.16em",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  Wer reist mit
-                </span>
-              </div>
-              <div
-                className="leading-relaxed mb-3"
-                style={{ color: "var(--foreground)", fontSize: "0.78rem", fontWeight: 300 }}
-              >
-                Sarah · Marcel
-                <br />
-                Lia · Elias
-                <br />
-                <span>Lumi </span>
-                <span
-                  style={{
-                    color: "var(--accent)",
-                    fontSize: "0.62rem",
-                    letterSpacing: "0.06em",
-                  }}
-                >
-                  · 2 J.
-                </span>
-              </div>
-              <div
-                style={{
-                  color: "var(--accent)",
-                  fontSize: "0.55rem",
-                  letterSpacing: "0.1em",
-                  cursor: "pointer",
-                }}
-              >
-                ändern
-              </div>
-            </div>
-
-            {/* Abflug */}
-            <div
-              className="p-4 rounded-xl"
-              style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
-            >
-              <div className="flex items-center gap-2 mb-3">
-                <Plane
-                  size={10}
-                  strokeWidth={1.5}
-                  style={{ color: "var(--accent)" }}
-                />
-                <span
-                  style={{
-                    color: "var(--muted)",
-                    fontSize: "0.55rem",
-                    letterSpacing: "0.16em",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  Abflug
-                </span>
-              </div>
-              <div
-                className="font-light mb-3"
-                style={{ color: "var(--foreground)", fontSize: "0.85rem" }}
-              >
-                Frankfurt
-              </div>
-              <div
-                style={{
-                  color: "var(--accent)",
-                  fontSize: "0.55rem",
-                  letterSpacing: "0.1em",
-                  cursor: "pointer",
-                }}
-              >
-                ändern
-              </div>
-            </div>
-
           </div>
         </section>
 
@@ -656,31 +343,24 @@ export default async function PlanPage({
               Ihr müsst bei jeder neuen Reise nicht wieder alles von vorne erklären.
             </p>
 
-            <div
-              className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-6"
-            >
-              {FAMILY_PREFS.map((pref) => (
-                <div
-                  key={pref}
-                  className="flex items-center gap-3"
-                >
-                  <div
-                    style={{
-                      width: "4px",
-                      height: "4px",
-                      borderRadius: "50%",
-                      background: "var(--accent)",
-                      flexShrink: 0,
-                    }}
-                  />
-                  <span
-                    style={{ color: "var(--muted)", fontSize: "0.78rem" }}
-                  >
-                    {pref}
-                  </span>
-                </div>
-              ))}
-            </div>
+            {preferences && preferences.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-6">
+                {[...preferences]
+                  .filter((p) => p.weight >= 3)
+                  .map((pref) => (
+                    <div key={pref.category_key} className="flex items-center gap-3">
+                      <div style={{ width: "4px", height: "4px", borderRadius: "50%", background: "var(--accent)", flexShrink: 0 }} />
+                      <span style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
+                        {COMPASS_CATEGORY_LABELS[pref.category_key] ?? pref.category_key}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            ) : (
+              <p className="mb-6" style={{ color: "var(--muted)", fontSize: "0.72rem", fontStyle: "italic" }}>
+                Euer Reisekompass ist noch nicht ausgefüllt.
+              </p>
+            )}
 
             <div style={{ borderTop: "1px solid var(--border)", paddingTop: "18px" }}>
               <Link
@@ -702,51 +382,10 @@ export default async function PlanPage({
           </div>
         </section>
 
-        {/* ── 6 & 7. Demo: Aus einem Wunsch wird eine Richtung ── */}
-        <section className="mb-16">
-          <SectionLabel>Aus einer Idee wird langsam eine Reise</SectionLabel>
-
-          {/* Demo request */}
-          <div
-            className="rounded-xl p-6 mb-8"
-            style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
-          >
-            <div
-              style={{
-                color: "var(--muted)",
-                fontSize: "0.55rem",
-                letterSpacing: "0.18em",
-                textTransform: "uppercase",
-                marginBottom: "10px",
-              }}
-            >
-              Euer Reisewunsch
-            </div>
-            <p
-              style={{
-                color: "var(--foreground)",
-                fontSize: "0.88rem",
-                fontWeight: 300,
-                fontStyle: "italic",
-                lineHeight: 1.7,
-              }}
-            >
-              „Zwei Wochen im Oktober. Warm. Außergewöhnlich. Nicht zu viele
-              Ortswechsel. Etwas, das die Kinder noch nie gesehen haben."
-            </p>
-          </div>
-
-          {/* Destination cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {DESTINATIONS.map((dest) => (
-              <DestinationCard key={dest.id} dest={dest} />
-            ))}
-          </div>
-        </section>
-
         {/* ── 8. Reise anlegen (echtes Formular) ── */}
         <section>
           <form action={createTrip}>
+            {fromIdea && <input type="hidden" name="source_trip_idea_id" value={from_idea} />}
             <div
               className="rounded-xl p-8 md:p-10"
               style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
@@ -775,6 +414,15 @@ export default async function PlanPage({
                 Gebt der Reise einen Namen und speichert sie. Alles andere — Etappen, Hotels, Flüge — kommt danach.
               </p>
 
+              {fromIdea && (
+                <div
+                  className="mb-6 px-4 py-3 rounded-lg"
+                  style={{ background: "rgba(184,154,94,0.12)", border: "1px solid rgba(184,154,94,0.3)", color: "var(--accent)", fontSize: "0.75rem", letterSpacing: "0.02em" }}
+                >
+                  Aus eurer Reiseidee „{fromIdea.destination}" übernommen — Name bitte prüfen, Termine sind noch offen.
+                </div>
+              )}
+
               {error && (
                 <div
                   className="mb-6 px-4 py-3 rounded-lg"
@@ -797,6 +445,7 @@ export default async function PlanPage({
                   name="title"
                   type="text"
                   required
+                  defaultValue={fromIdea?.destination ?? ""}
                   placeholder="z. B. Oman 2027 oder Sommer in Griechenland"
                   style={{
                     width: "100%",
