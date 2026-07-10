@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, FileText, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { BOOKING_TYPE_CONFIG, BOOKING_STATUS_LABELS, PAYMENT_STATUS_LABELS, formatDateTimeDE } from "@/lib/bookings";
+import { uploadBookingDocument, deleteBookingDocument } from "@/lib/actions/documents";
 import type { BookingType, BookingStatus, PaymentStatus } from "@/lib/supabase/types";
 
 type BookingDetail = {
@@ -37,10 +38,13 @@ function MetaItem({ label, value }: { label: string; value: string }) {
 
 export default async function BookingDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string; bookingId: string }>;
+  searchParams: Promise<{ error?: string }>;
 }) {
   const { id, bookingId } = await params;
+  const { error } = await searchParams;
 
   const supabase = await createClient();
   const { data: trip } = await supabase
@@ -66,6 +70,18 @@ export default async function BookingDetailPage({
   const b = booking as unknown as BookingDetail;
   const config = BOOKING_TYPE_CONFIG[b.type];
   const Icon = config.icon;
+
+  const { data: docsRaw } = await supabase
+    .from("documents")
+    .select("id, label, storage_path")
+    .eq("booking_id", b.id);
+
+  const documents = await Promise.all(
+    (docsRaw ?? []).map(async (d) => {
+      const { data: signed } = await supabase.storage.from("documents").createSignedUrl(d.storage_path, 3600);
+      return { id: d.id, label: d.label ?? "Dokument", storage_path: d.storage_path, url: signed?.signedUrl ?? null };
+    })
+  );
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -113,7 +129,7 @@ export default async function BookingDetailPage({
             {config.providerLabel && <MetaItem label={config.providerLabel} value={b.provider ?? "—"} />}
             <MetaItem label="Buchungsstatus" value={BOOKING_STATUS_LABELS[b.status]} />
             <MetaItem label="Zahlungsstatus" value={PAYMENT_STATUS_LABELS[b.payment_status]} />
-            <MetaItem label="Preis" value={b.amount !== null ? `${b.amount.toFixed(2)} ${b.currency}` : "—"} />
+            <MetaItem label="Preis" value={b.amount !== null ? `${b.amount.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${b.currency}` : "—"} />
             <MetaItem label="Buchungsnummer" value={b.booking_reference ?? "—"} />
             {b.stages && <MetaItem label="Etappe" value={b.stages.title} />}
           </div>
@@ -128,7 +144,7 @@ export default async function BookingDetailPage({
         </div>
 
         {b.notes && (
-          <div className="rounded-xl p-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+          <div className="rounded-xl p-6 mb-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
             <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: "12px" }}>
               Notizen
             </div>
@@ -137,6 +153,78 @@ export default async function BookingDetailPage({
             </p>
           </div>
         )}
+
+        <div className="rounded-xl p-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+          <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: "12px" }}>
+            Dokumente
+          </div>
+
+          {error && (
+            <div
+              className="mb-4 px-4 py-3 rounded-lg"
+              style={{ background: "rgba(181,98,74,0.12)", border: "1px solid rgba(181,98,74,0.3)", color: "#B5624A", fontSize: "0.75rem", letterSpacing: "0.02em" }}
+            >
+              {error}
+            </div>
+          )}
+
+          {documents.length > 0 ? (
+            <div className="mb-4">
+              {documents.map((doc) => (
+                <div key={doc.id} className="flex items-center gap-3 py-2" style={{ borderBottom: "1px solid var(--border)" }}>
+                  <FileText size={13} strokeWidth={1.4} style={{ color: "var(--accent)", flexShrink: 0 }} />
+                  {doc.url ? (
+                    <a href={doc.url} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-0 truncate" style={{ color: "var(--foreground)", fontSize: "0.82rem", textDecoration: "none" }}>
+                      {doc.label}
+                    </a>
+                  ) : (
+                    <span className="flex-1 min-w-0 truncate" style={{ color: "var(--foreground)", fontSize: "0.82rem" }}>{doc.label}</span>
+                  )}
+                  <form action={deleteBookingDocument}>
+                    <input type="hidden" name="document_id" value={doc.id} />
+                    <input type="hidden" name="storage_path" value={doc.storage_path} />
+                    <input type="hidden" name="slug" value={trip.slug} />
+                    <input type="hidden" name="booking_id" value={b.id} />
+                    <button type="submit" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", display: "flex" }} aria-label="Dokument löschen">
+                      <Trash2 size={13} strokeWidth={1.4} />
+                    </button>
+                  </form>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mb-4" style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
+              Noch keine Unterlagen zu dieser Buchung.
+            </p>
+          )}
+
+          <form action={uploadBookingDocument} encType="multipart/form-data" className="flex items-end gap-3 flex-wrap">
+            <input type="hidden" name="trip_id" value={trip.id} />
+            <input type="hidden" name="booking_id" value={b.id} />
+            <input type="hidden" name="slug" value={trip.slug} />
+            <div className="flex-1 min-w-[160px]">
+              <label htmlFor="doc-label" style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: "6px" }}>
+                Bezeichnung
+              </label>
+              <input
+                id="doc-label" name="label" type="text" required placeholder="z. B. Flugticket"
+                style={{ width: "100%", padding: "9px 12px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 300, outline: "none" }}
+              />
+            </div>
+            <div className="flex-1 min-w-[160px]">
+              <label htmlFor="doc-file" style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: "6px" }}>
+                Datei
+              </label>
+              <input id="doc-file" name="file" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" required style={{ width: "100%", fontSize: "0.75rem", color: "var(--muted)" }} />
+            </div>
+            <button
+              type="submit"
+              style={{ background: "var(--foreground)", color: "var(--surface)", border: "none", borderRadius: "6px", padding: "10px 18px", fontSize: "0.62rem", letterSpacing: "0.14em", textTransform: "uppercase", cursor: "pointer", whiteSpace: "nowrap" }}
+            >
+              Hinzufügen
+            </button>
+          </form>
+        </div>
 
       </div>
     </div>

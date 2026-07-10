@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 import { DOCUMENT_TYPE_CONFIG } from "@/lib/documents";
 import type { DocumentType } from "@/lib/documents";
 import { unassignPolicyFromTrip } from "@/lib/actions/insurance";
+import { BOOKING_TYPE_CONFIG } from "@/lib/bookings";
+import type { BookingType } from "@/lib/supabase/types";
 
 type PersonRow = { id: string; name: string; initials: string; color: string };
 type EntryDoc = { id: string; doc_type: DocumentType; label: string; person_id: string };
@@ -75,6 +77,22 @@ export default async function TripDocumentsPage({
     .map((r) => r.insurance_policies as unknown as Policy | null)
     .filter((p): p is Policy => p !== null);
 
+  // Buchungsunterlagen (§11 Dokumenten-Hub): dieselbe Datei, die auf der jeweiligen
+  // Buchungsdetailseite hochgeladen wurde — hier nur referenziert, kein zweiter Upload.
+  const { data: bookingDocRows } = await supabase
+    .from("documents")
+    .select("id, label, booking_id, bookings ( id, title, type )")
+    .eq("trip_id", trip.id)
+    .not("booking_id", "is", null);
+
+  const bookingDocuments = (bookingDocRows ?? [])
+    .map((row) => {
+      const booking = row.bookings as unknown as { id: string; title: string; type: string } | null;
+      if (!booking) return null;
+      return { id: row.id, label: row.label ?? "Dokument", bookingId: booking.id, bookingTitle: booking.title, bookingType: booking.type };
+    })
+    .filter((d): d is { id: string; label: string; bookingId: string; bookingTitle: string; bookingType: string } => d !== null);
+
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
       <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-9">
@@ -94,6 +112,41 @@ export default async function TripDocumentsPage({
         <h1 className="font-light mb-8" style={{ color: "var(--foreground)", fontSize: "1.4rem", letterSpacing: "0.01em" }}>
           Reisedokumente der Mitreisenden
         </h1>
+
+        {/* Buchungsunterlagen: Flugtickets, Hotel-Voucher, Mietwagenunterlagen, ... — je Buchung, nicht je Person */}
+        <section className="mb-10">
+          <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: "12px" }}>
+            Buchungsunterlagen
+          </div>
+          {bookingDocuments.length > 0 ? (
+            <div className="space-y-2">
+              {bookingDocuments.map((doc) => {
+                const config = BOOKING_TYPE_CONFIG[doc.bookingType as BookingType];
+                const Icon = config?.icon;
+                return (
+                  <Link
+                    key={doc.id}
+                    href={`/trips/${trip.slug}/bookings/${doc.bookingId}`}
+                    className="flex items-center gap-4 p-4 rounded-xl"
+                    style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}
+                  >
+                    {Icon && <Icon size={16} strokeWidth={1.4} style={{ color: "var(--accent)", flexShrink: 0 }} />}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate" style={{ color: "var(--foreground)" }}>{doc.label}</div>
+                      <div className="text-xs mt-0.5" style={{ color: "var(--muted)", fontSize: "0.7rem" }}>
+                        {config?.label ?? doc.bookingType} · {doc.bookingTitle}
+                      </div>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          ) : (
+            <p style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
+              Noch keine Buchungsunterlagen — hochgeladen wird direkt auf der jeweiligen Buchungsseite.
+            </p>
+          )}
+        </section>
 
         {members.length > 0 ? (
           <>

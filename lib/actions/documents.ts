@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { ALLOWED_DOCUMENT_MIME_TYPES, MAX_DOCUMENT_FILE_SIZE, buildStoragePath, combineIsoDate } from '@/lib/documents'
+import { ALLOWED_DOCUMENT_MIME_TYPES, MAX_DOCUMENT_FILE_SIZE, buildStoragePath, buildBookingStoragePath, combineIsoDate } from '@/lib/documents'
 import type { DocumentType, DocumentDetails } from '@/lib/documents'
 
 function readDateGroup(formData: FormData, prefix: string, fieldLabel: string): string | null {
@@ -235,6 +235,79 @@ export async function unassignDocumentFromTrip(formData: FormData) {
 
   const supabase = await createClient()
   await supabase.from('document_trips').delete().eq('document_id', documentId).eq('trip_id', tripId)
+
+  redirect(detailPath)
+}
+
+/**
+ * Dokumenten-Hub §11: eine Buchungsunterlage (Flugticket, Hotel-Voucher,
+ * Mietwagenunterlage, ...) gehört zur Buchung selbst, nicht zu einer Person —
+ * `person_id` bleibt leer. Dieselbe Datei erscheint dadurch automatisch sowohl
+ * auf der Buchungsdetailseite als auch im Dokumenten-Hub der Reise (kein
+ * zweiter Upload, keine zweite Storage-Datei, nur eine gemeinsame Referenz).
+ */
+export async function uploadBookingDocument(formData: FormData) {
+  const tripId    = String(formData.get('trip_id') ?? '')
+  const bookingId = String(formData.get('booking_id') ?? '')
+  const slug      = String(formData.get('slug') ?? '')
+  const label     = String(formData.get('label') ?? '').trim()
+  const detailPath = `/trips/${slug}/bookings/${bookingId}`
+
+  const { error: fileError, file } = validateFile(formData.get('file'), true)
+  if (fileError)
+    redirect(`${detailPath}?error=${encodeURIComponent(fileError)}`)
+  if (!file)
+    redirect(`${detailPath}?error=${encodeURIComponent('Datei fehlt')}`)
+  if (label.length < 2)
+    redirect(`${detailPath}?error=${encodeURIComponent('Dokumentname: mindestens 2 Zeichen erforderlich')}`)
+
+  const supabase = await createClient()
+
+  const storagePath = buildBookingStoragePath(bookingId, file.name)
+  const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
+    contentType: file.type,
+  })
+  if (uploadError)
+    redirect(`${detailPath}?error=${encodeURIComponent('Upload fehlgeschlagen: ' + uploadError.message)}`)
+
+  const { error: insertError } = await supabase.from('documents').insert({
+    trip_id: tripId,
+    booking_id: bookingId,
+    person_id: null,
+    doc_type: 'booking_document',
+    label,
+    details: { source: 'manual' },
+    storage_provider: 'supabase_storage',
+    storage_bucket: 'documents',
+    storage_path: storagePath,
+  })
+
+  if (insertError) {
+    await supabase.storage.from('documents').remove([storagePath])
+    redirect(`${detailPath}?error=${encodeURIComponent('Speicherfehler: ' + insertError.message)}`)
+  }
+
+  redirect(detailPath)
+}
+
+export async function deleteBookingDocument(formData: FormData) {
+  const documentId  = String(formData.get('document_id') ?? '')
+  const storagePath = String(formData.get('storage_path') ?? '')
+  const slug        = String(formData.get('slug') ?? '')
+  const bookingId   = String(formData.get('booking_id') ?? '')
+  const detailPath  = `/trips/${slug}/bookings/${bookingId}`
+
+  const supabase = await createClient()
+
+  if (storagePath) {
+    const { error: storageError } = await supabase.storage.from('documents').remove([storagePath])
+    if (storageError)
+      redirect(`${detailPath}?error=${encodeURIComponent('Datei konnte nicht gelöscht werden: ' + storageError.message)}`)
+  }
+
+  const { error } = await supabase.from('documents').delete().eq('id', documentId)
+  if (error)
+    redirect(`${detailPath}?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)
 
   redirect(detailPath)
 }

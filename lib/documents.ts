@@ -216,3 +216,9 @@ export function buildStoragePath(personId: string, fileName: string): string {
   const ext = fileName.includes('.') ? fileName.split('.').pop()!.toLowerCase() : 'bin'
   return `${personId}/${crypto.randomUUID()}.${ext}`
 }
+
+/** Ablagepfad für Dokumente ohne Personenbezug (z. B. Buchungsunterlagen, Boardingpässe ohne Zuordnung). */
+export function buildBookingStoragePath(bookingId: string, fileName: string): string {
+  const ext = fileName.includes('.') ? fileName.split('.').pop()!.toLowerCase() : 'bin'
+  return `bookings/${bookingId}/${crypto.randomUUID()}.${ext}`
+}
