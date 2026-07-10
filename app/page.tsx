@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { Map, Globe, CalendarDays, Users } from "lucide-react";
-import { getDaysUntil, formatDateDE, getTripDuration } from "@/lib/demo-data";
+import { formatDateDE, getTripDuration } from "@/lib/demo-data";
 import { createClient } from "@/lib/supabase/server";
 import { buildWorldStats } from "@/lib/world-stats";
-import { isTripPastEnd, isTripHistorical, isTripCurrentlyRunning } from "@/lib/trip-status";
+import { isTripPastEnd, isTripHistorical, tripCountdownDisplay } from "@/lib/trip-status";
 
 const TRIP_IMAGES: Record<string, string> = {
   "costa-rica-2026":
@@ -31,31 +31,9 @@ type TripRow = {
   stages: Array<{ id: string }>
 };
 
-/**
- * §Countdown-Bugfix: "Tage bis Abreise" darf nie negativ werden (z. B. während
- * einer laufenden Reise). Drei Zustände statt einer einzigen Countdown-Zahl:
- * noch nicht gestartet → Countdown, läuft → Tag X von Y, beendet → Textstatus.
- */
-function tripCountdownDisplay(trip: TripRow): { value: string; label: string } {
-  const duration = trip.start_date && trip.end_date ? getTripDuration(trip.start_date, trip.end_date) : 0;
-
-  if (isTripPastEnd(trip)) {
-    return { value: "—", label: "Reise beendet" };
-  }
-  if (trip.start_date && trip.end_date && isTripCurrentlyRunning(trip)) {
-    const todayIso = new Date().toISOString().slice(0, 10);
-    const dayNumber = Math.floor(
-      (new Date(todayIso + "T00:00:00Z").getTime() - new Date(trip.start_date + "T00:00:00Z").getTime()) / 86400000,
-    ) + 1;
-    return { value: `${dayNumber}/${duration}`, label: "Reisetag" };
-  }
-  const days = trip.start_date ? Math.max(getDaysUntil(trip.start_date), 0) : 0;
-  return { value: days.toLocaleString("de-DE"), label: "Tage bis zur Abreise" };
-}
-
 function HeroTrip({ trip }: { trip: TripRow }) {
   const duration = trip.start_date && trip.end_date ? getTripDuration(trip.start_date, trip.end_date) : 0;
-  const countdown = tripCountdownDisplay(trip);
+  const countdown = tripCountdownDisplay(trip, duration);
   const imgUrl = TRIP_IMAGES[trip.slug];
   const members = trip.trip_members.flatMap((tm) => (tm.persons ? [tm.persons] : []));
 

@@ -1,9 +1,10 @@
 import type { LucideIcon } from 'lucide-react'
-import type { StageInput, TimelineDay } from './journey'
+import type { StageInput, TimelineBooking, TimelineDay } from './journey'
 import type { JourneyEventCategory } from './journey-events'
 import type { BookingType } from './supabase/types'
 import { BOOKING_TYPE_CONFIG, splitDateTime } from './bookings'
 import { JOURNEY_EVENT_CATEGORIES, formatEventTime } from './journey-events'
+import { suggestCountryCode, COUNTRY_NAMES } from './geo-suggestions'
 
 function dateOnly(iso: string | null): string | null {
   return iso ? iso.slice(0, 10) : null
@@ -59,29 +60,49 @@ export function findNextUpcoming(items: TodayTimelineItem[], nowHHMM: string): T
   return items.find((i) => i.time !== null && i.time >= nowHHMM) ?? null
 }
 
+export type CurrentLocation = {
+  label: string
+  countryCode: string | null
+  source: 'stage' | 'accommodation' | 'destination'
+}
+
 /**
- * Fällt "heute" in eine Lücke ohne zugeordnete Etappe (z. B. vor der ersten
- * Etappe oder zwischen zwei Etappen), liefert diese Funktion die zeitlich
- * nächstgelegene Etappe als sinnvollen geografischen Bezugspunkt für Wetter/
- * Hero-Bild/Untertitel — statt ersatzweise auf den rohen (oft nicht
- * geokodierbaren) Reisetitel zurückzufallen.
+ * EINE einzige, eindeutige Standortquelle für Hero-Untertitel, Wetter und
+ * Hero-Bild — keine Kombination aus mehrereren Quellen (z. B. nicht mehr
+ * "Etappe, Land" wie in der vorigen Fassung, die während einer Lücke vor der
+ * ersten Etappe fälschlich "Atlanta, Costa Rica" zeigte, obwohl die Familie
+ * dort noch gar nicht ist). Feste Prioritätskette, erster Treffer gewinnt:
+ * 1) eine Etappe, die "heute" wirklich abdeckt, 2) eine heute aktive
+ * Unterkunfts-Buchung, 3) das Reiseziel als letzte Instanz.
  */
-export function findNearestStage(stages: StageInput[], dateIso: string): StageInput | null {
-  const withDates = stages.filter((s) => s.start_date && s.end_date)
-  if (withDates.length === 0) return null
+export function resolveCurrentLocation(
+  trip: { title: string; subtitle: string | null },
+  stages: StageInput[],
+  bookings: TimelineBooking[],
+  todayIso: string,
+): CurrentLocation {
+  const currentStage = stages.find(
+    (s) => s.start_date && s.end_date && s.start_date <= todayIso && todayIso <= s.end_date,
+  )
+  if (currentStage) {
+    return { label: currentStage.location || currentStage.title, countryCode: currentStage.country_code ?? null, source: 'stage' }
+  }
 
-  const covering = withDates.find((s) => s.start_date! <= dateIso && dateIso <= s.end_date!)
-  if (covering) return covering
+  const currentAccommodation = bookings.find(
+    (b) => b.type === 'accommodation' && b.status !== 'cancelled'
+      && b.start_datetime && b.end_datetime
+      && b.start_datetime.slice(0, 10) <= todayIso && b.end_datetime.slice(0, 10) >= todayIso,
+  )
+  if (currentAccommodation) {
+    const relatedStage = stages.find((s) => s.id === currentAccommodation.stage_id)
+    return { label: currentAccommodation.title, countryCode: relatedStage?.country_code ?? null, source: 'accommodation' }
+  }
 
-  const upcoming = [...withDates]
-    .filter((s) => s.start_date! > dateIso)
-    .sort((a, b) => a.start_date!.localeCompare(b.start_date!))[0]
-  if (upcoming) return upcoming
-
-  const past = [...withDates]
-    .filter((s) => s.end_date! < dateIso)
-    .sort((a, b) => b.end_date!.localeCompare(a.end_date!))[0]
-  return past ?? null
+  const countryCode = suggestCountryCode(`${trip.title} ${trip.subtitle ?? ''}`)
+    ?? stages.find((s) => s.country_code)?.country_code
+    ?? null
+  const label = countryCode ? COUNTRY_NAMES[countryCode] ?? trip.title : trip.title
+  return { label, countryCode, source: 'destination' }
 }
 
 export type PrepItem = { icon: LucideIcon; text: string }

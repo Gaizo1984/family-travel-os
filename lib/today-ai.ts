@@ -14,7 +14,7 @@ const TODAY_SCHEMA = {
   properties: {
     day_summary: {
       type: 'string',
-      description: 'Kurze, warme Zusammenfassung des heutigen Reisetags in 1-2 Sätzen, für die Hero-Sektion',
+      description: 'SEHR kurze, warme Zusammenfassung des heutigen Reisetags für die Hero-Sektion — maximal 3-4 kurze Zeilen (ca. 25-30 Wörter). Details gehören NICHT hierhin, sondern in main_recommendation/alternatives.',
     },
     main_recommendation: {
       type: 'object',
@@ -65,7 +65,7 @@ ${context.weatherSummary ? `Wetter heute: ${context.weatherSummary}.` : 'Wetterd
 ${context.familyDnaText || 'Keine weiteren Familienpräferenzen hinterlegt.'}
 Bereits bekannter Plan für heute: ${context.knownPlanText || 'Noch nichts Festes geplant.'}
 
-Schlage eine sinnvolle, zur Familie und zum Wetter passende Tagesgestaltung vor: eine Hauptempfehlung und zwei kleinere Alternativen. Widerspreche NICHT dem bereits bekannten Plan, ergänze ihn sinnvoll. Erfinde keine konkreten Preise, Öffnungszeiten oder Adressen — bleibe bei allgemeinen, plausiblen Vorschlägen. Schreibe auf Deutsch, warm und konkret, keine Floskeln.`
+Schlage eine sinnvolle, zur Familie und zum Wetter passende Tagesgestaltung vor: eine Hauptempfehlung und zwei kleinere Alternativen. Widerspreche NICHT dem bereits bekannten Plan, ergänze ihn sinnvoll. Erfinde keine konkreten Preise, Öffnungszeiten oder Adressen — bleibe bei allgemeinen, plausiblen Vorschlägen. Schreibe auf Deutsch, warm und konkret, keine Floskeln. day_summary muss extrem kurz bleiben (maximal 3-4 Zeilen) — alle Details gehören in main_recommendation/alternatives, nicht in day_summary.`
 
   try {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })

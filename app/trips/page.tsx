@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { Map, Globe, CalendarDays } from "lucide-react";
-import { getDaysUntil, formatDateDE, getTripDuration } from "@/lib/demo-data";
+import { formatDateDE, getTripDuration } from "@/lib/demo-data";
 import { createClient } from "@/lib/supabase/server";
 import { restoreTrip } from "@/lib/actions/trips";
+import { tripCountdownDisplay } from "@/lib/trip-status";
 
 const H_FG    = "#F0EBE3";
 const H_MUTED = "#A89880";
@@ -56,9 +57,9 @@ function applyFilter(trips: TripRow[], f: string): { planned: TripRow[]; past: T
 }
 
 function PlannedCard({ trip }: { trip: TripRow }) {
-  const days     = trip.start_date ? getDaysUntil(trip.start_date) : 0;
   const duration = trip.start_date && trip.end_date
     ? getTripDuration(trip.start_date, trip.end_date) : 0;
+  const countdown = tripCountdownDisplay(trip, duration);
   const imgUrl  = TRIP_IMAGES[trip.slug];
   const members = trip.trip_members.flatMap(tm => tm.persons ? [tm.persons] : []);
   const stageCount = trip.stages.length;
@@ -149,10 +150,10 @@ function PlannedCard({ trip }: { trip: TripRow }) {
             </div>
             <div className="text-right">
               <div className="text-3xl font-light leading-none" style={{ color: "#C8A96E" }}>
-                {days.toLocaleString("de-DE")}
+                {countdown.value}
               </div>
               <div style={{ color: H_MUTED, fontSize: "0.62rem", letterSpacing: "0.08em", textTransform: "uppercase", marginTop: "3px" }}>
-                Tage bis zur Abreise
+                {countdown.label}
               </div>
             </div>
           </div>

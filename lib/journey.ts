@@ -59,6 +59,7 @@ export type TimelineBooking = {
   end_datetime: string | null
   /** Optional, da nicht jede Aufrufstelle die Spalte selektiert. */
   details?: Record<string, string> | null
+  stage_id?: string | null
 }
 
 /**

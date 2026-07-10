@@ -1,19 +1,20 @@
 import Link from "next/link";
 import {
-  Clock, ArrowRight, Ticket, Sunrise, Sunset, Car, Users, ChevronRight, Droplets,
+  Clock, ArrowRight, Ticket, Car, Users, ChevronRight,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { isTripCurrentlyRunning } from "@/lib/trip-status";
 import { sortStagesChronologically, buildJourneyTimeline } from "@/lib/journey";
 import type { StageInput, TimelineBooking, TimelineEvent, TimelineDay } from "@/lib/journey";
 import { sortBookingsChronologically } from "@/lib/bookings";
-import { buildTodayTimelineItems, findNextUpcoming, buildTomorrowPrepItems, findNearestStage } from "@/lib/today";
+import { buildTodayTimelineItems, findNextUpcoming, buildTomorrowPrepItems, resolveCurrentLocation } from "@/lib/today";
 import { getWeatherForLocation, describeWeatherCode } from "@/lib/weather";
 import type { WeatherLocationCandidate } from "@/lib/weather";
 import { generateTodayRecommendation } from "@/lib/today-ai";
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt, TRAVEL_NEED_OPTIONS } from "@/lib/family-dna";
 import { COUNTRY_STAGE_IMAGES, FALLBACK_STAGE_IMAGE } from "@/lib/stage-images";
 import { COUNTRY_NAMES } from "@/lib/geo-suggestions";
+import { todayIsoInFamilyTimezone, nowHHMMInFamilyTimezone } from "@/lib/time";
 import type { BookingType, BookingStatus } from "@/lib/supabase/types";
 import type { JourneyEventCategory, JourneyEventStatus } from "@/lib/journey-events";
 
@@ -27,7 +28,7 @@ type FlightWithPasses = { id: string; title: string; slug: string };
  */
 async function findTodaysFlightWithBoardingPasses(): Promise<FlightWithPasses | null> {
   const supabase = await createClient();
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = todayIsoInFamilyTimezone();
 
   const { data: flights } = await supabase
     .from("bookings")
@@ -107,9 +108,9 @@ export default async function TodayPage() {
   const { data: family } = await supabase.from("families").select("id, name").limit(1).single();
   const familyId = family?.id ?? "";
 
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = todayIsoInFamilyTimezone();
   const tomorrowIso = addDaysIso(todayIso, 1);
-  const nowHHMM = new Date().toISOString().slice(11, 16);
+  const nowHHMM = nowHHMMInFamilyTimezone();
 
   const [{ data: trips }, flightToday] = await Promise.all([
     supabase
@@ -125,7 +126,11 @@ export default async function TodayPage() {
     findTodaysFlightWithBoardingPasses(),
   ]);
 
-  const activeTrip = ((trips ?? []) as unknown as TripRow[]).find((t) => isTripCurrentlyRunning(t));
+  // todayIso (Familienzeitzone) explizit übergeben, statt auf den UTC-basierten
+  // Default von isTripCurrentlyRunning zu vertrauen — sonst könnte die "aktive
+  // Reise"-Erkennung im selben ~2-Stunden-Fenster wie der Aktivitäten-Bug (s. u.)
+  // von einem anderen Kalendertag ausgehen als der Rest dieser Seite.
+  const activeTrip = ((trips ?? []) as unknown as TripRow[]).find((t) => isTripCurrentlyRunning(t, todayIso));
 
   // Warme, kurze Begrüßung statt Namensaufzählung — nutzt den echten Familiennamen, falls hinterlegt.
   const greeting = family?.name ? `Hallo ${family.name}` : "Schön, dass ihr da seid.";
@@ -191,29 +196,21 @@ export default async function TodayPage() {
   const todayDay = allDays.find((d) => d.date === todayIso) ?? null;
   const tomorrowDay = allDays.find((d) => d.date === tomorrowIso) ?? null;
 
-  // Fällt "heute" in eine Lücke ohne Etappe (z. B. vor der ersten Etappe), wird die
-  // zeitlich nächstgelegene Etappe als Bezugspunkt verwendet — der rohe Reisetitel
-  // (oft mit Jahreszahl, z. B. "Costa Rica 2026") lässt sich weder sinnvoll geokodieren
-  // noch einem Länderbild zuordnen.
-  const stage = todayDay?.stage ?? findNearestStage(stages, todayIso);
-  const countryName = stage?.country_code ? COUNTRY_NAMES[stage.country_code] ?? null : null;
-  const locationLabel = stage ? (stage.location || stage.title) : activeTrip.title;
-  const heroSubtitle = stage
-    ? `📍 ${locationLabel}${countryName ? `, ${countryName}` : ""}`
-    : `📍 ${activeTrip.title}`;
-  const heroPhoto = (stage?.country_code && COUNTRY_STAGE_IMAGES[stage.country_code]) || FALLBACK_STAGE_IMAGE;
+  // Eine einzige Standortquelle für Untertitel, Wetter und Hero-Bild — siehe
+  // resolveCurrentLocation für die Prioritätskette (Etappe → Unterkunft → Reiseziel).
+  // Keine Kombination mehrerer Quellen zu einem Text wie "Atlanta, Costa Rica".
+  const currentLocation = resolveCurrentLocation(activeTrip, stages, bookings, todayIso);
+  const heroSubtitle = `📍 ${currentLocation.label}`;
+  const heroPhoto = (currentLocation.countryCode && COUNTRY_STAGE_IMAGES[currentLocation.countryCode]) || FALLBACK_STAGE_IMAGE;
 
-  // Wetter-Fallback-Kette Hotel → Etappe → Reiseziel: Hotel-/Etappennamen sind im
-  // Geocoding-Datensatz oft mehrdeutig oder unbekannt (z. B. "Guanacaste" existiert dort
-  // nur als Kleinstort in Mexiko/Honduras, nicht als Provinz in Costa Rica) — das
-  // Länderzentrum als letzte, verlässliche Instanz stellt sicher, dass so gut wie immer
-  // ein Ergebnis kommt, auch wenn die genaue Etappe nicht auflösbar ist.
+  // Wetter wird exakt für denselben Standort geladen: der aufgelöste Name zuerst,
+  // mit Länder-Filter; schlägt die Geokodierung des genauen Namens fehl (z. B. bei
+  // Hotelnamen oder unbekannten Kleinorten), zusätzlich das Land selbst als
+  // verlässliche Näherung — ohne den angezeigten Standort-Text zu verändern.
+  const countryName = currentLocation.countryCode ? COUNTRY_NAMES[currentLocation.countryCode] ?? null : null;
   const weatherCandidates: WeatherLocationCandidate[] = [
-    ...(stage?.accommodation ? [{ query: stage.accommodation, countryCode: stage.country_code }] : []),
-    ...(stage?.location ? [{ query: stage.location, countryCode: stage.country_code }] : []),
-    ...(stage?.title ? [{ query: stage.title, countryCode: stage.country_code }] : []),
-    ...(countryName ? [{ query: countryName }] : []),
-    { query: activeTrip.title },
+    { query: currentLocation.label, countryCode: currentLocation.countryCode },
+    ...(countryName && countryName !== currentLocation.label ? [{ query: countryName }] : []),
   ];
   const weather = await getWeatherForLocation(weatherCandidates);
   const currentWeather = weather ? describeWeatherCode(weather.currentCode) : null;
@@ -232,7 +229,7 @@ export default async function TodayPage() {
 
   const recommendation = await generateTodayRecommendation({
     dateLabel,
-    locationLabel,
+    locationLabel: currentLocation.label,
     weatherSummary,
     familyDnaText: formatFamilyDnaForPrompt(dna, todayIso),
     knownPlanText,
@@ -252,7 +249,7 @@ export default async function TodayPage() {
       {/* ── Hero ── */}
       <div className="relative" style={{ height: "380px", flexShrink: 0 }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={heroPhoto} alt={locationLabel} className="absolute inset-0 w-full h-full object-cover" />
+        <img src={heroPhoto} alt={currentLocation.label} className="absolute inset-0 w-full h-full object-cover" />
         <div
           className="absolute inset-0"
           style={{ background: "linear-gradient(to top, rgba(10,9,7,0.97) 0%, rgba(10,9,7,0.6) 45%, rgba(10,9,7,0.18) 100%)" }}
@@ -266,35 +263,31 @@ export default async function TodayPage() {
           </h1>
           <div className="mb-4" style={{ color: "#A89880", fontSize: "0.8rem" }}>{heroSubtitle}</div>
 
-          <div className="flex items-center gap-5 flex-wrap mb-4">
-            {currentWeather && (
+          {weather && (
+            <div className="mb-4" style={{ color: "#A89880", fontSize: "0.72rem", lineHeight: 1.6 }}>
               <div className="flex items-center gap-1.5">
-                <currentWeather.icon size={12} strokeWidth={1.6} style={{ color: "#A89880" }} />
-                <span style={{ color: "#A89880", fontSize: "0.72rem" }}>{weather!.currentTemp}°C · {currentWeather.label}</span>
+                {currentWeather && <currentWeather.icon size={12} strokeWidth={1.6} />}
+                <span>{weather.currentTemp}°C · {currentWeather?.label}</span>
               </div>
-            )}
-            {todayPrecipitation !== null && (
-              <div className="flex items-center gap-1.5">
-                <Droplets size={12} strokeWidth={1.6} style={{ color: "#A89880" }} />
-                <span style={{ color: "#A89880", fontSize: "0.72rem" }}>{todayPrecipitation}% Regen</span>
-              </div>
-            )}
-            {weather?.sunrise && (
-              <div className="flex items-center gap-1.5">
-                <Sunrise size={12} strokeWidth={1.6} style={{ color: "#A89880" }} />
-                <span style={{ color: "#A89880", fontSize: "0.72rem" }}>{weather.sunrise.slice(11, 16)}</span>
-              </div>
-            )}
-            {weather?.sunset && (
-              <div className="flex items-center gap-1.5">
-                <Sunset size={12} strokeWidth={1.6} style={{ color: "#A89880" }} />
-                <span style={{ color: "#A89880", fontSize: "0.72rem" }}>{weather.sunset.slice(11, 16)}</span>
-              </div>
-            )}
-          </div>
+              {todayPrecipitation !== null && <div>Regenwahrscheinlichkeit {todayPrecipitation}%</div>}
+              {(weather.sunrise || weather.sunset) && (
+                <div>
+                  {weather.sunrise && <>🌅 {weather.sunrise.slice(11, 16)}</>}
+                  {weather.sunrise && weather.sunset && " · "}
+                  {weather.sunset && <>🌇 {weather.sunset.slice(11, 16)}</>}
+                </div>
+              )}
+            </div>
+          )}
 
           {recommendation && (
-            <p style={{ color: "#D8CFC2", fontSize: "0.82rem", fontWeight: 300, lineHeight: 1.5, maxWidth: "640px" }}>
+            <p
+              className="overflow-hidden"
+              style={{
+                color: "#D8CFC2", fontSize: "0.82rem", fontWeight: 300, lineHeight: 1.5, maxWidth: "640px",
+                display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical",
+              }}
+            >
               {recommendation.daySummary}
             </p>
           )}
