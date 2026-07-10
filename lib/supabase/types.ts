@@ -19,23 +19,38 @@ export interface Database {
   public: {
     Tables: {
       families: {
-        Row:    { id: string; name: string; created_at: string }
-        Insert: { id?: string; name: string; created_at?: string }
-        Update: { id?: string; name?: string; created_at?: string }
+        Row: {
+          id: string; name: string; created_at: string
+          content_style_preference: Json | null; exceptional_hotel_criteria: string[]
+        }
+        Insert: {
+          id?: string; name: string; created_at?: string
+          content_style_preference?: Json | null; exceptional_hotel_criteria?: string[]
+        }
+        Update: {
+          id?: string; name?: string; created_at?: string
+          content_style_preference?: Json | null; exceptional_hotel_criteria?: string[]
+        }
         Relationships: []
       }
       persons: {
         Row: {
           id: string; family_id: string; name: string; initials: string
           color: string; birth_date: string | null; is_minor: boolean; created_at: string
+          photo_storage_path: string | null; description: string | null; role_label: string | null
+          interest_tags: string[]; travel_needs: string[]
         }
         Insert: {
           id?: string; family_id: string; name: string; initials: string
           color: string; birth_date?: string | null; is_minor?: boolean; created_at?: string
+          photo_storage_path?: string | null; description?: string | null; role_label?: string | null
+          interest_tags?: string[]; travel_needs?: string[]
         }
         Update: {
           id?: string; family_id?: string; name?: string; initials?: string
           color?: string; birth_date?: string | null; is_minor?: boolean; created_at?: string
+          photo_storage_path?: string | null; description?: string | null; role_label?: string | null
+          interest_tags?: string[]; travel_needs?: string[]
         }
         Relationships: [
           { foreignKeyName: "persons_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }
@@ -81,16 +96,19 @@ export interface Database {
           id: string; trip_id: string; title: string; location: string | null
           start_date: string | null; end_date: string | null; nights: number | null
           accommodation: string | null; notes: string | null; sort_order: number; created_at: string
+          country_code: string | null
         }
         Insert: {
           id?: string; trip_id: string; title: string; location?: string | null
           start_date?: string | null; end_date?: string | null; nights?: number | null
           accommodation?: string | null; notes?: string | null; sort_order?: number; created_at?: string
+          country_code?: string | null
         }
         Update: {
           id?: string; trip_id?: string; title?: string; location?: string | null
           start_date?: string | null; end_date?: string | null; nights?: number | null
           accommodation?: string | null; notes?: string | null; sort_order?: number; created_at?: string
+          country_code?: string | null
         }
         Relationships: [
           { foreignKeyName: "stages_trip_id_fkey"; columns: ["trip_id"]; isOneToOne: false; referencedRelation: "trips"; referencedColumns: ["id"] }
@@ -338,6 +356,164 @@ export interface Database {
           { foreignKeyName: "journal_entries_trip_id_fkey";     columns: ["trip_id"];     isOneToOne: false; referencedRelation: "trips";     referencedColumns: ["id"] },
           { foreignKeyName: "journal_entries_trip_day_id_fkey"; columns: ["trip_day_id"]; isOneToOne: false; referencedRelation: "trip_days"; referencedColumns: ["id"] },
           { foreignKeyName: "journal_entries_author_id_fkey";   columns: ["author_id"];   isOneToOne: false; referencedRelation: "persons";   referencedColumns: ["id"] }
+        ]
+      }
+      family_preference_categories: {
+        Row: {
+          id: string; family_id: string; category_key: string; weight: number
+          note: string | null; created_at: string; updated_at: string
+        }
+        Insert: {
+          id?: string; family_id: string; category_key: string; weight?: number
+          note?: string | null; created_at?: string; updated_at?: string
+        }
+        Update: {
+          id?: string; family_id?: string; category_key?: string; weight?: number
+          note?: string | null; created_at?: string; updated_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "family_preference_categories_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }
+        ]
+      }
+      past_trips: {
+        Row: {
+          id: string; family_id: string; country_or_region: string; country_code: string | null
+          year: number; places: string | null; duration_days: number | null
+          photo_storage_path: string | null; note: string | null; created_at: string; updated_at: string
+        }
+        Insert: {
+          id?: string; family_id: string; country_or_region: string; country_code?: string | null
+          year: number; places?: string | null; duration_days?: number | null
+          photo_storage_path?: string | null; note?: string | null; created_at?: string; updated_at?: string
+        }
+        Update: {
+          id?: string; family_id?: string; country_or_region?: string; country_code?: string | null
+          year?: number; places?: string | null; duration_days?: number | null
+          photo_storage_path?: string | null; note?: string | null; created_at?: string; updated_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "past_trips_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }
+        ]
+      }
+      past_trip_travelers: {
+        Row:    { past_trip_id: string; person_id: string }
+        Insert: { past_trip_id: string; person_id: string }
+        Update: { past_trip_id?: string; person_id?: string }
+        Relationships: [
+          { foreignKeyName: "past_trip_travelers_past_trip_id_fkey"; columns: ["past_trip_id"]; isOneToOne: false; referencedRelation: "past_trips"; referencedColumns: ["id"] },
+          { foreignKeyName: "past_trip_travelers_person_id_fkey";    columns: ["person_id"];    isOneToOne: false; referencedRelation: "persons";    referencedColumns: ["id"] }
+        ]
+      }
+      content_projects: {
+        Row: {
+          id: string; family_id: string; trip_id: string | null; title: string
+          status: string; created_at: string; updated_at: string
+        }
+        Insert: {
+          id?: string; family_id: string; trip_id?: string | null; title: string
+          status?: string; created_at?: string; updated_at?: string
+        }
+        Update: {
+          id?: string; family_id?: string; trip_id?: string | null; title?: string
+          status?: string; created_at?: string; updated_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "content_projects_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] },
+          { foreignKeyName: "content_projects_trip_id_fkey";   columns: ["trip_id"];   isOneToOne: false; referencedRelation: "trips";   referencedColumns: ["id"] }
+        ]
+      }
+      content_ideas: {
+        Row: {
+          id: string; family_id: string; project_id: string | null; trip_id: string | null
+          source_input_text: string | null; source_media_storage_path: string | null
+          content_goal: string | null; suggestions: Json; chosen_index: number | null
+          status: string; created_at: string; updated_at: string
+        }
+        Insert: {
+          id?: string; family_id: string; project_id?: string | null; trip_id?: string | null
+          source_input_text?: string | null; source_media_storage_path?: string | null
+          content_goal?: string | null; suggestions: Json; chosen_index?: number | null
+          status?: string; created_at?: string; updated_at?: string
+        }
+        Update: {
+          id?: string; family_id?: string; project_id?: string | null; trip_id?: string | null
+          source_input_text?: string | null; source_media_storage_path?: string | null
+          content_goal?: string | null; suggestions?: Json; chosen_index?: number | null
+          status?: string; created_at?: string; updated_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "content_ideas_family_id_fkey";  columns: ["family_id"];  isOneToOne: false; referencedRelation: "families";         referencedColumns: ["id"] },
+          { foreignKeyName: "content_ideas_project_id_fkey"; columns: ["project_id"]; isOneToOne: false; referencedRelation: "content_projects"; referencedColumns: ["id"] },
+          { foreignKeyName: "content_ideas_trip_id_fkey";    columns: ["trip_id"];    isOneToOne: false; referencedRelation: "trips";             referencedColumns: ["id"] }
+        ]
+      }
+      content_drafts: {
+        Row: {
+          id: string; idea_id: string | null; project_id: string; draft_type: string
+          structure: Json; visibility: string; scheduled_at: string | null; posted_at: string | null
+          storage_path: string | null; notes: string | null; created_at: string; updated_at: string
+        }
+        Insert: {
+          id?: string; idea_id?: string | null; project_id: string; draft_type: string
+          structure: Json; visibility?: string; scheduled_at?: string | null; posted_at?: string | null
+          storage_path?: string | null; notes?: string | null; created_at?: string; updated_at?: string
+        }
+        Update: {
+          id?: string; idea_id?: string | null; project_id?: string; draft_type?: string
+          structure?: Json; visibility?: string; scheduled_at?: string | null; posted_at?: string | null
+          storage_path?: string | null; notes?: string | null; created_at?: string; updated_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "content_drafts_idea_id_fkey";    columns: ["idea_id"];    isOneToOne: false; referencedRelation: "content_ideas";    referencedColumns: ["id"] },
+          { foreignKeyName: "content_drafts_project_id_fkey"; columns: ["project_id"]; isOneToOne: false; referencedRelation: "content_projects"; referencedColumns: ["id"] }
+        ]
+      }
+      trip_idea_sessions: {
+        Row: {
+          id: string; family_id: string; input_text: string; clarifying_answers: Json | null
+          status: string; created_at: string; updated_at: string
+        }
+        Insert: {
+          id?: string; family_id: string; input_text: string; clarifying_answers?: Json | null
+          status?: string; created_at?: string; updated_at?: string
+        }
+        Update: {
+          id?: string; family_id?: string; input_text?: string; clarifying_answers?: Json | null
+          status?: string; created_at?: string; updated_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "trip_idea_sessions_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }
+        ]
+      }
+      trip_ideas: {
+        Row: {
+          id: string; session_id: string | null; family_id: string; origin: string
+          destination: string; route_summary: string | null; best_season: string | null
+          duration_days_min: number | null; duration_days_max: number | null; reasoning: string | null
+          budget_range_min: number | null; budget_range_max: number | null; budget_currency: string
+          includes_flights: boolean | null; is_chosen: boolean; converted_trip_id: string | null
+          development_notes: string | null; created_at: string; updated_at: string
+        }
+        Insert: {
+          id?: string; session_id?: string | null; family_id: string; origin?: string
+          destination: string; route_summary?: string | null; best_season?: string | null
+          duration_days_min?: number | null; duration_days_max?: number | null; reasoning?: string | null
+          budget_range_min?: number | null; budget_range_max?: number | null; budget_currency?: string
+          includes_flights?: boolean | null; is_chosen?: boolean; converted_trip_id?: string | null
+          development_notes?: string | null; created_at?: string; updated_at?: string
+        }
+        Update: {
+          id?: string; session_id?: string | null; family_id?: string; origin?: string
+          destination?: string; route_summary?: string | null; best_season?: string | null
+          duration_days_min?: number | null; duration_days_max?: number | null; reasoning?: string | null
+          budget_range_min?: number | null; budget_range_max?: number | null; budget_currency?: string
+          includes_flights?: boolean | null; is_chosen?: boolean; converted_trip_id?: string | null
+          development_notes?: string | null; created_at?: string; updated_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "trip_ideas_session_id_fkey";        columns: ["session_id"];        isOneToOne: false; referencedRelation: "trip_idea_sessions"; referencedColumns: ["id"] },
+          { foreignKeyName: "trip_ideas_family_id_fkey";         columns: ["family_id"];         isOneToOne: false; referencedRelation: "families";            referencedColumns: ["id"] },
+          { foreignKeyName: "trip_ideas_converted_trip_id_fkey"; columns: ["converted_trip_id"]; isOneToOne: false; referencedRelation: "trips";                referencedColumns: ["id"] }
         ]
       }
     }
