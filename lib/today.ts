@@ -59,6 +59,31 @@ export function findNextUpcoming(items: TodayTimelineItem[], nowHHMM: string): T
   return items.find((i) => i.time !== null && i.time >= nowHHMM) ?? null
 }
 
+/**
+ * Fällt "heute" in eine Lücke ohne zugeordnete Etappe (z. B. vor der ersten
+ * Etappe oder zwischen zwei Etappen), liefert diese Funktion die zeitlich
+ * nächstgelegene Etappe als sinnvollen geografischen Bezugspunkt für Wetter/
+ * Hero-Bild/Untertitel — statt ersatzweise auf den rohen (oft nicht
+ * geokodierbaren) Reisetitel zurückzufallen.
+ */
+export function findNearestStage(stages: StageInput[], dateIso: string): StageInput | null {
+  const withDates = stages.filter((s) => s.start_date && s.end_date)
+  if (withDates.length === 0) return null
+
+  const covering = withDates.find((s) => s.start_date! <= dateIso && dateIso <= s.end_date!)
+  if (covering) return covering
+
+  const upcoming = [...withDates]
+    .filter((s) => s.start_date! > dateIso)
+    .sort((a, b) => a.start_date!.localeCompare(b.start_date!))[0]
+  if (upcoming) return upcoming
+
+  const past = [...withDates]
+    .filter((s) => s.end_date! < dateIso)
+    .sort((a, b) => b.end_date!.localeCompare(a.end_date!))[0]
+  return past ?? null
+}
+
 export type PrepItem = { icon: LucideIcon; text: string }
 
 /**

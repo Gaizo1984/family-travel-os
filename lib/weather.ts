@@ -52,6 +52,7 @@ export type DailyForecast = {
   tempMax: number
   tempMin: number
   code: number
+  precipitationProbability: number | null
 }
 
 export type WeatherResult = {
@@ -63,10 +64,19 @@ export type WeatherResult = {
   daily: DailyForecast[] // 5 Tage, Index 0 = heute
 }
 
-async function geocodeLocation(query: string): Promise<{ lat: number; lon: number; name: string } | null> {
+/**
+ * Ortsnamen wie einzelne Etappen-/Hotelbezeichnungen sind im Geocoding-Datensatz
+ * oft mehrdeutig (z. B. gibt es "Guanacaste" auch als Kleinstort in Mexiko,
+ * Honduras und El Salvador, aber nicht in Costa Rica erfasst) — mit `countryCode`
+ * wird auf Treffer im bekannten Zielland eingeschränkt, um falsche Länder zu
+ * vermeiden. Liefert bei einer zu engen Einschränkung bewusst `null` zurück,
+ * statt einen falschen Treffer in einem anderen Land zu akzeptieren.
+ */
+async function geocodeLocation(query: string, countryCode?: string): Promise<{ lat: number; lon: number; name: string } | null> {
   try {
-    const url = `${GEOCODING_URL}?name=${encodeURIComponent(query)}&count=1&language=de&format=json`
-    const res = await fetch(url, { cache: 'no-store' })
+    const params = new URLSearchParams({ name: query, count: '1', language: 'de', format: 'json' })
+    if (countryCode) params.set('countryCode', countryCode)
+    const res = await fetch(`${GEOCODING_URL}?${params.toString()}`, { cache: 'no-store' })
     if (!res.ok) return null
     const data = await res.json()
     const first = data?.results?.[0]
@@ -83,7 +93,7 @@ async function fetchForecast(lat: number, lon: number): Promise<Omit<WeatherResu
       latitude: String(lat),
       longitude: String(lon),
       current: 'temperature_2m,weather_code',
-      daily: 'temperature_2m_max,temperature_2m_min,weather_code,sunrise,sunset',
+      daily: 'temperature_2m_max,temperature_2m_min,weather_code,sunrise,sunset,precipitation_probability_max',
       timezone: 'auto',
       forecast_days: '5',
     })
@@ -96,6 +106,7 @@ async function fetchForecast(lat: number, lon: number): Promise<Omit<WeatherResu
       tempMax: Math.round(data.daily.temperature_2m_max[i]),
       tempMin: Math.round(data.daily.temperature_2m_min[i]),
       code: data.daily.weather_code[i],
+      precipitationProbability: data.daily.precipitation_probability_max?.[i] ?? null,
     }))
 
     return {
@@ -110,17 +121,25 @@ async function fetchForecast(lat: number, lon: number): Promise<Omit<WeatherResu
   }
 }
 
+export type WeatherLocationCandidate = { query: string; countryCode?: string | null }
+
 /**
- * Automatische Etappenzuordnung: der aufrufende Code übergibt bereits den
- * Ortsnamen der heute aktiven Etappe (oder den Reisetitel als Fallback) —
- * hier wird nur noch geokodiert und das Wetter dafür geladen. Gibt bei jedem
- * Fehler (Geocoding ohne Treffer, Netzwerkfehler, ...) `null` zurück, statt
- * die Seite mit einer fehlenden Wetter-Sektion abstürzen zu lassen.
+ * Fallback-Kette Hotel → Etappe → Reiseziel: probiert die übergebenen
+ * Kandidaten der Reihe nach (üblicherweise Unterkunftsname, Etappenort,
+ * Landesname/Reisetitel als letzte Instanz) und nimmt den ersten, der sich
+ * geokodieren lässt. `countryCode` schränkt pro Kandidat auf das erwartete
+ * Land ein, um Falschtreffer in einem anderen Land zu vermeiden (siehe
+ * geocodeLocation). Gibt bei komplettem Fehlschlag `null` zurück, statt die
+ * Seite mit einer fehlenden Wetter-Sektion abstürzen zu lassen.
  */
-export async function getWeatherForLocation(locationQuery: string): Promise<WeatherResult | null> {
-  const geo = await geocodeLocation(locationQuery)
-  if (!geo) return null
-  const forecast = await fetchForecast(geo.lat, geo.lon)
-  if (!forecast) return null
-  return { locationName: geo.name, ...forecast }
+export async function getWeatherForLocation(candidates: WeatherLocationCandidate[]): Promise<WeatherResult | null> {
+  for (const candidate of candidates) {
+    if (!candidate.query) continue
+    const geo = await geocodeLocation(candidate.query, candidate.countryCode ?? undefined)
+    if (!geo) continue
+    const forecast = await fetchForecast(geo.lat, geo.lon)
+    if (!forecast) continue
+    return { locationName: geo.name, ...forecast }
+  }
+  return null
 }

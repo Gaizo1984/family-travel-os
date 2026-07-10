@@ -3,7 +3,7 @@ import { Map, Globe, CalendarDays, Users } from "lucide-react";
 import { getDaysUntil, formatDateDE, getTripDuration } from "@/lib/demo-data";
 import { createClient } from "@/lib/supabase/server";
 import { buildWorldStats } from "@/lib/world-stats";
-import { isTripPastEnd, isTripHistorical } from "@/lib/trip-status";
+import { isTripPastEnd, isTripHistorical, isTripCurrentlyRunning } from "@/lib/trip-status";
 
 const TRIP_IMAGES: Record<string, string> = {
   "costa-rica-2026":
@@ -31,9 +31,31 @@ type TripRow = {
   stages: Array<{ id: string }>
 };
 
-function HeroTrip({ trip }: { trip: TripRow }) {
-  const days = trip.start_date ? getDaysUntil(trip.start_date) : 0;
+/**
+ * §Countdown-Bugfix: "Tage bis Abreise" darf nie negativ werden (z. B. während
+ * einer laufenden Reise). Drei Zustände statt einer einzigen Countdown-Zahl:
+ * noch nicht gestartet → Countdown, läuft → Tag X von Y, beendet → Textstatus.
+ */
+function tripCountdownDisplay(trip: TripRow): { value: string; label: string } {
   const duration = trip.start_date && trip.end_date ? getTripDuration(trip.start_date, trip.end_date) : 0;
+
+  if (isTripPastEnd(trip)) {
+    return { value: "—", label: "Reise beendet" };
+  }
+  if (trip.start_date && trip.end_date && isTripCurrentlyRunning(trip)) {
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const dayNumber = Math.floor(
+      (new Date(todayIso + "T00:00:00Z").getTime() - new Date(trip.start_date + "T00:00:00Z").getTime()) / 86400000,
+    ) + 1;
+    return { value: `${dayNumber}/${duration}`, label: "Reisetag" };
+  }
+  const days = trip.start_date ? Math.max(getDaysUntil(trip.start_date), 0) : 0;
+  return { value: days.toLocaleString("de-DE"), label: "Tage bis zur Abreise" };
+}
+
+function HeroTrip({ trip }: { trip: TripRow }) {
+  const duration = trip.start_date && trip.end_date ? getTripDuration(trip.start_date, trip.end_date) : 0;
+  const countdown = tripCountdownDisplay(trip);
   const imgUrl = TRIP_IMAGES[trip.slug];
   const members = trip.trip_members.flatMap((tm) => (tm.persons ? [tm.persons] : []));
 
@@ -99,10 +121,10 @@ function HeroTrip({ trip }: { trip: TripRow }) {
             </div>
             <div className="text-right">
               <div className="text-3xl font-light leading-none" style={{ color: "var(--accent)" }}>
-                {days.toLocaleString("de-DE")}
+                {countdown.value}
               </div>
               <div className="text-xs mt-1" style={{ color: "#A89880", letterSpacing: "0.08em", fontSize: "0.65rem", textTransform: "uppercase" }}>
-                Tage bis zur Abreise
+                {countdown.label}
               </div>
             </div>
           </div>

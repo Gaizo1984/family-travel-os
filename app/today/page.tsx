@@ -1,17 +1,19 @@
 import Link from "next/link";
 import {
-  Clock, ArrowRight, MapPin, Ticket, Sunrise, Sunset, Car, Users, ChevronRight,
+  Clock, ArrowRight, Ticket, Sunrise, Sunset, Car, Users, ChevronRight, Droplets,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { isTripCurrentlyRunning } from "@/lib/trip-status";
 import { sortStagesChronologically, buildJourneyTimeline } from "@/lib/journey";
 import type { StageInput, TimelineBooking, TimelineEvent, TimelineDay } from "@/lib/journey";
 import { sortBookingsChronologically } from "@/lib/bookings";
-import { buildTodayTimelineItems, findNextUpcoming, buildTomorrowPrepItems } from "@/lib/today";
+import { buildTodayTimelineItems, findNextUpcoming, buildTomorrowPrepItems, findNearestStage } from "@/lib/today";
 import { getWeatherForLocation, describeWeatherCode } from "@/lib/weather";
+import type { WeatherLocationCandidate } from "@/lib/weather";
 import { generateTodayRecommendation } from "@/lib/today-ai";
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt, TRAVEL_NEED_OPTIONS } from "@/lib/family-dna";
 import { COUNTRY_STAGE_IMAGES, FALLBACK_STAGE_IMAGE } from "@/lib/stage-images";
+import { COUNTRY_NAMES } from "@/lib/geo-suggestions";
 import type { BookingType, BookingStatus } from "@/lib/supabase/types";
 import type { JourneyEventCategory, JourneyEventStatus } from "@/lib/journey-events";
 
@@ -102,14 +104,14 @@ function Card({ children, className = "" }: { children: React.ReactNode; classNa
 
 export default async function TodayPage() {
   const supabase = await createClient();
-  const { data: family } = await supabase.from("families").select("id").limit(1).single();
+  const { data: family } = await supabase.from("families").select("id, name").limit(1).single();
   const familyId = family?.id ?? "";
 
   const todayIso = new Date().toISOString().slice(0, 10);
   const tomorrowIso = addDaysIso(todayIso, 1);
   const nowHHMM = new Date().toISOString().slice(11, 16);
 
-  const [{ data: trips }, flightToday, { data: allPersons }] = await Promise.all([
+  const [{ data: trips }, flightToday] = await Promise.all([
     supabase
       .from("trips")
       .select(`
@@ -121,15 +123,12 @@ export default async function TodayPage() {
       `)
       .eq("family_id", familyId),
     findTodaysFlightWithBoardingPasses(),
-    supabase.from("persons").select("id, name").eq("family_id", familyId).order("name"),
   ]);
 
   const activeTrip = ((trips ?? []) as unknown as TripRow[]).find((t) => isTripCurrentlyRunning(t));
 
-  const greetingNames = activeTrip
-    ? activeTrip.trip_members.flatMap((m) => (m.persons ? [m.persons.name] : []))
-    : (allPersons ?? []).map((p) => p.name);
-  const greeting = greetingNames.length > 0 ? `Hallo ${greetingNames.join(" & ")}` : "Hallo";
+  // Warme, kurze Begrüßung statt Namensaufzählung — nutzt den echten Familiennamen, falls hinterlegt.
+  const greeting = family?.name ? `Hallo ${family.name}` : "Schön, dass ihr da seid.";
 
   const dateLabel = new Date(todayIso).toLocaleDateString("de-DE", {
     weekday: "long", day: "2-digit", month: "long", year: "numeric",
@@ -192,12 +191,33 @@ export default async function TodayPage() {
   const todayDay = allDays.find((d) => d.date === todayIso) ?? null;
   const tomorrowDay = allDays.find((d) => d.date === tomorrowIso) ?? null;
 
-  const stage = todayDay?.stage ?? null;
-  const locationLabel = stage?.location || stage?.title || activeTrip.title;
+  // Fällt "heute" in eine Lücke ohne Etappe (z. B. vor der ersten Etappe), wird die
+  // zeitlich nächstgelegene Etappe als Bezugspunkt verwendet — der rohe Reisetitel
+  // (oft mit Jahreszahl, z. B. "Costa Rica 2026") lässt sich weder sinnvoll geokodieren
+  // noch einem Länderbild zuordnen.
+  const stage = todayDay?.stage ?? findNearestStage(stages, todayIso);
+  const countryName = stage?.country_code ? COUNTRY_NAMES[stage.country_code] ?? null : null;
+  const locationLabel = stage ? (stage.location || stage.title) : activeTrip.title;
+  const heroSubtitle = stage
+    ? `📍 ${locationLabel}${countryName ? `, ${countryName}` : ""}`
+    : `📍 ${activeTrip.title}`;
   const heroPhoto = (stage?.country_code && COUNTRY_STAGE_IMAGES[stage.country_code]) || FALLBACK_STAGE_IMAGE;
 
-  const weather = await getWeatherForLocation(locationLabel);
+  // Wetter-Fallback-Kette Hotel → Etappe → Reiseziel: Hotel-/Etappennamen sind im
+  // Geocoding-Datensatz oft mehrdeutig oder unbekannt (z. B. "Guanacaste" existiert dort
+  // nur als Kleinstort in Mexiko/Honduras, nicht als Provinz in Costa Rica) — das
+  // Länderzentrum als letzte, verlässliche Instanz stellt sicher, dass so gut wie immer
+  // ein Ergebnis kommt, auch wenn die genaue Etappe nicht auflösbar ist.
+  const weatherCandidates: WeatherLocationCandidate[] = [
+    ...(stage?.accommodation ? [{ query: stage.accommodation, countryCode: stage.country_code }] : []),
+    ...(stage?.location ? [{ query: stage.location, countryCode: stage.country_code }] : []),
+    ...(stage?.title ? [{ query: stage.title, countryCode: stage.country_code }] : []),
+    ...(countryName ? [{ query: countryName }] : []),
+    { query: activeTrip.title },
+  ];
+  const weather = await getWeatherForLocation(weatherCandidates);
   const currentWeather = weather ? describeWeatherCode(weather.currentCode) : null;
+  const todayPrecipitation = weather?.daily[0]?.precipitationProbability ?? null;
 
   const timelineItems = todayDay ? buildTodayTimelineItems(todayDay) : [];
   const nextUp = findNextUpcoming(timelineItems, nowHHMM);
@@ -241,19 +261,22 @@ export default async function TodayPage() {
           <div style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.28em", textTransform: "uppercase", marginBottom: "10px" }}>
             {dateLabel}
           </div>
-          <h1 className="text-3xl md:text-4xl font-light leading-tight mb-3" style={{ color: "#F0EBE3", letterSpacing: "-0.01em" }}>
+          <h1 className="text-3xl md:text-4xl font-light leading-tight mb-1" style={{ color: "#F0EBE3", letterSpacing: "-0.01em" }}>
             {greeting}
           </h1>
+          <div className="mb-4" style={{ color: "#A89880", fontSize: "0.8rem" }}>{heroSubtitle}</div>
 
           <div className="flex items-center gap-5 flex-wrap mb-4">
-            <div className="flex items-center gap-1.5">
-              <MapPin size={12} strokeWidth={1.6} style={{ color: "#A89880" }} />
-              <span style={{ color: "#A89880", fontSize: "0.72rem" }}>{locationLabel}</span>
-            </div>
             {currentWeather && (
               <div className="flex items-center gap-1.5">
                 <currentWeather.icon size={12} strokeWidth={1.6} style={{ color: "#A89880" }} />
                 <span style={{ color: "#A89880", fontSize: "0.72rem" }}>{weather!.currentTemp}°C · {currentWeather.label}</span>
+              </div>
+            )}
+            {todayPrecipitation !== null && (
+              <div className="flex items-center gap-1.5">
+                <Droplets size={12} strokeWidth={1.6} style={{ color: "#A89880" }} />
+                <span style={{ color: "#A89880", fontSize: "0.72rem" }}>{todayPrecipitation}% Regen</span>
               </div>
             )}
             {weather?.sunrise && (
@@ -335,20 +358,23 @@ export default async function TodayPage() {
           <SectionLabel>Heutiger Tag</SectionLabel>
           {timelineItems.length > 0 ? (
             <Card>
-              {timelineItems.map((item, idx) => (
-                <div
-                  key={item.id}
-                  className="flex items-center gap-4 py-3"
-                  style={{ borderBottom: idx < timelineItems.length - 1 ? "1px solid var(--border)" : "none" }}
-                >
-                  <item.icon size={14} strokeWidth={1.4} style={{ color: "var(--accent)", flexShrink: 0 }} />
-                  <div className="flex-1 min-w-0">
-                    <div style={{ color: "var(--foreground)", fontSize: "0.85rem" }}>{item.title}</div>
-                    {item.subtitle && <div style={{ color: "var(--muted)", fontSize: "0.68rem" }}>{item.subtitle}</div>}
+              {timelineItems.map((item, idx) => {
+                const isPast = item.time !== null && item.time < nowHHMM;
+                return (
+                  <div
+                    key={item.id}
+                    className="flex items-center gap-4 py-3"
+                    style={{ borderBottom: idx < timelineItems.length - 1 ? "1px solid var(--border)" : "none", opacity: isPast ? 0.45 : 1 }}
+                  >
+                    <item.icon size={14} strokeWidth={1.4} style={{ color: "var(--accent)", flexShrink: 0 }} />
+                    <div className="flex-1 min-w-0">
+                      <div style={{ color: "var(--foreground)", fontSize: "0.85rem" }}>{item.title}</div>
+                      {item.subtitle && <div style={{ color: "var(--muted)", fontSize: "0.68rem" }}>{item.subtitle}</div>}
+                    </div>
+                    {item.time && <div style={{ color: "var(--muted)", fontSize: "0.72rem", flexShrink: 0 }}>{item.time}</div>}
                   </div>
-                  {item.time && <div style={{ color: "var(--muted)", fontSize: "0.72rem", flexShrink: 0 }}>{item.time}</div>}
-                </div>
-              ))}
+                );
+              })}
             </Card>
           ) : (
             <Card>
@@ -372,6 +398,9 @@ export default async function TodayPage() {
                       <info.icon size={16} strokeWidth={1.4} style={{ color: "var(--accent)" }} />
                       <span style={{ color: "var(--foreground)", fontSize: "0.72rem" }}>{d.tempMax}°</span>
                       <span style={{ color: "var(--muted)", fontSize: "0.64rem" }}>{d.tempMin}°</span>
+                      {d.precipitationProbability !== null && (
+                        <span style={{ color: "var(--muted)", fontSize: "0.6rem" }}>{d.precipitationProbability}%</span>
+                      )}
                     </div>
                   );
                 })}

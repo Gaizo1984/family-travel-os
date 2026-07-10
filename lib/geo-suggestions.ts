@@ -52,3 +52,14 @@ export function suggestCountryCode(text: string | null | undefined): string | nu
   }
   return null
 }
+
+/** ISO-3166-1-alpha-2 → deutscher Anzeigename, für dieselben Länder wie COUNTRY_CODE_MAP. */
+export const COUNTRY_NAMES: Record<string, string> = {
+  CR: 'Costa Rica', OM: 'Oman', BR: 'Brasilien', US: 'USA', CH: 'Schweiz',
+  GB: 'Vereinigtes Königreich', ID: 'Indonesien', AE: 'Vereinigte Arabische Emirate',
+  JP: 'Japan', TH: 'Thailand', LK: 'Sri Lanka', SC: 'Seychellen', MX: 'Mexiko',
+  CA: 'Kanada', ZA: 'Südafrika', AU: 'Australien', IT: 'Italien', GR: 'Griechenland',
+  ES: 'Spanien', PT: 'Portugal', FR: 'Frankreich', DE: 'Deutschland', AT: 'Österreich',
+  MV: 'Malediven', VN: 'Vietnam', NZ: 'Neuseeland', EG: 'Ägypten', MA: 'Marokko',
+  TR: 'Türkei', KE: 'Kenia', TZ: 'Tansania',
+}
