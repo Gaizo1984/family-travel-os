@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
+import { suggestCountryCode } from '@/lib/geo-suggestions'
 
 function computeNights(startDate: string, endDate: string): number | null {
   if (!startDate || !endDate) return null
@@ -27,13 +28,17 @@ export async function createStage(formData: FormData) {
 
   const supabase = await createClient()
 
-  const { data: last } = await supabase
-    .from('stages')
-    .select('sort_order')
-    .eq('trip_id', tripId)
-    .order('sort_order', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+  const [{ data: last }, { data: trip }] = await Promise.all([
+    supabase.from('stages').select('sort_order').eq('trip_id', tripId).order('sort_order', { ascending: false }).limit(1).maybeSingle(),
+    supabase.from('trips').select('title, subtitle').eq('id', tripId).maybeSingle(),
+  ])
+
+  // Deterministischer Länder-Vorschlag: zuerst die Etappe selbst (z. B. "Dubai"
+  // bei einer Mehrländer-Reise), erst wenn die Etappe keinen Ländertreffer
+  // enthält (z. B. "Guanacaste") auf den Reisetitel zurückfallen — sonst würde
+  // bei Mehrländer-Reisen der Reisetitel jede Etappe auf ein Land ziehen.
+  const countryCode = suggestCountryCode(`${title} ${accommodation}`)
+    ?? suggestCountryCode(`${trip?.title ?? ''} ${trip?.subtitle ?? ''}`)
 
   const { error } = await supabase.from('stages').insert({
     trip_id: tripId,
@@ -45,6 +50,7 @@ export async function createStage(formData: FormData) {
     accommodation: accommodation || null,
     notes: notes || null,
     sort_order: (last?.sort_order ?? -1) + 1,
+    country_code: countryCode,
   })
 
   if (error)
@@ -71,6 +77,13 @@ export async function updateStage(formData: FormData) {
 
   const supabase = await createClient()
 
+  const { data: stage } = await supabase.from('stages').select('trip_id').eq('id', stageId).maybeSingle()
+  const { data: trip } = stage
+    ? await supabase.from('trips').select('title, subtitle').eq('id', stage.trip_id).maybeSingle()
+    : { data: null }
+  const countryCode = suggestCountryCode(`${title} ${accommodation}`)
+    ?? suggestCountryCode(`${trip?.title ?? ''} ${trip?.subtitle ?? ''}`)
+
   const { error } = await supabase
     .from('stages')
     .update({
@@ -81,6 +94,7 @@ export async function updateStage(formData: FormData) {
       nights: computeNights(startDate, endDate),
       accommodation: accommodation || null,
       notes: notes || null,
+      country_code: countryCode,
     })
     .eq('id', stageId)
 

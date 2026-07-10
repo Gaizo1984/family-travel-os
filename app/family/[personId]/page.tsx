@@ -7,6 +7,11 @@ import {
   getPassportValidity, formatExpiresAt,
 } from "@/lib/documents";
 import type { DocumentType, DocumentDetails } from "@/lib/documents";
+import { TRAVEL_NEED_OPTIONS } from "@/lib/family-dna";
+
+const TRAVEL_NEED_LABELS: Record<string, string> = Object.fromEntries(
+  TRAVEL_NEED_OPTIONS.map((o) => [o.key, o.label]),
+);
 
 type DocumentRow = {
   id: string;
@@ -61,11 +66,17 @@ export default async function PersonDetailPage({
   const supabase = await createClient();
   const { data: person } = await supabase
     .from("persons")
-    .select("id, name, initials, color")
+    .select("id, name, initials, color, role_label, description, interest_tags, travel_needs, photo_storage_path")
     .eq("id", personId)
     .maybeSingle();
 
   if (!person) notFound();
+
+  let photoUrl: string | null = null;
+  if (person.photo_storage_path) {
+    const { data: signed } = await supabase.storage.from("documents").createSignedUrl(person.photo_storage_path, 3600);
+    photoUrl = signed?.signedUrl ?? null;
+  }
 
   const { data: documents } = await supabase
     .from("documents")
@@ -88,17 +99,63 @@ export default async function PersonDetailPage({
           Familie
         </Link>
 
-        <div className="flex items-center gap-3 mb-8">
-          <div
-            className="w-10 h-10 rounded-full flex items-center justify-center"
-            style={{ background: "var(--accent-subtle)", color: "var(--accent)", fontSize: "0.75rem", letterSpacing: "0.04em" }}
-          >
-            {person.initials}
+        <div className="flex items-center justify-between mb-8 flex-wrap gap-4">
+          <div className="flex items-center gap-3">
+            {photoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={photoUrl} alt={person.name} className="w-10 h-10 rounded-full object-cover" />
+            ) : (
+              <div
+                className="w-10 h-10 rounded-full flex items-center justify-center"
+                style={{ background: "var(--accent-subtle)", color: "var(--accent)", fontSize: "0.75rem", letterSpacing: "0.04em" }}
+              >
+                {person.initials}
+              </div>
+            )}
+            <div>
+              <h1 className="font-light" style={{ color: "var(--foreground)", fontSize: "1.6rem", letterSpacing: "0.01em" }}>
+                {person.name}
+              </h1>
+              {person.role_label && (
+                <p style={{ color: "var(--muted)", fontSize: "0.72rem", letterSpacing: "0.04em" }}>{person.role_label}</p>
+              )}
+            </div>
           </div>
-          <h1 className="font-light" style={{ color: "var(--foreground)", fontSize: "1.6rem", letterSpacing: "0.01em" }}>
-            {person.name}
-          </h1>
+          <Link
+            href={`/family/${person.id}/edit`}
+            style={{ color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.08em", textDecoration: "none" }}
+          >
+            Profil bearbeiten →
+          </Link>
         </div>
+
+        {(person.description || person.interest_tags.length > 0 || person.travel_needs.length > 0) && (
+          <div className="rounded-xl p-6 mb-8" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+            {person.description && (
+              <p className="mb-4" style={{ color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 300, lineHeight: 1.6 }}>
+                {person.description}
+              </p>
+            )}
+            {person.interest_tags.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-3">
+                {person.interest_tags.map((tag) => (
+                  <span key={tag} style={{ color: "var(--accent)", fontSize: "0.62rem", letterSpacing: "0.06em", background: "rgba(184,154,94,0.1)", border: "1px solid rgba(184,154,94,0.25)", padding: "3px 10px", borderRadius: "20px" }}>
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
+            {person.travel_needs.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {person.travel_needs.map((need) => (
+                  <span key={need} style={{ color: "var(--muted)", fontSize: "0.62rem", letterSpacing: "0.06em", background: "var(--background)", border: "1px solid var(--border)", padding: "3px 10px", borderRadius: "20px" }}>
+                    {TRAVEL_NEED_LABELS[need] ?? need}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <section>
           <div className="flex items-center justify-between mb-5">
