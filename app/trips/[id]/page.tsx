@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Plane, BedDouble, Compass, FileText, MoreHorizontal, ChevronLeft, ChevronRight, Wallet } from "lucide-react";
+import { Plane, BedDouble, Compass, FileText, MoreHorizontal, ChevronLeft, ChevronRight, Wallet, Route } from "lucide-react";
 import { formatDateDE, getTripDuration } from "@/lib/demo-data";
 import { createClient } from "@/lib/supabase/server";
 import { sortBookingsChronologically, BOOKING_CATEGORIES } from "@/lib/bookings";
@@ -13,7 +13,6 @@ import {
 } from "@/lib/journey";
 import type { JourneyEventCategory, JourneyEventStatus } from "@/lib/journey-events";
 import { computeTripReadiness } from "@/lib/readiness";
-import { computeTripBudget } from "@/lib/budget";
 
 const H_FG    = "#F0EBE3";
 const H_MUTED = "#A89880";
@@ -162,59 +161,29 @@ function StageCard({ stage, idx, slug }: { stage: StageRow; idx: number; slug: s
   );
 }
 
-function summarizeBookingsByTypes(
-  bookings: BookingRow[],
-  types: BookingType[],
-  pluralLabel: string,
-  emptyDetail: string,
-  href: string,
-): { status: string; statusColor: string; detail: string; href: string } {
-  const active = bookings.filter((b) => types.includes(b.type) && b.status !== "cancelled");
-  if (active.length === 0) {
-    return { status: "Offen", statusColor: "#B5624A", detail: emptyDetail, href };
-  }
-  const allConfirmed = active.every((b) => b.status === "confirmed");
-  const detail = active.length === 1
-    ? (active[0].provider ? `${active[0].provider} · ${active[0].title}` : active[0].title)
-    : `${active.length} ${pluralLabel} gebucht`;
-  return {
-    status: allConfirmed ? "Gebucht" : "In Planung",
-    statusColor: "#B89A5E",
-    detail,
-    href,
-  };
-}
-
-function OverviewCard({ title, detail, status, statusColor, Icon, href }: {
-  title: string; detail: string; status: string; statusColor: string;
+function QuickNavItem({ Icon, label, href }: {
   Icon: React.ComponentType<{ size?: number; strokeWidth?: number; style?: React.CSSProperties }>;
-  href?: string;
+  label: string; href: string;
 }) {
-  const content = (
-    <>
-      <div className="flex items-center justify-between mb-4">
-        <Icon size={14} strokeWidth={1.4} style={{ color: "var(--accent)" }} />
-        <span style={{ color: statusColor, fontSize: "0.56rem", letterSpacing: "0.14em", textTransform: "uppercase" }}>
-          {status}
-        </span>
-      </div>
-      <div className="text-sm font-medium mb-1.5" style={{ color: "var(--foreground)" }}>{title}</div>
-      <div className="leading-relaxed" style={{ color: "var(--muted)", fontSize: "0.68rem" }}>{detail}</div>
-    </>
-  );
-
-  if (href) {
-    return (
-      <Link href={href} className="block p-5 rounded-xl transition-colors" style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}>
-        {content}
-      </Link>
-    );
-  }
-
   return (
-    <div className="p-5 rounded-xl" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-      {content}
-    </div>
+    <Link
+      href={href}
+      className="flex flex-col items-center justify-center gap-1.5 shrink-0 transition-opacity hover:opacity-70"
+      style={{ width: 68, textDecoration: "none" }}
+    >
+      <div
+        className="w-11 h-11 rounded-full flex items-center justify-center"
+        style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+      >
+        <Icon size={16} strokeWidth={1.4} style={{ color: "var(--accent)" }} />
+      </div>
+      <span
+        className="text-center leading-tight"
+        style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.02em" }}
+      >
+        {label}
+      </span>
+    </Link>
   );
 }
 
@@ -341,41 +310,14 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
     journeyEvents,
   );
 
-  const memberIds = members.map((m) => m.id);
-  const { data: passportDocs } = memberIds.length > 0
-    ? await supabase.from("documents").select("person_id").eq("doc_type", "passport").in("person_id", memberIds)
-    : { data: [] };
-  const membersWithPassport = new Set((passportDocs ?? []).map((d) => d.person_id)).size;
-
-  const flightsSummary = summarizeBookingsByTypes(
-    bookings, BOOKING_CATEGORIES.flight.types, "Flüge", BOOKING_CATEGORIES.flight.emptyDetail,
-    `/trips/${trip.slug}/bookings/category/flight`,
-  );
-  const hotelsSummary = summarizeBookingsByTypes(
-    bookings, BOOKING_CATEGORIES.accommodation.types, "Unterkünfte", BOOKING_CATEGORIES.accommodation.emptyDetail,
-    `/trips/${trip.slug}/bookings/category/accommodation`,
-  );
-  const activitiesSummary = summarizeBookingsByTypes(
-    bookings, BOOKING_CATEGORIES.activity.types, "Aktivitäten", BOOKING_CATEGORIES.activity.emptyDetail,
-    `/trips/${trip.slug}/bookings/category/activity`,
-  );
   // "Mehr" überspringt die Zwischenansicht und führt bei komplett leerer Kategorie
   // direkt zur Typ-Auswahl; sobald irgendeine Buchung existiert (unabhängig vom Status,
   // damit auch stornierte oder bestehende Versicherungsbuchungen erreichbar bleiben),
   // führt die Kachel weiterhin zur Listenansicht.
   const hasMoreBookings = bookings.some((b) => BOOKING_CATEGORIES.more.types.includes(b.type));
-  const moreSummary = summarizeBookingsByTypes(
-    bookings, BOOKING_CATEGORIES.more.types, "weitere Buchungen", BOOKING_CATEGORIES.more.emptyDetail,
-    hasMoreBookings ? `/trips/${trip.slug}/bookings/category/more` : `/trips/${trip.slug}/bookings/new?category=more`,
-  );
-  const documentsSummary = members.length === 0
-    ? { status: "Offen", statusColor: "#B5624A", detail: "Noch keine Reisepässe hinterlegt" }
-    : membersWithPassport === 0
-      ? { status: "Offen", statusColor: "#B5624A", detail: "Noch keine Reisepässe hinterlegt" }
-      : membersWithPassport === members.length
-        ? { status: "Vorhanden", statusColor: "#B89A5E", detail: "Alle Reisepässe hinterlegt" }
-        : { status: "In Planung", statusColor: "#B89A5E", detail: `${membersWithPassport} von ${members.length} Reisepässen vorhanden` };
-  const documentsHref = `/trips/${trip.slug}/documents`;
+  const moreHref = hasMoreBookings
+    ? `/trips/${trip.slug}/bookings/category/more`
+    : `/trips/${trip.slug}/bookings/new?category=more`;
 
   const duration  = trip.start_date && trip.end_date
     ? getTripDuration(trip.start_date, trip.end_date) : 0;
@@ -398,19 +340,6 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
       ? `${readiness.conflictCount} ${readiness.conflictCount === 1 ? "Konflikt" : "Konflikte"}`
       : `${readiness.hintCount} ${readiness.hintCount === 1 ? "Punkt" : "Punkte"} prüfen`;
   const readinessColor = readiness.status === "ready" ? "#4C7A5D" : readiness.status === "conflicts" ? "#B5624A" : "#B89A5E";
-
-  const budget = await computeTripBudget(trip.id);
-  const budgetSummary = budget.budgetAmount !== null
-    ? {
-        status: (budget.percentUsed ?? 0) > 100 ? "Überschritten" : "In Budget",
-        statusColor: (budget.percentUsed ?? 0) > 100 ? "#B5624A" : "#B89A5E",
-        detail: `${budget.totalConverted.toFixed(2)} von ${budget.budgetAmount.toFixed(2)} ${budget.tripCurrency}`,
-      }
-    : {
-        status: budget.items.length > 0 ? "Erfasst" : "Offen",
-        statusColor: "#B89A5E",
-        detail: budget.items.length > 0 ? `${budget.totalConverted.toFixed(2)} ${budget.tripCurrency} bisher` : "Noch keine Kosten erfasst",
-      };
 
   return (
     <div className="flex-1 flex flex-col">
@@ -549,7 +478,19 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
       <div className="flex-1" style={{ background: "var(--background)" }}>
         <div className="max-w-5xl mx-auto px-5 md:px-10 py-10 space-y-14">
 
-          <section>
+          <div className="overflow-x-auto -mx-1 px-1 -mt-2">
+            <div className="flex gap-1 sm:gap-3 flex-nowrap sm:flex-wrap sm:justify-between" style={{ width: "max-content", minWidth: "100%" }}>
+              <QuickNavItem Icon={Route} label="Journey" href="#journey" />
+              <QuickNavItem Icon={Plane} label="Flüge" href={`/trips/${trip.slug}/bookings/category/flight`} />
+              <QuickNavItem Icon={BedDouble} label="Hotels" href={`/trips/${trip.slug}/bookings/category/accommodation`} />
+              <QuickNavItem Icon={Compass} label="Aktivitäten" href={`/trips/${trip.slug}/bookings/category/activity`} />
+              <QuickNavItem Icon={FileText} label="Dokumente" href={`/trips/${trip.slug}/documents`} />
+              <QuickNavItem Icon={Wallet} label="Budget" href={`/trips/${trip.slug}/budget`} />
+              <QuickNavItem Icon={MoreHorizontal} label="Mehr" href={moreHref} />
+            </div>
+          </div>
+
+          <section id="journey">
             <div className="flex items-center justify-between mb-5">
               <h2
                 className="text-xs font-medium"
@@ -666,18 +607,6 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
                 </Link>
               </div>
             )}
-          </section>
-
-          <section>
-            <SectionLabel>Reiseübersicht</SectionLabel>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
-              <OverviewCard title="Flüge" detail={flightsSummary.detail} status={flightsSummary.status} statusColor={flightsSummary.statusColor} Icon={Plane} href={flightsSummary.href} />
-              <OverviewCard title="Hotels" detail={hotelsSummary.detail} status={hotelsSummary.status} statusColor={hotelsSummary.statusColor} Icon={BedDouble} href={hotelsSummary.href} />
-              <OverviewCard title="Aktivitäten" detail={activitiesSummary.detail} status={activitiesSummary.status} statusColor={activitiesSummary.statusColor} Icon={Compass} href={activitiesSummary.href} />
-              <OverviewCard title="Dokumente" detail={documentsSummary.detail} status={documentsSummary.status} statusColor={documentsSummary.statusColor} Icon={FileText} href={documentsHref} />
-              <OverviewCard title="Budget" detail={budgetSummary.detail} status={budgetSummary.status} statusColor={budgetSummary.statusColor} Icon={Wallet} href={`/trips/${trip.slug}/budget`} />
-              <OverviewCard title="Mehr" detail={moreSummary.detail} status={moreSummary.status} statusColor={moreSummary.statusColor} Icon={MoreHorizontal} href={moreSummary.href} />
-            </div>
           </section>
 
           <section>

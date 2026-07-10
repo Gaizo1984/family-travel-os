@@ -68,25 +68,6 @@ export function DocumentForm({
         className="rounded-xl p-8"
         style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
       >
-        {errorMessage && (
-          <div
-            className="mb-6 px-4 py-3 rounded-lg"
-            style={{ background: "rgba(181,98,74,0.12)", border: "1px solid rgba(181,98,74,0.3)", color: "#B5624A", fontSize: "0.75rem", letterSpacing: "0.02em" }}
-          >
-            {errorMessage}
-          </div>
-        )}
-
-        {infoMessage && (
-          <div
-            className="mb-6 px-4 py-3 rounded-lg"
-            style={{ background: "rgba(184,154,94,0.12)", border: "1px solid rgba(184,154,94,0.3)", color: "var(--accent)", fontSize: "0.75rem", letterSpacing: "0.02em" }}
-          >
-            🤖 {infoMessage}
-            {detectedName && ` — im Dokument erkannter Name: „${detectedName}“, bitte mit der ausgewählten Person abgleichen.`}
-          </div>
-        )}
-
         <div className="mb-5">
           <label htmlFor="doc-label" style={LABEL_STYLE}>Dokumentname *</label>
           <input
@@ -269,6 +250,26 @@ export function DocumentForm({
               ? "Neues Foto/PDF hochladen (ersetzt die bereits hochgeladene Datei)"
               : fileRequired ? "Foto aufnehmen oder Datei/PDF auswählen *" : "Neue Datei hochladen (optional, ersetzt vorhandene Datei)"}
           </label>
+
+          {errorMessage && (
+            <div
+              className="mb-3 px-4 py-3 rounded-lg"
+              style={{ background: "rgba(181,98,74,0.12)", border: "1px solid rgba(181,98,74,0.3)", color: "#B5624A", fontSize: "0.75rem", letterSpacing: "0.02em" }}
+            >
+              {errorMessage}
+            </div>
+          )}
+
+          {infoMessage && (
+            <div
+              className="mb-3 px-4 py-3 rounded-lg"
+              style={{ background: "rgba(184,154,94,0.12)", border: "1px solid rgba(184,154,94,0.3)", color: "var(--accent)", fontSize: "0.75rem", letterSpacing: "0.02em" }}
+            >
+              🤖 {infoMessage}
+              {detectedName && ` — im Dokument erkannter Name: „${detectedName}“, bitte mit der ausgewählten Person abgleichen.`}
+            </div>
+          )}
+
           <input
             id="doc-file" name="file" type="file"
             accept="image/jpeg,image/png,image/webp,application/pdf"
@@ -290,6 +291,7 @@ export function DocumentForm({
               <button
                 type="submit"
                 formAction={extractAction}
+                formNoValidate
                 style={{
                   background: "transparent", color: "var(--accent)", border: "1px solid rgba(184,154,94,0.4)",
                   borderRadius: "6px", padding: "10px 18px", fontSize: "0.65rem",

@@ -109,25 +109,6 @@ export default async function NewBudgetItemPage({
           {draft?.receipt_number && <input type="hidden" name="receipt_number" value={draft.receipt_number} />}
 
           <div className="rounded-xl p-8" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-            {error && (
-              <div
-                className="mb-6 px-4 py-3 rounded-lg"
-                style={{ background: "rgba(181,98,74,0.12)", border: "1px solid rgba(181,98,74,0.3)", color: "#B5624A", fontSize: "0.75rem", letterSpacing: "0.02em" }}
-              >
-                {error}
-              </div>
-            )}
-
-            {draft && (
-              <div
-                className="mb-6 px-4 py-3 rounded-lg"
-                style={{ background: "rgba(184,154,94,0.12)", border: "1px solid rgba(184,154,94,0.3)", color: "var(--accent)", fontSize: "0.75rem", letterSpacing: "0.02em" }}
-              >
-                🤖 Beleg automatisch ausgelesen — bitte Betrag, Währung und die übrigen Felder prüfen und bei Bedarf korrigieren.
-                {draft.location && ` Erkannter Ort: „${draft.location}“.`}
-              </div>
-            )}
-
             <div className="mb-5">
               <label htmlFor="bi-label" style={LABEL_STYLE}>Bezeichnung *</label>
               <input
@@ -202,6 +183,26 @@ export default async function NewBudgetItemPage({
               <label htmlFor="bi-file" style={LABEL_STYLE}>
                 {storage_path ? "Beleg bereits hochgeladen ✓ (ersetzen optional)" : "Beleg als Foto/PDF (optional)"}
               </label>
+
+              {error && (
+                <div
+                  className="mb-3 px-4 py-3 rounded-lg"
+                  style={{ background: "rgba(181,98,74,0.12)", border: "1px solid rgba(181,98,74,0.3)", color: "#B5624A", fontSize: "0.75rem", letterSpacing: "0.02em" }}
+                >
+                  {error}
+                </div>
+              )}
+
+              {draft && (
+                <div
+                  className="mb-3 px-4 py-3 rounded-lg"
+                  style={{ background: "rgba(184,154,94,0.12)", border: "1px solid rgba(184,154,94,0.3)", color: "var(--accent)", fontSize: "0.75rem", letterSpacing: "0.02em" }}
+                >
+                  🤖 Beleg automatisch ausgelesen — bitte Betrag, Währung und die übrigen Felder prüfen und bei Bedarf korrigieren.
+                  {draft.location && ` Erkannter Ort: „${draft.location}“.`}
+                </div>
+              )}
+
               <input
                 id="bi-file" name="file" type="file"
                 accept="image/jpeg,image/png,image/webp,application/pdf"
@@ -222,6 +223,7 @@ export default async function NewBudgetItemPage({
                   <button
                     type="submit"
                     formAction={extractReceiptData}
+                    formNoValidate
                     style={{
                       background: "transparent", color: "var(--accent)", border: "1px solid rgba(184,154,94,0.4)",
                       borderRadius: "6px", padding: "10px 18px", fontSize: "0.65rem",
@@ -229,7 +231,7 @@ export default async function NewBudgetItemPage({
                       whiteSpace: "nowrap", WebkitAppearance: "none", appearance: "none",
                     }}
                   >
-                    📷 Beleg scannen
+                    🤖 Mit KI auslesen
                   </button>
                 )}
                 <button
