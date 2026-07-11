@@ -35,7 +35,7 @@ export default async function ContentDraftPage({
   const supabase = await createClient();
   const { data: draft } = await supabase
     .from("content_drafts")
-    .select("id, project_id, draft_type, structure, visibility, scheduled_at, notes")
+    .select("id, project_id, draft_type, structure, visibility, scheduled_at, notes, instagram_ready")
     .eq("id", draftId)
     .maybeSingle();
 
@@ -131,6 +131,10 @@ export default async function ContentDraftPage({
                   </select>
                 </div>
               </div>
+              <label className="flex items-center gap-2 mt-4" style={{ cursor: "pointer" }}>
+                <input type="checkbox" name="instagram_ready" defaultChecked={draft.instagram_ready} />
+                <span style={{ color: "var(--muted)", fontSize: "0.72rem" }}>Für Instagram vorbereitet (noch keine Veröffentlichung)</span>
+              </label>
             </details>
 
             <div className="mt-6 mb-2">

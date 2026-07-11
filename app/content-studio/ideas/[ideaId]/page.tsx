@@ -13,7 +13,7 @@ type Suggestion = {
 };
 
 const FORMAT_LABELS: Record<string, string> = {
-  reel: "Reel", carousel: "Carousel", story: "Story-Serie", caption: "Feed-Post",
+  reel: "Reel", carousel: "Carousel", story: "Story-Serie", caption: "Feed-Post", feed_post: "Feed-Post",
 };
 
 export default async function ContentIdeaDetailPage({
@@ -29,7 +29,7 @@ export default async function ContentIdeaDetailPage({
   const supabase = await createClient();
   const { data: idea } = await supabase
     .from("content_ideas")
-    .select("id, suggestions, content_goal, chosen_index, source_input_text, trip_id, status, is_favorite, reasoning, trips(title)")
+    .select("id, project_id, suggestions, content_goal, chosen_index, source_input_text, trip_id, status, is_favorite, reasoning, trips(title)")
     .eq("id", ideaId)
     .maybeSingle();
 
@@ -38,6 +38,22 @@ export default async function ContentIdeaDetailPage({
   const suggestions = idea.suggestions as unknown as Suggestion[];
   const tripTitle = (idea.trips as unknown as { title: string } | null)?.title;
   const returnTo = `/content-studio/ideas/${idea.id}`;
+
+  const { data: selectedPhotosRaw } = idea.project_id
+    ? await supabase
+        .from("content_project_photos")
+        .select("id, storage_path, quality_score")
+        .eq("project_id", idea.project_id)
+        .eq("is_selected", true)
+        .order("quality_score", { ascending: false })
+    : { data: null };
+
+  const selectedPhotos = await Promise.all(
+    (selectedPhotosRaw ?? []).map(async (p) => {
+      const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.storage_path, 3600);
+      return { id: p.id, url: signed?.signedUrl ?? null, qualityScore: p.quality_score };
+    }),
+  );
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -104,6 +120,32 @@ export default async function ContentIdeaDetailPage({
           <div className="flex items-start gap-2 mb-8 p-4 rounded-lg" style={{ background: "var(--accent-subtle)" }}>
             <Sparkles size={13} strokeWidth={1.6} style={{ color: "var(--accent)", flexShrink: 0, marginTop: "2px" }} />
             <p style={{ color: "var(--foreground)", fontSize: "0.78rem", lineHeight: 1.5 }}>{idea.reasoning}</p>
+          </div>
+        )}
+
+        {selectedPhotos.length > 0 && (
+          <div className="mb-8">
+            <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: "10px" }}>
+              Ausgewählte Motive
+            </div>
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {selectedPhotos.map((p) => (
+                p.url && (
+                  <div key={p.id} className="relative shrink-0 rounded-lg overflow-hidden" style={{ width: 96, height: 96 }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={p.url} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                    {p.qualityScore !== null && (
+                      <span
+                        className="absolute bottom-1 right-1"
+                        style={{ color: "#F0EBE3", fontSize: "0.58rem", background: "rgba(10,9,7,0.6)", padding: "1px 6px", borderRadius: "10px" }}
+                      >
+                        {p.qualityScore}/10
+                      </span>
+                    )}
+                  </div>
+                )
+              ))}
+            </div>
           </div>
         )}
 

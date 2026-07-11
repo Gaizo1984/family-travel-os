@@ -90,15 +90,36 @@ export default async function NewContentIdeaPage({
               />
             </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+              <div>
+                <label htmlFor="ci-language" style={LABEL_STYLE}>Sprache</label>
+                <select id="ci-language" name="content_language" defaultValue="de" style={FIELD_STYLE}>
+                  <option value="de">Deutsch</option>
+                  <option value="en">English</option>
+                </select>
+              </div>
+              <div>
+                <label htmlFor="ci-style" style={LABEL_STYLE}>Stil</label>
+                <select id="ci-style" name="content_style" defaultValue="" style={FIELD_STYLE}>
+                  <option value="">— egal, KI wählt passend —</option>
+                  <option value="luxury">Luxury</option>
+                  <option value="family">Family</option>
+                  <option value="adventure">Adventure</option>
+                  <option value="emotional">Emotional</option>
+                </select>
+              </div>
+            </div>
+
             <div className="mb-8">
-              <label htmlFor="ci-file" style={LABEL_STYLE}>Foto (optional)</label>
+              <label htmlFor="ci-files" style={LABEL_STYLE}>Fotos (optional, 5–20 empfohlen)</label>
               <input
-                id="ci-file" name="file" type="file"
+                id="ci-files" name="files" type="file" multiple
                 accept="image/jpeg,image/png,image/webp"
                 style={{ ...FIELD_STYLE, padding: "10px 16px" }}
               />
               <p className="mt-2" style={{ color: "var(--muted)", fontSize: "0.65rem" }}>
-                Nur Fotos werden inhaltlich analysiert (Ort/Stimmung). Erlaubt: JPEG, PNG, WebP, maximal 10 MB.
+                Die KI erkennt Dubletten automatisch, bewertet die Bildqualität und wählt die besten Motive aus.
+                Erlaubt: JPEG, PNG, WebP, maximal 10 MB pro Foto.
               </p>
             </div>
 

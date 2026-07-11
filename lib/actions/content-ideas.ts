@@ -118,6 +118,7 @@ export async function updateContentDraft(formData: FormData) {
   const visibility = String(formData.get('visibility') ?? 'private')
   const scheduledAt = String(formData.get('scheduled_at') ?? '').trim()
   const notes = String(formData.get('notes') ?? '').trim()
+  const instagramReady = formData.get('instagram_ready') === 'on'
 
   const supabase = await createClient()
 
@@ -138,6 +139,7 @@ export async function updateContentDraft(formData: FormData) {
     visibility,
     scheduled_at: scheduledAt || null,
     notes: notes || null,
+    instagram_ready: instagramReady,
   }).eq('id', draftId)
 
   if (error)
