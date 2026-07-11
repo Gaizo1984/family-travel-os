@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { buildWorldStats } from "@/lib/world-stats";
 import { SignedPhoto } from "@/components/SignedPhoto";
+import { PhotoLightbox } from "@/components/PhotoLightbox";
 
 export default async function YearbookPage({
   params,
@@ -76,7 +77,9 @@ export default async function YearbookPage({
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             {photosWithUrls.map((p) => p.url && (
               <div key={p.id} className="relative rounded-lg overflow-hidden" style={{ aspectRatio: "1/1" }}>
-                <SignedPhoto storagePath={p.storage_path} initialUrl={p.url} alt={p.caption ?? ""} className="absolute inset-0 w-full h-full object-cover" />
+                <PhotoLightbox url={p.url} alt={p.caption ?? ""}>
+                  <SignedPhoto storagePath={p.storage_path} initialUrl={p.url} alt={p.caption ?? ""} className="absolute inset-0 w-full h-full object-cover" />
+                </PhotoLightbox>
               </div>
             ))}
           </div>

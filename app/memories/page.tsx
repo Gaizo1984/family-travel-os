@@ -7,6 +7,7 @@ import { MultiPhotoFilePreview } from "@/components/MultiPhotoFilePreview";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
 import { Banner } from "@/components/Banner";
 import { SignedPhoto } from "@/components/SignedPhoto";
+import { PhotoLightbox } from "@/components/PhotoLightbox";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -29,9 +30,14 @@ function PhotoCard({ photo, url, personName, returnTo }: { photo: PhotoRow; url:
   if (!url) return null;
   return (
     <div className="relative rounded-lg overflow-hidden group" style={{ aspectRatio: "1/1" }}>
-      <SignedPhoto storagePath={photo.storage_path} initialUrl={url} alt={photo.caption ?? ""} loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
-      <div className="absolute inset-0 flex flex-col justify-between p-2" style={{ background: "linear-gradient(to bottom, rgba(10,9,7,0.5) 0%, transparent 30%, transparent 70%, rgba(10,9,7,0.7) 100%)" }}>
-        <div className="flex items-center justify-end gap-1">
+      <PhotoLightbox url={url} alt={photo.caption ?? ""}>
+        <SignedPhoto storagePath={photo.storage_path} initialUrl={url} alt={photo.caption ?? ""} loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
+      </PhotoLightbox>
+      <div
+        className="absolute inset-0 flex flex-col justify-between p-2"
+        style={{ background: "linear-gradient(to bottom, rgba(10,9,7,0.5) 0%, transparent 30%, transparent 70%, rgba(10,9,7,0.7) 100%)", pointerEvents: "none" }}
+      >
+        <div className="flex items-center justify-end gap-1" style={{ pointerEvents: "auto" }}>
           <form action={toggleMemoryHighlight}>
             <input type="hidden" name="photo_id" value={photo.id} />
             <input type="hidden" name="next_value" value={(!photo.is_highlight).toString()} />

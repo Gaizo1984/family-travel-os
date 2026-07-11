@@ -30,68 +30,35 @@ function isValidWebpBuffer(buffer: Buffer): boolean {
 }
 
 /**
- * §Root-Cause-Fix "Broken Image nach Upload": ein real in Produktion
- * hochgeladenes Foto erwies sich als byteweise korrumpiert (UTF-8-
- * Replacement-Character-Muster), obwohl Upload und Signed-URL-Erzeugung ohne
- * Fehler zurückliefen — die Korruption ist also weder am HTTP-Status noch am
- * Supabase-Fehlerfeld erkennbar. Deshalb: nach jedem Upload sofort wieder
- * herunterladen und tatsächlich verifizieren (Byte-Vergleich + unabhängiger
- * Magic-Byte-Check + sharp-Dekodierbarkeit als Zusatzsignal), bevor die Datei
- * als gespeichert gilt. Bei Fehlschlag: löschen, einmal erneut hochladen,
- * erneut prüfen — schlägt es danach immer noch fehl, wird der Upload als
- * fehlgeschlagen gezählt statt eine kaputte Foto-Zeile anzulegen.
+ * §Root-Cause-Fix "Broken Image nach Upload": die tatsächliche Ursache war
+ * ein roher Node-Buffer-Upload, der in Produktion korrumpiert wurde — als
+ * Blob verpackt (wie der funktionierende Profilfoto-Pfad, lib/actions/
+ * persons.ts) behoben. Die anfängliche Verifikation per komplettem
+ * Re-Download+Byte-Vergleich war für die Root-Cause-Eingrenzung nötig,
+ * kostete bei Mehrfach-Uploads aber zu viel Zeit (2× Upload+Download pro
+ * Foto) und führte selbst zu Fehlern/Timeouts ("This page couldn't load").
+ * Jetzt: nur noch ein schneller, rein lokaler Magic-Byte-Check auf dem
+ * bereits im Speicher vorhandenen komprimierten Buffer — kein zusätzlicher
+ * Netzwerk-Roundtrip mehr nötig, da die eigentliche Ursache behoben ist.
  */
 async function uploadAndVerify(
   supabase: SupabaseClient,
   storagePath: string,
   compressed: Buffer,
 ): Promise<boolean> {
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    // §Root-Cause-Fix: die funktionierende Profilfoto-Upload-Stelle
-    // (lib/actions/persons.ts) lädt ein `File`/`Blob`-Objekt direkt hoch —
-    // NIE einen rohen Node-`Buffer`. Genau das ist der einzige strukturelle
-    // Unterschied zu diesem (bislang defekten) Pfad. Als Blob verpackt statt
-    // den rohen Buffer zu übergeben, um exakt dem nachweislich
-    // funktionierenden Muster zu entsprechen.
-    const blob = new Blob([new Uint8Array(compressed)], { type: 'image/webp' })
-    const { error: uploadError } = await supabase.storage.from('documents')
-      .upload(storagePath, blob, { contentType: 'image/webp', upsert: attempt > 1 })
-    if (uploadError) {
-      console.error('[Memories][DIAGNOSTIC] Storage-Upload fehlgeschlagen', { attempt, uploadError })
-      continue
-    }
-
-    const { data: signed } = await supabase.storage.from('documents').createSignedUrl(storagePath, 60)
-    if (!signed?.signedUrl) {
-      console.error('[Memories][DIAGNOSTIC] Verifikation: Signed-URL-Erzeugung fehlgeschlagen', { attempt, storagePath })
-      continue
-    }
-
-    try {
-      const res = await fetch(signed.signedUrl)
-      const downloaded = Buffer.from(await res.arrayBuffer())
-      const byteMatch = downloaded.equals(compressed)
-      const magicValid = isValidWebpBuffer(downloaded)
-      console.error('[Memories][DIAGNOSTIC] Verifikation', {
-        attempt, storagePath, httpStatus: res.status, contentType: res.headers.get('content-type'),
-        uploadedSize: compressed.length, downloadedSize: downloaded.length, byteMatch, magicValid,
-      })
-      if (byteMatch && magicValid) return true
-    } catch (e) {
-      console.error('[Memories][DIAGNOSTIC] Verifikations-Download fehlgeschlagen', { attempt, e })
-    }
-
-    if (attempt < 2) {
-      // Verifikation fehlgeschlagen — Datei entfernen, bevor der nächste Versuch folgt.
-      await supabase.storage.from('documents').remove([storagePath])
-    } else {
-      // Endgültig fehlgeschlagen: Datei NICHT löschen (temporär, solange die
-      // Root-Cause-Untersuchung läuft) — bleibt für eine forensische Prüfung
-      // im Storage erhalten, statt spurlos zu verschwinden.
-      console.error('[Memories][DIAGNOSTIC] Endgültig fehlgeschlagen, Datei zur Diagnose im Storage belassen', { storagePath })
-    }
+  if (!isValidWebpBuffer(compressed)) {
+    console.error('[Memories][DIAGNOSTIC] Komprimierter Buffer bereits vor Upload ungültig', { storagePath })
+    return false
   }
-  return false
+
+  const blob = new Blob([new Uint8Array(compressed)], { type: 'image/webp' })
+  const { error: uploadError } = await supabase.storage.from('documents')
+    .upload(storagePath, blob, { contentType: 'image/webp' })
+  if (uploadError) {
+    console.error('[Memories][DIAGNOSTIC] Storage-Upload fehlgeschlagen', uploadError)
+    return false
+  }
+  return true
 }
 
 /**
