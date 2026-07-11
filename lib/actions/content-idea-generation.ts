@@ -155,8 +155,12 @@ export async function generateContentIdeas(formData: FormData) {
     const photoId = crypto.randomUUID()
     const storagePath = `content-media/${projectId}/${photoId}.${ext}`
 
+    // §Root-Cause-Fix (Broken-Image-Bug): roher Node-Buffer-Upload korrumpierte
+    // Bilddaten in Produktion — als Blob verpackt, wie der nachweislich
+    // funktionierende Profilfoto-Pfad (lib/actions/persons.ts) ein
+    // Blob-artiges Objekt direkt hochlädt.
     const { error: uploadError } = await supabase.storage.from('documents')
-      .upload(storagePath, photo.buffer, { contentType: photo.mimeType })
+      .upload(storagePath, new Blob([new Uint8Array(photo.buffer)], { type: photo.mimeType }), { contentType: photo.mimeType })
     if (uploadError)
       redirect(`${newPath}?error=${encodeURIComponent('Foto-Upload fehlgeschlagen: ' + uploadError.message)}`)
 

@@ -3,7 +3,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { createHash } from 'crypto'
 import { compressImageForStorage } from '@/lib/image-compression'
 import { computeDHash, hammingDistance, DUPLICATE_HASH_THRESHOLD } from '@/lib/image-hash'
 import { assessPhotoBatch, MAX_PHOTOS_ANALYZED_PER_CALL } from '@/lib/photo-quality-analysis'
@@ -144,34 +143,7 @@ export async function uploadMemoryPhotos(formData: FormData) {
   for (const file of rawFiles) {
     try {
       const rawBuffer = Buffer.from(await file.arrayBuffer())
-      const rawHash = createHash('sha256').update(rawBuffer).digest('hex')
-      console.error('[Memories][DIAGNOSTIC] Datei empfangen', { name: file.name, type: file.type, size: rawBuffer.length, sha256: rawHash })
-
-      // §TEMPORÄR — Root-Cause-Eingrenzung: legt die UNVERÄNDERTEN Original-
-      // Bytes zusätzlich ab (vor jeder Kompression), damit sich per direktem
-      // Download nachweisen lässt, ob die Korruption schon beim Empfang der
-      // Datei (FormData/Server-Action-Parsing) entsteht oder erst danach.
-      const diagPath = `memories-diagnostic-raw/${familyId}/${crypto.randomUUID()}-original`
-      const { error: diagUploadError } = await supabase.storage.from('documents')
-        .upload(diagPath, rawBuffer, { contentType: file.type || 'application/octet-stream' })
-      if (diagUploadError) {
-        console.error('[Memories][DIAGNOSTIC] Diagnose-Upload (Rohdaten) fehlgeschlagen', diagUploadError)
-      } else {
-        const { data: diagSigned } = await supabase.storage.from('documents').createSignedUrl(diagPath, 120)
-        if (diagSigned?.signedUrl) {
-          try {
-            const diagRes = await fetch(diagSigned.signedUrl)
-            const diagDownloaded = Buffer.from(await diagRes.arrayBuffer())
-            const diagHash = createHash('sha256').update(diagDownloaded).digest('hex')
-            console.error('[Memories][DIAGNOSTIC] Rohdaten-Verifikation', {
-              diagPath, uploadedSize: rawBuffer.length, downloadedSize: diagDownloaded.length,
-              rawHashMatches: diagHash === rawHash, downloadedFirst16Hex: diagDownloaded.subarray(0, 16).toString('hex'),
-            })
-          } catch (e) {
-            console.error('[Memories][DIAGNOSTIC] Rohdaten-Verifikations-Download fehlgeschlagen', e)
-          }
-        }
-      }
+      console.error('[Memories][DIAGNOSTIC] Datei empfangen', { name: file.name, type: file.type, size: rawBuffer.length })
 
       const compressed = await compressImageForStorage(rawBuffer)
       console.error('[Memories][DIAGNOSTIC] Komprimiert', { size: compressed.length, magicValid: isValidWebpBuffer(compressed) })

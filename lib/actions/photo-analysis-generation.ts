@@ -152,8 +152,12 @@ export async function analyzePhotos(formData: FormData) {
     const ext = photo.mimeType.split('/')[1] || 'jpg'
     const storagePath = `content-media/${projectId}/${crypto.randomUUID()}.${ext}`
 
+    // §Root-Cause-Fix (Broken-Image-Bug): roher Node-Buffer-Upload korrumpierte
+    // Bilddaten in Produktion — als Blob verpackt, wie der nachweislich
+    // funktionierende Profilfoto-Pfad (lib/actions/persons.ts) ein
+    // Blob-artiges Objekt direkt hochlädt.
     const { error: uploadError } = await supabase.storage.from('documents')
-      .upload(storagePath, photo.buffer, { contentType: photo.mimeType })
+      .upload(storagePath, new Blob([new Uint8Array(photo.buffer)], { type: photo.mimeType }), { contentType: photo.mimeType })
     if (uploadError)
       redirect(`${newPath}?error=${encodeURIComponent('Foto-Upload fehlgeschlagen: ' + uploadError.message)}`)
 
