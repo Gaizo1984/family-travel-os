@@ -5,6 +5,7 @@ import { DESTINATIONS } from "@/lib/data/destination-knowledge";
 import { searchHotels } from "@/lib/providers/hotel-provider";
 import { searchFlights } from "@/lib/providers/flight-provider";
 import { searchRestaurants } from "@/lib/providers/restaurant-provider";
+import { searchExcursions } from "@/lib/providers/excursion-provider";
 import { saveToWishlist } from "@/lib/actions/buchungsportal";
 
 type TripRow = {
@@ -77,10 +78,11 @@ export default async function BuchungsportalPage({
 
   const wishlistDate = activeTrip?.start_date ?? todayIso;
 
-  const [hotels, flights, restaurants] = await Promise.all([
+  const [hotels, flights, restaurants, excursions] = await Promise.all([
     searchHotels({ destinationName: destinationMatch?.name }),
     searchFlights({ destinationId: destinationMatch?.id }),
     searchRestaurants({ destinationName: destinationMatch?.name }),
+    searchExcursions({ destinationName: destinationMatch?.name }),
   ]);
 
   return (
@@ -206,6 +208,41 @@ export default async function BuchungsportalPage({
             {(restaurants ?? []).length === 0 && (
               <p style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
                 Für diese Reise liegt noch keine kuratierte Restaurantempfehlung vor.
+              </p>
+            )}
+          </div>
+        </section>
+
+        {/* ── Aktivitäten & Ausflüge ── */}
+        <section className="mb-8">
+          <SectionLabel>Aktivitäten & Ausflüge</SectionLabel>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {(excursions ?? []).map((e) => (
+              <div key={e.id} className="rounded-xl overflow-hidden" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+                <div className="relative" style={{ height: 120 }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={e.photo} alt={e.title} className="absolute inset-0 w-full h-full object-cover" />
+                  <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(10,9,7,0.9) 0%, transparent 60%)" }} />
+                  <div className="absolute inset-x-0 bottom-0 p-4 flex items-end justify-between gap-2">
+                    <div>
+                      <div style={{ color: "#C9A96E", fontSize: "0.55rem", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: "4px" }}>{e.destination}</div>
+                      <div style={{ color: "#F0EBE3", fontSize: "0.9rem", fontWeight: 300 }}>{e.title}</div>
+                    </div>
+                    <PriceBadge value={e.priceIndicator} />
+                  </div>
+                </div>
+                <div className="p-4">
+                  <p className="mb-3" style={{ color: "var(--muted)", fontSize: "0.72rem", lineHeight: 1.5 }}>{e.description}</p>
+                  <p className="mb-3" style={{ color: "var(--muted)", fontSize: "0.68rem", fontStyle: "italic" }}>{e.mood}</p>
+                  {activeTrip && (
+                    <WishlistButton tripId={activeTrip.id} date={wishlistDate} title={`Ausflug-Idee: ${e.title}`} category="activity" />
+                  )}
+                </div>
+              </div>
+            ))}
+            {(excursions ?? []).length === 0 && (
+              <p style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
+                Für diese Reise liegt noch keine kuratierte Aktivität vor.
               </p>
             )}
           </div>

@@ -1,27 +1,46 @@
+import { EXCURSIONS } from '@/lib/data/excursion-knowledge'
+import type { PriceIndicator } from '@/lib/data/hotel-knowledge'
+
 export type ExcursionResult = {
   id: string
   title: string
   destination: string
   description: string
-  priceIndicator: '€' | '€€' | '€€€'
+  priceIndicator: PriceIndicator
+  mood: string
+  photo: string
 }
 
 export type ExcursionSearchParams = { destinationName?: string }
 
 /**
- * Vierter Provider-Adapter (Leitlinie 3) — hält die Architektur für "Ausflüge"
- * offen, ohne dass diese Phase eine eigene, noch dünne Ausflugs-Datenbank
- * erzwingen muss. `CuratedExcursionProvider` liefert aktuell bewusst `null`
- * (keine kuratierten Daten vorhanden) statt erfundener, schwacher Inhalte —
- * eine spätere Implementierung (kuratiert oder live) muss nur diese Datei
- * ersetzen, Aufrufer bleiben unverändert.
+ * Vierter Provider-Adapter (Leitlinie 3), jetzt mit kuratierten Daten befüllt
+ * — Interface/Zuweisungspunkt-Struktur bleibt exakt wie zuvor, nur der
+ * Rumpf von `curatedExcursionSearch` wurde ersetzt. Eine spätere Live-API
+ * braucht weiterhin nur eine neue Implementierung dieses Interfaces.
  */
 interface ExcursionProvider {
   search(params: ExcursionSearchParams): Promise<ExcursionResult[] | null>
 }
 
-async function curatedExcursionSearch(): Promise<ExcursionResult[] | null> {
-  return null
+async function curatedExcursionSearch(params: ExcursionSearchParams): Promise<ExcursionResult[] | null> {
+  let results = EXCURSIONS.map((e, i) => ({
+    id: `curated-excursion-${i}`,
+    title: e.name,
+    destination: e.destination,
+    description: e.description,
+    priceIndicator: e.priceIndicator,
+    mood: e.mood,
+    photo: e.photo,
+  }))
+
+  if (params.destinationName) {
+    const needle = params.destinationName.toLowerCase()
+    const filtered = results.filter((r) => r.destination.toLowerCase().includes(needle) || needle.includes(r.destination.toLowerCase()))
+    if (filtered.length > 0) results = filtered
+  }
+
+  return results
 }
 
 const curatedExcursionProvider: ExcursionProvider = { search: curatedExcursionSearch }
