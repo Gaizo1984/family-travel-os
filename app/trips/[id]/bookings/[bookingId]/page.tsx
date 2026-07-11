@@ -6,6 +6,8 @@ import { BOOKING_TYPE_CONFIG, BOOKING_STATUS_LABELS, PAYMENT_STATUS_LABELS, form
 import { uploadBookingDocument, deleteBookingDocument, uploadBoardingPass, uploadBaggageTag } from "@/lib/actions/documents";
 import { sortForBoardingPassViewer } from "@/lib/boarding-passes";
 import type { BookingType, BookingStatus, PaymentStatus } from "@/lib/supabase/types";
+import { Banner } from "@/components/Banner";
+import { formatCurrencyDE } from "@/lib/demo-data";
 
 type BookingDetail = {
   id: string;
@@ -138,7 +140,7 @@ export default async function BookingDetailPage({
             {config.providerLabel && <MetaItem label={config.providerLabel} value={b.provider ?? "—"} />}
             <MetaItem label="Buchungsstatus" value={BOOKING_STATUS_LABELS[b.status]} />
             <MetaItem label="Zahlungsstatus" value={PAYMENT_STATUS_LABELS[b.payment_status]} />
-            <MetaItem label="Preis" value={b.amount !== null ? `${b.amount.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${b.currency}` : "—"} />
+            <MetaItem label="Preis" value={b.amount !== null ? formatCurrencyDE(b.amount, b.currency) : "—"} />
             <MetaItem label="Buchungsnummer" value={b.booking_reference ?? "—"} />
             {b.stages && <MetaItem label="Etappe" value={b.stages.title} />}
           </div>
@@ -331,12 +333,9 @@ export default async function BookingDetailPage({
           </div>
 
           {error && (
-            <div
-              className="mb-4 px-4 py-3 rounded-lg"
-              style={{ background: "rgba(181,98,74,0.12)", border: "1px solid rgba(181,98,74,0.3)", color: "#B5624A", fontSize: "0.75rem", letterSpacing: "0.02em" }}
-            >
+            <Banner variant="error" className="mb-4 px-4 py-3 rounded-lg">
               {error}
-            </div>
+            </Banner>
           )}
 
           {documents.length > 0 ? (

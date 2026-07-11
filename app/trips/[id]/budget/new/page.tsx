@@ -8,6 +8,7 @@ import { BUDGET_CATEGORY_ORDER, BUDGET_CATEGORY_LABELS } from "@/lib/budget";
 import type { BudgetCategory } from "@/lib/budget";
 import { suggestTripCurrencies } from "@/lib/currency-suggestions";
 import { CurrencyQuickSelect } from "../../CurrencyQuickSelect";
+import { Banner } from "@/components/Banner";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -185,12 +186,9 @@ export default async function NewBudgetItemPage({
               </label>
 
               {error && (
-                <div
-                  className="mb-3 px-4 py-3 rounded-lg"
-                  style={{ background: "rgba(181,98,74,0.12)", border: "1px solid rgba(181,98,74,0.3)", color: "#B5624A", fontSize: "0.75rem", letterSpacing: "0.02em" }}
-                >
+                <Banner variant="error" className="mb-3 px-4 py-3 rounded-lg">
                   {error}
-                </div>
+                </Banner>
               )}
 
               {draft && (

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { updateTripIdeaNotes } from "@/lib/actions/trip-ideas";
+import { Banner } from "@/components/Banner";
 
 export default async function TripIdeaDetailPage({
   params,
@@ -82,12 +83,9 @@ export default async function TripIdeaDetailPage({
           <input type="hidden" name="session_id" value={sessionId} />
           <div className="rounded-xl p-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
             {error && (
-              <div
-                className="mb-4 px-4 py-3 rounded-lg"
-                style={{ background: "rgba(181,98,74,0.12)", border: "1px solid rgba(181,98,74,0.3)", color: "#B5624A", fontSize: "0.75rem", letterSpacing: "0.02em" }}
-              >
+              <Banner variant="error" className="mb-4 px-4 py-3 rounded-lg">
                 {error}
-              </div>
+              </Banner>
             )}
             <label htmlFor="dev-notes" style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px" }}>
               Weiterentwickeln — eure Notizen

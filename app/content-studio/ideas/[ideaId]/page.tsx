@@ -6,6 +6,7 @@ import {
   createContentDraftFromIdea, toggleFavoriteContentIdea, archiveContentIdea,
   unarchiveContentIdea, deleteContentIdea,
 } from "@/lib/actions/content-ideas";
+import { Banner } from "@/components/Banner";
 
 type Suggestion = {
   title: string; format: string; hook: string; angle: string
@@ -150,12 +151,9 @@ export default async function ContentIdeaDetailPage({
         )}
 
         {error && (
-          <div
-            className="mb-6 px-4 py-3 rounded-lg"
-            style={{ background: "rgba(181,98,74,0.12)", border: "1px solid rgba(181,98,74,0.3)", color: "#B5624A", fontSize: "0.75rem", letterSpacing: "0.02em" }}
-          >
+          <Banner variant="error">
             {error}
-          </div>
+          </Banner>
         )}
 
         <div className="grid grid-cols-1 gap-4">

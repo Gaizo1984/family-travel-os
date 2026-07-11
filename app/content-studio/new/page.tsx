@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { generateContentIdeas } from "@/lib/actions/content-idea-generation";
 import { MultiPhotoFilePreview } from "@/components/MultiPhotoFilePreview";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
+import { Banner } from "@/components/Banner";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -54,12 +55,9 @@ export default async function NewContentIdeaPage({
         <form action={generateContentIdeas} encType="multipart/form-data">
           <div className="rounded-xl p-8" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
             {error && (
-              <div
-                className="mb-6 px-4 py-3 rounded-lg"
-                style={{ background: "rgba(181,98,74,0.12)", border: "1px solid rgba(181,98,74,0.3)", color: "#B5624A", fontSize: "0.75rem", letterSpacing: "0.02em" }}
-              >
+              <Banner variant="error">
                 {error}
-              </div>
+              </Banner>
             )}
 
             <div className="mb-5">

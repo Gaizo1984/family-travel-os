@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { updateJourneyEvent, deleteJourneyEvent } from "@/lib/actions/journey-events";
 import { getDateFieldRange } from "@/lib/documents";
 import { DateSelectFields } from "@/app/family/DateSelectFields";
+import { Banner } from "@/components/Banner";
 import {
   JOURNEY_EVENT_CATEGORY_ORDER, JOURNEY_EVENT_CATEGORIES,
   JOURNEY_EVENT_STATUS_ORDER, JOURNEY_EVENT_STATUS_LABELS,
@@ -86,12 +87,9 @@ export default async function EditJourneyEventPage({
             style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
           >
             {error && (
-              <div
-                className="mb-6 px-4 py-3 rounded-lg"
-                style={{ background: "rgba(181,98,74,0.12)", border: "1px solid rgba(181,98,74,0.3)", color: "#B5624A", fontSize: "0.75rem", letterSpacing: "0.02em" }}
-              >
+              <Banner variant="error">
                 {error}
-              </div>
+              </Banner>
             )}
 
             <div className="mb-5">

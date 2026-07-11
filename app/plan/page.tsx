@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createTrip } from "@/lib/actions/trips";
 import { generateTripIdeas } from "@/lib/actions/trip-idea-generation";
 import { COMPASS_CATEGORY_LABELS } from "@/lib/family-dna";
+import { Banner } from "@/components/Banner";
 
 // ── Verified Unsplash photos ──────────────────────────────────────────────────
 
@@ -190,12 +191,9 @@ export default async function PlanPage({
               style={{ background: "var(--surface)", border: "1px solid var(--border)", overflow: "hidden" }}
             >
               {error && (
-                <div
-                  className="mx-6 mt-6 px-4 py-3 rounded-lg"
-                  style={{ background: "rgba(181,98,74,0.12)", border: "1px solid rgba(181,98,74,0.3)", color: "#B5624A", fontSize: "0.75rem", letterSpacing: "0.02em" }}
-                >
+                <Banner variant="error" className="mx-6 mt-6 px-4 py-3 rounded-lg">
                   {error}
-                </div>
+                </Banner>
               )}
               <textarea
                 name="wish_text"
@@ -424,12 +422,9 @@ export default async function PlanPage({
               )}
 
               {error && (
-                <div
-                  className="mb-6 px-4 py-3 rounded-lg"
-                  style={{ background: "rgba(181,98,74,0.12)", border: "1px solid rgba(181,98,74,0.3)", color: "#B5624A", fontSize: "0.75rem", letterSpacing: "0.02em" }}
-                >
+                <Banner variant="error">
                   {error}
-                </div>
+                </Banner>
               )}
 
               {/* Reisenname */}

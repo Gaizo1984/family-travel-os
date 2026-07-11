@@ -239,6 +239,11 @@ export function formatDateDE(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
+/** War zuvor an 3 Stellen wortwörtlich dupliziert (Budget-Übersicht, Buchungszeilen, Buchungsdetail). */
+export function formatCurrencyDE(amount: number, currency: string): string {
+  return `${amount.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
+}
+
 export function getTripDuration(startDate: string, endDate: string): number {
   const start = new Date(startDate);
   const end = new Date(endDate);

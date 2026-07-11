@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { BOOKING_TYPE_CONFIG, BOOKING_STATUS_LABELS, formatDateTimeDE } from "@/lib/bookings";
+import { formatCurrencyDE } from "@/lib/demo-data";
 import type { BookingType, BookingStatus } from "@/lib/supabase/types";
 
 export type BookingRowData = {
@@ -55,7 +56,7 @@ export function BookingRowItem({
         </div>
         {booking.amount !== null && (
           <div className="text-sm mt-0.5" style={{ color: "var(--foreground)" }}>
-            {booking.amount.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {booking.currency}
+            {formatCurrencyDE(booking.amount, booking.currency)}
           </div>
         )}
       </div>

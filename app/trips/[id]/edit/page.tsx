@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { updateTrip } from "@/lib/actions/trips";
+import { Banner } from "@/components/Banner";
 
 const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "planned",   label: "Geplant" },
@@ -85,12 +86,9 @@ export default async function EditTripPage({
             style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
           >
             {error && (
-              <div
-                className="mb-6 px-4 py-3 rounded-lg"
-                style={{ background: "rgba(181,98,74,0.12)", border: "1px solid rgba(181,98,74,0.3)", color: "#B5624A", fontSize: "0.75rem", letterSpacing: "0.02em" }}
-              >
+              <Banner variant="error">
                 {error}
-              </div>
+              </Banner>
             )}
 
             {/* Reisenname */}

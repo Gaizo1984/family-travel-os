@@ -4,6 +4,7 @@ import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { updateStage, deleteStage } from "@/lib/actions/stages";
 import { StageDateFields } from "../../StageDateFields";
+import { Banner } from "@/components/Banner";
 
 type StageRow = {
   id: string
@@ -87,12 +88,9 @@ export default async function EditStagePage({
             style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
           >
             {error && (
-              <div
-                className="mb-6 px-4 py-3 rounded-lg"
-                style={{ background: "rgba(181,98,74,0.12)", border: "1px solid rgba(181,98,74,0.3)", color: "#B5624A", fontSize: "0.75rem", letterSpacing: "0.02em" }}
-              >
+              <Banner variant="error">
                 {error}
-              </div>
+              </Banner>
             )}
 
             <div className="mb-5">

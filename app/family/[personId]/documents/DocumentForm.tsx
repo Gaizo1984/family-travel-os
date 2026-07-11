@@ -2,6 +2,7 @@ import Link from "next/link";
 import { DOCUMENT_TYPE_ORDER, DOCUMENT_TYPE_CONFIG, getDateFieldRange } from "@/lib/documents";
 import type { DocumentType, DocumentDetails } from "@/lib/documents";
 import { DateSelectFields } from "@/app/family/DateSelectFields";
+import { Banner } from "@/components/Banner";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -252,12 +253,9 @@ export function DocumentForm({
           </label>
 
           {errorMessage && (
-            <div
-              className="mb-3 px-4 py-3 rounded-lg"
-              style={{ background: "rgba(181,98,74,0.12)", border: "1px solid rgba(181,98,74,0.3)", color: "#B5624A", fontSize: "0.75rem", letterSpacing: "0.02em" }}
-            >
+            <Banner variant="error" className="mb-3 px-4 py-3 rounded-lg">
               {errorMessage}
-            </div>
+            </Banner>
           )}
 
           {infoMessage && (

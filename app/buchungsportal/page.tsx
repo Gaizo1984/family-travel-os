@@ -7,6 +7,7 @@ import { searchFlights } from "@/lib/providers/flight-provider";
 import { searchRestaurants } from "@/lib/providers/restaurant-provider";
 import { searchExcursions } from "@/lib/providers/excursion-provider";
 import { saveToWishlist } from "@/lib/actions/buchungsportal";
+import { Banner } from "@/components/Banner";
 
 type TripRow = {
   id: string; title: string; subtitle: string | null; status: string
@@ -101,16 +102,8 @@ export default async function BuchungsportalPage({
             : "Kuratierte Auswahl zur Orientierung — keine Live-Preise oder Verfügbarkeit."}
         </p>
 
-        {saved && (
-          <div className="mb-6 px-4 py-3 rounded-lg" style={{ background: "rgba(107,143,113,0.12)", border: "1px solid rgba(107,143,113,0.3)", color: "#6B8F71", fontSize: "0.75rem" }}>
-            &bdquo;{saved}&ldquo; auf die Merkliste eurer Reise gesetzt.
-          </div>
-        )}
-        {error && (
-          <div className="mb-6 px-4 py-3 rounded-lg" style={{ background: "rgba(181,98,74,0.12)", border: "1px solid rgba(181,98,74,0.3)", color: "#B5624A", fontSize: "0.75rem" }}>
-            {error}
-          </div>
-        )}
+        {saved && <Banner variant="success">&bdquo;{saved}&ldquo; auf die Merkliste eurer Reise gesetzt.</Banner>}
+        {error && <Banner variant="error">{error}</Banner>}
 
         {/* ── Hotels ── */}
         <section className="mb-12">

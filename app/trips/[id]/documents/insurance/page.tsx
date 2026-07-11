@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ChevronLeft, Shield } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { assignPolicyToTrip } from "@/lib/actions/insurance";
+import { Banner } from "@/components/Banner";
 
 export default async function AssignInsuranceToTripPage({
   params,
@@ -58,12 +59,9 @@ export default async function AssignInsuranceToTripPage({
         </h1>
 
         {error && (
-          <div
-            className="mb-6 px-4 py-3 rounded-lg"
-            style={{ background: "rgba(181,98,74,0.12)", border: "1px solid rgba(181,98,74,0.3)", color: "#B5624A", fontSize: "0.75rem", letterSpacing: "0.02em" }}
-          >
+          <Banner variant="error">
             {error}
-          </div>
+          </Banner>
         )}
 
         {availablePolicies.length > 0 ? (

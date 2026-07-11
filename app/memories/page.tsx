@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { uploadMemoryPhotos, deleteMemoryPhoto, toggleMemoryHighlight } from "@/lib/actions/memories";
 import { MultiPhotoFilePreview } from "@/components/MultiPhotoFilePreview";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
+import { Banner } from "@/components/Banner";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -143,16 +144,8 @@ export default async function MemoriesPage({
           )}
         </header>
 
-        {uploaded && (
-          <div className="mb-6 px-4 py-3 rounded-lg" style={{ background: "rgba(107,143,113,0.12)", border: "1px solid rgba(107,143,113,0.3)", color: "#6B8F71", fontSize: "0.75rem" }}>
-            {uploaded} Foto(s) gespeichert.
-          </div>
-        )}
-        {error && (
-          <div className="mb-6 px-4 py-3 rounded-lg" style={{ background: "rgba(181,98,74,0.12)", border: "1px solid rgba(181,98,74,0.3)", color: "#B5624A", fontSize: "0.75rem" }}>
-            {error}
-          </div>
-        )}
+        {uploaded && <Banner variant="success">{uploaded} Foto(s) gespeichert.</Banner>}
+        {error && <Banner variant="error">{error}</Banner>}
 
         {/* ── Upload ── */}
         <section className="mb-12">

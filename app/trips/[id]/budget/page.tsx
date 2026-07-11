@@ -3,11 +3,12 @@ import { notFound } from "next/navigation";
 import { ChevronLeft, Plane, BedDouble, Car, Compass, UtensilsCrossed, FileText, Shield, Receipt } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { computeTripBudget, BUDGET_CATEGORY_ORDER, BUDGET_CATEGORY_LABELS } from "@/lib/budget";
-import { formatDateDE } from "@/lib/demo-data";
+import { formatDateDE, formatCurrencyDE } from "@/lib/demo-data";
 import type { BudgetCategory } from "@/lib/budget";
 import { setTripBudget } from "@/lib/actions/budget-items";
 import { refreshExchangeRate, setManualExchangeRate } from "@/lib/actions/exchange-rates";
 import { suggestTripCurrencies } from "@/lib/currency-suggestions";
+import { Banner } from "@/components/Banner";
 import { CurrencyQuickSelect } from "../CurrencyQuickSelect";
 
 const CATEGORY_ICONS: Record<BudgetCategory, typeof Plane> = {
@@ -31,9 +32,7 @@ const FIELD_STYLE: React.CSSProperties = {
   fontSize: "0.85rem", fontWeight: 300, outline: "none",
 };
 
-function money(amount: number, currency: string): string {
-  return `${amount.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
-}
+const money = formatCurrencyDE;
 
 export default async function BudgetPage({
   params,
@@ -98,12 +97,9 @@ export default async function BudgetPage({
         </h1>
 
         {error && (
-          <div
-            className="mb-6 px-4 py-3 rounded-lg"
-            style={{ background: "rgba(181,98,74,0.12)", border: "1px solid rgba(181,98,74,0.3)", color: "#B5624A", fontSize: "0.75rem", letterSpacing: "0.02em" }}
-          >
+          <Banner variant="error">
             {error}
-          </div>
+          </Banner>
         )}
 
         {/* ── Summary ── */}

@@ -8,6 +8,7 @@ import {
 } from "@/lib/documents";
 import type { DocumentType, DocumentDetails } from "@/lib/documents";
 import { assignDocumentToTrip, unassignDocumentFromTrip } from "@/lib/actions/documents";
+import { Banner } from "@/components/Banner";
 
 type DocumentDetail = {
   id: string;
@@ -104,12 +105,9 @@ export default async function DocumentDetailPage({
         </Link>
 
         {error && (
-          <div
-            className="mb-6 px-4 py-3 rounded-lg"
-            style={{ background: "rgba(181,98,74,0.12)", border: "1px solid rgba(181,98,74,0.3)", color: "#B5624A", fontSize: "0.75rem", letterSpacing: "0.02em" }}
-          >
+          <Banner variant="error">
             {error}
-          </div>
+          </Banner>
         )}
 
         <div className="flex items-center justify-between flex-wrap gap-4 mb-8">
