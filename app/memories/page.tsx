@@ -128,7 +128,7 @@ export default async function MemoriesPage({
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
-      <div className="max-w-4xl w-full mx-auto px-5 md:px-8 pb-24 pt-9">
+      <div className="max-w-5xl w-full mx-auto px-5 md:px-8 pb-24 pt-9">
 
         <header className="mb-8">
           <div style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "12px" }}>
@@ -191,7 +191,7 @@ export default async function MemoriesPage({
             <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: "12px" }}>
               Highlights
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
               {highlightPhotos.map(({ photo, url }) => (
                 <PhotoCard key={photo.id} photo={photo} url={url} personName={photo.uploaded_by_person_id ? personNameById.get(photo.uploaded_by_person_id) ?? null : null} returnTo={returnTo} />
               ))}
@@ -209,7 +209,7 @@ export default async function MemoriesPage({
                 </Link>
                 <span style={{ color: "var(--muted)", fontSize: "0.68rem" }}>{byYear.get(year)!.length} Fotos</span>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                 {byYear.get(year)!.map(({ photo, url }) => (
                   <PhotoCard key={photo.id} photo={photo} url={url} personName={photo.uploaded_by_person_id ? personNameById.get(photo.uploaded_by_person_id) ?? null : null} returnTo={returnTo} />
                 ))}

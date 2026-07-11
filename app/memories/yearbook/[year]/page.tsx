@@ -39,7 +39,7 @@ export default async function YearbookPage({
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
-      <div className="max-w-3xl w-full mx-auto px-5 md:px-8 pb-24 pt-9">
+      <div className="max-w-5xl w-full mx-auto px-5 md:px-8 pb-24 pt-9">
 
         <Link
           href="/memories"
@@ -73,7 +73,7 @@ export default async function YearbookPage({
         )}
 
         {photosWithUrls.length > 0 ? (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             {photosWithUrls.map((p) => p.url && (
               <div key={p.id} className="relative rounded-lg overflow-hidden" style={{ aspectRatio: "1/1" }}>
                 <SignedPhoto storagePath={p.storage_path} initialUrl={p.url} alt={p.caption ?? ""} className="absolute inset-0 w-full h-full object-cover" />
