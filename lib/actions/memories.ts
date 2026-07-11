@@ -74,8 +74,15 @@ async function uploadAndVerify(
       console.error('[Memories][DIAGNOSTIC] Verifikations-Download fehlgeschlagen', { attempt, e })
     }
 
-    // Verifikation fehlgeschlagen — Datei entfernen, bevor der nächste Versuch (oder Abbruch) folgt.
-    await supabase.storage.from('documents').remove([storagePath])
+    if (attempt < 2) {
+      // Verifikation fehlgeschlagen — Datei entfernen, bevor der nächste Versuch folgt.
+      await supabase.storage.from('documents').remove([storagePath])
+    } else {
+      // Endgültig fehlgeschlagen: Datei NICHT löschen (temporär, solange die
+      // Root-Cause-Untersuchung läuft) — bleibt für eine forensische Prüfung
+      // im Storage erhalten, statt spurlos zu verschwinden.
+      console.error('[Memories][DIAGNOSTIC] Endgültig fehlgeschlagen, Datei zur Diagnose im Storage belassen', { storagePath })
+    }
   }
   return false
 }
