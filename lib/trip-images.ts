@@ -20,6 +20,12 @@ export const TRIP_IMAGES: Record<string, string> = {
 
 export type TripImageInput = { slug: string; title: string };
 
+/** `storagePath` ist nur gesetzt, wenn das Bild aus unserem Supabase-Storage
+ *  kommt (Highlight-Erinnerungsfoto) — nur dann kann components/SignedPhoto.tsx
+ *  bei einem Ladefehler ein frisches Signed-URL-Token nachfordern. */
+export type ResolvedTripImage = { url: string; storagePath: string | null };
+type HighlightPhoto = { url: string; storagePath: string };
+
 /**
  * §"Neue Reisen ohne kuratiertes Bild und ohne Highlight-Foto zeigen nur
  * einen schlichten Farbverlauf": Bildauflösung mit drei Stufen vor dem
@@ -29,11 +35,11 @@ export type TripImageInput = { slug: string; title: string };
  * Buchungsportal) → Gradient (vom Aufrufer gerendert, wenn diese Funktion
  * `null` zurückgibt).
  */
-export function resolveTripImage(trip: TripImageInput, highlightUrl: string | null): string | null {
-  if (highlightUrl) return highlightUrl;
-  if (TRIP_IMAGES[trip.slug]) return TRIP_IMAGES[trip.slug];
+export function resolveTripImage(trip: TripImageInput, highlight: HighlightPhoto | null): ResolvedTripImage | null {
+  if (highlight) return { url: highlight.url, storagePath: highlight.storagePath };
+  if (TRIP_IMAGES[trip.slug]) return { url: TRIP_IMAGES[trip.slug], storagePath: null };
   const destinationMatch = DESTINATIONS.find((d) => trip.title.toLowerCase().includes(d.name.toLowerCase()));
-  return destinationMatch?.photo ?? null;
+  return destinationMatch ? { url: destinationMatch.photo, storagePath: null } : null;
 }
 
 /**
@@ -46,7 +52,7 @@ export async function getHighlightPhotoByTripId(
   supabase: SupabaseClient,
   familyId: string,
   tripIds?: string[],
-): Promise<Map<string, string>> {
+): Promise<Map<string, HighlightPhoto>> {
   let query = supabase
     .from("memory_photos")
     .select("trip_id, storage_path")
@@ -64,11 +70,11 @@ export async function getHighlightPhotoByTripId(
     firstPhotoByTripId.set(p.trip_id, p.storage_path);
   }
 
-  const highlightPhotoByTripId = new Map<string, string>();
+  const highlightPhotoByTripId = new Map<string, HighlightPhoto>();
   await Promise.all(
     Array.from(firstPhotoByTripId.entries()).map(async ([tripId, storagePath]) => {
       const { data: signed } = await supabase.storage.from("documents").createSignedUrl(storagePath, 3600);
-      if (signed?.signedUrl) highlightPhotoByTripId.set(tripId, signed.signedUrl);
+      if (signed?.signedUrl) highlightPhotoByTripId.set(tripId, { url: signed.signedUrl, storagePath });
     }),
   );
   return highlightPhotoByTripId;

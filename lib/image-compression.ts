@@ -9,8 +9,16 @@ const MAX_WIDTH = 2000
  * Wiederverwendbar für jede künftige Foto-Upload-Stelle, nicht nur Memories.
  */
 export async function compressImageForStorage(buffer: Buffer): Promise<Buffer> {
-  return sharp(buffer)
+  const compressed = await sharp(buffer)
     .resize({ width: MAX_WIDTH, withoutEnlargement: true })
     .webp({ quality: 82 })
     .toBuffer()
+
+  // §Diagnose "Broken Image nach Upload" (Sprint 1.2): verifiziert, dass das
+  // komprimierte Ergebnis selbst wieder decodierbar ist, BEVOR es gespeichert
+  // wird — verhindert, dass eine kaputte Datei überhaupt erst im Storage
+  // landet (statt erst beim Anzeigen als Broken Image aufzufallen).
+  await sharp(compressed).metadata()
+
+  return compressed
 }

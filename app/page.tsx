@@ -5,7 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { buildWorldStats } from "@/lib/world-stats";
 import { isTripPastEnd, isTripHistorical, tripCountdownDisplay } from "@/lib/trip-status";
-import { resolveTripImage, getHighlightPhotoByTripId } from "@/lib/trip-images";
+import { resolveTripImage, getHighlightPhotoByTripId, type ResolvedTripImage } from "@/lib/trip-images";
+import { SignedPhoto } from "@/components/SignedPhoto";
 
 const STATUS_LABEL: Record<string, string> = {
   planned: "Geplant",
@@ -22,17 +23,17 @@ type TripRow = {
   stages: Array<{ id: string }>
 };
 
-function HeroTrip({ trip, imgUrl }: { trip: TripRow; imgUrl: string | null }) {
+function HeroTrip({ trip, img }: { trip: TripRow; img: ResolvedTripImage | null }) {
   const duration = trip.start_date && trip.end_date ? getTripDuration(trip.start_date, trip.end_date) : 0;
   const countdown = tripCountdownDisplay(trip, duration);
   const members = trip.trip_members.flatMap((tm) => (tm.persons ? [tm.persons] : []));
 
   return (
     <Link href={`/trips/${trip.slug}`} className="group relative block overflow-hidden rounded-xl" style={{ height: "440px" }}>
-      {imgUrl && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={imgUrl}
+      {img && (
+        <SignedPhoto
+          storagePath={img.storagePath}
+          initialUrl={img.url}
           alt={trip.title}
           className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
           style={{ transformOrigin: "center center" }}
@@ -123,15 +124,15 @@ function StatTile({
   );
 }
 
-function TripCardElegant({ trip, imgUrl }: { trip: TripRow; imgUrl: string | null }) {
+function TripCardElegant({ trip, img }: { trip: TripRow; img: ResolvedTripImage | null }) {
   const duration = trip.start_date && trip.end_date ? getTripDuration(trip.start_date, trip.end_date) : 0;
 
   return (
     <Link href={`/trips/${trip.slug}`} className="group relative block overflow-hidden rounded-xl" style={{ height: "190px" }}>
-      {imgUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={imgUrl}
+      {img ? (
+        <SignedPhoto
+          storagePath={img.storagePath}
+          initialUrl={img.url}
           alt={trip.title}
           className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
           style={{ transformOrigin: "center center" }}
@@ -230,7 +231,7 @@ export default async function Dashboard() {
       </header>
 
       <div className="flex-1 px-5 md:px-8 pb-10 space-y-7">
-        <HeroTrip trip={nextTrip} imgUrl={tripImageById.get(nextTrip.id) ?? null} />
+        <HeroTrip trip={nextTrip} img={tripImageById.get(nextTrip.id) ?? null} />
 
         <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <StatTile value={worldStats.tripsCount} label="Reisen gesamt" Icon={MapIcon} href="/trips" />
@@ -250,7 +251,7 @@ export default async function Dashboard() {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {pastTrips.map((trip) => (
-                <TripCardElegant key={trip.id} trip={trip} imgUrl={tripImageById.get(trip.id) ?? null} />
+                <TripCardElegant key={trip.id} trip={trip} img={tripImageById.get(trip.id) ?? null} />
               ))}
             </div>
           </section>

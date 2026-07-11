@@ -17,6 +17,7 @@ import type { ReadinessFinding, ReadinessSeverity } from "@/lib/readiness";
 import { isTripHistorical, isTripCurrentlyRunning } from "@/lib/trip-status";
 import { COUNTRY_STAGE_IMAGES, FALLBACK_STAGE_IMAGE } from "@/lib/stage-images";
 import { resolveTripImage, getHighlightPhotoByTripId } from "@/lib/trip-images";
+import { SignedPhoto } from "@/components/SignedPhoto";
 
 const H_FG    = "#F0EBE3";
 const H_MUTED = "#A89880";
@@ -463,8 +464,7 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
       {/* ── CINEMATIC HERO ── */}
       <div className="relative" style={{ height: 450 }}>
         {heroImage ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={heroImage} alt={trip.title} className="absolute inset-0 w-full h-full object-cover" />
+          <SignedPhoto storagePath={heroImage.storagePath} initialUrl={heroImage.url} alt={trip.title} className="absolute inset-0 w-full h-full object-cover" />
         ) : (
           <div
             className="absolute inset-0"

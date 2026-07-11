@@ -65,7 +65,7 @@ export async function uploadMemoryPhotos(formData: FormData) {
 
       const { error: uploadError } = await supabase.storage.from('documents')
         .upload(storagePath, compressed, { contentType: 'image/webp' })
-      if (uploadError) { failedCount++; continue }
+      if (uploadError) { console.error('[Memories][DIAGNOSTIC] Storage-Upload fehlgeschlagen', uploadError); failedCount++; continue }
 
       const { error: insertError } = await supabase.from('memory_photos').insert({
         family_id: familyId,
@@ -76,12 +76,14 @@ export async function uploadMemoryPhotos(formData: FormData) {
         caption,
       })
       if (insertError) {
+        console.error('[Memories][DIAGNOSTIC] DB-Insert fehlgeschlagen', insertError)
         await supabase.storage.from('documents').remove([storagePath])
         failedCount++
         continue
       }
       savedCount++
-    } catch {
+    } catch (e) {
+      console.error('[Memories][DIAGNOSTIC] Kompression/Upload-Exception', e)
       failedCount++
     }
   }

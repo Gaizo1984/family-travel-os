@@ -7,6 +7,7 @@ import {
   unarchiveContentIdea, deleteContentIdea,
 } from "@/lib/actions/content-ideas";
 import { Banner } from "@/components/Banner";
+import { SignedPhoto } from "@/components/SignedPhoto";
 
 type Suggestion = {
   title: string; format: string; hook: string; angle: string
@@ -62,7 +63,7 @@ export default async function ContentIdeaDetailPage({
   const selectedPhotos = await Promise.all(
     (selectedPhotosRaw ?? []).map(async (p) => {
       const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.storage_path, 3600);
-      return { id: p.id, url: signed?.signedUrl ?? null, qualityScore: p.quality_score };
+      return { id: p.id, url: signed?.signedUrl ?? null, storagePath: p.storage_path, qualityScore: p.quality_score };
     }),
   );
 
@@ -143,8 +144,7 @@ export default async function ContentIdeaDetailPage({
               {selectedPhotos.map((p) => (
                 p.url && (
                   <div key={p.id} className="relative shrink-0 rounded-lg overflow-hidden" style={{ width: 96, height: 96 }}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={p.url} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
+                    <SignedPhoto storagePath={p.storagePath} initialUrl={p.url} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
                     {p.qualityScore !== null && (
                       <span
                         className="absolute bottom-1 right-1"

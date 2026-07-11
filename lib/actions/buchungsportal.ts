@@ -30,3 +30,21 @@ export async function saveToWishlist(formData: FormData) {
   if (error) redirect('/buchungsportal?error=' + encodeURIComponent('Speicherfehler: ' + error.message))
   redirect('/buchungsportal?saved=' + encodeURIComponent(title))
 }
+
+/**
+ * Gegenstück zu saveToWishlist — entfernt einen gemerkten Eintrag wieder
+ * (echtes Löschen der journey_events-Zeile, kein Status-Flag). Nach dem
+ * Redirect fällt der WishlistButton automatisch zurück auf "Zur Merkliste".
+ */
+export async function removeFromWishlist(formData: FormData) {
+  const eventId = String(formData.get('event_id') ?? '')
+  const title = String(formData.get('title') ?? '').trim()
+
+  if (!eventId) redirect('/buchungsportal?error=' + encodeURIComponent('Konnte nicht entfernt werden'))
+
+  const supabase = await createClient()
+  const { error } = await supabase.from('journey_events').delete().eq('id', eventId)
+
+  if (error) redirect('/buchungsportal?error=' + encodeURIComponent('Löschfehler: ' + error.message))
+  redirect('/buchungsportal?removed=' + encodeURIComponent(title))
+}

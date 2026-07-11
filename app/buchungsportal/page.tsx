@@ -1,4 +1,4 @@
-import { MapPin, Plane, Heart } from "lucide-react";
+import { MapPin, Plane, Heart, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { isTripPastEnd } from "@/lib/trip-status";
@@ -7,7 +7,7 @@ import { searchHotels } from "@/lib/providers/hotel-provider";
 import { searchFlights } from "@/lib/providers/flight-provider";
 import { searchRestaurants } from "@/lib/providers/restaurant-provider";
 import { searchExcursions } from "@/lib/providers/excursion-provider";
-import { saveToWishlist } from "@/lib/actions/buchungsportal";
+import { saveToWishlist, removeFromWishlist } from "@/lib/actions/buchungsportal";
 import { JOURNEY_EVENT_CATEGORIES, type JourneyEventCategory } from "@/lib/journey-events";
 import { Banner } from "@/components/Banner";
 
@@ -32,19 +32,25 @@ function PriceBadge({ value }: { value: string }) {
   );
 }
 
-function WishlistButton({ tripId, date, title, category, isSaved }: { tripId: string; date: string; title: string; category: string; isSaved: boolean }) {
-  if (isSaved) {
+function WishlistButton({ tripId, date, title, category, wishlistItemId }: { tripId: string; date: string; title: string; category: string; wishlistItemId: string | null }) {
+  if (wishlistItemId) {
     return (
-      <span
-        style={{
-          display: "inline-flex", alignItems: "center", gap: "5px",
-          color: "var(--muted)", border: "1px solid var(--border)",
-          borderRadius: "20px", padding: "5px 14px", fontSize: "0.62rem", whiteSpace: "nowrap",
-        }}
-      >
-        <Heart size={11} strokeWidth={1.8} fill="currentColor" />
-        Gemerkt
-      </span>
+      <form action={removeFromWishlist}>
+        <input type="hidden" name="event_id" value={wishlistItemId} />
+        <input type="hidden" name="title" value={title} />
+        <button
+          type="submit"
+          style={{
+            display: "inline-flex", alignItems: "center", gap: "5px", cursor: "pointer",
+            color: "var(--muted)", border: "1px solid var(--border)", background: "transparent",
+            borderRadius: "20px", padding: "5px 14px", fontSize: "0.62rem", whiteSpace: "nowrap",
+          }}
+        >
+          <Heart size={11} strokeWidth={1.8} fill="currentColor" />
+          Gemerkt
+          <X size={10} strokeWidth={2} />
+        </button>
+      </form>
     );
   }
   return (
@@ -69,9 +75,9 @@ function WishlistButton({ tripId, date, title, category, isSaved }: { tripId: st
 export default async function BuchungsportalPage({
   searchParams,
 }: {
-  searchParams: Promise<{ saved?: string; error?: string }>;
+  searchParams: Promise<{ saved?: string; removed?: string; error?: string }>;
 }) {
-  const { saved, error } = await searchParams;
+  const { saved, removed, error } = await searchParams;
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
 
@@ -103,7 +109,7 @@ export default async function BuchungsportalPage({
         .order("date", { ascending: true })
     : { data: null };
   const wishlist = (wishlistRaw ?? []) as { id: string; title: string; category: JourneyEventCategory; date: string }[];
-  const wishlistTitles = new Set(wishlist.map((w) => w.title));
+  const wishlistIdByTitle = new Map(wishlist.map((w) => [w.title, w.id]));
 
   const [hotels, flights, restaurants, excursions] = await Promise.all([
     searchHotels({ destinationName: destinationMatch?.name }),
@@ -129,6 +135,7 @@ export default async function BuchungsportalPage({
         </p>
 
         {saved && <Banner variant="success">&bdquo;{saved}&ldquo; auf die Merkliste eurer Reise gesetzt.</Banner>}
+        {removed && <Banner variant="success">&bdquo;{removed}&ldquo; von der Merkliste entfernt.</Banner>}
         {error && <Banner variant="error">{error}</Banner>}
 
         {/* ── Meine Merkliste ── */}
@@ -146,6 +153,17 @@ export default async function BuchungsportalPage({
                   >
                     <Icon size={13} strokeWidth={1.6} style={{ color: "var(--accent)", flexShrink: 0 }} />
                     <span style={{ color: "var(--foreground)", fontSize: "0.8rem", flex: 1 }}>{w.title}</span>
+                    <form action={removeFromWishlist}>
+                      <input type="hidden" name="event_id" value={w.id} />
+                      <input type="hidden" name="title" value={w.title} />
+                      <button
+                        type="submit"
+                        aria-label="Entfernen"
+                        style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: "10px", margin: "-6px", color: "var(--muted)" }}
+                      >
+                        <X size={13} strokeWidth={1.8} />
+                      </button>
+                    </form>
                   </div>
                 );
               })}
@@ -180,7 +198,7 @@ export default async function BuchungsportalPage({
                     ))}
                   </div>
                   {activeTrip && (
-                    <WishlistButton tripId={activeTrip.id} date={wishlistDate} title={`Hotel-Idee: ${h.name}`} category="note" isSaved={wishlistTitles.has(`Hotel-Idee: ${h.name}`)} />
+                    <WishlistButton tripId={activeTrip.id} date={wishlistDate} title={`Hotel-Idee: ${h.name}`} category="note" wishlistItemId={wishlistIdByTitle.get(`Hotel-Idee: ${h.name}`) ?? null} />
                   )}
                 </div>
               </div>
@@ -207,7 +225,7 @@ export default async function BuchungsportalPage({
                 </p>
                 {activeTrip && (
                   <div className="mt-3">
-                    <WishlistButton tripId={activeTrip.id} date={wishlistDate} title={`Flugidee: ${f.route}`} category="note" isSaved={wishlistTitles.has(`Flugidee: ${f.route}`)} />
+                    <WishlistButton tripId={activeTrip.id} date={wishlistDate} title={`Flugidee: ${f.route}`} category="note" wishlistItemId={wishlistIdByTitle.get(`Flugidee: ${f.route}`) ?? null} />
                   </div>
                 )}
               </div>
@@ -241,7 +259,7 @@ export default async function BuchungsportalPage({
                 <div className="p-4">
                   <p className="mb-3" style={{ color: "var(--muted)", fontSize: "0.72rem", fontStyle: "italic" }}>{r.cuisine} · {r.mood}</p>
                   {activeTrip && (
-                    <WishlistButton tripId={activeTrip.id} date={wishlistDate} title={r.name} category="restaurant" isSaved={wishlistTitles.has(r.name)} />
+                    <WishlistButton tripId={activeTrip.id} date={wishlistDate} title={r.name} category="restaurant" wishlistItemId={wishlistIdByTitle.get(r.name) ?? null} />
                   )}
                 </div>
               </div>
@@ -276,7 +294,7 @@ export default async function BuchungsportalPage({
                   <p className="mb-3" style={{ color: "var(--muted)", fontSize: "0.72rem", lineHeight: 1.5 }}>{e.description}</p>
                   <p className="mb-3" style={{ color: "var(--muted)", fontSize: "0.68rem", fontStyle: "italic" }}>{e.mood}</p>
                   {activeTrip && (
-                    <WishlistButton tripId={activeTrip.id} date={wishlistDate} title={`Ausflug-Idee: ${e.title}`} category="activity" isSaved={wishlistTitles.has(`Ausflug-Idee: ${e.title}`)} />
+                    <WishlistButton tripId={activeTrip.id} date={wishlistDate} title={`Ausflug-Idee: ${e.title}`} category="activity" wishlistItemId={wishlistIdByTitle.get(`Ausflug-Idee: ${e.title}`) ?? null} />
                   )}
                 </div>
               </div>

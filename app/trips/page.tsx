@@ -5,7 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { restoreTrip } from "@/lib/actions/trips";
 import { tripCountdownDisplay } from "@/lib/trip-status";
-import { resolveTripImage, getHighlightPhotoByTripId } from "@/lib/trip-images";
+import { resolveTripImage, getHighlightPhotoByTripId, type ResolvedTripImage } from "@/lib/trip-images";
+import { SignedPhoto } from "@/components/SignedPhoto";
 
 const H_FG    = "#F0EBE3";
 const H_MUTED = "#A89880";
@@ -47,7 +48,7 @@ function applyFilter(trips: TripRow[], f: string): { planned: TripRow[]; past: T
   return { planned: [...active, ...planned], past };
 }
 
-function PlannedCard({ trip, imgUrl }: { trip: TripRow; imgUrl: string | null }) {
+function PlannedCard({ trip, img }: { trip: TripRow; img: ResolvedTripImage | null }) {
   const duration = trip.start_date && trip.end_date
     ? getTripDuration(trip.start_date, trip.end_date) : 0;
   const countdown = tripCountdownDisplay(trip, duration);
@@ -60,10 +61,10 @@ function PlannedCard({ trip, imgUrl }: { trip: TripRow; imgUrl: string | null })
       className="group relative block overflow-hidden rounded-xl"
       style={{ height: "420px" }}
     >
-      {imgUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={imgUrl}
+      {img ? (
+        <SignedPhoto
+          storagePath={img.storagePath}
+          initialUrl={img.url}
           alt={trip.title}
           className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
           style={{ transformOrigin: "center" }}
@@ -153,7 +154,7 @@ function PlannedCard({ trip, imgUrl }: { trip: TripRow; imgUrl: string | null })
   );
 }
 
-function PastCard({ trip, imgUrl }: { trip: TripRow; imgUrl: string | null }) {
+function PastCard({ trip, img }: { trip: TripRow; img: ResolvedTripImage | null }) {
   const duration = trip.start_date && trip.end_date
     ? getTripDuration(trip.start_date, trip.end_date) : 0;
   const members = trip.trip_members.flatMap(tm => tm.persons ? [tm.persons] : []);
@@ -164,10 +165,10 @@ function PastCard({ trip, imgUrl }: { trip: TripRow; imgUrl: string | null }) {
       className="group relative block overflow-hidden rounded-xl"
       style={{ height: "320px" }}
     >
-      {imgUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={imgUrl}
+      {img ? (
+        <SignedPhoto
+          storagePath={img.storagePath}
+          initialUrl={img.url}
           alt={trip.title}
           className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
           style={{ transformOrigin: "center" }}
@@ -339,7 +340,7 @@ export default async function TripsPage({
             </div>
             <div className="space-y-4">
               {planned.map((trip) => (
-                <PlannedCard key={trip.id} trip={trip} imgUrl={tripImageById.get(trip.id) ?? null} />
+                <PlannedCard key={trip.id} trip={trip} img={tripImageById.get(trip.id) ?? null} />
               ))}
             </div>
           </section>
@@ -352,7 +353,7 @@ export default async function TripsPage({
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {past.map((trip) => (
-                <PastCard key={trip.id} trip={trip} imgUrl={tripImageById.get(trip.id) ?? null} />
+                <PastCard key={trip.id} trip={trip} img={tripImageById.get(trip.id) ?? null} />
               ))}
             </div>
           </section>
@@ -367,7 +368,7 @@ export default async function TripsPage({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {archivedTrips.map((trip) => (
                   <div key={trip.id} className="relative">
-                    <PastCard trip={trip} imgUrl={tripImageById.get(trip.id) ?? null} />
+                    <PastCard trip={trip} img={tripImageById.get(trip.id) ?? null} />
                     <div className="absolute top-4 right-4 flex items-center gap-2" style={{ zIndex: 5 }}>
                       <form action={restoreTrip}>
                         <input type="hidden" name="trip_id" value={trip.id} />

@@ -84,6 +84,15 @@ export default async function ContentStudioPage() {
           </Link>
         </div>
 
+        <div className="flex items-center gap-6 mb-8" style={{ borderBottom: "1px solid var(--border)", paddingBottom: "14px" }}>
+          <span style={{ fontSize: "0.72rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--foreground)", borderBottom: "1px solid var(--accent)", paddingBottom: "14px", marginBottom: "-15px" }}>
+            Content-Ideen
+          </span>
+          <Link href="/content-studio/analyze" style={{ fontSize: "0.72rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--muted)", textDecoration: "none" }}>
+            Bilder analysieren
+          </Link>
+        </div>
+
         {strategyContext && strategy && (
           <div className="rounded-xl p-6 mb-6" style={{ background: "var(--surface)", border: "1px solid var(--accent)" }}>
             <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
