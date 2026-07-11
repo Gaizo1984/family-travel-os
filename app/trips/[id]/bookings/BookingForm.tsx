@@ -104,12 +104,24 @@ export function BookingForm({
             {config.detailFields.map((field) => (
               <div key={field.key}>
                 <label htmlFor={`bk-${field.key}`} style={LABEL_STYLE}>{field.label}</label>
-                <input
-                  id={`bk-${field.key}`} name={field.key} type="text"
-                  defaultValue={details[field.key] ?? ""}
-                  placeholder={field.placeholder}
-                  style={FIELD_STYLE}
-                />
+                {field.type === "select" ? (
+                  <select
+                    id={`bk-${field.key}`} name={field.key}
+                    defaultValue={details[field.key] ?? ""}
+                    style={FIELD_STYLE}
+                  >
+                    {(field.options ?? []).map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    id={`bk-${field.key}`} name={field.key} type="text"
+                    defaultValue={details[field.key] ?? ""}
+                    placeholder={field.placeholder}
+                    style={FIELD_STYLE}
+                  />
+                )}
               </div>
             ))}
           </div>

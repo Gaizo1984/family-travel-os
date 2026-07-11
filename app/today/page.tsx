@@ -277,14 +277,14 @@ export default async function TodayPage() {
           style={{ background: "linear-gradient(to top, rgba(10,9,7,0.97) 0%, rgba(10,9,7,0.6) 45%, rgba(10,9,7,0.18) 100%)" }}
         />
         <div className="absolute inset-x-0 bottom-0 px-5 md:px-10 pb-8">
-          <div style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.28em", textTransform: "uppercase", marginBottom: "10px" }}>
-            {dateLabel}
-          </div>
           <h1 className="text-3xl md:text-4xl font-light leading-tight mb-1" style={{ color: "#F0EBE3", letterSpacing: "-0.01em" }}>
             {greeting}
           </h1>
           <div className="mb-4" style={{ color: "#A89880", fontSize: "0.8rem" }}>{heroSubtitle}</div>
 
+          <div style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.28em", textTransform: "uppercase", marginBottom: "6px" }}>
+            {dateLabel}
+          </div>
           {weather && (
             <div className="flex items-center gap-1.5 mb-4" style={{ color: "#A89880", fontSize: "0.72rem" }}>
               {currentWeather && <currentWeather.icon size={12} strokeWidth={1.6} />}
@@ -356,6 +356,21 @@ export default async function TodayPage() {
                   Rund um euer Highlight heute: {recommendation.highlightTitle}
                 </p>
               )}
+            </Card>
+          </section>
+        )}
+
+        {/* ── Alternative des Tages: EINE bewusst andere Option, kein zweiter Konkurrent ── */}
+        {recommendation?.alternative && (
+          <section className="mb-8">
+            <SectionLabel>Alternative des Tages</SectionLabel>
+            <Card>
+              <div style={{ color: "var(--foreground)", fontSize: "0.92rem", fontWeight: 400, marginBottom: "6px" }}>
+                {recommendation.alternative.title}
+              </div>
+              <p style={{ color: "var(--muted)", fontSize: "0.8rem", lineHeight: 1.5 }}>
+                {recommendation.alternative.description}
+              </p>
             </Card>
           </section>
         )}

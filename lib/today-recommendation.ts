@@ -31,7 +31,7 @@ export async function getCachedTodayRecommendation(
   const supabase = await createClient()
   const { data } = await supabase
     .from('today_recommendations')
-    .select('day_summary, recommendation, day_style, highlight_title, created_at')
+    .select('day_summary, recommendation, alternative, day_style, highlight_title, created_at')
     .eq('family_id', familyId)
     .eq('trip_id', tripId)
     .eq('for_date', forDate)
@@ -41,6 +41,7 @@ export async function getCachedTodayRecommendation(
   return {
     daySummary: data.day_summary,
     recommendation: data.recommendation as unknown as { title: string; description: string },
+    alternative: data.alternative as unknown as { title: string; description: string } | null,
     dayStyle: data.day_style,
     highlightTitle: data.highlight_title,
     createdAt: data.created_at,
@@ -80,6 +81,7 @@ export async function generateAndCacheTodayRecommendation(
       highlight_title: highlightTitle,
       day_summary: result.daySummary,
       recommendation: result.recommendation,
+      alternative: result.alternative,
     },
     { onConflict: 'family_id,trip_id,for_date' },
   ).select('created_at').single()

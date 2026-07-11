@@ -8,6 +8,9 @@ import {
 } from "@/lib/documents";
 import type { DocumentType, DocumentDetails } from "@/lib/documents";
 import { TRAVEL_NEED_OPTIONS } from "@/lib/family-dna";
+import { buildPersonWorldStats } from "@/lib/world-stats";
+import { WorldMap } from "@/components/WorldMap";
+import { Map as MapIcon, Globe } from "lucide-react";
 
 const TRAVEL_NEED_LABELS: Record<string, string> = Object.fromEntries(
   TRAVEL_NEED_OPTIONS.map((o) => [o.key, o.label]),
@@ -85,6 +88,7 @@ export default async function PersonDetailPage({
     .order("created_at", { ascending: true });
 
   const docs = (documents ?? []) as unknown as DocumentRow[];
+  const personWorldStats = await buildPersonWorldStats(person.id);
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -155,6 +159,34 @@ export default async function PersonDetailPage({
               </div>
             )}
           </div>
+        )}
+
+        {personWorldStats.tripsCount > 0 && (
+          <section className="mb-8">
+            <h2
+              className="text-xs font-medium mb-5"
+              style={{ color: "var(--muted)", letterSpacing: "0.2em", textTransform: "uppercase", fontSize: "0.65rem" }}
+            >
+              Diese Reisewelt
+            </h2>
+            <div className="flex gap-10 mb-5">
+              {[
+                { Icon: MapIcon, value: personWorldStats.tripsCount, label: "Reisen" },
+                { Icon: Globe, value: personWorldStats.countryCodes.size, label: "Länder" },
+              ].map(({ Icon, value, label }) => (
+                <div key={label} className="flex items-center gap-3">
+                  <Icon size={13} strokeWidth={1.4} style={{ color: "var(--accent)", flexShrink: 0 }} />
+                  <div>
+                    <div className="text-2xl font-light leading-none mb-0.5" style={{ color: "var(--foreground)" }}>{value}</div>
+                    <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.14em", textTransform: "uppercase" }}>{label}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="rounded-xl p-4" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+              <WorldMap visitedCodes={personWorldStats.countryCodes} />
+            </div>
+          </section>
         )}
 
         <section>

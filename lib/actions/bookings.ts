@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { BOOKING_TYPE_CONFIG, combineDateTime } from '@/lib/bookings'
+import { suggestCountryCode } from '@/lib/geo-suggestions'
 import type { BookingType, BookingStatus, PaymentStatus } from '@/lib/supabase/types'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
@@ -28,6 +29,59 @@ async function suggestStageId(
     (s) => s.start_date && s.end_date && startDate >= s.start_date && startDate <= s.end_date,
   )
   return matches.length === 1 ? matches[0].id : null
+}
+
+function addDaysIso(date: string, delta: number): string {
+  const d = new Date(date + 'T00:00:00Z')
+  d.setUTCDate(d.getUTCDate() + delta)
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * §"Zwischenstopp als Bestandteil eines Fluges... daraus automatisch Etappe
+ * erzeugen": im Gegensatz zum heuristischen `flight-stopovers.ts`-Mechanismus
+ * (der noch eine Bestätigung verlangt) ist die explizite Nutzereingabe hier
+ * bereits die Bestätigung — keine Zwischenbestätigung nötig. Idempotent: legt
+ * dieselbe Etappe nicht doppelt an, falls die Buchung mehrfach gespeichert wird.
+ */
+async function maybeCreateLayoverStage(
+  supabase: SupabaseClient,
+  tripId: string,
+  bookingType: BookingType,
+  details: Record<string, string>,
+  endDatetime: string | null,
+): Promise<void> {
+  if (bookingType !== 'flight') return
+  const airport = details.layover_airport?.trim()
+  const nights = Number(details.layover_nights)
+  if (!airport || details.layover_overnight !== 'ja' || !Number.isFinite(nights) || nights <= 0) return
+  if (!endDatetime) return
+
+  const startDate = endDatetime.slice(0, 10)
+  const endDate = addDaysIso(startDate, nights)
+
+  const { data: existing } = await supabase
+    .from('stages').select('id').eq('trip_id', tripId).eq('title', airport).eq('start_date', startDate).maybeSingle()
+  if (existing) return
+
+  const [{ data: last }, { data: trip }] = await Promise.all([
+    supabase.from('stages').select('sort_order').eq('trip_id', tripId).order('sort_order', { ascending: false }).limit(1).maybeSingle(),
+    supabase.from('trips').select('title, subtitle').eq('id', tripId).maybeSingle(),
+  ])
+
+  const countryCode = suggestCountryCode(airport) ?? suggestCountryCode(`${trip?.title ?? ''} ${trip?.subtitle ?? ''}`)
+
+  await supabase.from('stages').insert({
+    trip_id: tripId,
+    title: airport,
+    location: airport,
+    start_date: startDate,
+    end_date: endDate,
+    nights,
+    sort_order: (last?.sort_order ?? -1) + 1,
+    country_code: countryCode,
+    notes: 'Automatisch aus Zwischenstopp-Angabe im Flug erzeugt.',
+  })
 }
 
 function readCommonFields(formData: FormData) {
@@ -79,6 +133,8 @@ export async function createBooking(formData: FormData) {
   const supabase = await createClient()
   const stageId = f.stageId || await suggestStageId(supabase, tripId, f.startDate)
 
+  const endDatetime = f.config.showEnd ? combineDateTime(f.endDate, f.endTime) : null
+
   const { error } = await supabase.from('bookings').insert({
     trip_id: tripId,
     stage_id: stageId,
@@ -91,13 +147,15 @@ export async function createBooking(formData: FormData) {
     amount: f.amountRaw ? Number(f.amountRaw) : null,
     currency: f.currency,
     start_datetime: combineDateTime(f.startDate, f.startTime),
-    end_datetime: f.config.showEnd ? combineDateTime(f.endDate, f.endTime) : null,
+    end_datetime: endDatetime,
     details: Object.keys(f.details).length > 0 ? f.details : null,
     notes: f.notes || null,
   })
 
   if (error)
     redirect(`${newPath}&error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
+
+  await maybeCreateLayoverStage(supabase, tripId, f.type, f.details, endDatetime)
 
   redirect(category ? `/trips/${slug}/bookings/category/${category}` : `/trips/${slug}`)
 }
@@ -118,11 +176,13 @@ export async function updateBooking(formData: FormData) {
 
   const supabase = await createClient()
 
+  const { data: existing } = await supabase.from('bookings').select('trip_id').eq('id', bookingId).maybeSingle()
+  const tripId = existing?.trip_id ?? ''
+
   let stageId = f.stageId || null
-  if (!stageId) {
-    const { data: existing } = await supabase.from('bookings').select('trip_id').eq('id', bookingId).maybeSingle()
-    if (existing?.trip_id) stageId = await suggestStageId(supabase, existing.trip_id, f.startDate)
-  }
+  if (!stageId && tripId) stageId = await suggestStageId(supabase, tripId, f.startDate)
+
+  const endDatetime = f.config.showEnd ? combineDateTime(f.endDate, f.endTime) : null
 
   const { error } = await supabase
     .from('bookings')
@@ -136,7 +196,7 @@ export async function updateBooking(formData: FormData) {
       amount: f.amountRaw ? Number(f.amountRaw) : null,
       currency: f.currency,
       start_datetime: combineDateTime(f.startDate, f.startTime),
-      end_datetime: f.config.showEnd ? combineDateTime(f.endDate, f.endTime) : null,
+      end_datetime: endDatetime,
       details: Object.keys(f.details).length > 0 ? f.details : null,
       notes: f.notes || null,
     })
@@ -144,6 +204,8 @@ export async function updateBooking(formData: FormData) {
 
   if (error)
     redirect(`${editPath}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
+
+  if (tripId) await maybeCreateLayoverStage(supabase, tripId, f.type, f.details, endDatetime)
 
   redirect(`/trips/${slug}/bookings/${bookingId}`)
 }

@@ -7,6 +7,9 @@ export type DetailField = {
   key: string
   label: string
   placeholder?: string
+  /** 'select' rendert ein Dropdown statt eines Text-Inputs (z. B. Zwischenstopp-Übernachtung ja/nein). */
+  type?: 'text' | 'select'
+  options?: { value: string; label: string }[]
 }
 
 export type BookingTypeConfig = {
@@ -75,6 +78,12 @@ export const BOOKING_TYPE_CONFIG: Record<BookingType, BookingTypeConfig> = {
       { key: 'flight_number', label: 'Flugnummer', placeholder: 'z. B. EK052' },
       { key: 'from', label: 'Abflughafen', placeholder: 'z. B. FRA' },
       { key: 'to', label: 'Zielflughafen', placeholder: 'z. B. DXB' },
+      { key: 'layover_airport', label: 'Zwischenstopp-Flughafen (optional)', placeholder: 'z. B. IST' },
+      {
+        key: 'layover_overnight', label: 'Übernachtung am Zwischenstopp', type: 'select',
+        options: [{ value: '', label: 'Nein' }, { value: 'ja', label: 'Ja' }],
+      },
+      { key: 'layover_nights', label: 'Nächte am Zwischenstopp', placeholder: 'z. B. 2' },
     ],
   },
   accommodation: {

@@ -6,6 +6,7 @@ const OPENAI_MODEL = 'gpt-5.4'
 export type TodayRecommendation = {
   daySummary: string
   recommendation: { title: string; description: string }
+  alternative: { title: string; description: string } | null
 }
 
 const TODAY_SCHEMA = {
@@ -27,8 +28,18 @@ const TODAY_SCHEMA = {
       required: ['title', 'description'],
       additionalProperties: false,
     },
+    alternative: {
+      type: 'object',
+      description: 'GENAU EINE klar benannte Alternative zur Hauptempfehlung, für den Fall dass sich Wetter oder Familienlaune ändern — keine zweite konkurrierende Hauptoption, sondern ein bewusst anders gearteter Plan B.',
+      properties: {
+        title: { type: 'string', description: 'Kurzer Titel für die Alternative' },
+        description: { type: 'string', description: 'Kurze Beschreibung, 30-50 Wörter, nicht mehr.' },
+      },
+      required: ['title', 'description'],
+      additionalProperties: false,
+    },
   },
-  required: ['day_summary', 'recommendation'],
+  required: ['day_summary', 'recommendation', 'alternative'],
   additionalProperties: false,
 }
 
@@ -62,7 +73,7 @@ ${context.familyDnaText || 'Keine weiteren Familienpräferenzen hinterlegt.'}
 Bereits bekannter Plan für heute: ${context.knownPlanText || 'Noch nichts Festes geplant.'}
 ${focusInstruction}
 
-Sprich die Familie direkt und persönlich an, wie ein Concierge, der ihre Reise wirklich kennt — konkret, warm, ohne Floskeln, keine drei konkurrierenden Optionen, nur EINE klare Empfehlung. Widerspreche NICHT dem bereits bekannten Plan, ergänze ihn sinnvoll. Erfinde keine konkreten Preise, Öffnungszeiten oder Adressen — bleibe bei allgemeinen, plausiblen Vorschlägen. Schreibe auf Deutsch. day_summary bleibt extrem kurz (maximal 3-4 Zeilen), alle Details gehören in recommendation.description (70-90 Wörter, mit ungefähren Uhrzeiten/Tageszeiten, kein vages Geschwafel).`
+Sprich die Familie direkt und persönlich an, wie ein Concierge, der ihre Reise wirklich kennt — konkret, warm, ohne Floskeln, keine drei konkurrierenden Optionen, nur EINE klare Hauptempfehlung. Widerspreche NICHT dem bereits bekannten Plan, ergänze ihn sinnvoll. Erfinde keine konkreten Preise, Öffnungszeiten oder Adressen — bleibe bei allgemeinen, plausiblen Vorschlägen. Schreibe auf Deutsch. day_summary bleibt extrem kurz (maximal 3-4 Zeilen), alle Details gehören in recommendation.description (70-90 Wörter, mit ungefähren Uhrzeiten/Tageszeiten, kein vages Geschwafel). Ergänze zusätzlich GENAU EINE Alternative (alternative.title/alternative.description, 30-50 Wörter) für den Fall, dass sich Wetter oder Laune ändern — z. B. drinnen statt draußen, ruhiger statt aktiv — bewusst anders als die Hauptempfehlung, aber ebenfalls konkret statt vage.`
 
   try {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -76,6 +87,7 @@ Sprich die Familie direkt und persönlich an, wie ein Concierge, der ihre Reise 
     return {
       daySummary: parsed.day_summary,
       recommendation: parsed.recommendation,
+      alternative: parsed.alternative ?? null,
     }
   } catch {
     return null

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Map, Globe, CalendarDays, Users } from "lucide-react";
+import { Map, Globe, Users } from "lucide-react";
 import { formatDateDE, getTripDuration } from "@/lib/demo-data";
 import { createClient } from "@/lib/supabase/server";
 import { buildWorldStats } from "@/lib/world-stats";
@@ -238,10 +238,9 @@ export default async function Dashboard() {
       <div className="flex-1 px-5 md:px-8 pb-10 space-y-7">
         <HeroTrip trip={nextTrip} />
 
-        <section className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <StatTile value={worldStats.tripsCount} label="Reisen gesamt" Icon={Map} href="/trips" />
           <StatTile value={worldStats.countryCodes.size} label="Länder besucht" Icon={Globe} href="/family#unsere-welt" />
-          <StatTile value={worldStats.travelDays} label="Reisetage" Icon={CalendarDays} href="/family#unsere-welt" />
           <StatTile value={personsCount ?? 0} label="Familienmitglieder" Icon={Users} href="/family" />
         </section>
 

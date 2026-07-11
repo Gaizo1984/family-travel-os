@@ -426,17 +426,17 @@ export interface Database {
         Row: {
           id: string; family_id: string; trip_id: string | null; for_date: string
           day_style: string | null; highlight_title: string | null
-          day_summary: string; recommendation: Json; created_at: string
+          day_summary: string; recommendation: Json; alternative: Json | null; created_at: string
         }
         Insert: {
           id?: string; family_id: string; trip_id?: string | null; for_date: string
           day_style?: string | null; highlight_title?: string | null
-          day_summary: string; recommendation: Json; created_at?: string
+          day_summary: string; recommendation: Json; alternative?: Json | null; created_at?: string
         }
         Update: {
           id?: string; family_id?: string; trip_id?: string | null; for_date?: string
           day_style?: string | null; highlight_title?: string | null
-          day_summary?: string; recommendation?: Json; created_at?: string
+          day_summary?: string; recommendation?: Json; alternative?: Json | null; created_at?: string
         }
         Relationships: [
           { foreignKeyName: "today_recommendations_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] },
