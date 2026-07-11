@@ -7,6 +7,10 @@ import { MultiPhotoFilePreview } from "@/components/MultiPhotoFilePreview";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
 import { Banner } from "@/components/Banner";
 
+// §Mehrfachfoto-KI-Analyse kann länger dauern als das Standard-Timeout —
+// betrifft den Server Action (generateContentIdeas), der auf dieser Seite läuft.
+export const maxDuration = 60;
+
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
   letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px",

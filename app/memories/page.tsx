@@ -9,6 +9,10 @@ import { Banner } from "@/components/Banner";
 import { SignedPhoto } from "@/components/SignedPhoto";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
 
+// §Der Upload selbst ist jetzt schnell (Analyse läuft per after() im
+// Hintergrund) — großzügigeres Timeout als zusätzliches Sicherheitsnetz.
+export const maxDuration = 60;
+
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
   letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px",

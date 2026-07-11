@@ -7,6 +7,10 @@ import { MultiPhotoFilePreview } from "@/components/MultiPhotoFilePreview";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
 import { Banner } from "@/components/Banner";
 
+// §Bilder analysieren macht bei mehreren Fotos 2 KI-Calls (Kategorisierung +
+// Inhalte-Generierung) — kann das Standard-Timeout überschreiten.
+export const maxDuration = 60;
+
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
   letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px",

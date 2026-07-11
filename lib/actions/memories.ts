@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
+import { after } from 'next/server'
 import { compressImageForStorage } from '@/lib/image-compression'
 import { computeDHash, hammingDistance, DUPLICATE_HASH_THRESHOLD } from '@/lib/image-hash'
 import { assessPhotoBatch, MAX_PHOTOS_ANALYZED_PER_CALL } from '@/lib/photo-quality-analysis'
@@ -140,16 +141,23 @@ export async function uploadMemoryPhotos(formData: FormData) {
     }
   }
 
-  // §"Keine Fehlerseite": Analyse ist Best-Effort und darf einen bereits
-  // erfolgreichen Upload nie zu Fall bringen (z. B. bei einem Netzwerkfehler
-  // beim Foto-Abruf aus Storage) — sonst würde Next.js hier eine generische
-  // Fehlerseite zeigen, obwohl die Fotos technisch gespeichert wurden.
+  // §Root-Cause-Fix "This page couldn't load" bei Mehrfach-Upload: die
+  // KI-Analyse (Perceptual-Hash-Fetches + Qualitätsbewertung) skaliert mit
+  // der Fotoanzahl und konnte bei mehreren neuen Fotos die
+  // Serverless-Function-Laufzeit überschreiten — das ist ein Infrastruktur-
+  // Timeout, kein von try/catch fangbarer JS-Fehler, und ließ den kompletten
+  // Request abstürzen, obwohl die Fotos bereits gespeichert waren. Mit
+  // `after()` läuft die Analyse jetzt NACH dem Redirect im Hintergrund
+  // weiter (Vercel `waitUntil`) — der Nutzer sieht sofort die gespeicherten
+  // Fotos, ohne auf die KI zu warten.
   if (tripId && savedCount > 0) {
-    try {
-      await analyzeTripMemoryPhotos(supabase, tripId)
-    } catch {
-      // bewusst verschluckt — Fotos sind bereits gespeichert, Analyse kann später nachlaufen
-    }
+    after(async () => {
+      try {
+        await analyzeTripMemoryPhotos(supabase, tripId)
+      } catch {
+        // bewusst verschluckt — Fotos sind bereits gespeichert, Analyse kann später nachlaufen
+      }
+    })
   }
 
   // §Zusätzliche Cache-Absicherung (Dokument-Vorgabe): erzwingt einen frischen
