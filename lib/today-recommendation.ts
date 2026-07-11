@@ -14,6 +14,7 @@ export const DAY_STYLE_OPTIONS = [
 export type CachedTodayRecommendation = TodayRecommendation & {
   dayStyle: string | null
   highlightTitle: string | null
+  createdAt: string
 }
 
 /**
@@ -30,7 +31,7 @@ export async function getCachedTodayRecommendation(
   const supabase = await createClient()
   const { data } = await supabase
     .from('today_recommendations')
-    .select('day_summary, recommendation, day_style, highlight_title')
+    .select('day_summary, recommendation, day_style, highlight_title, created_at')
     .eq('family_id', familyId)
     .eq('trip_id', tripId)
     .eq('for_date', forDate)
@@ -42,6 +43,7 @@ export async function getCachedTodayRecommendation(
     recommendation: data.recommendation as unknown as { title: string; description: string },
     dayStyle: data.day_style,
     highlightTitle: data.highlight_title,
+    createdAt: data.created_at,
   }
 }
 
@@ -69,7 +71,7 @@ export async function generateAndCacheTodayRecommendation(
   if (!result) return null
 
   const supabase = await createClient()
-  await supabase.from('today_recommendations').upsert(
+  const { data } = await supabase.from('today_recommendations').upsert(
     {
       family_id: familyId,
       trip_id: tripId,
@@ -80,7 +82,7 @@ export async function generateAndCacheTodayRecommendation(
       recommendation: result.recommendation,
     },
     { onConflict: 'family_id,trip_id,for_date' },
-  )
+  ).select('created_at').single()
 
-  return { ...result, dayStyle, highlightTitle }
+  return { ...result, dayStyle, highlightTitle, createdAt: data?.created_at ?? new Date().toISOString() }
 }

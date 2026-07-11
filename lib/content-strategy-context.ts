@@ -13,6 +13,7 @@ import type { JourneyEventCategory, JourneyEventStatus } from './journey-events'
 
 export type ContentStrategyContext = {
   tripId: string
+  tripSlug: string
   tripTitle: string
   forDate: string
   dateLabel: string
@@ -20,6 +21,7 @@ export type ContentStrategyContext = {
   weatherSummary: string | null
   knownPlanText: string
   highlightTitle: string | null
+  memberNames: string[]
 }
 
 type PersonRow = { id: string; name: string }
@@ -38,7 +40,7 @@ type JourneyEventRow = {
   category: JourneyEventCategory; title: string; location: string | null; status: JourneyEventStatus
 }
 type TripRow = {
-  id: string; title: string; subtitle: string | null; status: string
+  id: string; slug: string; title: string; subtitle: string | null; status: string
   start_date: string | null; end_date: string | null
   trip_members: Array<{ persons: PersonRow | null }>
   stages: StageRow[]; bookings: BookingRow[]; journey_events: JourneyEventRow[]
@@ -58,7 +60,7 @@ export async function buildContentStrategyContext(familyId: string): Promise<Con
   const { data: trips } = await supabase
     .from('trips')
     .select(`
-      id, title, subtitle, status, start_date, end_date,
+      id, slug, title, subtitle, status, start_date, end_date,
       trip_members ( persons ( id, name ) ),
       stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code ),
       bookings ( id, type, title, provider, status, start_datetime, end_datetime, stage_id, details, created_at ),
@@ -99,8 +101,11 @@ export async function buildContentStrategyContext(familyId: string): Promise<Con
     weekday: 'long', day: '2-digit', month: 'long', year: 'numeric',
   })
 
+  const memberNames = activeTrip.trip_members.flatMap((m) => (m.persons ? [m.persons.name] : []))
+
   return {
     tripId: activeTrip.id,
+    tripSlug: activeTrip.slug,
     tripTitle: activeTrip.title,
     forDate: todayIso,
     dateLabel,
@@ -108,5 +113,6 @@ export async function buildContentStrategyContext(familyId: string): Promise<Con
     weatherSummary,
     knownPlanText,
     highlightTitle,
+    memberNames,
   }
 }
