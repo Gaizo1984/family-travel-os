@@ -1,9 +1,10 @@
 import Link from "next/link";
-import { Map, Globe, Users } from "lucide-react";
+import { Map as MapIcon, Globe, Users } from "lucide-react";
 import { formatDateDE, getTripDuration } from "@/lib/demo-data";
 import { createClient } from "@/lib/supabase/server";
 import { buildWorldStats } from "@/lib/world-stats";
 import { isTripPastEnd, isTripHistorical, tripCountdownDisplay } from "@/lib/trip-status";
+import { DESTINATIONS } from "@/lib/data/destination-knowledge";
 
 const TRIP_IMAGES: Record<string, string> = {
   "costa-rica-2026":
@@ -31,10 +32,24 @@ type TripRow = {
   stages: Array<{ id: string }>
 };
 
-function HeroTrip({ trip }: { trip: TripRow }) {
+/**
+ * §"Neue Reisen ohne kuratiertes Bild und ohne Highlight-Foto zeigen nur
+ * einen schlichten Farbverlauf": Bildauflösung mit drei Stufen vor dem
+ * Gradient-Fallback — Highlight-Erinnerungsfoto (Familie hat selbst
+ * hochgeladen) → fest kuratiertes TRIP_IMAGES-Bild → zum Reisetitel
+ * passendes Destination-Foto (gleiche Namens-Abgleich-Technik wie im
+ * Buchungsportal) → Gradient.
+ */
+function resolveTripImage(trip: TripRow, highlightUrl: string | null): string | null {
+  if (highlightUrl) return highlightUrl;
+  if (TRIP_IMAGES[trip.slug]) return TRIP_IMAGES[trip.slug];
+  const destinationMatch = DESTINATIONS.find((d) => trip.title.toLowerCase().includes(d.name.toLowerCase()));
+  return destinationMatch?.photo ?? null;
+}
+
+function HeroTrip({ trip, imgUrl }: { trip: TripRow; imgUrl: string | null }) {
   const duration = trip.start_date && trip.end_date ? getTripDuration(trip.start_date, trip.end_date) : 0;
   const countdown = tripCountdownDisplay(trip, duration);
-  const imgUrl = TRIP_IMAGES[trip.slug];
   const members = trip.trip_members.flatMap((tm) => (tm.persons ? [tm.persons] : []));
 
   return (
@@ -133,9 +148,8 @@ function StatTile({
   );
 }
 
-function TripCardElegant({ trip }: { trip: TripRow }) {
+function TripCardElegant({ trip, imgUrl }: { trip: TripRow; imgUrl: string | null }) {
   const duration = trip.start_date && trip.end_date ? getTripDuration(trip.start_date, trip.end_date) : 0;
-  const imgUrl = TRIP_IMAGES[trip.slug];
 
   return (
     <Link href={`/trips/${trip.slug}`} className="group relative block overflow-hidden rounded-xl" style={{ height: "190px" }}>
@@ -207,6 +221,21 @@ export default async function Dashboard() {
   const nextTrip = upcoming[0] ?? trips[0];
   const pastTrips = trips.filter((t) => isTripHistorical(t));
 
+  // Highlightfoto je Reise (falls die Familie eines markiert hat) — erste Stufe der Bildauflösung.
+  const { data: highlightPhotosRaw } = await supabase
+    .from("memory_photos")
+    .select("trip_id, storage_path")
+    .eq("family_id", familyId)
+    .eq("is_highlight", true)
+    .not("trip_id", "is", null);
+  const highlightPhotoByTripId = new Map<string, string>();
+  for (const p of highlightPhotosRaw ?? []) {
+    if (!p.trip_id || highlightPhotoByTripId.has(p.trip_id)) continue;
+    const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.storage_path, 3600);
+    if (signed?.signedUrl) highlightPhotoByTripId.set(p.trip_id, signed.signedUrl);
+  }
+  const tripImageById = new Map(trips.map((t) => [t.id, resolveTripImage(t, highlightPhotoByTripId.get(t.id) ?? null)]));
+
   if (!nextTrip) {
     return (
       <div className="flex-1 flex flex-col">
@@ -236,10 +265,10 @@ export default async function Dashboard() {
       </header>
 
       <div className="flex-1 px-5 md:px-8 pb-10 space-y-7">
-        <HeroTrip trip={nextTrip} />
+        <HeroTrip trip={nextTrip} imgUrl={tripImageById.get(nextTrip.id) ?? null} />
 
         <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <StatTile value={worldStats.tripsCount} label="Reisen gesamt" Icon={Map} href="/trips" />
+          <StatTile value={worldStats.tripsCount} label="Reisen gesamt" Icon={MapIcon} href="/trips" />
           <StatTile value={worldStats.countryCodes.size} label="Länder besucht" Icon={Globe} href="/family#unsere-welt" />
           <StatTile value={personsCount ?? 0} label="Familienmitglieder" Icon={Users} href="/family" />
         </section>
@@ -256,7 +285,7 @@ export default async function Dashboard() {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {pastTrips.map((trip) => (
-                <TripCardElegant key={trip.id} trip={trip} />
+                <TripCardElegant key={trip.id} trip={trip} imgUrl={tripImageById.get(trip.id) ?? null} />
               ))}
             </div>
           </section>

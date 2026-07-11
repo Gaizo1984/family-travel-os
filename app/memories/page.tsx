@@ -2,6 +2,8 @@ import Link from "next/link";
 import { Star, Trash2, Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { uploadMemoryPhotos, deleteMemoryPhoto, toggleMemoryHighlight } from "@/lib/actions/memories";
+import { MemoryFilePreview } from "@/components/MemoryFilePreview";
+import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -17,6 +19,7 @@ type PhotoRow = {
   id: string; trip_id: string | null; uploaded_by_person_id: string | null
   storage_path: string; taken_at: string | null; caption: string | null
   is_highlight: boolean; created_at: string
+  is_selected: boolean; is_duplicate_of: string | null; quality_score: number | null
 };
 
 function PhotoCard({ photo, url, personName, returnTo }: { photo: PhotoRow; url: string | null; personName: string | null; returnTo: string }) {
@@ -69,7 +72,7 @@ export default async function MemoriesPage({
     (() => {
       let query = supabase
         .from("memory_photos")
-        .select("id, trip_id, uploaded_by_person_id, storage_path, taken_at, caption, is_highlight, created_at")
+        .select("id, trip_id, uploaded_by_person_id, storage_path, taken_at, caption, is_highlight, created_at, is_selected, is_duplicate_of, quality_score")
         .eq("family_id", familyId)
         .order("taken_at", { ascending: false, nullsFirst: false });
       if (tripFilter) query = query.eq("trip_id", tripFilter);
@@ -79,7 +82,12 @@ export default async function MemoriesPage({
     supabase.from("trips").select("id, title").eq("family_id", familyId).order("start_date", { ascending: false }),
   ]);
 
-  const photos = (photosRaw ?? []) as PhotoRow[];
+  const allPhotos = (photosRaw ?? []) as PhotoRow[];
+  // §"Maximal 30 Erinnerungsbilder je Reise": nicht ausgewählte Fotos (Dubletten
+  // oder außerhalb der KI-Top-30) werden in der Hauptgalerie ausgeblendet, aber
+  // nie gelöscht — keine stille Datenlöschung.
+  const photos = allPhotos.filter((p) => p.is_selected);
+  const hiddenCount = allPhotos.length - photos.length;
   const persons = personsRaw ?? [];
   const trips = tripsRaw ?? [];
   const personNameById = new Map(persons.map((p) => [p.id, p.name]));
@@ -177,18 +185,9 @@ export default async function MemoriesPage({
               </div>
               <div className="mb-5">
                 <label htmlFor="mem-files" style={LABEL_STYLE}>Fotos</label>
-                <input id="mem-files" name="files" type="file" multiple accept="image/jpeg,image/png,image/webp" style={{ ...FIELD_STYLE, padding: "10px 16px" }} />
+                <MemoryFilePreview inputId="mem-files" inputName="files" fieldStyle={FIELD_STYLE} />
               </div>
-              <button
-                type="submit"
-                style={{
-                  background: "var(--foreground)", color: "var(--surface)", border: "none",
-                  borderRadius: "6px", padding: "11px 20px", fontSize: "0.65rem",
-                  letterSpacing: "0.16em", textTransform: "uppercase", cursor: "pointer",
-                }}
-              >
-                Fotos speichern
-              </button>
+              <SubmitButtonWithProgress label="Fotos speichern" pendingLabel="Fotos werden gespeichert …" />
             </div>
           </form>
         </section>
@@ -237,6 +236,12 @@ export default async function MemoriesPage({
             <Link href="/family" style={{ color: "var(--accent)" }}>Familie → Profil → Erinnerungen</Link>.
           </p>
         </div>
+
+        {hiddenCount > 0 && (
+          <p className="mt-2" style={{ color: "var(--muted)", fontSize: "0.68rem", fontStyle: "italic" }}>
+            {hiddenCount} weitere hochgeladene {hiddenCount === 1 ? "Foto ist" : "Fotos sind"} (Dubletten oder außerhalb der besten 30 je Reise) hier ausgeblendet, aber nicht gelöscht.
+          </p>
+        )}
       </div>
     </div>
   );

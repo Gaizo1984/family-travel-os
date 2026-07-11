@@ -542,21 +542,28 @@ export interface Database {
           id: string; family_id: string; trip_id: string | null; uploaded_by_person_id: string | null
           storage_path: string; taken_at: string | null; caption: string | null
           is_highlight: boolean; created_at: string
+          phash: string | null; quality_score: number | null; analyzed_at: string | null
+          is_duplicate_of: string | null; is_selected: boolean
         }
         Insert: {
           id?: string; family_id: string; trip_id?: string | null; uploaded_by_person_id?: string | null
           storage_path: string; taken_at?: string | null; caption?: string | null
           is_highlight?: boolean; created_at?: string
+          phash?: string | null; quality_score?: number | null; analyzed_at?: string | null
+          is_duplicate_of?: string | null; is_selected?: boolean
         }
         Update: {
           id?: string; family_id?: string; trip_id?: string | null; uploaded_by_person_id?: string | null
           storage_path?: string; taken_at?: string | null; caption?: string | null
           is_highlight?: boolean; created_at?: string
+          phash?: string | null; quality_score?: number | null; analyzed_at?: string | null
+          is_duplicate_of?: string | null; is_selected?: boolean
         }
         Relationships: [
           { foreignKeyName: "memory_photos_family_id_fkey";             columns: ["family_id"];             isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] },
           { foreignKeyName: "memory_photos_trip_id_fkey";               columns: ["trip_id"];               isOneToOne: false; referencedRelation: "trips";    referencedColumns: ["id"] },
-          { foreignKeyName: "memory_photos_uploaded_by_person_id_fkey"; columns: ["uploaded_by_person_id"]; isOneToOne: false; referencedRelation: "persons";  referencedColumns: ["id"] }
+          { foreignKeyName: "memory_photos_uploaded_by_person_id_fkey"; columns: ["uploaded_by_person_id"]; isOneToOne: false; referencedRelation: "persons";  referencedColumns: ["id"] },
+          { foreignKeyName: "memory_photos_is_duplicate_of_fkey";       columns: ["is_duplicate_of"];       isOneToOne: false; referencedRelation: "memory_photos"; referencedColumns: ["id"] }
         ]
       }
       content_project_photos: {

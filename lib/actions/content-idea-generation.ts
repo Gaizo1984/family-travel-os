@@ -5,12 +5,15 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { buildTripDigest } from '@/lib/trip-digest'
 import { computeDHash, hammingDistance, DUPLICATE_HASH_THRESHOLD } from '@/lib/image-hash'
+import {
+  PHOTO_ASSESSMENT_SCHEMA_FIELD, PHOTO_ASSESSMENT_PROMPT_FRAGMENT, MAX_PHOTOS_ANALYZED_PER_CALL,
+  parsePhotoAssessments,
+} from '@/lib/photo-quality-analysis'
 
 /** Gleiches Modell wie die bestehende Pass-/ESTA-/Beleg-/Reiseideen-KI. */
 const OPENAI_MODEL = 'gpt-5.4'
 
 const MAX_PHOTOS_PER_UPLOAD = 20
-const MAX_PHOTOS_ANALYZED_PER_CALL = 20
 
 const CONTENT_STYLE_LABELS: Record<string, string> = {
   luxury: 'Luxury — elegant, hochwertig, ruhig',
@@ -29,20 +32,7 @@ const CONTENT_IDEA_SCHEMA = {
       type: 'string',
       description: 'Kurze Erklärung (2-3 Sätze) an die Familie, WARUM genau diese Ideen vorgeschlagen wurden — bezieht sich konkret auf die genutzten Reisedaten/Fotos/den Stil, keine Floskeln.',
     },
-    photo_assessments: {
-      type: 'array',
-      description: 'Genau ein Eintrag pro übergebenem Foto, in derselben Reihenfolge — Qualitäts-/Motiv-Bewertung für die Fotoauswahl.',
-      items: {
-        type: 'object',
-        properties: {
-          photo_index: { type: 'integer', description: 'Index des Fotos in der übergebenen Reihenfolge, beginnend bei 0' },
-          quality_score: { type: 'integer', description: '1 (schwach) bis 10 (hervorragendes Motiv)' },
-          is_best_motif: { type: 'boolean', description: 'true für die besten, für den Content wirklich geeigneten Motive' },
-        },
-        required: ['photo_index', 'quality_score', 'is_best_motif'],
-        additionalProperties: false,
-      },
-    },
+    photo_assessments: PHOTO_ASSESSMENT_SCHEMA_FIELD,
     suggestions: {
       type: 'array',
       description: 'Maximal 4 wirklich hochwertige, unterscheidbare Ideen — lieber weniger und dafür konkret als viele generische.',
@@ -77,10 +67,9 @@ function buildPrompt(language: string, styleKey: string): string {
     'Du bist Social-Media-Stratege für eine Familie und entwickelst aus echten Reisedaten und optional mehreren Fotos ' +
     'maximal 4 hochwertige, unterscheidbare Content-Ideen (Reel/Carousel/Story/Feed-Post) — Qualität vor Menge. ' +
     'Nutze ausschließlich die gegebenen Reisedaten und den Stil-Kontext als Faktengrundlage — erfinde keine Orte, ' +
-    'Ereignisse oder Details, die dort nicht stehen. Falls Fotos beigefügt sind: bewerte JEDES Foto einzeln in ' +
-    '"photo_assessments" (gleiche Reihenfolge wie übergeben) nach Bildqualität/Eignung als Social-Media-Motiv, und ' +
-    'markiere die wirklich besten als "is_best_motif":true — die Content-Ideen sollen sich an diesen besten Motiven ' +
-    'orientieren. Erkenne Ort/Stimmung nur, wenn wirklich zuverlässig erkennbar — sonst null setzen, niemals raten. ' +
+    `Ereignisse oder Details, die dort nicht stehen. Falls Fotos beigefügt sind: ${PHOTO_ASSESSMENT_PROMPT_FRAGMENT} ` +
+    'Die Content-Ideen sollen sich an den als beste Motive markierten Fotos orientieren. Erkenne Ort/Stimmung nur, ' +
+    'wenn wirklich zuverlässig erkennbar — sonst null setzen, niemals raten. ' +
     `Setze "usable" auf false, wenn aus den Eingaben keine sinnvolle Idee entwickelbar ist. ${styleText} ${languageInstruction} ` +
     'Erkläre der Familie in "reasoning" kurz und konkret, worauf sich die vorgeschlagenen Ideen stützen.'
   )
@@ -242,12 +231,14 @@ export async function generateContentIdeas(formData: FormData) {
   if (!parsed.usable || parsed.suggestions.length === 0)
     redirect(`${newPath}?error=${encodeURIComponent('Aus diesen Eingaben konnten keine Content-Ideen entwickelt werden.')}`)
 
-  // Analyse-Ergebnis auf die jeweiligen Fotos zurückschreiben.
-  const bestIndices = new Set(parsed.photo_assessments.filter((a) => a.is_best_motif).map((a) => a.photo_index))
+  // Analyse-Ergebnis auf die jeweiligen Fotos zurückschreiben — Parsing über
+  // die gemeinsame Foto-Analyse-Pipeline (lib/photo-quality-analysis.ts).
+  const assessments = parsePhotoAssessments(parsed.photo_assessments)
+  const bestIndices = new Set(assessments.filter((a) => a.isBestMotif).map((a) => a.photoIndex))
   await Promise.all(toAnalyze.map((p, i) => {
-    const assessment = parsed.photo_assessments.find((a) => a.photo_index === i)
+    const assessment = assessments.find((a) => a.photoIndex === i)
     return supabase.from('content_project_photos').update({
-      quality_score: assessment?.quality_score ?? null,
+      quality_score: assessment?.qualityScore ?? null,
       analyzed_at: new Date().toISOString(),
       is_selected: bestIndices.size > 0 ? bestIndices.has(i) : true,
     }).eq('id', p.id)
