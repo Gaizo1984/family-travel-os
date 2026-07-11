@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
+import { revalidatePath } from 'next/cache'
 import { compressImageForStorage } from '@/lib/image-compression'
 import { computeDHash, hammingDistance, DUPLICATE_HASH_THRESHOLD } from '@/lib/image-hash'
 import { assessPhotoBatch, MAX_PHOTOS_ANALYZED_PER_CALL } from '@/lib/photo-quality-analysis'
@@ -10,6 +11,74 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 const MAX_PHOTOS_PER_UPLOAD = 20
 /** §"Maximal 30 Erinnerungsbilder je Reise": Kappung als Auswahl (is_selected), kein Löschen. */
 const MAX_SELECTED_PHOTOS_PER_TRIP = 30
+
+/**
+ * §Root-Cause-Fix "Broken Image nach Upload": prüft die RIFF/WEBP-Magic-Bytes
+ * UND die im RIFF-Header deklarierte Chunk-Größe gegen die tatsächliche
+ * Puffergröße — bewusst UNABHÄNGIG von sharp/libvips, damit die Prüfung nicht
+ * von genau der (ggf. auf der Produktionsplattform fehlerhaften) Bibliothek
+ * abhängt, die auch komprimiert hat.
+ */
+function isValidWebpBuffer(buffer: Buffer): boolean {
+  if (buffer.length < 12) return false
+  if (buffer.toString('ascii', 0, 4) !== 'RIFF') return false
+  if (buffer.toString('ascii', 8, 12) !== 'WEBP') return false
+  const declaredSize = buffer.readUInt32LE(4)
+  const actualSize = buffer.length - 8
+  // RIFF erlaubt ein optionales Padding-Byte auf gerade Größen — 1 Byte Toleranz.
+  return Math.abs(declaredSize - actualSize) <= 1
+}
+
+/**
+ * §Root-Cause-Fix "Broken Image nach Upload": ein real in Produktion
+ * hochgeladenes Foto erwies sich als byteweise korrumpiert (UTF-8-
+ * Replacement-Character-Muster), obwohl Upload und Signed-URL-Erzeugung ohne
+ * Fehler zurückliefen — die Korruption ist also weder am HTTP-Status noch am
+ * Supabase-Fehlerfeld erkennbar. Deshalb: nach jedem Upload sofort wieder
+ * herunterladen und tatsächlich verifizieren (Byte-Vergleich + unabhängiger
+ * Magic-Byte-Check + sharp-Dekodierbarkeit als Zusatzsignal), bevor die Datei
+ * als gespeichert gilt. Bei Fehlschlag: löschen, einmal erneut hochladen,
+ * erneut prüfen — schlägt es danach immer noch fehl, wird der Upload als
+ * fehlgeschlagen gezählt statt eine kaputte Foto-Zeile anzulegen.
+ */
+async function uploadAndVerify(
+  supabase: SupabaseClient,
+  storagePath: string,
+  compressed: Buffer,
+): Promise<boolean> {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const { error: uploadError } = await supabase.storage.from('documents')
+      .upload(storagePath, compressed, { contentType: 'image/webp', upsert: attempt > 1 })
+    if (uploadError) {
+      console.error('[Memories][DIAGNOSTIC] Storage-Upload fehlgeschlagen', { attempt, uploadError })
+      continue
+    }
+
+    const { data: signed } = await supabase.storage.from('documents').createSignedUrl(storagePath, 60)
+    if (!signed?.signedUrl) {
+      console.error('[Memories][DIAGNOSTIC] Verifikation: Signed-URL-Erzeugung fehlgeschlagen', { attempt, storagePath })
+      continue
+    }
+
+    try {
+      const res = await fetch(signed.signedUrl)
+      const downloaded = Buffer.from(await res.arrayBuffer())
+      const byteMatch = downloaded.equals(compressed)
+      const magicValid = isValidWebpBuffer(downloaded)
+      console.error('[Memories][DIAGNOSTIC] Verifikation', {
+        attempt, storagePath, httpStatus: res.status, contentType: res.headers.get('content-type'),
+        uploadedSize: compressed.length, downloadedSize: downloaded.length, byteMatch, magicValid,
+      })
+      if (byteMatch && magicValid) return true
+    } catch (e) {
+      console.error('[Memories][DIAGNOSTIC] Verifikations-Download fehlgeschlagen', { attempt, e })
+    }
+
+    // Verifikation fehlgeschlagen — Datei entfernen, bevor der nächste Versuch (oder Abbruch) folgt.
+    await supabase.storage.from('documents').remove([storagePath])
+  }
+  return false
+}
 
 /**
  * Deterministische Reise-Zuordnung (kein Raten) — 1:1 nach dem Muster von
@@ -60,12 +129,14 @@ export async function uploadMemoryPhotos(formData: FormData) {
   for (const file of rawFiles) {
     try {
       const rawBuffer = Buffer.from(await file.arrayBuffer())
-      const compressed = await compressImageForStorage(rawBuffer)
-      const storagePath = `memories/${familyId}/${crypto.randomUUID()}.webp`
+      console.error('[Memories][DIAGNOSTIC] Datei empfangen', { name: file.name, type: file.type, size: rawBuffer.length })
 
-      const { error: uploadError } = await supabase.storage.from('documents')
-        .upload(storagePath, compressed, { contentType: 'image/webp' })
-      if (uploadError) { console.error('[Memories][DIAGNOSTIC] Storage-Upload fehlgeschlagen', uploadError); failedCount++; continue }
+      const compressed = await compressImageForStorage(rawBuffer)
+      console.error('[Memories][DIAGNOSTIC] Komprimiert', { size: compressed.length, magicValid: isValidWebpBuffer(compressed) })
+
+      const storagePath = `memories/${familyId}/${crypto.randomUUID()}.webp`
+      const verified = await uploadAndVerify(supabase, storagePath, compressed)
+      if (!verified) { failedCount++; continue }
 
       const { error: insertError } = await supabase.from('memory_photos').insert({
         family_id: familyId,
@@ -99,6 +170,12 @@ export async function uploadMemoryPhotos(formData: FormData) {
       // bewusst verschluckt — Fotos sind bereits gespeichert, Analyse kann später nachlaufen
     }
   }
+
+  // §Zusätzliche Cache-Absicherung (Dokument-Vorgabe): erzwingt einen frischen
+  // Server-Render von /memories nach dem Upload — der bestehende Redirect
+  // reicht dafür bereits aus (Route ist dynamisch, kein Fetch-Cache aktiv,
+  // siehe Performance-Sprint), revalidatePath ist hier reine Zusatzsicherung.
+  revalidatePath(backPath)
 
   if (savedCount === 0)
     redirect(`${backPath}?error=${encodeURIComponent('Keines der Fotos konnte gespeichert werden.')}`)

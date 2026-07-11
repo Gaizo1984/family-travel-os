@@ -38,7 +38,7 @@ export function SignedPhoto({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  async function handleError() {
+  async function handleErrorInner() {
     let httpStatus = 'unknown'
     try {
       const res = await fetch(src, { method: 'HEAD' })
@@ -50,16 +50,34 @@ export function SignedPhoto({
     console.error('[SignedPhoto][DIAGNOSTIC] Bild-Ladefehler', { storagePath, url: src, httpStatus, retried: retriedRef.current })
     logPhotoDiagnostic({ storagePath, url: src, phase: 'load', httpStatus, retried: retriedRef.current }).catch(() => {})
 
+    // §Fix "This page couldn't load"/Unhandled Promise Rejection: refreshSignedUrl
+    // ist ein Server-Aufruf und kann selbst fehlschlagen (Netzwerk, Server) —
+    // MUSS abgesichert sein, sonst wird handleErrors Promise zurückgewiesen,
+    // ohne dass irgendjemand sie behandelt (React ruft onError "fire and
+    // forget" auf, ohne die zurückgegebene Promise abzuwarten).
     if (!retriedRef.current && storagePath) {
       retriedRef.current = true
-      const fresh = await refreshSignedUrl(storagePath)
-      if (fresh && fresh !== src) {
-        setSrc(fresh)
-        return
+      try {
+        const fresh = await refreshSignedUrl(storagePath)
+        if (fresh && fresh !== src) {
+          setSrc(fresh)
+          return
+        }
+      } catch (e) {
+        console.error('[SignedPhoto][DIAGNOSTIC] refreshSignedUrl fehlgeschlagen', e)
       }
     }
     // Zweiter Fehlschlag (oder kein storagePath/Refresh möglich): Broken
     // Image bewusst sichtbar lassen, wie gewünscht — kein Verstecken.
+  }
+
+  // Zusätzliches Sicherheitsnetz: React ruft onError "fire and forget" auf und
+  // wartet die zurückgegebene Promise nicht ab — ein hier nicht gefangener
+  // Fehler würde als unhandled rejection im Browser landen. handleErrorInner
+  // ist bereits vollständig abgesichert (s. o.), dieser äußere .catch() ist
+  // die letzte Verteidigungslinie, falls doch einmal etwas durchrutscht.
+  function handleError() {
+    handleErrorInner().catch((e) => console.error('[SignedPhoto][DIAGNOSTIC] unerwarteter Fehler in handleError', e))
   }
 
   // eslint-disable-next-line @next/next/no-img-element
