@@ -214,7 +214,15 @@ export default async function TodayPage() {
   ];
   const weather = await getWeatherForLocation(weatherCandidates);
   const currentWeather = weather ? describeWeatherCode(weather.currentCode) : null;
-  const todayPrecipitation = weather?.daily[0]?.precipitationProbability ?? null;
+  // Open-Meteo liefert "heute" (daily[0]) im lokalen Zeitfenster des ZIELORTS
+  // (timezone=auto) — bei einem Standort mit anderer UTC-Differenz als
+  // Deutschland kann das ein anderer Kalendertag sein als unser eigenes,
+  // familienzeitbasiertes todayIso. Für den Tageswert daher explizit den
+  // Eintrag suchen, der wirklich zu unserem "heute" passt, statt blind Index 0
+  // zu nehmen — sonst würde z. B. die Regenwahrscheinlichkeit für "gestern"
+  // (aus Zielort-Sicht) als "heute" angezeigt.
+  const todayForecast = weather?.daily.find((d) => d.date === todayIso) ?? weather?.daily[0] ?? null;
+  const todayPrecipitation = todayForecast?.precipitationProbability ?? null;
 
   const timelineItems = todayDay ? buildTodayTimelineItems(todayDay) : [];
   const nextUp = findNextUpcoming(timelineItems, nowHHMM);
@@ -264,19 +272,13 @@ export default async function TodayPage() {
           <div className="mb-4" style={{ color: "#A89880", fontSize: "0.8rem" }}>{heroSubtitle}</div>
 
           {weather && (
-            <div className="mb-4" style={{ color: "#A89880", fontSize: "0.72rem", lineHeight: 1.6 }}>
-              <div className="flex items-center gap-1.5">
-                {currentWeather && <currentWeather.icon size={12} strokeWidth={1.6} />}
-                <span>{weather.currentTemp}°C · {currentWeather?.label}</span>
-              </div>
-              {todayPrecipitation !== null && <div>Regenwahrscheinlichkeit {todayPrecipitation}%</div>}
-              {(weather.sunrise || weather.sunset) && (
-                <div>
-                  {weather.sunrise && <>🌅 {weather.sunrise.slice(11, 16)}</>}
-                  {weather.sunrise && weather.sunset && " · "}
-                  {weather.sunset && <>🌇 {weather.sunset.slice(11, 16)}</>}
-                </div>
-              )}
+            <div className="flex items-center gap-1.5 mb-4" style={{ color: "#A89880", fontSize: "0.72rem" }}>
+              {currentWeather && <currentWeather.icon size={12} strokeWidth={1.6} />}
+              <span>
+                {weather.currentTemp}°C · {currentWeather?.label}
+                {todayPrecipitation !== null && ` · ${todayPrecipitation}% Regen`}
+                {weather.sunset && ` · 🌇 ${weather.sunset.slice(11, 16)}`}
+              </span>
             </div>
           )}
 
@@ -301,14 +303,13 @@ export default async function TodayPage() {
           <SectionLabel>Was machen wir jetzt?</SectionLabel>
           <Card>
             {nextUp ? (
+              // Nur Icon/Titel/Uhrzeit — Details (Ort, Anbieter) stehen bereits identisch
+              // unten in "Heutiger Tag", keine doppelte Darstellung derselben Angaben.
               <div className="flex items-center gap-4">
                 <div className="shrink-0 flex items-center justify-center rounded-lg" style={{ width: 40, height: 40, background: "var(--accent-subtle)" }}>
                   <nextUp.icon size={17} strokeWidth={1.4} style={{ color: "var(--accent)" }} />
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div style={{ color: "var(--foreground)", fontSize: "0.92rem" }}>{nextUp.title}</div>
-                  {nextUp.subtitle && <div style={{ color: "var(--muted)", fontSize: "0.72rem" }}>{nextUp.subtitle}</div>}
-                </div>
+                <div className="flex-1 min-w-0" style={{ color: "var(--foreground)", fontSize: "0.92rem" }}>{nextUp.title}</div>
                 {nextUp.time && (
                   <div className="flex items-center gap-1 shrink-0" style={{ color: "var(--accent)", fontSize: "0.78rem" }}>
                     <Clock size={12} strokeWidth={1.6} /> {nextUp.time}

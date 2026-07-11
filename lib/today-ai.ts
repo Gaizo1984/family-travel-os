@@ -20,7 +20,10 @@ const TODAY_SCHEMA = {
       type: 'object',
       properties: {
         title: { type: 'string', description: 'Kurzer Titel für die empfohlene Tagesgestaltung' },
-        description: { type: 'string', description: '1-2 Sätze Begründung/Beschreibung' },
+        description: {
+          type: 'string',
+          description: 'Konkrete Beschreibung mit ungefähren Uhrzeiten/Tageszeiten und benannten Aktivitätsarten (kein vages Fließ-Geschwafel) — 70 bis 90 Wörter, nicht mehr.',
+        },
       },
       required: ['title', 'description'],
       additionalProperties: false,
@@ -32,7 +35,10 @@ const TODAY_SCHEMA = {
         type: 'object',
         properties: {
           title: { type: 'string' },
-          description: { type: 'string' },
+          description: {
+            type: 'string',
+            description: 'Konkret und knapp, 70 bis 90 Wörter, nicht mehr.',
+          },
         },
         required: ['title', 'description'],
         additionalProperties: false,
@@ -65,7 +71,7 @@ ${context.weatherSummary ? `Wetter heute: ${context.weatherSummary}.` : 'Wetterd
 ${context.familyDnaText || 'Keine weiteren Familienpräferenzen hinterlegt.'}
 Bereits bekannter Plan für heute: ${context.knownPlanText || 'Noch nichts Festes geplant.'}
 
-Schlage eine sinnvolle, zur Familie und zum Wetter passende Tagesgestaltung vor: eine Hauptempfehlung und zwei kleinere Alternativen. Widerspreche NICHT dem bereits bekannten Plan, ergänze ihn sinnvoll. Erfinde keine konkreten Preise, Öffnungszeiten oder Adressen — bleibe bei allgemeinen, plausiblen Vorschlägen. Schreibe auf Deutsch, warm und konkret, keine Floskeln. day_summary muss extrem kurz bleiben (maximal 3-4 Zeilen) — alle Details gehören in main_recommendation/alternatives, nicht in day_summary.`
+Schlage eine sinnvolle, zur Familie und zum Wetter passende Tagesgestaltung vor: eine Hauptempfehlung und zwei kleinere Alternativen. Widerspreche NICHT dem bereits bekannten Plan, ergänze ihn sinnvoll. Erfinde keine konkreten Preise, Öffnungszeiten oder Adressen — bleibe bei allgemeinen, plausiblen Vorschlägen. Schreibe auf Deutsch, warm und konkret, keine Floskeln. day_summary muss extrem kurz bleiben (maximal 3-4 Zeilen) — alle Details gehören in main_recommendation/alternatives. Die Beschreibungen in main_recommendation und alternatives sind jeweils 70-90 Wörter lang, konkret mit ungefähren Uhrzeiten/Tageszeiten, kein vages Geschwafel.`
 
   try {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })

@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Star, Archive, ArchiveRestore, Trash2, Sparkles } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { createContentDraftFromIdea } from "@/lib/actions/content-ideas";
+import {
+  createContentDraftFromIdea, toggleFavoriteContentIdea, archiveContentIdea,
+  unarchiveContentIdea, deleteContentIdea,
+} from "@/lib/actions/content-ideas";
 
 type Suggestion = {
   title: string; format: string; hook: string; angle: string
@@ -26,7 +29,7 @@ export default async function ContentIdeaDetailPage({
   const supabase = await createClient();
   const { data: idea } = await supabase
     .from("content_ideas")
-    .select("id, suggestions, content_goal, chosen_index, source_input_text, trip_id, trips(title)")
+    .select("id, suggestions, content_goal, chosen_index, source_input_text, trip_id, status, is_favorite, reasoning, trips(title)")
     .eq("id", ideaId)
     .maybeSingle();
 
@@ -34,6 +37,7 @@ export default async function ContentIdeaDetailPage({
 
   const suggestions = idea.suggestions as unknown as Suggestion[];
   const tripTitle = (idea.trips as unknown as { title: string } | null)?.title;
+  const returnTo = `/content-studio/ideas/${idea.id}`;
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -48,12 +52,60 @@ export default async function ContentIdeaDetailPage({
           Alle Ideen
         </Link>
 
-        <div style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "12px" }}>
-          {tripTitle ?? "Content-Idee"}
+        <div className="flex items-start justify-between flex-wrap gap-4 mb-2">
+          <div>
+            <div style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "12px" }}>
+              {tripTitle ?? "Content-Idee"}{idea.status === "archived" && " · Archiviert"}
+            </div>
+            <h1 className="font-light" style={{ color: "var(--foreground)", fontSize: "1.4rem", letterSpacing: "0.01em" }}>
+              {suggestions.length} Vorschläge
+            </h1>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <form action={toggleFavoriteContentIdea}>
+              <input type="hidden" name="idea_id" value={idea.id} />
+              <input type="hidden" name="next_value" value={(!idea.is_favorite).toString()} />
+              <input type="hidden" name="return_to" value={returnTo} />
+              <button
+                type="submit"
+                aria-label={idea.is_favorite ? "Favorit entfernen" : "Als Favorit markieren"}
+                style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: "6px" }}
+              >
+                <Star size={16} strokeWidth={1.6} fill={idea.is_favorite ? "var(--accent)" : "none"} style={{ color: "var(--accent)" }} />
+              </button>
+            </form>
+            <form action={idea.status === "archived" ? unarchiveContentIdea : archiveContentIdea}>
+              <input type="hidden" name="idea_id" value={idea.id} />
+              <input type="hidden" name="return_to" value={idea.status === "archived" ? returnTo : "/content-studio/ideas"} />
+              <button
+                type="submit"
+                aria-label={idea.status === "archived" ? "Wiederherstellen" : "Archivieren"}
+                style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: "6px", color: "var(--muted)" }}
+              >
+                {idea.status === "archived" ? <ArchiveRestore size={16} strokeWidth={1.6} /> : <Archive size={16} strokeWidth={1.6} />}
+              </button>
+            </form>
+            <form action={deleteContentIdea}>
+              <input type="hidden" name="idea_id" value={idea.id} />
+              <input type="hidden" name="return_to" value="/content-studio/ideas" />
+              <button
+                type="submit"
+                aria-label="Idee löschen"
+                style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: "6px", color: "#B5624A" }}
+              >
+                <Trash2 size={16} strokeWidth={1.6} />
+              </button>
+            </form>
+          </div>
         </div>
-        <h1 className="font-light mb-8" style={{ color: "var(--foreground)", fontSize: "1.4rem", letterSpacing: "0.01em" }}>
-          {suggestions.length} Vorschläge
-        </h1>
+
+        {idea.reasoning && (
+          <div className="flex items-start gap-2 mb-8 p-4 rounded-lg" style={{ background: "var(--accent-subtle)" }}>
+            <Sparkles size={13} strokeWidth={1.6} style={{ color: "var(--accent)", flexShrink: 0, marginTop: "2px" }} />
+            <p style={{ color: "var(--foreground)", fontSize: "0.78rem", lineHeight: 1.5 }}>{idea.reasoning}</p>
+          </div>
+        )}
 
         {error && (
           <div

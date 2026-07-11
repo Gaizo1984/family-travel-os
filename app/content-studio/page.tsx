@@ -1,6 +1,13 @@
 import Link from "next/link";
-import { ArrowRight, Sparkles, Settings } from "lucide-react";
+import { ArrowRight, Sparkles, Settings, MapPin, Camera, Wand2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { WhatCanAI } from "./WhatCanAI";
+
+const STEPS = [
+  { Icon: MapPin, label: "Reise wählen" },
+  { Icon: Camera, label: "Foto (optional)" },
+  { Icon: Wand2, label: "KI entwickelt Ideen" },
+];
 
 export default async function ContentStudioPage() {
   const supabase = await createClient();
@@ -44,7 +51,7 @@ export default async function ContentStudioPage() {
               Content Studio
             </div>
             <h1 className="font-light" style={{ color: "var(--foreground)", fontSize: "1.5rem", letterSpacing: "0.01em" }}>
-              Aus euren Reisen wird Erzählung.
+              Verwandle eure Reise in Posts, Reels & Erinnerungen.
             </h1>
           </div>
           <Link href="/content-studio/settings" style={{ color: "var(--muted)" }}>
@@ -70,6 +77,23 @@ export default async function ContentStudioPage() {
           </Link>
         )}
 
+        <div className="flex items-center justify-center gap-3 mb-6" style={{ color: "var(--muted)" }}>
+          {STEPS.map(({ Icon, label }, i) => (
+            <div key={label} className="flex items-center gap-3">
+              <div className="flex flex-col items-center gap-1.5">
+                <div
+                  className="flex items-center justify-center rounded-full"
+                  style={{ width: 32, height: 32, background: "var(--accent-subtle)" }}
+                >
+                  <Icon size={14} strokeWidth={1.5} style={{ color: "var(--accent)" }} />
+                </div>
+                <span style={{ fontSize: "0.62rem", letterSpacing: "0.02em", textAlign: "center" }}>{label}</span>
+              </div>
+              {i < STEPS.length - 1 && <ArrowRight size={12} strokeWidth={1.5} style={{ flexShrink: 0, marginBottom: "18px" }} />}
+            </div>
+          ))}
+        </div>
+
         <Link
           href="/content-studio/new"
           className="block rounded-xl p-7 mb-8"
@@ -80,7 +104,7 @@ export default async function ContentStudioPage() {
             <span style={{ color: "var(--surface)", fontSize: "1rem", fontWeight: 400 }}>Content-Idee erstellen</span>
           </div>
           <p style={{ color: "var(--surface)", opacity: 0.7, fontSize: "0.76rem" }}>
-            Reise auswählen, optional ein Foto — die KI entwickelt 3–5 konkrete Vorschläge.
+            Reise auswählen, optional ein Foto — die KI entwickelt bis zu 4 hochwertige Vorschläge.
           </p>
         </Link>
 
@@ -94,7 +118,7 @@ export default async function ContentStudioPage() {
         </div>
 
         {(recentIdeas ?? []).length === 0 ? (
-          <p style={{ color: "var(--muted)", fontSize: "0.76rem" }}>Noch keine Content-Ideen entwickelt.</p>
+          <WhatCanAI />
         ) : (
           <div className="grid grid-cols-1 gap-2">
             {(recentIdeas ?? []).map((idea) => (

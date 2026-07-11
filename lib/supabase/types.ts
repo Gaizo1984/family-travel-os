@@ -427,19 +427,22 @@ export interface Database {
           id: string; family_id: string; project_id: string | null; trip_id: string | null
           source_input_text: string | null; source_media_storage_path: string | null
           content_goal: string | null; suggestions: Json; chosen_index: number | null
-          status: string; created_at: string; updated_at: string
+          status: string; is_favorite: boolean; reasoning: string | null
+          created_at: string; updated_at: string
         }
         Insert: {
           id?: string; family_id: string; project_id?: string | null; trip_id?: string | null
           source_input_text?: string | null; source_media_storage_path?: string | null
           content_goal?: string | null; suggestions: Json; chosen_index?: number | null
-          status?: string; created_at?: string; updated_at?: string
+          status?: string; is_favorite?: boolean; reasoning?: string | null
+          created_at?: string; updated_at?: string
         }
         Update: {
           id?: string; family_id?: string; project_id?: string | null; trip_id?: string | null
           source_input_text?: string | null; source_media_storage_path?: string | null
           content_goal?: string | null; suggestions?: Json; chosen_index?: number | null
-          status?: string; created_at?: string; updated_at?: string
+          status?: string; is_favorite?: boolean; reasoning?: string | null
+          created_at?: string; updated_at?: string
         }
         Relationships: [
           { foreignKeyName: "content_ideas_family_id_fkey";  columns: ["family_id"];  isOneToOne: false; referencedRelation: "families";         referencedColumns: ["id"] },

@@ -61,6 +61,57 @@ export async function createContentDraftFromIdea(formData: FormData) {
   redirect(`/content-studio/drafts/${draft.id}`)
 }
 
+/** Favorisieren/Entfavorisieren — unabhängig vom status (suggested/chosen/archived). */
+export async function toggleFavoriteContentIdea(formData: FormData) {
+  const ideaId = String(formData.get('idea_id') ?? '')
+  const nextValue = formData.get('next_value') === 'true'
+  const returnTo = String(formData.get('return_to') ?? '').trim()
+
+  const supabase = await createClient()
+  await supabase.from('content_ideas').update({ is_favorite: nextValue }).eq('id', ideaId)
+
+  redirect(returnTo || `/content-studio/ideas/${ideaId}`)
+}
+
+export async function archiveContentIdea(formData: FormData) {
+  const ideaId = String(formData.get('idea_id') ?? '')
+  const returnTo = String(formData.get('return_to') ?? '').trim()
+
+  const supabase = await createClient()
+  await supabase.from('content_ideas').update({ status: 'archived' }).eq('id', ideaId)
+
+  redirect(returnTo || '/content-studio/ideas')
+}
+
+export async function unarchiveContentIdea(formData: FormData) {
+  const ideaId = String(formData.get('idea_id') ?? '')
+  const returnTo = String(formData.get('return_to') ?? '').trim()
+
+  const supabase = await createClient()
+  const { data: idea } = await supabase.from('content_ideas').select('chosen_index').eq('id', ideaId).maybeSingle()
+  await supabase.from('content_ideas').update({ status: idea?.chosen_index !== null ? 'chosen' : 'suggested' }).eq('id', ideaId)
+
+  redirect(returnTo || `/content-studio/ideas/${ideaId}`)
+}
+
+/** Löscht eine Idee inkl. eines eventuell hochgeladenen Fotos (kein Storage-Waise). */
+export async function deleteContentIdea(formData: FormData) {
+  const ideaId = String(formData.get('idea_id') ?? '')
+  const returnTo = String(formData.get('return_to') ?? '').trim()
+
+  const supabase = await createClient()
+  const { data: idea } = await supabase.from('content_ideas').select('source_media_storage_path').eq('id', ideaId).maybeSingle()
+
+  if (idea?.source_media_storage_path)
+    await supabase.storage.from('documents').remove([idea.source_media_storage_path])
+
+  const { error } = await supabase.from('content_ideas').delete().eq('id', ideaId)
+  if (error)
+    redirect(`/content-studio/ideas/${ideaId}?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)
+
+  redirect(returnTo || '/content-studio/ideas')
+}
+
 export async function updateContentDraft(formData: FormData) {
   const draftId = String(formData.get('draft_id') ?? '')
   const draftType = String(formData.get('draft_type') ?? '')

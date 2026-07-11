@@ -14,10 +14,15 @@ const CONTENT_IDEA_SCHEMA = {
     usable: { type: 'boolean', description: 'false, wenn aus den Eingaben keine sinnvollen Content-Ideen ableitbar sind' },
     detected_location: { type: ['string', 'null'], description: 'Nur bei hochgeladenem Foto und wirklich erkennbarem Ort — sonst null, niemals raten' },
     detected_mood: { type: ['string', 'null'], description: 'Nur bei hochgeladenem Foto — wahrgenommene Stimmung, sonst null' },
+    reasoning: {
+      type: 'string',
+      description: 'Kurze Erklärung (2-3 Sätze) an die Familie, WARUM genau diese Ideen vorgeschlagen wurden — bezieht sich konkret auf die genutzten Reisedaten/den Stil, keine Floskeln.',
+    },
     suggestions: {
       type: 'array',
-      minItems: 3,
-      maxItems: 5,
+      description: 'Maximal 4 wirklich hochwertige, unterscheidbare Ideen — lieber weniger und dafür konkret als viele generische.',
+      minItems: 2,
+      maxItems: 4,
       items: {
         type: 'object',
         properties: {
@@ -33,18 +38,21 @@ const CONTENT_IDEA_SCHEMA = {
       },
     },
   },
-  required: ['usable', 'detected_location', 'detected_mood', 'suggestions'],
+  required: ['usable', 'detected_location', 'detected_mood', 'reasoning', 'suggestions'],
   additionalProperties: false,
 }
 
 const CONTENT_IDEA_PROMPT = (
-  'Du entwickelst aus echten Reisedaten und optional einem Foto 3–5 konkrete, ' +
-  'unterscheidbare Social-Media-Content-Ideen für eine Familie. Nutze ' +
+  'Du entwickelst aus echten Reisedaten und optional einem Foto maximal 4 hochwertige, ' +
+  'unterscheidbare Social-Media-Content-Ideen für eine Familie — Qualität vor Menge, ' +
+  'lieber 2 wirklich gute als 4 generische. Nutze ' +
   'ausschließlich die gegebenen Reisedaten und den Stil-Kontext als Faktengrundlage ' +
   '— erfinde keine Orte, Ereignisse oder Details, die dort nicht stehen. Falls ein ' +
   'Foto beigefügt ist: erkenne Ort/Stimmung nur, wenn wirklich zuverlässig erkennbar ' +
   '— sonst null setzen, niemals raten. Setze "usable" auf false, wenn aus den ' +
-  'Eingaben keine sinnvolle Idee entwickelbar ist.'
+  'Eingaben keine sinnvolle Idee entwickelbar ist. Erkläre der Familie in "reasoning" ' +
+  'kurz und konkret, worauf sich die vorgeschlagenen Ideen stützen (z. B. bestimmte ' +
+  'Etappen, Buchungen, der Fotoinhalt oder der Content-Stil).'
 )
 
 export async function generateContentIdeas(formData: FormData) {
@@ -101,6 +109,7 @@ export async function generateContentIdeas(formData: FormData) {
     usable: boolean
     detected_location: string | null
     detected_mood: string | null
+    reasoning: string
     suggestions: Array<{ title: string; format: string; hook: string; angle: string; caption_draft: string; hashtags: string[] }>
   }
 
@@ -150,6 +159,7 @@ export async function generateContentIdeas(formData: FormData) {
     source_media_storage_path: sourceMediaPath,
     content_goal: contentGoal || null,
     suggestions: parsed.suggestions,
+    reasoning: parsed.reasoning,
     status: 'suggested',
   }).select('id').single()
 
