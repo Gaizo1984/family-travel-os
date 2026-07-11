@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ChevronLeft, Plane, BedDouble, Car, Compass, UtensilsCrossed, FileText, Shield, Receipt } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { computeTripBudget, BUDGET_CATEGORY_ORDER, BUDGET_CATEGORY_LABELS } from "@/lib/budget";
+import { formatDateDE } from "@/lib/demo-data";
 import type { BudgetCategory } from "@/lib/budget";
 import { setTripBudget } from "@/lib/actions/budget-items";
 import { refreshExchangeRate, setManualExchangeRate } from "@/lib/actions/exchange-rates";
@@ -201,7 +202,7 @@ export default async function BudgetPage({
                 <div key={r.currency} className="flex items-center justify-between" style={{ fontSize: "0.78rem" }}>
                   <span style={{ color: "var(--foreground)" }}>1 {r.currency} = {r.rate} {trip.budget_currency}</span>
                   <span style={{ color: "var(--muted)", fontSize: "0.65rem" }}>
-                    {r.source === "eodhd" ? "automatisch" : "manuell"} · {new Date(r.updated_at).toLocaleDateString("de-DE")}
+                    {r.source === "eodhd" ? "automatisch" : "manuell"} · {formatDateDE(r.updated_at)}
                   </span>
                 </div>
               ))}

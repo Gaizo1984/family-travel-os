@@ -16,8 +16,6 @@ const FIELD_STYLE: React.CSSProperties = {
   fontSize: "0.9rem", fontWeight: 300, outline: "none",
 };
 
-type StageOption = { id: string; title: string };
-
 type BookingValues = {
   stage_id: string | null;
   title: string;
@@ -36,7 +34,6 @@ type BookingValues = {
 export function BookingForm({
   config,
   action,
-  stages,
   hiddenFields,
   submitLabel,
   cancelHref,
@@ -45,7 +42,6 @@ export function BookingForm({
 }: {
   config: BookingTypeConfig;
   action: (formData: FormData) => void | Promise<void>;
-  stages: StageOption[];
   hiddenFields: Record<string, string>;
   submitLabel: string;
   cancelHref: string;
@@ -152,19 +148,6 @@ export function BookingForm({
             </div>
           )}
         </div>
-
-        {/* Etappe */}
-        {stages.length > 0 && (
-          <div className="mb-5">
-            <label htmlFor="bk-stage" style={LABEL_STYLE}>Etappe (optional)</label>
-            <select id="bk-stage" name="stage_id" defaultValue={values?.stage_id ?? ""} style={FIELD_STYLE}>
-              <option value="">Keine Etappe / ganze Reise</option>
-              {stages.map((s) => (
-                <option key={s.id} value={s.id}>{s.title}</option>
-              ))}
-            </select>
-          </div>
-        )}
 
         {/* Buchungsnummer */}
         <div className="mb-5">

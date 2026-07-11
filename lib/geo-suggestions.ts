@@ -37,6 +37,7 @@ const COUNTRY_CODE_MAP: Array<{ keywords: string[]; code: string }> = [
   { keywords: ['türkei', 'turkey', 'türkiye'], code: 'TR' },
   { keywords: ['kenia', 'kenya'], code: 'KE' },
   { keywords: ['tansania', 'tanzania', 'sansibar', 'zanzibar'], code: 'TZ' },
+  { keywords: ['montenegro'], code: 'ME' },
 ]
 
 /**
@@ -61,5 +62,5 @@ export const COUNTRY_NAMES: Record<string, string> = {
   CA: 'Kanada', ZA: 'Südafrika', AU: 'Australien', IT: 'Italien', GR: 'Griechenland',
   ES: 'Spanien', PT: 'Portugal', FR: 'Frankreich', DE: 'Deutschland', AT: 'Österreich',
   MV: 'Malediven', VN: 'Vietnam', NZ: 'Neuseeland', EG: 'Ägypten', MA: 'Marokko',
-  TR: 'Türkei', KE: 'Kenia', TZ: 'Tansania',
+  TR: 'Türkei', KE: 'Kenia', TZ: 'Tansania', ME: 'Montenegro',
 }

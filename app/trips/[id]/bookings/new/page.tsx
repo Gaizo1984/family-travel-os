@@ -79,12 +79,6 @@ export default async function NewBookingPage({
     );
   }
 
-  const { data: stages } = await supabase
-    .from("stages")
-    .select("id, title, start_date")
-    .eq("trip_id", trip.id)
-    .order("start_date", { ascending: true, nullsFirst: false });
-
   const changeTypeHref = categoryConfig
     ? `/trips/${trip.slug}/bookings/category/${categoryConfig.value}`
     : `/trips/${trip.slug}/bookings/new`;
@@ -113,7 +107,6 @@ export default async function NewBookingPage({
         <BookingForm
           config={config}
           action={createBooking}
-          stages={stages ?? []}
           hiddenFields={{
             trip_id: trip.id, slug: trip.slug, type: config.value,
             ...(categoryConfig ? { category: categoryConfig.value } : {}),

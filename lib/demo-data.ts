@@ -236,7 +236,7 @@ export function getDaysUntil(dateStr: string): number {
 }
 
 export function formatDateDE(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString('de-DE', { day: '2-digit', month: 'short', year: 'numeric' });
+  return new Date(dateStr).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
 export function getTripDuration(startDate: string, endDate: string): number {

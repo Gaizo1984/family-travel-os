@@ -36,12 +36,6 @@ export default async function EditBookingPage({
   if (!booking) notFound();
   const config = BOOKING_TYPE_CONFIG[booking.type as BookingType];
 
-  const { data: stages } = await supabase
-    .from("stages")
-    .select("id, title, start_date")
-    .eq("trip_id", trip.id)
-    .order("start_date", { ascending: true, nullsFirst: false });
-
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
       <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-9">
@@ -65,7 +59,6 @@ export default async function EditBookingPage({
         <BookingForm
           config={config}
           action={updateBooking}
-          stages={stages ?? []}
           hiddenFields={{ booking_id: booking.id, slug: trip.slug, type: booking.type }}
           submitLabel="Änderungen speichern"
           cancelHref={`/trips/${trip.slug}/bookings/${booking.id}`}

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   cacheDocument, getCachedDocument, removeCachedDocument, keepCachedDocumentLonger, pruneExpiredDocuments,
 } from '@/lib/offline-document-cache'
+import { formatDateDE } from '@/lib/demo-data'
 
 type Props = {
   documentId: string
@@ -13,10 +14,6 @@ type Props = {
   isPdf: boolean
   referenceDateIso: string
   altText: string
-}
-
-function formatDE(iso: string): string {
-  return new Date(iso).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
 /**
@@ -117,7 +114,7 @@ export function OfflineDocumentViewer({ documentId, sourceUrl, fileName, mimeTyp
       {isCached && expiresAt && (
         <div className="flex items-center gap-3 flex-wrap justify-center mt-4">
           <span style={{ color: "rgba(255,255,255,0.55)", fontSize: "0.68rem", letterSpacing: "0.03em" }}>
-            {keepLonger ? "Offline dauerhaft verfügbar" : `Offline verfügbar bis ${formatDE(expiresAt)}`}
+            {keepLonger ? "Offline dauerhaft verfügbar" : `Offline verfügbar bis ${formatDateDE(expiresAt)}`}
           </span>
           {!keepLonger && (
             <button
