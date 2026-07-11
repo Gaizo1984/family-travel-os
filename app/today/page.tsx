@@ -7,10 +7,11 @@ import { isTripCurrentlyRunning } from "@/lib/trip-status";
 import { sortStagesChronologically, buildJourneyTimeline } from "@/lib/journey";
 import type { StageInput, TimelineBooking, TimelineEvent, TimelineDay } from "@/lib/journey";
 import { sortBookingsChronologically } from "@/lib/bookings";
-import { buildTodayTimelineItems, findNextUpcoming, buildTomorrowPrepItems, resolveCurrentLocation } from "@/lib/today";
+import { buildTodayTimelineItems, findNextUpcoming, buildTomorrowPrepItems, resolveCurrentLocation, nearbyStageGeocodeCandidates, detectDayHighlight } from "@/lib/today";
 import { getWeatherForLocation, describeWeatherCode } from "@/lib/weather";
 import type { WeatherLocationCandidate } from "@/lib/weather";
-import { generateTodayRecommendation } from "@/lib/today-ai";
+import { getCachedTodayRecommendation, generateAndCacheTodayRecommendation, DAY_STYLE_OPTIONS } from "@/lib/today-recommendation";
+import { chooseTodayStyle } from "@/lib/actions/today-style";
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt, TRAVEL_NEED_OPTIONS } from "@/lib/family-dna";
 import { COUNTRY_STAGE_IMAGES, FALLBACK_STAGE_IMAGE } from "@/lib/stage-images";
 import { COUNTRY_NAMES } from "@/lib/geo-suggestions";
@@ -203,13 +204,17 @@ export default async function TodayPage() {
   const heroSubtitle = `📍 ${currentLocation.label}`;
   const heroPhoto = (currentLocation.countryCode && COUNTRY_STAGE_IMAGES[currentLocation.countryCode]) || FALLBACK_STAGE_IMAGE;
 
-  // Wetter wird exakt für denselben Standort geladen: der aufgelöste Name zuerst,
-  // mit Länder-Filter; schlägt die Geokodierung des genauen Namens fehl (z. B. bei
-  // Hotelnamen oder unbekannten Kleinorten), zusätzlich das Land selbst als
-  // verlässliche Näherung — ohne den angezeigten Standort-Text zu verändern.
+  // Wetter wird exakt für denselben Standort geladen: der aufgelöste Name zuerst;
+  // schlägt die Geokodierung fehl (z. B. bei Hotelnamen oder kleinen Provinzen,
+  // die im Geocoding-Datensatz nicht erfasst sind — "Westin Reserva Conchal" und
+  // "Guanacaste" liefern beide keinen Treffer in Costa Rica), zunächst andere
+  // Etappen derselben Reise im selben Land (real näher am Aufenthaltsort als die
+  // grobe Landeskoordinate), erst zuletzt das Land selbst — ohne den angezeigten
+  // Standort-Text zu verändern.
   const countryName = currentLocation.countryCode ? COUNTRY_NAMES[currentLocation.countryCode] ?? null : null;
   const weatherCandidates: WeatherLocationCandidate[] = [
     { query: currentLocation.label, countryCode: currentLocation.countryCode },
+    ...nearbyStageGeocodeCandidates(stages, currentLocation.label, currentLocation.countryCode, todayIso),
     ...(countryName && countryName !== currentLocation.label ? [{ query: countryName }] : []),
   ];
   const weather = await getWeatherForLocation(weatherCandidates);
@@ -234,14 +239,23 @@ export default async function TodayPage() {
 
   const knownPlanText = timelineItems.map((i) => `${i.time ?? ""} ${i.title}`.trim()).join(", ");
   const weatherSummary = currentWeather ? `${weather!.currentTemp}°C, ${currentWeather.label}` : null;
+  const familyDnaText = formatFamilyDnaForPrompt(dna, todayIso);
 
-  const recommendation = await generateTodayRecommendation({
-    dateLabel,
-    locationLabel: currentLocation.label,
-    weatherSummary,
-    familyDnaText: formatFamilyDnaForPrompt(dna, todayIso),
-    knownPlanText,
-  });
+  // §"Nur einmal pro Kalendertag generieren, bis Mitternacht wiederverwenden":
+  // zuerst den Cache prüfen (kein KI-Aufruf). Existiert noch nichts, wird bei
+  // erkanntem Kalender-Highlight sofort automatisch generiert; ohne Highlight
+  // zeigt die Seite stattdessen den Tagesstil-Auswähler (kein KI-Aufruf, bis
+  // die Familie eine Wahl trifft).
+  const highlightTitle = detectDayHighlight(timelineItems);
+  let recommendation = await getCachedTodayRecommendation(familyId, activeTrip.id, todayIso);
+  if (!recommendation && highlightTitle) {
+    recommendation = await generateAndCacheTodayRecommendation(
+      familyId, activeTrip.id, todayIso,
+      { dateLabel, locationLabel: currentLocation.label, weatherSummary, familyDnaText, knownPlanText },
+      highlightTitle, null,
+    );
+  }
+  const needsStyleChoice = !recommendation && !highlightTitle;
 
   // Fahrzeitanalyse: nur reale, heute aktive Mietwagen-Buchung — keine erfundenen Kennzahlen.
   const activeRentalCar = bookings.find(
@@ -276,7 +290,9 @@ export default async function TodayPage() {
               {currentWeather && <currentWeather.icon size={12} strokeWidth={1.6} />}
               <span>
                 {weather.currentTemp}°C · {currentWeather?.label}
-                {todayPrecipitation !== null && ` · ${todayPrecipitation}% Regen`}
+                {weather.rainStartsAt
+                  ? ` · Regen ab ${weather.rainStartsAt} Uhr`
+                  : todayPrecipitation !== null && ` · ${todayPrecipitation}% Regen`}
                 {weather.sunset && ` · 🌇 ${weather.sunset.slice(11, 16)}`}
               </span>
             </div>
@@ -324,26 +340,59 @@ export default async function TodayPage() {
           </Card>
         </section>
 
-        {/* ── KI-Empfehlung: eine große, zwei kleine ── */}
+        {/* ── KI-Empfehlung: nur eine Hauptempfehlung, keine konkurrierenden Vorschläge ── */}
         {recommendation && (
           <section className="mb-8">
             <SectionLabel>Empfehlung für heute</SectionLabel>
-            <Card className="mb-3">
+            <Card>
               <div style={{ color: "var(--foreground)", fontSize: "1rem", fontWeight: 400, marginBottom: "6px" }}>
-                {recommendation.mainRecommendation.title}
+                {recommendation.recommendation.title}
               </div>
               <p style={{ color: "var(--muted)", fontSize: "0.82rem", lineHeight: 1.5 }}>
-                {recommendation.mainRecommendation.description}
+                {recommendation.recommendation.description}
               </p>
+              {recommendation.highlightTitle && (
+                <p className="mt-3" style={{ color: "var(--accent)", fontSize: "0.68rem" }}>
+                  Rund um euer Highlight heute: {recommendation.highlightTitle}
+                </p>
+              )}
             </Card>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {recommendation.alternatives.map((alt, i) => (
-                <Card key={i}>
-                  <div style={{ color: "var(--foreground)", fontSize: "0.85rem", marginBottom: "4px" }}>{alt.title}</div>
-                  <p style={{ color: "var(--muted)", fontSize: "0.74rem", lineHeight: 1.5 }}>{alt.description}</p>
-                </Card>
-              ))}
-            </div>
+          </section>
+        )}
+
+        {/* ── Tagesstil-Auswahl: nur wenn kein Highlight erkannt und noch nicht gewählt ── */}
+        {needsStyleChoice && (
+          <section className="mb-8">
+            <SectionLabel>Wie soll euer Tag heute sein?</SectionLabel>
+            <Card>
+              <p className="mb-4" style={{ color: "var(--muted)", fontSize: "0.8rem" }}>
+                Kein besonderes Highlight für heute erkannt — wählt einen Tagesstil, dann entwickelt der Concierge eine passende Empfehlung. Gilt bis Mitternacht.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {DAY_STYLE_OPTIONS.map((opt) => (
+                  <form key={opt.key} action={chooseTodayStyle}>
+                    <input type="hidden" name="family_id" value={familyId} />
+                    <input type="hidden" name="trip_id" value={activeTrip.id} />
+                    <input type="hidden" name="for_date" value={todayIso} />
+                    <input type="hidden" name="day_style" value={opt.key} />
+                    <input type="hidden" name="date_label" value={dateLabel} />
+                    <input type="hidden" name="location_label" value={currentLocation.label} />
+                    <input type="hidden" name="weather_summary" value={weatherSummary ?? ""} />
+                    <input type="hidden" name="family_dna_text" value={familyDnaText} />
+                    <input type="hidden" name="known_plan_text" value={knownPlanText} />
+                    <button
+                      type="submit"
+                      style={{
+                        background: "var(--surface)", color: "var(--foreground)", border: "1px solid var(--border)",
+                        borderRadius: "20px", padding: "8px 16px", fontSize: "0.78rem", cursor: "pointer",
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  </form>
+                ))}
+              </div>
+            </Card>
           </section>
         )}
 

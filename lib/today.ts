@@ -60,6 +60,22 @@ export function findNextUpcoming(items: TodayTimelineItem[], nowHHMM: string): T
   return items.find((i) => i.time !== null && i.time >= nowHHMM) ?? null
 }
 
+/**
+ * Deterministisches Keyword-Matching (kein Raten, gleiches Muster wie
+ * lib/geo-suggestions.ts) auf besonders "highlight-würdige" Programmpunkte des
+ * Tages — wenn vorhanden, priorisiert die KI-Tagesplanung dieses Ereignis statt
+ * einen konkurrierenden eigenen Vorschlag zu erfinden.
+ */
+const HIGHLIGHT_KEYWORDS = [
+  'helikopter', 'helicopter', 'safari', 'boot', 'boat', 'bootstour', 'bootsfahrt',
+  'ausflug', 'ballon', 'tauchen', 'schnorcheln', 'wildwasser', 'canyoning', 'wal', 'whale',
+]
+
+export function detectDayHighlight(items: TodayTimelineItem[]): string | null {
+  const match = items.find((i) => HIGHLIGHT_KEYWORDS.some((kw) => i.title.toLowerCase().includes(kw)))
+  return match?.title ?? null
+}
+
 export type CurrentLocation = {
   label: string
   countryCode: string | null
@@ -69,11 +85,12 @@ export type CurrentLocation = {
 /**
  * EINE einzige, eindeutige Standortquelle für Hero-Untertitel, Wetter und
  * Hero-Bild — keine Kombination aus mehrereren Quellen (z. B. nicht mehr
- * "Etappe, Land" wie in der vorigen Fassung, die während einer Lücke vor der
- * ersten Etappe fälschlich "Atlanta, Costa Rica" zeigte, obwohl die Familie
- * dort noch gar nicht ist). Feste Prioritätskette, erster Treffer gewinnt:
- * 1) eine Etappe, die "heute" wirklich abdeckt, 2) eine heute aktive
- * Unterkunfts-Buchung, 3) das Reiseziel als letzte Instanz.
+ * "Etappe, Land" wie in einer früheren Fassung, die während einer Lücke vor
+ * der ersten Etappe fälschlich "Atlanta, Costa Rica" zeigte, obwohl die
+ * Familie dort noch gar nicht ist). Feste Prioritätskette Hotel → Etappe →
+ * Reiseziel, erster Treffer gewinnt: 1) eine heute aktive Unterkunfts-
+ * Buchung (das genaueste bekannte Ziel), 2) eine Etappe, die "heute"
+ * abdeckt, 3) das Reiseziel als letzte Instanz.
  */
 export function resolveCurrentLocation(
   trip: { title: string; subtitle: string | null },
@@ -81,13 +98,6 @@ export function resolveCurrentLocation(
   bookings: TimelineBooking[],
   todayIso: string,
 ): CurrentLocation {
-  const currentStage = stages.find(
-    (s) => s.start_date && s.end_date && s.start_date <= todayIso && todayIso <= s.end_date,
-  )
-  if (currentStage) {
-    return { label: currentStage.location || currentStage.title, countryCode: currentStage.country_code ?? null, source: 'stage' }
-  }
-
   const currentAccommodation = bookings.find(
     (b) => b.type === 'accommodation' && b.status !== 'cancelled'
       && b.start_datetime && b.end_datetime
@@ -98,11 +108,45 @@ export function resolveCurrentLocation(
     return { label: currentAccommodation.title, countryCode: relatedStage?.country_code ?? null, source: 'accommodation' }
   }
 
+  const currentStage = stages.find(
+    (s) => s.start_date && s.end_date && s.start_date <= todayIso && todayIso <= s.end_date,
+  )
+  if (currentStage) {
+    return { label: currentStage.location || currentStage.title, countryCode: currentStage.country_code ?? null, source: 'stage' }
+  }
+
   const countryCode = suggestCountryCode(`${trip.title} ${trip.subtitle ?? ''}`)
     ?? stages.find((s) => s.country_code)?.country_code
     ?? null
   const label = countryCode ? COUNTRY_NAMES[countryCode] ?? trip.title : trip.title
   return { label, countryCode, source: 'destination' }
+}
+
+/**
+ * Zusätzliche, rein für die Wetter-Geokodierung gedachte Kandidaten (nicht für
+ * die Anzeige): weitere Etappen derselben Reise im selben Land, sortiert nach
+ * zeitlicher Nähe zu heute. Der exakte Hotel-/Etappenname lässt sich bei
+ * kleineren Resorts/Provinzen oft nicht geokodieren (z. B. "Westin Reserva
+ * Conchal" oder "Guanacaste" sind im Geocoding-Datensatz nicht erfasst) — eine
+ * andere, bereits bekannte Etappe im selben Land (z. B. "Liberia") liegt real
+ * meist näher am tatsächlichen Aufenthaltsort als die grobe Landes-Koordinate
+ * und ist keine erfundene Angabe, sondern eine andere Etappe derselben Reise.
+ */
+export function nearbyStageGeocodeCandidates(
+  stages: StageInput[],
+  excludeLabel: string,
+  countryCode: string | null,
+  todayIso: string,
+): Array<{ query: string; countryCode?: string | null }> {
+  const dayDistance = (dateIso: string): number => {
+    const d = new Date(dateIso + 'T00:00:00Z').getTime()
+    const t = new Date(todayIso + 'T00:00:00Z').getTime()
+    return Math.abs(d - t)
+  }
+  return [...stages]
+    .filter((s) => s.country_code === countryCode && s.location !== excludeLabel && s.title !== excludeLabel && s.start_date)
+    .sort((a, b) => dayDistance(a.start_date!) - dayDistance(b.start_date!))
+    .map((s) => ({ query: s.location || s.title, countryCode: s.country_code }))
 }
 
 export type PrepItem = { icon: LucideIcon; text: string }

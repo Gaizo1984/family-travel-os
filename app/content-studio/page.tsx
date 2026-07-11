@@ -1,7 +1,10 @@
 import Link from "next/link";
-import { ArrowRight, Sparkles, Settings, MapPin, Camera, Wand2 } from "lucide-react";
+import { ArrowRight, Sparkles, Settings, MapPin, Camera, Wand2, Clapperboard, Clock, Gauge } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { WhatCanAI } from "./WhatCanAI";
+import { buildContentStrategyContext } from "@/lib/content-strategy-context";
+import { getCachedContentStrategy, generateAndCacheContentStrategy } from "@/lib/content-strategy";
+import { regenerateContentStrategy } from "@/lib/actions/content-strategy-actions";
 
 const STEPS = [
   { Icon: MapPin, label: "Reise wählen" },
@@ -41,6 +44,25 @@ export default async function ContentStudioPage() {
     .order("created_at", { ascending: false })
     .limit(3);
 
+  // §"Vom Ideengenerator zum Content Director": nur EINE "Today's Content
+  // Strategy" gleichzeitig, einmal pro Tag generiert und zwischengespeichert
+  // (wie die Heute-Tagesplanung) — nur relevant, wenn gerade eine Reise läuft.
+  const strategyContext = await buildContentStrategyContext(familyId);
+  let strategy = strategyContext
+    ? await getCachedContentStrategy(familyId, strategyContext.tripId, strategyContext.forDate)
+    : null;
+  if (!strategy && strategyContext) {
+    strategy = await generateAndCacheContentStrategy(
+      familyId, strategyContext.tripId, strategyContext.forDate,
+      {
+        dateLabel: strategyContext.dateLabel, locationLabel: strategyContext.locationLabel,
+        weatherSummary: strategyContext.weatherSummary, knownPlanText: strategyContext.knownPlanText,
+        highlightTitle: strategyContext.highlightTitle,
+      },
+      false,
+    );
+  }
+
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
       <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-9">
@@ -58,6 +80,70 @@ export default async function ContentStudioPage() {
             <Settings size={16} strokeWidth={1.5} />
           </Link>
         </div>
+
+        {strategyContext && strategy && (
+          <div className="rounded-xl p-6 mb-6" style={{ background: "var(--surface)", border: "1px solid var(--accent)" }}>
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+              <div className="flex items-center gap-2">
+                <Clapperboard size={14} strokeWidth={1.5} style={{ color: "var(--accent)" }} />
+                <span style={{ color: "var(--accent)", fontSize: "0.58rem", letterSpacing: "0.16em", textTransform: "uppercase" }}>
+                  Today&apos;s Content Strategy · {strategy.contentType}
+                </span>
+              </div>
+            </div>
+
+            <p className="mb-3" style={{ color: "var(--foreground)", fontSize: "0.85rem", lineHeight: 1.5 }}>
+              {strategy.storyline}
+            </p>
+            <p className="mb-4" style={{ color: "var(--muted)", fontSize: "0.76rem", lineHeight: 1.5 }}>
+              {strategy.reasoning}
+            </p>
+
+            <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "8px" }}>
+              Shotliste
+            </div>
+            <ul className="mb-4 space-y-1.5">
+              {strategy.shotlist.map((shot, i) => (
+                <li key={i} className="flex items-start gap-2" style={{ color: "var(--foreground)", fontSize: "0.78rem" }}>
+                  <span style={{ color: "var(--accent)", flexShrink: 0 }}>{i + 1}.</span>
+                  {shot}
+                </li>
+              ))}
+            </ul>
+
+            <div className="flex items-center gap-5 flex-wrap mb-5" style={{ color: "var(--muted)", fontSize: "0.72rem" }}>
+              <div className="flex items-center gap-1.5">
+                <Clock size={12} strokeWidth={1.6} style={{ color: "var(--accent)" }} />
+                {strategy.bestTime}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Gauge size={12} strokeWidth={1.6} style={{ color: "var(--accent)" }} />
+                Aufwand: {strategy.effort}
+              </div>
+            </div>
+
+            <form action={regenerateContentStrategy}>
+              <input type="hidden" name="family_id" value={familyId} />
+              <input type="hidden" name="trip_id" value={strategyContext.tripId} />
+              <input type="hidden" name="for_date" value={strategyContext.forDate} />
+              <input type="hidden" name="date_label" value={strategyContext.dateLabel} />
+              <input type="hidden" name="location_label" value={strategyContext.locationLabel} />
+              <input type="hidden" name="weather_summary" value={strategyContext.weatherSummary ?? ""} />
+              <input type="hidden" name="known_plan_text" value={strategyContext.knownPlanText} />
+              <input type="hidden" name="highlight_title" value={strategyContext.highlightTitle ?? ""} />
+              <button
+                type="submit"
+                style={{
+                  background: "transparent", color: "var(--accent)", border: "1px solid rgba(184,154,94,0.4)",
+                  borderRadius: "6px", padding: "8px 16px", fontSize: "0.62rem", letterSpacing: "0.1em",
+                  textTransform: "uppercase", cursor: "pointer", WebkitAppearance: "none", appearance: "none",
+                }}
+              >
+                Andere Strategie
+              </button>
+            </form>
+          </div>
+        )}
 
         {activeProject && (
           <Link

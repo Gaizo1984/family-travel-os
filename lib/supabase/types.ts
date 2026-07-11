@@ -422,6 +422,48 @@ export interface Database {
           { foreignKeyName: "content_projects_trip_id_fkey";   columns: ["trip_id"];   isOneToOne: false; referencedRelation: "trips";   referencedColumns: ["id"] }
         ]
       }
+      today_recommendations: {
+        Row: {
+          id: string; family_id: string; trip_id: string | null; for_date: string
+          day_style: string | null; highlight_title: string | null
+          day_summary: string; recommendation: Json; created_at: string
+        }
+        Insert: {
+          id?: string; family_id: string; trip_id?: string | null; for_date: string
+          day_style?: string | null; highlight_title?: string | null
+          day_summary: string; recommendation: Json; created_at?: string
+        }
+        Update: {
+          id?: string; family_id?: string; trip_id?: string | null; for_date?: string
+          day_style?: string | null; highlight_title?: string | null
+          day_summary?: string; recommendation?: Json; created_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "today_recommendations_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] },
+          { foreignKeyName: "today_recommendations_trip_id_fkey";   columns: ["trip_id"];   isOneToOne: false; referencedRelation: "trips";   referencedColumns: ["id"] }
+        ]
+      }
+      content_strategies: {
+        Row: {
+          id: string; family_id: string; trip_id: string | null; for_date: string
+          content_type: string; reasoning: string; storyline: string; shotlist: Json
+          best_time: string | null; effort: string | null; created_at: string
+        }
+        Insert: {
+          id?: string; family_id: string; trip_id?: string | null; for_date: string
+          content_type: string; reasoning: string; storyline: string; shotlist: Json
+          best_time?: string | null; effort?: string | null; created_at?: string
+        }
+        Update: {
+          id?: string; family_id?: string; trip_id?: string | null; for_date?: string
+          content_type?: string; reasoning?: string; storyline?: string; shotlist?: Json
+          best_time?: string | null; effort?: string | null; created_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "content_strategies_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] },
+          { foreignKeyName: "content_strategies_trip_id_fkey";   columns: ["trip_id"];   isOneToOne: false; referencedRelation: "trips";   referencedColumns: ["id"] }
+        ]
+      }
       content_ideas: {
         Row: {
           id: string; family_id: string; project_id: string | null; trip_id: string | null

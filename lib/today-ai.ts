@@ -5,8 +5,7 @@ const OPENAI_MODEL = 'gpt-5.4'
 
 export type TodayRecommendation = {
   daySummary: string
-  mainRecommendation: { title: string; description: string }
-  alternatives: [{ title: string; description: string }, { title: string; description: string }]
+  recommendation: { title: string; description: string }
 }
 
 const TODAY_SCHEMA = {
@@ -14,9 +13,9 @@ const TODAY_SCHEMA = {
   properties: {
     day_summary: {
       type: 'string',
-      description: 'SEHR kurze, warme Zusammenfassung des heutigen Reisetags für die Hero-Sektion — maximal 3-4 kurze Zeilen (ca. 25-30 Wörter). Details gehören NICHT hierhin, sondern in main_recommendation/alternatives.',
+      description: 'SEHR kurze, warme Zusammenfassung des heutigen Reisetags für die Hero-Sektion — maximal 3-4 kurze Zeilen (ca. 25-30 Wörter). Details gehören NICHT hierhin, sondern in recommendation.',
     },
-    main_recommendation: {
+    recommendation: {
       type: 'object',
       properties: {
         title: { type: 'string', description: 'Kurzer Titel für die empfohlene Tagesgestaltung' },
@@ -28,32 +27,15 @@ const TODAY_SCHEMA = {
       required: ['title', 'description'],
       additionalProperties: false,
     },
-    alternatives: {
-      type: 'array',
-      description: 'Genau zwei kleinere Alternativen zur Hauptempfehlung',
-      items: {
-        type: 'object',
-        properties: {
-          title: { type: 'string' },
-          description: {
-            type: 'string',
-            description: 'Konkret und knapp, 70 bis 90 Wörter, nicht mehr.',
-          },
-        },
-        required: ['title', 'description'],
-        additionalProperties: false,
-      },
-      minItems: 2,
-      maxItems: 2,
-    },
   },
-  required: ['day_summary', 'main_recommendation', 'alternatives'],
+  required: ['day_summary', 'recommendation'],
   additionalProperties: false,
 }
 
 /**
- * Ein Aufruf pro Seitenaufruf (kein Persistenz-/Review-Gate wie bei Content-
- * oder Reiseideen, da rein tagesaktueller Vorschlag ohne Weiterverarbeitung).
+ * §"Nur eine Hauptempfehlung anzeigen – keine drei konkurrierenden Vorschläge":
+ * genau EIN Aufruf pro Kalendertag (Ergebnis wird vom Aufrufer in
+ * today_recommendations zwischengespeichert, siehe lib/actions/today-recommendation.ts).
  * Gibt bei fehlendem API-Key oder jedem Fehler `null` zurück — die Seite
  * rendert dann ohne KI-Sektion, statt abzustürzen.
  */
@@ -63,15 +45,24 @@ export async function generateTodayRecommendation(context: {
   weatherSummary: string | null
   familyDnaText: string
   knownPlanText: string
+  highlightTitle: string | null
+  dayStyle: string | null
 }): Promise<TodayRecommendation | null> {
   if (!process.env.OPENAI_API_KEY) return null
 
-  const prompt = `Ihr plant den heutigen Tag (${context.dateLabel}) einer Familienreise in ${context.locationLabel}.
+  const focusInstruction = context.highlightTitle
+    ? `Im heutigen Plan steht bereits ein besonderes Highlight: "${context.highlightTitle}". Baue deine Empfehlung UM DIESES Highlight herum (z. B. sinnvolle Vor-/Nachbereitung, Timing drumherum) — erfinde KEINE konkurrierende Alternative dazu.`
+    : context.dayStyle
+      ? `Die Familie hat sich heute für den Tagesstil "${context.dayStyle}" entschieden — richte deine Empfehlung konsequent danach aus.`
+      : 'Kein besonderes Highlight bekannt und kein Tagesstil gewählt — schlage etwas Ausgewogenes vor, das zur Familie passt.'
+
+  const prompt = `Du bist der persönliche Reise-Concierge dieser Familie für den heutigen Tag (${context.dateLabel}) in ${context.locationLabel}.
 ${context.weatherSummary ? `Wetter heute: ${context.weatherSummary}.` : 'Wetterdaten nicht verfügbar.'}
 ${context.familyDnaText || 'Keine weiteren Familienpräferenzen hinterlegt.'}
 Bereits bekannter Plan für heute: ${context.knownPlanText || 'Noch nichts Festes geplant.'}
+${focusInstruction}
 
-Schlage eine sinnvolle, zur Familie und zum Wetter passende Tagesgestaltung vor: eine Hauptempfehlung und zwei kleinere Alternativen. Widerspreche NICHT dem bereits bekannten Plan, ergänze ihn sinnvoll. Erfinde keine konkreten Preise, Öffnungszeiten oder Adressen — bleibe bei allgemeinen, plausiblen Vorschlägen. Schreibe auf Deutsch, warm und konkret, keine Floskeln. day_summary muss extrem kurz bleiben (maximal 3-4 Zeilen) — alle Details gehören in main_recommendation/alternatives. Die Beschreibungen in main_recommendation und alternatives sind jeweils 70-90 Wörter lang, konkret mit ungefähren Uhrzeiten/Tageszeiten, kein vages Geschwafel.`
+Sprich die Familie direkt und persönlich an, wie ein Concierge, der ihre Reise wirklich kennt — konkret, warm, ohne Floskeln, keine drei konkurrierenden Optionen, nur EINE klare Empfehlung. Widerspreche NICHT dem bereits bekannten Plan, ergänze ihn sinnvoll. Erfinde keine konkreten Preise, Öffnungszeiten oder Adressen — bleibe bei allgemeinen, plausiblen Vorschlägen. Schreibe auf Deutsch. day_summary bleibt extrem kurz (maximal 3-4 Zeilen), alle Details gehören in recommendation.description (70-90 Wörter, mit ungefähren Uhrzeiten/Tageszeiten, kein vages Geschwafel).`
 
   try {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -84,8 +75,7 @@ Schlage eine sinnvolle, zur Familie und zum Wetter passende Tagesgestaltung vor:
     const parsed = JSON.parse(response.output_text)
     return {
       daySummary: parsed.day_summary,
-      mainRecommendation: parsed.main_recommendation,
-      alternatives: parsed.alternatives,
+      recommendation: parsed.recommendation,
     }
   } catch {
     return null
