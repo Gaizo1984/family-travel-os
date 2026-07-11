@@ -48,8 +48,15 @@ async function uploadAndVerify(
   compressed: Buffer,
 ): Promise<boolean> {
   for (let attempt = 1; attempt <= 2; attempt++) {
+    // §Root-Cause-Fix: die funktionierende Profilfoto-Upload-Stelle
+    // (lib/actions/persons.ts) lädt ein `File`/`Blob`-Objekt direkt hoch —
+    // NIE einen rohen Node-`Buffer`. Genau das ist der einzige strukturelle
+    // Unterschied zu diesem (bislang defekten) Pfad. Als Blob verpackt statt
+    // den rohen Buffer zu übergeben, um exakt dem nachweislich
+    // funktionierenden Muster zu entsprechen.
+    const blob = new Blob([new Uint8Array(compressed)], { type: 'image/webp' })
     const { error: uploadError } = await supabase.storage.from('documents')
-      .upload(storagePath, compressed, { contentType: 'image/webp', upsert: attempt > 1 })
+      .upload(storagePath, blob, { contentType: 'image/webp', upsert: attempt > 1 })
     if (uploadError) {
       console.error('[Memories][DIAGNOSTIC] Storage-Upload fehlgeschlagen', { attempt, uploadError })
       continue
