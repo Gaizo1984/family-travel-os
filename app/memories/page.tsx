@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Star, Trash2, Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { uploadMemoryPhotos, deleteMemoryPhoto, toggleMemoryHighlight } from "@/lib/actions/memories";
-import { MemoryFilePreview } from "@/components/MemoryFilePreview";
+import { MultiPhotoFilePreview } from "@/components/MultiPhotoFilePreview";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
 
 const LABEL_STYLE: React.CSSProperties = {
@@ -185,7 +185,7 @@ export default async function MemoriesPage({
               </div>
               <div className="mb-5">
                 <label htmlFor="mem-files" style={LABEL_STYLE}>Fotos</label>
-                <MemoryFilePreview inputId="mem-files" inputName="files" fieldStyle={FIELD_STYLE} />
+                <MultiPhotoFilePreview inputId="mem-files" inputName="files" fieldStyle={FIELD_STYLE} />
               </div>
               <SubmitButtonWithProgress label="Fotos speichern" pendingLabel="Fotos werden gespeichert …" />
             </div>

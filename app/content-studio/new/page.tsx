@@ -2,6 +2,8 @@ import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { generateContentIdeas } from "@/lib/actions/content-idea-generation";
+import { MultiPhotoFilePreview } from "@/components/MultiPhotoFilePreview";
+import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -112,11 +114,7 @@ export default async function NewContentIdeaPage({
 
             <div className="mb-8">
               <label htmlFor="ci-files" style={LABEL_STYLE}>Fotos (optional, 5–20 empfohlen)</label>
-              <input
-                id="ci-files" name="files" type="file" multiple
-                accept="image/jpeg,image/png,image/webp"
-                style={{ ...FIELD_STYLE, padding: "10px 16px" }}
-              />
+              <MultiPhotoFilePreview inputId="ci-files" inputName="files" fieldStyle={FIELD_STYLE} />
               <p className="mt-2" style={{ color: "var(--muted)", fontSize: "0.65rem" }}>
                 Die KI erkennt Dubletten automatisch, bewertet die Bildqualität und wählt die besten Motive aus.
                 Erlaubt: JPEG, PNG, WebP, maximal 10 MB pro Foto.
@@ -127,17 +125,7 @@ export default async function NewContentIdeaPage({
               <Link href="/content-studio" style={{ color: "var(--muted)", fontSize: "0.7rem", letterSpacing: "0.1em", textDecoration: "none" }}>
                 Abbrechen
               </Link>
-              <button
-                type="submit"
-                style={{
-                  background: "var(--foreground)", color: "var(--surface)", border: "none",
-                  borderRadius: "6px", padding: "11px 20px", fontSize: "0.65rem",
-                  letterSpacing: "0.16em", textTransform: "uppercase", cursor: "pointer",
-                  whiteSpace: "nowrap", WebkitAppearance: "none", appearance: "none",
-                }}
-              >
-                Ideen entwickeln →
-              </button>
+              <SubmitButtonWithProgress label="Ideen entwickeln →" pendingLabel="Fotos werden analysiert …" />
             </div>
           </div>
         </form>

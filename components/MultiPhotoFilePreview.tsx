@@ -5,9 +5,10 @@ import { useState } from 'react'
 /**
  * §"Einzelbilder sofort anzeigen": zeigt ausgewählte Dateien direkt nach der
  * Auswahl als Thumbnails an (vor dem Absenden) — ohne Server-Architektur-
- * Umbau, rein clientseitig via `URL.createObjectURL`.
+ * Umbau, rein clientseitig via `URL.createObjectURL`. Von Travel Memory und
+ * Content Studio gemeinsam genutzt (keine feature-spezifische Logik).
  */
-export function MemoryFilePreview({
+export function MultiPhotoFilePreview({
   inputId,
   inputName,
   fieldStyle,
