@@ -537,6 +537,28 @@ export interface Database {
           { foreignKeyName: "content_drafts_project_id_fkey"; columns: ["project_id"]; isOneToOne: false; referencedRelation: "content_projects"; referencedColumns: ["id"] }
         ]
       }
+      memory_photos: {
+        Row: {
+          id: string; family_id: string; trip_id: string | null; uploaded_by_person_id: string | null
+          storage_path: string; taken_at: string | null; caption: string | null
+          is_highlight: boolean; created_at: string
+        }
+        Insert: {
+          id?: string; family_id: string; trip_id?: string | null; uploaded_by_person_id?: string | null
+          storage_path: string; taken_at?: string | null; caption?: string | null
+          is_highlight?: boolean; created_at?: string
+        }
+        Update: {
+          id?: string; family_id?: string; trip_id?: string | null; uploaded_by_person_id?: string | null
+          storage_path?: string; taken_at?: string | null; caption?: string | null
+          is_highlight?: boolean; created_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "memory_photos_family_id_fkey";             columns: ["family_id"];             isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] },
+          { foreignKeyName: "memory_photos_trip_id_fkey";               columns: ["trip_id"];               isOneToOne: false; referencedRelation: "trips";    referencedColumns: ["id"] },
+          { foreignKeyName: "memory_photos_uploaded_by_person_id_fkey"; columns: ["uploaded_by_person_id"]; isOneToOne: false; referencedRelation: "persons";  referencedColumns: ["id"] }
+        ]
+      }
       content_project_photos: {
         Row: {
           id: string; project_id: string; storage_path: string; phash: string | null

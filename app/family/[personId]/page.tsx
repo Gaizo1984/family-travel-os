@@ -11,6 +11,8 @@ import { TRAVEL_NEED_OPTIONS } from "@/lib/family-dna";
 import { buildPersonWorldStats } from "@/lib/world-stats";
 import { WorldMap } from "@/components/WorldMap";
 import { Map as MapIcon, Globe } from "lucide-react";
+import { toggleMemoryHighlight } from "@/lib/actions/memories";
+import { Star } from "lucide-react";
 
 const TRAVEL_NEED_LABELS: Record<string, string> = Object.fromEntries(
   TRAVEL_NEED_OPTIONS.map((o) => [o.key, o.label]),
@@ -89,6 +91,20 @@ export default async function PersonDetailPage({
 
   const docs = (documents ?? []) as unknown as DocumentRow[];
   const personWorldStats = await buildPersonWorldStats(person.id);
+
+  const { data: memoryPhotosRaw } = await supabase
+    .from("memory_photos")
+    .select("id, storage_path, caption, is_highlight, taken_at, created_at")
+    .eq("uploaded_by_person_id", person.id)
+    .order("taken_at", { ascending: false, nullsFirst: false })
+    .limit(12);
+
+  const memoryPhotos = await Promise.all(
+    (memoryPhotosRaw ?? []).map(async (p) => {
+      const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.storage_path, 3600);
+      return { ...p, url: signed?.signedUrl ?? null };
+    }),
+  );
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -185,6 +201,38 @@ export default async function PersonDetailPage({
             </div>
             <div className="rounded-xl p-4" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
               <WorldMap visitedCodes={personWorldStats.countryCodes} />
+            </div>
+          </section>
+        )}
+
+        {memoryPhotos.length > 0 && (
+          <section className="mb-8">
+            <div className="flex items-center justify-between mb-5">
+              <h2
+                className="text-xs font-medium"
+                style={{ color: "var(--muted)", letterSpacing: "0.2em", textTransform: "uppercase", fontSize: "0.65rem" }}
+              >
+                Erinnerungen
+              </h2>
+              <Link href="/memories" style={{ color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.08em", textDecoration: "none" }}>
+                Alle Erinnerungen →
+              </Link>
+            </div>
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+              {memoryPhotos.map((p) => p.url && (
+                <div key={p.id} className="relative rounded-lg overflow-hidden" style={{ aspectRatio: "1/1" }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={p.url} alt={p.caption ?? ""} className="absolute inset-0 w-full h-full object-cover" />
+                  <form action={toggleMemoryHighlight} className="absolute top-1 right-1">
+                    <input type="hidden" name="photo_id" value={p.id} />
+                    <input type="hidden" name="next_value" value={(!p.is_highlight).toString()} />
+                    <input type="hidden" name="return_to" value={`/family/${person.id}`} />
+                    <button type="submit" aria-label="Highlight" style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: "2px" }}>
+                      <Star size={13} strokeWidth={1.8} fill={p.is_highlight ? "#F0EBE3" : "none"} style={{ color: "#F0EBE3" }} />
+                    </button>
+                  </form>
+                </div>
+              ))}
             </div>
           </section>
         )}

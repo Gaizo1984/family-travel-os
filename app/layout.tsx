@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist } from "next/font/google";
 import Link from "next/link";
-import { LayoutDashboard, Plane, Users, Sun, Camera, Compass, MessageSquare, MoreHorizontal, BookOpenCheck } from "lucide-react";
+import { LayoutDashboard, Plane, Users, Sun, Camera, Compass, MessageSquare, MoreHorizontal, BookOpenCheck, Images } from "lucide-react";
 import "./globals.css";
 
 const geist = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -31,6 +31,7 @@ const NAV = [
   { href: "/content-studio", label: "Content", Icon: Camera },
   { href: "/discover", label: "Entdecken", Icon: Compass },
   { href: "/buchungsportal", label: "Buchungsportal", Icon: BookOpenCheck },
+  { href: "/memories", label: "Memory", Icon: Images },
   { href: "/concierge", label: "Concierge", Icon: MessageSquare },
 ];
 

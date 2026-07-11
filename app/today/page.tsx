@@ -60,6 +60,32 @@ function addDaysIso(date: string, delta: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+type OnThisDayMemory = { id: string; storagePath: string; caption: string | null; yearsAgo: number };
+
+/**
+ * §"Vor einem Jahr wart ihr heute...": reine Datums-Query (taken_at = heute
+ * minus 1/2/3 Jahre), kein KI-Aufruf nötig — deterministisch wie die übrigen
+ * Highlight-Erkennungen in dieser App.
+ */
+async function findOnThisDayMemories(familyId: string, todayIso: string): Promise<OnThisDayMemory[]> {
+  const supabase = await createClient();
+  const [y, m, d] = todayIso.split("-");
+  const candidateDates = [1, 2, 3].map((yearsAgo) => `${Number(y) - yearsAgo}-${m}-${d}`);
+
+  const { data } = await supabase
+    .from("memory_photos")
+    .select("id, storage_path, caption, taken_at")
+    .eq("family_id", familyId)
+    .in("taken_at", candidateDates);
+
+  return (data ?? []).map((p) => ({
+    id: p.id,
+    storagePath: p.storage_path,
+    caption: p.caption,
+    yearsAgo: Number(y) - Number(p.taken_at!.slice(0, 4)),
+  }));
+}
+
 type PersonRow = { id: string; name: string };
 type StageRow = {
   id: string; title: string; location: string | null; nights: number | null;
@@ -113,7 +139,7 @@ export default async function TodayPage() {
   const tomorrowIso = addDaysIso(todayIso, 1);
   const nowHHMM = nowHHMMInFamilyTimezone();
 
-  const [{ data: trips }, flightToday] = await Promise.all([
+  const [{ data: trips }, flightToday, onThisDayMemories] = await Promise.all([
     supabase
       .from("trips")
       .select(`
@@ -125,7 +151,15 @@ export default async function TodayPage() {
       `)
       .eq("family_id", familyId),
     findTodaysFlightWithBoardingPasses(),
+    findOnThisDayMemories(familyId, todayIso),
   ]);
+
+  const onThisDayMemoriesWithUrls = await Promise.all(
+    onThisDayMemories.map(async (m) => {
+      const { data: signed } = await supabase.storage.from("documents").createSignedUrl(m.storagePath, 3600);
+      return { ...m, url: signed?.signedUrl ?? null };
+    }),
+  );
 
   // todayIso (Familienzeitzone) explizit übergeben, statt auf den UTC-basierten
   // Default von isTripCurrentlyRunning zu vertrauen — sonst könnte die "aktive
@@ -339,6 +373,26 @@ export default async function TodayPage() {
             )}
           </Card>
         </section>
+
+        {/* ── Vor einem Jahr wart ihr heute... ── */}
+        {onThisDayMemoriesWithUrls.some((m) => m.url) && (
+          <section className="mb-8">
+            <SectionLabel>Vor {onThisDayMemoriesWithUrls[0].yearsAgo === 1 ? "einem Jahr" : `${onThisDayMemoriesWithUrls[0].yearsAgo} Jahren`} wart ihr heute...</SectionLabel>
+            <div className="flex gap-3 overflow-x-auto pb-1">
+              {onThisDayMemoriesWithUrls.map((m) => m.url && (
+                <div key={m.id} className="relative shrink-0 rounded-lg overflow-hidden" style={{ width: 120, height: 120 }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={m.url} alt={m.caption ?? ""} className="absolute inset-0 w-full h-full object-cover" />
+                  {m.caption && (
+                    <div className="absolute inset-x-0 bottom-0 p-2" style={{ background: "linear-gradient(to top, rgba(10,9,7,0.85), transparent)" }}>
+                      <span style={{ color: "#F0EBE3", fontSize: "0.6rem" }}>{m.caption}</span>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* ── KI-Empfehlung: nur eine Hauptempfehlung, keine konkurrierenden Vorschläge ── */}
         {recommendation && (
