@@ -6,6 +6,7 @@ import {
   splitDateTime,
 } from "@/lib/bookings";
 import { Banner } from "@/components/Banner";
+import { BookingDateFields } from "./BookingDateFields";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -122,30 +123,15 @@ export function BookingForm({
         )}
 
         {/* Start-/Enddatum */}
-        <div className={`grid grid-cols-1 ${config.showEnd ? "sm:grid-cols-2" : "sm:grid-cols-2 sm:max-w-md"} gap-4 mb-5`}>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label htmlFor="bk-start-date" style={LABEL_STYLE}>{config.startLabel} *</label>
-              <input id="bk-start-date" name="start_date" type="date" required defaultValue={start.date} style={FIELD_STYLE} />
-            </div>
-            <div>
-              <label htmlFor="bk-start-time" style={{ ...LABEL_STYLE, opacity: 0 }}>Zeit</label>
-              <input id="bk-start-time" name="start_time" type="time" defaultValue={start.time} style={FIELD_STYLE} />
-            </div>
-          </div>
-          {config.showEnd && (
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label htmlFor="bk-end-date" style={LABEL_STYLE}>{config.endLabel}</label>
-                <input id="bk-end-date" name="end_date" type="date" defaultValue={end.date} style={FIELD_STYLE} />
-              </div>
-              <div>
-                <label htmlFor="bk-end-time" style={{ ...LABEL_STYLE, opacity: 0 }}>Zeit</label>
-                <input id="bk-end-time" name="end_time" type="time" defaultValue={end.time} style={FIELD_STYLE} />
-              </div>
-            </div>
-          )}
-        </div>
+        <BookingDateFields
+          showEnd={config.showEnd}
+          startLabel={config.startLabel}
+          endLabel={config.endLabel}
+          defaultStartDate={start.date}
+          defaultStartTime={start.time}
+          defaultEndDate={end.date}
+          defaultEndTime={end.time}
+        />
 
         {/* Buchungsnummer */}
         <div className="mb-5">

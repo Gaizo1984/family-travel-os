@@ -15,21 +15,11 @@ import { computeTripReadiness } from "@/lib/readiness";
 import type { ReadinessFinding, ReadinessSeverity } from "@/lib/readiness";
 import { isTripHistorical, isTripCurrentlyRunning } from "@/lib/trip-status";
 import { COUNTRY_STAGE_IMAGES, FALLBACK_STAGE_IMAGE } from "@/lib/stage-images";
+import { resolveTripImage, getHighlightPhotoByTripId } from "@/lib/trip-images";
 
 const H_FG    = "#F0EBE3";
 const H_MUTED = "#A89880";
 const H_BORDER = "rgba(240,235,227,0.1)";
-
-const TRIP_IMAGES: Record<string, string> = {
-  "costa-rica-2026":
-    "https://images.unsplash.com/photo-1611222566512-cb8dd8e689e5?auto=format&fit=crop&w=1920&q=80",
-  "indonesien-2028":
-    "https://images.unsplash.com/photo-1537996194471-e657df975ab4?auto=format&fit=crop&w=1920&q=80",
-  "japan-2025":
-    "https://images.unsplash.com/photo-1757220306353-2282322ac464?auto=format&fit=crop&w=1920&q=80",
-  "sardinien-2024":
-    "https://images.unsplash.com/photo-1780581800373-4fd4961743cd?auto=format&fit=crop&w=1920&q=80",
-};
 
 type PersonRow = { id: string; name: string; initials: string; color: string }
 
@@ -79,6 +69,8 @@ type TripDetail = {
   status: string
   start_date: string | null
   end_date: string | null
+  gradient_from: string | null
+  gradient_to: string | null
   trip_members: Array<{ persons: PersonRow | null }>
   stages: StageRow[]
   bookings: BookingRow[]
@@ -358,10 +350,13 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
   const { id } = await params;
 
   const supabase = await createClient();
+  const { data: family } = await supabase.from("families").select("id").limit(1).single();
+  const familyId = family?.id ?? "";
+
   const { data } = await supabase
     .from("trips")
     .select(`
-      id, slug, title, subtitle, status, start_date, end_date,
+      id, slug, title, subtitle, status, start_date, end_date, gradient_from, gradient_to,
       trip_members ( persons ( id, name, initials, color ) ),
       stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code ),
       bookings ( id, type, title, provider, status, amount, currency, start_datetime, end_datetime, stage_id, details, created_at ),
@@ -402,8 +397,8 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
 
   const duration  = trip.start_date && trip.end_date
     ? getTripDuration(trip.start_date, trip.end_date) : 0;
-  const heroImage = TRIP_IMAGES[trip.slug]
-    ?? "https://images.unsplash.com/photo-1537996194471-e657df975ab4?auto=format&fit=crop&w=1920&q=80";
+  const highlightPhotoByTripId = await getHighlightPhotoByTripId(supabase, familyId, [trip.id]);
+  const heroImage = resolveTripImage(trip, highlightPhotoByTripId.get(trip.id) ?? null);
 
   // "Aktive Reise" nur, wenn die Reise anhand der echten Daten gerade läuft —
   // nicht allein anhand des manuell gesetzten Status. Zukünftige Reisen zeigen
@@ -462,8 +457,15 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
 
       {/* ── CINEMATIC HERO ── */}
       <div className="relative" style={{ height: 450 }}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={heroImage} alt={trip.title} className="absolute inset-0 w-full h-full object-cover" />
+        {heroImage ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={heroImage} alt={trip.title} className="absolute inset-0 w-full h-full object-cover" />
+        ) : (
+          <div
+            className="absolute inset-0"
+            style={{ background: `linear-gradient(135deg, ${trip.gradient_from ?? "#1a1a1a"}, ${trip.gradient_to ?? "#333"})` }}
+          />
+        )}
         <div
           className="absolute inset-0"
           style={{ background: "linear-gradient(to top, rgba(10,9,7,0.97) 0%, rgba(10,9,7,0.62) 45%, rgba(10,9,7,0.18) 100%)" }}

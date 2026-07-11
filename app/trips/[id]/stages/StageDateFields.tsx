@@ -50,6 +50,7 @@ export function StageDateFields({
           name="end_date"
           type="date"
           value={endDate}
+          min={startDate || undefined}
           onChange={(e) => setEndDate(e.target.value)}
           style={FIELD_STYLE}
         />

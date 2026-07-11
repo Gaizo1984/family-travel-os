@@ -180,11 +180,14 @@ export async function createBooking(formData: FormData) {
   if (!f.startDate)
     redirect(`${newPath}&error=${encodeURIComponent(`${f.config.startLabel}: Datum ist erforderlich`)}`)
 
-  const supabase = await createClient()
-  let stageId = f.stageId || await suggestStageId(supabase, tripId, f.startDate)
-
   const startDatetime = combineDateTime(f.startDate, f.startTime)
   const endDatetime = f.config.showEnd ? combineDateTime(f.endDate, f.endTime) : null
+
+  if (endDatetime && startDatetime && new Date(endDatetime) < new Date(startDatetime))
+    redirect(`${newPath}&error=${encodeURIComponent('Enddatum darf nicht vor dem Startdatum liegen')}`)
+
+  const supabase = await createClient()
+  let stageId = f.stageId || await suggestStageId(supabase, tripId, f.startDate)
 
   const { data: created, error } = await supabase.from('bookings').insert({
     trip_id: tripId,
@@ -242,11 +245,14 @@ export async function updateBooking(formData: FormData) {
   const { data: existing } = await supabase.from('bookings').select('trip_id, stage_id').eq('id', bookingId).maybeSingle()
   const tripId = existing?.trip_id ?? ''
 
-  let stageId = existing?.stage_id ?? null
-  if (!stageId && tripId) stageId = await suggestStageId(supabase, tripId, f.startDate)
-
   const startDatetime = combineDateTime(f.startDate, f.startTime)
   const endDatetime = f.config.showEnd ? combineDateTime(f.endDate, f.endTime) : null
+
+  if (endDatetime && startDatetime && new Date(endDatetime) < new Date(startDatetime))
+    redirect(`${editPath}?error=${encodeURIComponent('Enddatum darf nicht vor dem Startdatum liegen')}`)
+
+  let stageId = existing?.stage_id ?? null
+  if (!stageId && tripId) stageId = await suggestStageId(supabase, tripId, f.startDate)
 
   if (!stageId && tripId) {
     stageId = await maybeCreateAccommodationStage(supabase, tripId, f.type, f.title, startDatetime, endDatetime)

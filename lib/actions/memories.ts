@@ -86,7 +86,17 @@ export async function uploadMemoryPhotos(formData: FormData) {
     }
   }
 
-  if (tripId && savedCount > 0) await analyzeTripMemoryPhotos(supabase, tripId)
+  // §"Keine Fehlerseite": Analyse ist Best-Effort und darf einen bereits
+  // erfolgreichen Upload nie zu Fall bringen (z. B. bei einem Netzwerkfehler
+  // beim Foto-Abruf aus Storage) — sonst würde Next.js hier eine generische
+  // Fehlerseite zeigen, obwohl die Fotos technisch gespeichert wurden.
+  if (tripId && savedCount > 0) {
+    try {
+      await analyzeTripMemoryPhotos(supabase, tripId)
+    } catch {
+      // bewusst verschluckt — Fotos sind bereits gespeichert, Analyse kann später nachlaufen
+    }
+  }
 
   if (savedCount === 0)
     redirect(`${backPath}?error=${encodeURIComponent('Keines der Fotos konnte gespeichert werden.')}`)
@@ -115,14 +125,19 @@ async function analyzeTripMemoryPhotos(supabase: SupabaseClient, tripId: string)
   const hashById = new Map<string, string>()
   for (const p of photos) {
     if (p.phash) { hashById.set(p.id, p.phash); continue }
-    const { data: signed } = await supabase.storage.from('documents').createSignedUrl(p.storage_path, 60)
-    if (!signed?.signedUrl) continue
-    const res = await fetch(signed.signedUrl)
-    const buffer = Buffer.from(await res.arrayBuffer())
-    const phash = await computeDHash(buffer)
-    if (phash) {
-      hashById.set(p.id, phash)
-      await supabase.from('memory_photos').update({ phash }).eq('id', p.id)
+    try {
+      const { data: signed } = await supabase.storage.from('documents').createSignedUrl(p.storage_path, 60)
+      if (!signed?.signedUrl) continue
+      const res = await fetch(signed.signedUrl)
+      const buffer = Buffer.from(await res.arrayBuffer())
+      const phash = await computeDHash(buffer)
+      if (phash) {
+        hashById.set(p.id, phash)
+        await supabase.from('memory_photos').update({ phash }).eq('id', p.id)
+      }
+    } catch {
+      // ein fehlerhaftes Foto darf die Dublettenerkennung der übrigen Fotos nicht abbrechen
+      continue
     }
   }
 
@@ -157,10 +172,14 @@ async function analyzeTripMemoryPhotos(supabase: SupabaseClient, tripId: string)
   for (let i = 0; i < toAnalyze.length; i += MAX_PHOTOS_ANALYZED_PER_CALL) {
     const batch = toAnalyze.slice(i, i + MAX_PHOTOS_ANALYZED_PER_CALL)
     const batchPhotos = await Promise.all(batch.map(async (p) => {
-      const { data: signed } = await supabase.storage.from('documents').createSignedUrl(p.storage_path, 60)
-      if (!signed?.signedUrl) return null
-      const res = await fetch(signed.signedUrl)
-      return { buffer: Buffer.from(await res.arrayBuffer()), mimeType: 'image/webp' }
+      try {
+        const { data: signed } = await supabase.storage.from('documents').createSignedUrl(p.storage_path, 60)
+        if (!signed?.signedUrl) return null
+        const res = await fetch(signed.signedUrl)
+        return { buffer: Buffer.from(await res.arrayBuffer()), mimeType: 'image/webp' }
+      } catch {
+        return null
+      }
     }))
 
     const validIndices = batchPhotos.map((p, idx) => (p ? idx : -1)).filter((idx) => idx !== -1)

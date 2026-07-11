@@ -1,24 +1,14 @@
 import Link from "next/link";
-import { Map, Globe, CalendarDays } from "lucide-react";
+import { Map as MapIcon, Globe, CalendarDays } from "lucide-react";
 import { formatDateDE, getTripDuration } from "@/lib/demo-data";
 import { createClient } from "@/lib/supabase/server";
 import { restoreTrip } from "@/lib/actions/trips";
 import { tripCountdownDisplay } from "@/lib/trip-status";
+import { resolveTripImage, getHighlightPhotoByTripId } from "@/lib/trip-images";
 
 const H_FG    = "#F0EBE3";
 const H_MUTED = "#A89880";
 const H_BORDER = "rgba(240,235,227,0.1)";
-
-const TRIP_IMAGES: Record<string, string> = {
-  "costa-rica-2026":
-    "https://images.unsplash.com/photo-1611222566512-cb8dd8e689e5?auto=format&fit=crop&w=1920&q=80",
-  "indonesien-2028":
-    "https://images.unsplash.com/photo-1542897644-e04428948020?auto=format&fit=crop&w=1920&q=80",
-  "japan-2025":
-    "https://images.unsplash.com/photo-1757220306353-2282322ac464?auto=format&fit=crop&w=900&q=80",
-  "sardinien-2024":
-    "https://images.unsplash.com/photo-1780581800373-4fd4961743cd?auto=format&fit=crop&w=900&q=80",
-};
 
 const FILTERS = [
   { key: "alle",       label: "Alle" },
@@ -56,11 +46,10 @@ function applyFilter(trips: TripRow[], f: string): { planned: TripRow[]; past: T
   return { planned: [...active, ...planned], past };
 }
 
-function PlannedCard({ trip }: { trip: TripRow }) {
+function PlannedCard({ trip, imgUrl }: { trip: TripRow; imgUrl: string | null }) {
   const duration = trip.start_date && trip.end_date
     ? getTripDuration(trip.start_date, trip.end_date) : 0;
   const countdown = tripCountdownDisplay(trip, duration);
-  const imgUrl  = TRIP_IMAGES[trip.slug];
   const members = trip.trip_members.flatMap(tm => tm.persons ? [tm.persons] : []);
   const stageCount = trip.stages.length;
 
@@ -163,10 +152,9 @@ function PlannedCard({ trip }: { trip: TripRow }) {
   );
 }
 
-function PastCard({ trip }: { trip: TripRow }) {
+function PastCard({ trip, imgUrl }: { trip: TripRow; imgUrl: string | null }) {
   const duration = trip.start_date && trip.end_date
     ? getTripDuration(trip.start_date, trip.end_date) : 0;
-  const imgUrl  = TRIP_IMAGES[trip.slug];
   const members = trip.trip_members.flatMap(tm => tm.persons ? [tm.persons] : []);
 
   return (
@@ -265,6 +253,9 @@ export default async function TripsPage({
   const { f = "alle" } = await searchParams;
 
   const supabase = await createClient();
+  const { data: family } = await supabase.from("families").select("id").limit(1).single();
+  const familyId = family?.id ?? "";
+
   const { data } = await supabase
     .from("trips")
     .select(`
@@ -277,6 +268,8 @@ export default async function TripsPage({
     .order("start_date", { ascending: true, nullsFirst: false });
 
   const trips = (data ?? []) as unknown as TripRow[];
+  const highlightPhotoByTripId = await getHighlightPhotoByTripId(supabase, familyId);
+  const tripImageById = new Map(trips.map((t) => [t.id, resolveTripImage(t, highlightPhotoByTripId.get(t.id) ?? null)]));
   const { planned, past } = applyFilter(trips, f);
 
   const visibleTrips  = trips.filter((t) => t.status !== "archived");
@@ -344,7 +337,7 @@ export default async function TripsPage({
             </div>
             <div className="space-y-4">
               {planned.map((trip) => (
-                <PlannedCard key={trip.id} trip={trip} />
+                <PlannedCard key={trip.id} trip={trip} imgUrl={tripImageById.get(trip.id) ?? null} />
               ))}
             </div>
           </section>
@@ -357,7 +350,7 @@ export default async function TripsPage({
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {past.map((trip) => (
-                <PastCard key={trip.id} trip={trip} />
+                <PastCard key={trip.id} trip={trip} imgUrl={tripImageById.get(trip.id) ?? null} />
               ))}
             </div>
           </section>
@@ -372,7 +365,7 @@ export default async function TripsPage({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {archivedTrips.map((trip) => (
                   <div key={trip.id} className="relative">
-                    <PastCard trip={trip} />
+                    <PastCard trip={trip} imgUrl={tripImageById.get(trip.id) ?? null} />
                     <div className="absolute top-4 right-4 flex items-center gap-2" style={{ zIndex: 5 }}>
                       <form action={restoreTrip}>
                         <input type="hidden" name="trip_id" value={trip.id} />
@@ -418,7 +411,7 @@ export default async function TripsPage({
             </div>
             <div className="flex gap-12 md:gap-20">
               {[
-                { Icon: Map,         value: visibleTrips.length, label: "Reisen" },
+                { Icon: MapIcon,     value: visibleTrips.length, label: "Reisen" },
                 { Icon: Globe,       value: 6,            label: "Länder" },
                 { Icon: CalendarDays, value: totalDays,   label: "Reisetage" },
               ].map(({ Icon, value, label }) => (

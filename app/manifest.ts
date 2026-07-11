@@ -2,9 +2,9 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Family Travel OS",
-    short_name: "Travel OS",
-    description: "Unsere private Familien-Reise-App",
+    name: "LUMI",
+    short_name: "LUMI",
+    description: "Family Travel OS – eure private Familien-Reise-App",
     start_url: "/",
     display: "standalone",
     background_color: "#E8E3DA",

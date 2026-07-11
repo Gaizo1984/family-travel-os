@@ -189,6 +189,24 @@ export function getDateFieldRange(kind: 'birth' | 'issue' | 'expiry'): DateField
   return { minYear: currentYear, maxYear: currentYear + 15 }
 }
 
+/**
+ * Für Datumsfelder, die an eine konkrete Reise gebunden sind (z. B.
+ * Journey-Event-Datum): der Bereich muss den tatsächlichen Reisezeitraum
+ * abdecken, auch wenn dieser in der Vergangenheit liegt — anders als
+ * `getDateFieldRange('expiry')`, das nur zukünftige Jahre listet und bei
+ * vergangenen/laufenden Reisen das gespeicherte Jahr aus der Auswahl fallen
+ * lässt (Jahr/Monat erscheinen dann fälschlich leer).
+ */
+export function getTripDateFieldRange(startDate: string | null, endDate: string | null): DateFieldRange {
+  const currentYear = new Date().getFullYear()
+  const startYear = startDate ? new Date(startDate).getFullYear() : currentYear
+  const endYear = endDate ? new Date(endDate).getFullYear() : currentYear
+  return {
+    minYear: Math.min(startYear, currentYear) - 1,
+    maxYear: Math.max(endYear, currentYear) + 1,
+  }
+}
+
 export function splitIsoDate(iso: string | null | undefined): { day: string; month: string; year: string } {
   if (!iso) return { day: '', month: '', year: '' }
   const [year, month, day] = iso.split('-')

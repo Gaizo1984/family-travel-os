@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { createJourneyEvent } from "@/lib/actions/journey-events";
-import { getDateFieldRange } from "@/lib/documents";
+import { getTripDateFieldRange } from "@/lib/documents";
 import { DateSelectFields } from "@/app/family/DateSelectFields";
 import { Banner } from "@/components/Banner";
 import {
@@ -34,7 +34,7 @@ export default async function NewJourneyEventPage({
   const supabase = await createClient();
   const { data: trip } = await supabase
     .from("trips")
-    .select("id, slug, title")
+    .select("id, slug, title, start_date, end_date")
     .eq("slug", id)
     .maybeSingle();
 
@@ -108,7 +108,7 @@ export default async function NewJourneyEventPage({
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <DateSelectFields label="Datum *" namePrefix="date" defaultIso={date ?? null} range={getDateFieldRange("expiry")} />
+              <DateSelectFields label="Datum *" namePrefix="date" defaultIso={date ?? null} range={getTripDateFieldRange(trip.start_date, trip.end_date)} />
               <div className="mb-5">
                 <label htmlFor="je-time" style={LABEL_STYLE}>Uhrzeit (optional)</label>
                 <input id="je-time" name="time" type="time" style={FIELD_STYLE} />

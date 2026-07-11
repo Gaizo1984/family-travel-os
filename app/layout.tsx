@@ -2,16 +2,17 @@ import type { Metadata, Viewport } from "next";
 import { Geist } from "next/font/google";
 import Link from "next/link";
 import { LayoutDashboard, Plane, Users, Sun, Camera, Compass, MessageSquare, MoreHorizontal, BookOpenCheck, Images } from "lucide-react";
+import { SplashScreen } from "@/components/SplashScreen";
 import "./globals.css";
 
 const geist = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Family Travel OS",
-  description: "Unsere private Familien-Reise-App",
+  title: "LUMI",
+  description: "Family Travel OS – eure private Familien-Reise-App",
   appleWebApp: {
     capable: true,
-    title: "Travel OS",
+    title: "LUMI",
     statusBarStyle: "black-translucent",
   },
   icons: {
@@ -71,6 +72,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         className="min-h-screen flex flex-col md:flex-row"
         style={{ background: "var(--background)", color: "var(--foreground)" }}
       >
+        <SplashScreen />
+
         {/* Sidebar — desktop */}
         <aside
           className="hidden md:flex flex-col w-52 shrink-0"
@@ -79,16 +82,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           {/* Logo */}
           <div className="px-7 py-8" style={{ borderBottom: "1px solid var(--border)" }}>
             <div
-              className="text-xs font-medium tracking-widest uppercase"
-              style={{ color: "var(--muted)", letterSpacing: "0.2em" }}
-            >
-              Family
-            </div>
-            <div
-              className="text-sm font-semibold tracking-widest uppercase mt-0.5"
+              className="text-sm font-semibold tracking-widest uppercase"
               style={{ color: "var(--accent)", letterSpacing: "0.22em" }}
             >
-              Travel OS
+              LUMI
+            </div>
+            <div
+              className="text-xs font-medium tracking-widest uppercase mt-0.5"
+              style={{ color: "var(--muted)", letterSpacing: "0.2em" }}
+            >
+              Family Travel OS
             </div>
           </div>
 

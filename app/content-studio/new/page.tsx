@@ -48,9 +48,20 @@ export default async function NewContentIdeaPage({
         <div style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "12px" }}>
           Content-Idee erstellen
         </div>
-        <h1 className="font-light mb-8" style={{ color: "var(--foreground)", fontSize: "1.4rem", letterSpacing: "0.01em" }}>
+        <h1 className="font-light mb-4" style={{ color: "var(--foreground)", fontSize: "1.4rem", letterSpacing: "0.01em" }}>
           Woraus soll Content entstehen?
         </h1>
+
+        {/* §"Kompletter AI-Workflow sichtbar": der eigentliche Ablauf läuft
+            technisch in einem Request, soll aber für die Familie nachvollziehbar
+            bleiben, statt nur ein einzelner Pending-Button zu sein. */}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-8" style={{ color: "var(--muted)", fontSize: "0.66rem", letterSpacing: "0.04em" }}>
+          <span>1 Fotos wählen</span>
+          <span style={{ color: "var(--border)" }}>·</span>
+          <span>2 KI prüft Qualität &amp; Dubletten</span>
+          <span style={{ color: "var(--border)" }}>·</span>
+          <span>3 Ideen erhalten</span>
+        </div>
 
         <form action={generateContentIdeas} encType="multipart/form-data">
           <div className="rounded-xl p-8" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>

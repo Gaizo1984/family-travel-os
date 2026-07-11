@@ -1,4 +1,4 @@
-import { MapPin, Plane } from "lucide-react";
+import { MapPin, Plane, Heart } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { isTripPastEnd } from "@/lib/trip-status";
 import { DESTINATIONS } from "@/lib/data/destination-knowledge";
@@ -7,6 +7,7 @@ import { searchFlights } from "@/lib/providers/flight-provider";
 import { searchRestaurants } from "@/lib/providers/restaurant-provider";
 import { searchExcursions } from "@/lib/providers/excursion-provider";
 import { saveToWishlist } from "@/lib/actions/buchungsportal";
+import { JOURNEY_EVENT_CATEGORIES, type JourneyEventCategory } from "@/lib/journey-events";
 import { Banner } from "@/components/Banner";
 
 type TripRow = {
@@ -30,7 +31,21 @@ function PriceBadge({ value }: { value: string }) {
   );
 }
 
-function WishlistButton({ tripId, date, title, category }: { tripId: string; date: string; title: string; category: string }) {
+function WishlistButton({ tripId, date, title, category, isSaved }: { tripId: string; date: string; title: string; category: string; isSaved: boolean }) {
+  if (isSaved) {
+    return (
+      <span
+        style={{
+          display: "inline-flex", alignItems: "center", gap: "5px",
+          color: "var(--muted)", border: "1px solid var(--border)",
+          borderRadius: "20px", padding: "5px 14px", fontSize: "0.62rem", whiteSpace: "nowrap",
+        }}
+      >
+        <Heart size={11} strokeWidth={1.8} fill="currentColor" />
+        Gemerkt
+      </span>
+    );
+  }
   return (
     <form action={saveToWishlist}>
       <input type="hidden" name="trip_id" value={tripId} />
@@ -79,6 +94,17 @@ export default async function BuchungsportalPage({
 
   const wishlistDate = activeTrip?.start_date ?? todayIso;
 
+  const { data: wishlistRaw } = activeTrip
+    ? await supabase
+        .from("journey_events")
+        .select("id, title, category, date")
+        .eq("trip_id", activeTrip.id)
+        .eq("status", "idea")
+        .order("date", { ascending: true })
+    : { data: null };
+  const wishlist = (wishlistRaw ?? []) as { id: string; title: string; category: JourneyEventCategory; date: string }[];
+  const wishlistTitles = new Set(wishlist.map((w) => w.title));
+
   const [hotels, flights, restaurants, excursions] = await Promise.all([
     searchHotels({ destinationName: destinationMatch?.name }),
     searchFlights({ destinationId: destinationMatch?.id }),
@@ -104,6 +130,28 @@ export default async function BuchungsportalPage({
 
         {saved && <Banner variant="success">&bdquo;{saved}&ldquo; auf die Merkliste eurer Reise gesetzt.</Banner>}
         {error && <Banner variant="error">{error}</Banner>}
+
+        {/* ── Meine Merkliste ── */}
+        {wishlist.length > 0 && (
+          <section className="mb-12">
+            <SectionLabel>Meine Merkliste</SectionLabel>
+            <div className="space-y-2">
+              {wishlist.map((w) => {
+                const Icon = JOURNEY_EVENT_CATEGORIES[w.category]?.icon ?? Heart;
+                return (
+                  <div
+                    key={w.id}
+                    className="flex items-center gap-3 px-4 py-3 rounded-lg"
+                    style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+                  >
+                    <Icon size={13} strokeWidth={1.6} style={{ color: "var(--accent)", flexShrink: 0 }} />
+                    <span style={{ color: "var(--foreground)", fontSize: "0.8rem", flex: 1 }}>{w.title}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
 
         {/* ── Hotels ── */}
         <section className="mb-12">
@@ -132,7 +180,7 @@ export default async function BuchungsportalPage({
                     ))}
                   </div>
                   {activeTrip && (
-                    <WishlistButton tripId={activeTrip.id} date={wishlistDate} title={`Hotel-Idee: ${h.name}`} category="note" />
+                    <WishlistButton tripId={activeTrip.id} date={wishlistDate} title={`Hotel-Idee: ${h.name}`} category="note" isSaved={wishlistTitles.has(`Hotel-Idee: ${h.name}`)} />
                   )}
                 </div>
               </div>
@@ -159,7 +207,7 @@ export default async function BuchungsportalPage({
                 </p>
                 {activeTrip && (
                   <div className="mt-3">
-                    <WishlistButton tripId={activeTrip.id} date={wishlistDate} title={`Flugidee: ${f.route}`} category="note" />
+                    <WishlistButton tripId={activeTrip.id} date={wishlistDate} title={`Flugidee: ${f.route}`} category="note" isSaved={wishlistTitles.has(`Flugidee: ${f.route}`)} />
                   </div>
                 )}
               </div>
@@ -193,7 +241,7 @@ export default async function BuchungsportalPage({
                 <div className="p-4">
                   <p className="mb-3" style={{ color: "var(--muted)", fontSize: "0.72rem", fontStyle: "italic" }}>{r.cuisine} · {r.mood}</p>
                   {activeTrip && (
-                    <WishlistButton tripId={activeTrip.id} date={wishlistDate} title={r.name} category="restaurant" />
+                    <WishlistButton tripId={activeTrip.id} date={wishlistDate} title={r.name} category="restaurant" isSaved={wishlistTitles.has(r.name)} />
                   )}
                 </div>
               </div>
@@ -228,7 +276,7 @@ export default async function BuchungsportalPage({
                   <p className="mb-3" style={{ color: "var(--muted)", fontSize: "0.72rem", lineHeight: 1.5 }}>{e.description}</p>
                   <p className="mb-3" style={{ color: "var(--muted)", fontSize: "0.68rem", fontStyle: "italic" }}>{e.mood}</p>
                   {activeTrip && (
-                    <WishlistButton tripId={activeTrip.id} date={wishlistDate} title={`Ausflug-Idee: ${e.title}`} category="activity" />
+                    <WishlistButton tripId={activeTrip.id} date={wishlistDate} title={`Ausflug-Idee: ${e.title}`} category="activity" isSaved={wishlistTitles.has(`Ausflug-Idee: ${e.title}`)} />
                   )}
                 </div>
               </div>

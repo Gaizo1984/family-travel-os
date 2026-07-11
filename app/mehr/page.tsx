@@ -31,7 +31,7 @@ export default function MehrPage() {
             className="text-xs"
             style={{ color: "var(--muted)", letterSpacing: "0.08em", fontSize: "0.7rem" }}
           >
-            Weitere Bereiche von Family Travel OS
+            Weitere Bereiche von LUMI
           </p>
         </header>
 

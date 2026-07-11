@@ -49,6 +49,16 @@ export default async function ContentIdeaDetailPage({
         .order("quality_score", { ascending: false })
     : { data: null };
 
+  // §"Dublettenerkennung sichtbar machen": läuft bereits (is_duplicate_of),
+  // wurde bisher aber nirgends kommuniziert — analog zu app/memories/page.tsx.
+  const { count: duplicateCount } = idea.project_id
+    ? await supabase
+        .from("content_project_photos")
+        .select("id", { count: "exact", head: true })
+        .eq("project_id", idea.project_id)
+        .not("is_duplicate_of", "is", null)
+    : { count: 0 };
+
   const selectedPhotos = await Promise.all(
     (selectedPhotosRaw ?? []).map(async (p) => {
       const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.storage_path, 3600);
@@ -87,7 +97,7 @@ export default async function ContentIdeaDetailPage({
               <button
                 type="submit"
                 aria-label={idea.is_favorite ? "Favorit entfernen" : "Als Favorit markieren"}
-                style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: "6px" }}
+                style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: "10px", margin: "-6px" }}
               >
                 <Star size={16} strokeWidth={1.6} fill={idea.is_favorite ? "var(--accent)" : "none"} style={{ color: "var(--accent)" }} />
               </button>
@@ -98,7 +108,7 @@ export default async function ContentIdeaDetailPage({
               <button
                 type="submit"
                 aria-label={idea.status === "archived" ? "Wiederherstellen" : "Archivieren"}
-                style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: "6px", color: "var(--muted)" }}
+                style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: "10px", margin: "-6px", color: "var(--muted)" }}
               >
                 {idea.status === "archived" ? <ArchiveRestore size={16} strokeWidth={1.6} /> : <Archive size={16} strokeWidth={1.6} />}
               </button>
@@ -109,7 +119,7 @@ export default async function ContentIdeaDetailPage({
               <button
                 type="submit"
                 aria-label="Idee löschen"
-                style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: "6px", color: "#B5624A" }}
+                style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: "10px", margin: "-6px", color: "#B5624A" }}
               >
                 <Trash2 size={16} strokeWidth={1.6} />
               </button>
@@ -147,6 +157,11 @@ export default async function ContentIdeaDetailPage({
                 )
               ))}
             </div>
+            {!!duplicateCount && (
+              <p className="mt-2" style={{ color: "var(--muted)", fontSize: "0.68rem", fontStyle: "italic" }}>
+                {duplicateCount} {duplicateCount === 1 ? "Dublette" : "Dubletten"} automatisch erkannt und ausgeblendet.
+              </p>
+            )}
           </div>
         )}
 
