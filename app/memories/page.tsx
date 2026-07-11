@@ -35,14 +35,14 @@ function PhotoCard({ photo, url, personName, returnTo }: { photo: PhotoRow; url:
             <input type="hidden" name="photo_id" value={photo.id} />
             <input type="hidden" name="next_value" value={(!photo.is_highlight).toString()} />
             <input type="hidden" name="return_to" value={returnTo} />
-            <button type="submit" aria-label="Highlight" style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: "4px" }}>
+            <button type="submit" aria-label="Highlight" style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: "10px", margin: "-6px" }}>
               <Star size={14} strokeWidth={1.8} fill={photo.is_highlight ? "#F0EBE3" : "none"} style={{ color: "#F0EBE3" }} />
             </button>
           </form>
           <form action={deleteMemoryPhoto}>
             <input type="hidden" name="photo_id" value={photo.id} />
             <input type="hidden" name="return_to" value={returnTo} />
-            <button type="submit" aria-label="Löschen" style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: "4px" }}>
+            <button type="submit" aria-label="Löschen" style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: "10px", margin: "-6px" }}>
               <Trash2 size={13} strokeWidth={1.8} style={{ color: "#F0EBE3" }} />
             </button>
           </form>
