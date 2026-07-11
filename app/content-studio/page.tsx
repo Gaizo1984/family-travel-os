@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowRight, Sparkles, Settings, MapPin, Camera, Wand2, Clapperboard, Clock, Gauge } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getFamily } from "@/lib/family";
 import { WhatCanAI } from "./WhatCanAI";
 import { buildContentStrategyContext } from "@/lib/content-strategy-context";
 import { getCachedContentStrategy, generateAndCacheContentStrategy } from "@/lib/content-strategy";
@@ -14,17 +15,27 @@ const STEPS = [
 
 export default async function ContentStudioPage() {
   const supabase = await createClient();
-  const { data: family } = await supabase.from("families").select("id").limit(1).single();
-  const familyId = family?.id ?? "";
+  const { id: familyId } = await getFamily();
 
-  const { data: activeProject } = await supabase
-    .from("content_projects")
-    .select("id, title, trip_id, trips(title)")
-    .eq("family_id", familyId)
-    .eq("status", "active")
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  // §"Vom Ideengenerator zum Content Director": alle drei hängen nur von
+  // familyId ab, nicht voneinander — parallel statt seriell laden.
+  const [{ data: activeProject }, { data: recentIdeas }, strategyContext] = await Promise.all([
+    supabase
+      .from("content_projects")
+      .select("id, title, trip_id, trips(title)")
+      .eq("family_id", familyId)
+      .eq("status", "active")
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("content_ideas")
+      .select("id, content_goal, status, trip_id, trips(title)")
+      .eq("family_id", familyId)
+      .order("created_at", { ascending: false })
+      .limit(3),
+    buildContentStrategyContext(familyId),
+  ]);
 
   let ideaCount = 0;
   let draftCount = 0;
@@ -37,17 +48,9 @@ export default async function ContentStudioPage() {
     draftCount = dc ?? 0;
   }
 
-  const { data: recentIdeas } = await supabase
-    .from("content_ideas")
-    .select("id, content_goal, status, trip_id, trips(title)")
-    .eq("family_id", familyId)
-    .order("created_at", { ascending: false })
-    .limit(3);
-
   // §"Vom Ideengenerator zum Content Director": nur EINE "Today's Content
   // Strategy" gleichzeitig, einmal pro Tag generiert und zwischengespeichert
   // (wie die Heute-Tagesplanung) — nur relevant, wenn gerade eine Reise läuft.
-  const strategyContext = await buildContentStrategyContext(familyId);
   let strategy = strategyContext
     ? await getCachedContentStrategy(familyId, strategyContext.tripId, strategyContext.forDate)
     : null;

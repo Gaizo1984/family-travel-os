@@ -144,7 +144,7 @@ export default async function ContentIdeaDetailPage({
                 p.url && (
                   <div key={p.id} className="relative shrink-0 rounded-lg overflow-hidden" style={{ width: 96, height: 96 }}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={p.url} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                    <img src={p.url} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
                     {p.qualityScore !== null && (
                       <span
                         className="absolute bottom-1 right-1"

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getFamily } from "@/lib/family";
 import { isTripHistorical, isTripCurrentlyRunning } from "@/lib/trip-status";
 
 type TimelineEntry = {
@@ -22,8 +23,7 @@ export default async function FamilyHistoryPage({
   const { person: personFilter } = await searchParams;
 
   const supabase = await createClient();
-  const { data: family } = await supabase.from("families").select("id").limit(1).single();
-  const familyId = family?.id ?? "";
+  const { id: familyId } = await getFamily();
 
   const [{ data: persons }, { data: trips }, { data: pastTrips }, { data: pastTravelers }] = await Promise.all([
     supabase.from("persons").select("id, name").eq("family_id", familyId).order("name"),

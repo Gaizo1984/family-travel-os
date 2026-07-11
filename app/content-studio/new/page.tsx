@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getFamily } from "@/lib/family";
 import { generateContentIdeas } from "@/lib/actions/content-idea-generation";
 import { MultiPhotoFilePreview } from "@/components/MultiPhotoFilePreview";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
@@ -24,11 +25,11 @@ export default async function NewContentIdeaPage({
   const { error } = await searchParams;
 
   const supabase = await createClient();
-  const { data: family } = await supabase.from("families").select("id").limit(1).single();
+  const { id: familyId } = await getFamily();
   const { data: trips } = await supabase
     .from("trips")
     .select("id, title")
-    .eq("family_id", family?.id ?? "")
+    .eq("family_id", familyId)
     .in("status", ["planned", "active", "completed"])
     .order("start_date", { ascending: false });
 

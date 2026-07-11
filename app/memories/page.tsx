@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Star, Trash2, Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getFamily } from "@/lib/family";
 import { uploadMemoryPhotos, deleteMemoryPhoto, toggleMemoryHighlight } from "@/lib/actions/memories";
 import { MultiPhotoFilePreview } from "@/components/MultiPhotoFilePreview";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
@@ -28,7 +29,7 @@ function PhotoCard({ photo, url, personName, returnTo }: { photo: PhotoRow; url:
   return (
     <div className="relative rounded-lg overflow-hidden group" style={{ aspectRatio: "1/1" }}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={url} alt={photo.caption ?? ""} className="absolute inset-0 w-full h-full object-cover" />
+      <img src={url} alt={photo.caption ?? ""} loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
       <div className="absolute inset-0 flex flex-col justify-between p-2" style={{ background: "linear-gradient(to bottom, rgba(10,9,7,0.5) 0%, transparent 30%, transparent 70%, rgba(10,9,7,0.7) 100%)" }}>
         <div className="flex items-center justify-end gap-1">
           <form action={toggleMemoryHighlight}>
@@ -65,8 +66,7 @@ export default async function MemoriesPage({
 }) {
   const { error, uploaded, trip: tripFilter } = await searchParams;
   const supabase = await createClient();
-  const { data: family } = await supabase.from("families").select("id").limit(1).single();
-  const familyId = family?.id ?? "";
+  const { id: familyId } = await getFamily();
   const returnTo = tripFilter ? `/memories?trip=${tripFilter}` : "/memories";
 
   const [{ data: photosRaw }, { data: personsRaw }, { data: tripsRaw }] = await Promise.all([

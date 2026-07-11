@@ -3,6 +3,7 @@ import {
   Clock, ArrowRight, Ticket, Car, Users, ChevronRight,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getFamily } from "@/lib/family";
 import { isTripCurrentlyRunning } from "@/lib/trip-status";
 import { sortStagesChronologically, buildJourneyTimeline } from "@/lib/journey";
 import type { StageInput, TimelineBooking, TimelineEvent, TimelineDay } from "@/lib/journey";
@@ -132,8 +133,8 @@ function Card({ children, className = "" }: { children: React.ReactNode; classNa
 
 export default async function TodayPage() {
   const supabase = await createClient();
-  const { data: family } = await supabase.from("families").select("id, name").limit(1).single();
-  const familyId = family?.id ?? "";
+  const family = await getFamily();
+  const familyId = family.id;
 
   const todayIso = todayIsoInFamilyTimezone();
   const tomorrowIso = addDaysIso(todayIso, 1);
@@ -251,7 +252,19 @@ export default async function TodayPage() {
     ...nearbyStageGeocodeCandidates(stages, currentLocation.label, currentLocation.countryCode, todayIso),
     ...(countryName && countryName !== currentLocation.label ? [{ query: countryName }] : []),
   ];
-  const weather = await getWeatherForLocation(weatherCandidates);
+  const timelineItems = todayDay ? buildTodayTimelineItems(todayDay) : [];
+  const nextUp = findNextUpcoming(timelineItems, nowHHMM);
+  const prepItems = buildTomorrowPrepItems(tomorrowDay, stages, tomorrowIso);
+  const highlightTitle = detectDayHighlight(timelineItems);
+
+  // Wetter, Familien-DNA und der Empfehlungs-Cache-Check hängen nicht
+  // voneinander ab (nur von bereits bekannten Werten) — parallel statt
+  // seriell laden.
+  const [weather, dna, cachedRecommendation] = await Promise.all([
+    getWeatherForLocation(weatherCandidates),
+    buildFamilyDnaSummary(familyId),
+    getCachedTodayRecommendation(familyId, activeTrip.id, todayIso),
+  ]);
   const currentWeather = weather ? describeWeatherCode(weather.currentCode) : null;
   // Open-Meteo liefert "heute" (daily[0]) im lokalen Zeitfenster des ZIELORTS
   // (timezone=auto) — bei einem Standort mit anderer UTC-Differenz als
@@ -263,11 +276,6 @@ export default async function TodayPage() {
   const todayForecast = weather?.daily.find((d) => d.date === todayIso) ?? weather?.daily[0] ?? null;
   const todayPrecipitation = todayForecast?.precipitationProbability ?? null;
 
-  const timelineItems = todayDay ? buildTodayTimelineItems(todayDay) : [];
-  const nextUp = findNextUpcoming(timelineItems, nowHHMM);
-  const prepItems = buildTomorrowPrepItems(tomorrowDay, stages, tomorrowIso);
-
-  const dna = await buildFamilyDnaSummary(familyId);
   const tripMemberIds = new Set(activeTrip.trip_members.flatMap((m) => (m.persons ? [m.persons.id] : [])));
   const tripMemberDna = dna.persons.filter((p) => tripMemberIds.has(p.id) && (p.travel_needs.length > 0 || p.interest_tags.length > 0));
 
@@ -280,8 +288,7 @@ export default async function TodayPage() {
   // erkanntem Kalender-Highlight sofort automatisch generiert; ohne Highlight
   // zeigt die Seite stattdessen den Tagesstil-Auswähler (kein KI-Aufruf, bis
   // die Familie eine Wahl trifft).
-  const highlightTitle = detectDayHighlight(timelineItems);
-  let recommendation = await getCachedTodayRecommendation(familyId, activeTrip.id, todayIso);
+  let recommendation = cachedRecommendation;
   if (!recommendation && highlightTitle) {
     recommendation = await generateAndCacheTodayRecommendation(
       familyId, activeTrip.id, todayIso,

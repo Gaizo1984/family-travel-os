@@ -83,11 +83,20 @@ export async function computeTripReadiness(tripId: string): Promise<ReadinessRes
   const slug = trip.slug
   const tripEnd = trip.end_date
 
+  // §Performance: die folgenden Abfragen sind alle unabhängig voneinander
+  // (keine hängt vom Ergebnis einer anderen ab, außer der Dokumente-Query, die
+  // die Mitreisenden-IDs braucht) — parallel statt seriell laden.
+  const [{ data: memberRows }, { data: assignedEntryDocsRaw }, { count: insuranceCount }, { data: stagesRaw }, { data: bookingsRaw }, stopoverSuggestions] =
+    await Promise.all([
+      supabase.from('trip_members').select('persons ( id, name )').eq('trip_id', tripId),
+      supabase.from('document_trips').select('documents ( id, person_id, doc_type, expires_at, label )').eq('trip_id', tripId),
+      supabase.from('insurance_policy_trips').select('policy_id', { count: 'exact', head: true }).eq('trip_id', tripId),
+      supabase.from('stages').select('id, title, start_date, end_date, nights, accommodation, sort_order').eq('trip_id', tripId),
+      supabase.from('bookings').select('id, type, stage_id, status, start_datetime, end_datetime').eq('trip_id', tripId),
+      detectFlightStopoverSuggestions(tripId),
+    ])
+
   // ── Reisende & Dokumente: Reisepass je Mitreisendem ──
-  const { data: memberRows } = await supabase
-    .from('trip_members')
-    .select('persons ( id, name )')
-    .eq('trip_id', tripId)
   const members = (memberRows ?? [])
     .flatMap((m) => (m.persons ? [m.persons as unknown as { id: string; name: string }] : []))
   const memberIds = members.map((m) => m.id)
@@ -123,11 +132,6 @@ export async function computeTripReadiness(tripId: string): Promise<ReadinessRes
   }
 
   // ── Einreise: dieser Reise zugeordnete Visa/ESTA/eTA ──
-  const { data: assignedEntryDocsRaw } = await supabase
-    .from('document_trips')
-    .select('documents ( id, person_id, doc_type, expires_at, label )')
-    .eq('trip_id', tripId)
-
   for (const row of assignedEntryDocsRaw ?? []) {
     const doc = row.documents as unknown as
       { id: string; person_id: string; doc_type: DocumentType; expires_at: string | null; label: string } | null
@@ -142,10 +146,6 @@ export async function computeTripReadiness(tripId: string): Promise<ReadinessRes
   }
 
   // ── Versicherung ──
-  const { count: insuranceCount } = await supabase
-    .from('insurance_policy_trips')
-    .select('policy_id', { count: 'exact', head: true })
-    .eq('trip_id', tripId)
   if (!insuranceCount) {
     findings.push({
       severity: 'hint', theme: 'insurance',
@@ -155,16 +155,7 @@ export async function computeTripReadiness(tripId: string): Promise<ReadinessRes
   }
 
   // ── Reiseverlauf: Etappen-Überschneidungen, Lücken, fehlende Unterkunft ──
-  const { data: stagesRaw } = await supabase
-    .from('stages')
-    .select('id, title, start_date, end_date, nights, accommodation, sort_order')
-    .eq('trip_id', tripId)
   const stages = sortStages((stagesRaw ?? []) as StageRow[])
-
-  const { data: bookingsRaw } = await supabase
-    .from('bookings')
-    .select('id, type, stage_id, status, start_datetime, end_datetime')
-    .eq('trip_id', tripId)
   const bookings = (bookingsRaw ?? []).filter((b) => b.status !== 'cancelled')
 
   for (let i = 0; i < stages.length; i++) {
@@ -233,7 +224,6 @@ export async function computeTripReadiness(tripId: string): Promise<ReadinessRes
   }
 
   // ── Zwischenstopps mit nötiger Übernachtung, für die noch keine Etappe existiert ──
-  const stopoverSuggestions = await detectFlightStopoverSuggestions(tripId)
   for (const s of stopoverSuggestions) {
     findings.push({
       severity: 'hint', theme: 'itinerary',

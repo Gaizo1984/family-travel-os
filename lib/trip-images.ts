@@ -9,9 +9,9 @@ import { DESTINATIONS } from "@/lib/data/destination-knowledge";
  */
 export const TRIP_IMAGES: Record<string, string> = {
   "costa-rica-2026":
-    "https://images.unsplash.com/photo-1611222566512-cb8dd8e689e5?auto=format&fit=crop&w=1920&q=80",
+    "https://images.unsplash.com/photo-1611222566512-cb8dd8e689e5?auto=format&fit=crop&w=1200&q=80",
   "indonesien-2028":
-    "https://images.unsplash.com/photo-1537996194471-e657df975ab4?auto=format&fit=crop&w=1920&q=80",
+    "https://images.unsplash.com/photo-1537996194471-e657df975ab4?auto=format&fit=crop&w=1200&q=80",
   "japan-2025":
     "https://images.unsplash.com/photo-1757220306353-2282322ac464?auto=format&fit=crop&w=900&q=80",
   "sardinien-2024":
@@ -56,11 +56,20 @@ export async function getHighlightPhotoByTripId(
   if (tripIds) query = query.in("trip_id", tripIds);
   const { data: highlightPhotosRaw } = await query;
 
-  const highlightPhotoByTripId = new Map<string, string>();
+  // Nur das erste Foto je Reise signieren (falls mehrere Highlights existieren
+  // sollten), dann alle Signaturen parallel statt seriell abrufen.
+  const firstPhotoByTripId = new Map<string, string>();
   for (const p of highlightPhotosRaw ?? []) {
-    if (!p.trip_id || highlightPhotoByTripId.has(p.trip_id)) continue;
-    const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.storage_path, 3600);
-    if (signed?.signedUrl) highlightPhotoByTripId.set(p.trip_id, signed.signedUrl);
+    if (!p.trip_id || firstPhotoByTripId.has(p.trip_id)) continue;
+    firstPhotoByTripId.set(p.trip_id, p.storage_path);
   }
+
+  const highlightPhotoByTripId = new Map<string, string>();
+  await Promise.all(
+    Array.from(firstPhotoByTripId.entries()).map(async ([tripId, storagePath]) => {
+      const { data: signed } = await supabase.storage.from("documents").createSignedUrl(storagePath, 3600);
+      if (signed?.signedUrl) highlightPhotoByTripId.set(tripId, signed.signedUrl);
+    }),
+  );
   return highlightPhotoByTripId;
 }

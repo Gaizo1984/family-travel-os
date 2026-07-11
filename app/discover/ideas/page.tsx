@@ -1,14 +1,15 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getFamily } from "@/lib/family";
 
 export default async function DiscoverIdeasPage() {
   const supabase = await createClient();
-  const { data: family } = await supabase.from("families").select("id").limit(1).single();
+  const { id: familyId } = await getFamily();
   const { data: ideas } = await supabase
     .from("trip_ideas")
     .select("id, destination, route_summary, best_season, reasoning, origin, session_id, converted_trip_id")
-    .eq("family_id", family?.id ?? "")
+    .eq("family_id", familyId)
     .order("created_at", { ascending: false });
 
   return (

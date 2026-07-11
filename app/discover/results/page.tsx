@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getFamily } from "@/lib/family";
 import { buildFamilyDnaSummary } from "@/lib/family-dna";
 import { DESTINATIONS, MOOD_OPTIONS, SEASON_WINDOW_OPTIONS } from "@/lib/data/destination-knowledge";
 import type { MoodKey, SeasonWindowKey } from "@/lib/data/destination-knowledge";
@@ -15,11 +16,11 @@ export default async function DiscoverResultsPage({
   const { season, mood } = await searchParams;
 
   const supabase = await createClient();
-  const { data: family } = await supabase.from("families").select("id").limit(1).single();
-  const dna = await buildFamilyDnaSummary(family?.id ?? "");
+  const { id: familyId } = await getFamily();
+  const dna = await buildFamilyDnaSummary(familyId);
 
-  const { data: pastTrips } = await supabase.from("past_trips").select("country_or_region").eq("family_id", family?.id ?? "");
-  const { data: trips } = await supabase.from("trips").select("title").eq("family_id", family?.id ?? "").in("status", ["completed", "active"]);
+  const { data: pastTrips } = await supabase.from("past_trips").select("country_or_region").eq("family_id", familyId);
+  const { data: trips } = await supabase.from("trips").select("title").eq("family_id", familyId).in("status", ["completed", "active"]);
   const avoidNames = [...(pastTrips ?? []).map((p) => p.country_or_region), ...(trips ?? []).map((t) => t.title)];
 
   const seasonOption = SEASON_WINDOW_OPTIONS.find((s) => s.key === season as SeasonWindowKey);

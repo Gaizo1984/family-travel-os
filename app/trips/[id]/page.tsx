@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { Plane, BedDouble, Compass, FileText, MoreHorizontal, ChevronLeft, ChevronRight, Wallet, Route, Pencil } from "lucide-react";
 import { formatDateDE, getTripDuration } from "@/lib/demo-data";
 import { createClient } from "@/lib/supabase/server";
+import { getFamily } from "@/lib/family";
 import { sortBookingsChronologically, BOOKING_CATEGORIES, BOOKING_CATEGORY_ORDER } from "@/lib/bookings";
 import type { BookingType, BookingStatus } from "@/lib/supabase/types";
 import { DayRow } from "./JourneyDayRow";
@@ -350,20 +351,20 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
   const { id } = await params;
 
   const supabase = await createClient();
-  const { data: family } = await supabase.from("families").select("id").limit(1).single();
-  const familyId = family?.id ?? "";
-
-  const { data } = await supabase
-    .from("trips")
-    .select(`
-      id, slug, title, subtitle, status, start_date, end_date, gradient_from, gradient_to,
-      trip_members ( persons ( id, name, initials, color ) ),
-      stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code ),
-      bookings ( id, type, title, provider, status, amount, currency, start_datetime, end_datetime, stage_id, details, created_at ),
-      journey_events ( id, stage_id, date, time, category, title, location, status )
-    `)
-    .eq("slug", id)
-    .maybeSingle();
+  const [{ id: familyId }, { data }] = await Promise.all([
+    getFamily(),
+    supabase
+      .from("trips")
+      .select(`
+        id, slug, title, subtitle, status, start_date, end_date, gradient_from, gradient_to,
+        trip_members ( persons ( id, name, initials, color ) ),
+        stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code ),
+        bookings ( id, type, title, provider, status, amount, currency, start_datetime, end_datetime, stage_id, details, created_at ),
+        journey_events ( id, stage_id, date, time, category, title, location, status )
+      `)
+      .eq("slug", id)
+      .maybeSingle(),
+  ]);
 
   if (!data) notFound();
 
@@ -397,15 +398,27 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
 
   const duration  = trip.start_date && trip.end_date
     ? getTripDuration(trip.start_date, trip.end_date) : 0;
-  const highlightPhotoByTripId = await getHighlightPhotoByTripId(supabase, familyId, [trip.id]);
+
+  // §"Vergangene Reisen: keine Boardingpass-/Dokumenten-/Konflikthinweise mehr":
+  // Readiness ist eine reine Vorbereitungs-Checkliste — für abgeschlossene
+  // Reisen gibt es nichts mehr vorzubereiten, daher wird sie gar nicht erst
+  // berechnet, sondern durch eine Erinnerungs-/Statistik-Ansicht ersetzt.
+  const historical = isTripHistorical(trip);
+  // Beide unabhängig voneinander (Highlight-Foto braucht nur familyId/trip.id,
+  // Readiness nur trip.id) — parallel statt seriell laden.
+  const [highlightPhotoByTripId, readiness] = await Promise.all([
+    getHighlightPhotoByTripId(supabase, familyId, [trip.id]),
+    historical ? Promise.resolve(null) : computeTripReadiness(trip.id),
+  ]);
   const heroImage = resolveTripImage(trip, highlightPhotoByTripId.get(trip.id) ?? null);
+  const groupedFindings = readiness ? groupReadinessFindings(readiness.findings) : [];
 
   // "Aktive Reise" nur, wenn die Reise anhand der echten Daten gerade läuft —
   // nicht allein anhand des manuell gesetzten Status. Zukünftige Reisen zeigen
   // stattdessen "Bevorstehende Reise"; Reisen, deren Enddatum bereits vergangen
   // ist (auch wenn der Status nie manuell auf "completed" gesetzt wurde), gelten
   // als "Erlebt" statt fälschlich als bevorstehend.
-  const statusLabel = isTripHistorical(trip) ? "Erlebt"
+  const statusLabel = historical ? "Erlebt"
     : isTripCurrentlyRunning(trip) ? "Aktive Reise"
     : "Bevorstehende Reise";
 
@@ -429,14 +442,6 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
     totalNights > 0 ? `${totalNights} ${totalNights === 1 ? "Nacht" : "Nächte"}` : null,
     stages.length > 0 ? `${stages.length} ${stages.length === 1 ? "Aufenthalt" : "Aufenthalte"}` : null,
   ].filter(Boolean).join(" · ");
-
-  // §"Vergangene Reisen: keine Boardingpass-/Dokumenten-/Konflikthinweise mehr":
-  // Readiness ist eine reine Vorbereitungs-Checkliste — für abgeschlossene
-  // Reisen gibt es nichts mehr vorzubereiten, daher wird sie gar nicht erst
-  // berechnet, sondern durch eine Erinnerungs-/Statistik-Ansicht ersetzt.
-  const historical = isTripHistorical(trip);
-  const readiness = historical ? null : await computeTripReadiness(trip.id);
-  const groupedFindings = readiness ? groupReadinessFindings(readiness.findings) : [];
   // Konflikte und Hinweise nicht mehr vermischen/verschweigen: Sind beide Arten
   // vorhanden, zeigt die Hero-Pille beide Zahlen statt nur die eine Kategorie —
   // sonst könnte "5 Konflikte" stehen, während unten zusätzlich Hinweise (z. B.

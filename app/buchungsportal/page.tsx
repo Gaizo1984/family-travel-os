@@ -1,5 +1,6 @@
 import { MapPin, Plane, Heart } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getFamily } from "@/lib/family";
 import { isTripPastEnd } from "@/lib/trip-status";
 import { DESTINATIONS } from "@/lib/data/destination-knowledge";
 import { searchHotels } from "@/lib/providers/hotel-provider";
@@ -72,8 +73,7 @@ export default async function BuchungsportalPage({
 }) {
   const { saved, error } = await searchParams;
   const supabase = await createClient();
-  const { data: family } = await supabase.from("families").select("id").limit(1).single();
-  const familyId = family?.id ?? "";
+  const { id: familyId } = await getFamily();
 
   const { data: tripsRaw } = await supabase
     .from("trips")
@@ -161,7 +161,7 @@ export default async function BuchungsportalPage({
               <div key={h.id} className="rounded-xl overflow-hidden" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
                 <div className="relative" style={{ height: 150 }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={h.photo} alt={h.name} className="absolute inset-0 w-full h-full object-cover" />
+                  <img src={h.photo} alt={h.name} loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
                   <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(10,9,7,0.9) 0%, transparent 60%)" }} />
                   <div className="absolute inset-x-0 bottom-0 p-4 flex items-end justify-between gap-2">
                     <div>
@@ -228,7 +228,7 @@ export default async function BuchungsportalPage({
               <div key={r.id} className="rounded-xl overflow-hidden" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
                 <div className="relative" style={{ height: 120 }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={r.photo} alt={r.name} className="absolute inset-0 w-full h-full object-cover" />
+                  <img src={r.photo} alt={r.name} loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
                   <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(10,9,7,0.9) 0%, transparent 60%)" }} />
                   <div className="absolute inset-x-0 bottom-0 p-4 flex items-end justify-between gap-2">
                     <div>
@@ -262,7 +262,7 @@ export default async function BuchungsportalPage({
               <div key={e.id} className="rounded-xl overflow-hidden" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
                 <div className="relative" style={{ height: 120 }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={e.photo} alt={e.title} className="absolute inset-0 w-full h-full object-cover" />
+                  <img src={e.photo} alt={e.title} loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
                   <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(10,9,7,0.9) 0%, transparent 60%)" }} />
                   <div className="absolute inset-x-0 bottom-0 p-4 flex items-end justify-between gap-2">
                     <div>

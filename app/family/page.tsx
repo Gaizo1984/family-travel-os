@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Map as MapIcon, Globe, CalendarDays, ArrowRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getFamily } from "@/lib/family";
 import { COMPASS_CATEGORY_ORDER, COMPASS_CATEGORY_LABELS } from "@/lib/family-dna";
 import { buildWorldStats } from "@/lib/world-stats";
 import { isTripHistorical, isTripCurrentlyRunning } from "@/lib/trip-status";
@@ -60,8 +61,7 @@ function PersonCard({ person, photoUrl, compact }: { person: PersonRow; photoUrl
 
 export default async function FamilyPage() {
   const supabase = await createClient();
-  const { data: family } = await supabase.from("families").select("id").limit(1).single();
-  const familyId = family?.id ?? "";
+  const { id: familyId } = await getFamily();
 
   const [{ data: personsRaw }, { data: preferences }, worldStats] = await Promise.all([
     supabase.from("persons").select("id, name, initials, is_minor, role_label, description, interest_tags, travel_needs, photo_storage_path").eq("family_id", familyId).order("is_minor"),
@@ -74,12 +74,14 @@ export default async function FamilyPage() {
   const kids = persons.filter((p) => p.is_minor);
 
   const photoUrlByPersonId = new Map<string, string>();
-  for (const p of persons) {
-    if (p.photo_storage_path) {
-      const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.photo_storage_path, 3600);
-      if (signed?.signedUrl) photoUrlByPersonId.set(p.id, signed.signedUrl);
-    }
-  }
+  await Promise.all(
+    persons
+      .filter((p): p is PersonRow & { photo_storage_path: string } => !!p.photo_storage_path)
+      .map(async (p) => {
+        const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.photo_storage_path, 3600);
+        if (signed?.signedUrl) photoUrlByPersonId.set(p.id, signed.signedUrl);
+      }),
+  );
 
   const prefByKey = new Map((preferences ?? []).map((p) => [p.category_key, p]));
 

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getFamily } from "@/lib/family";
 import { buildFamilyDnaSummary } from "@/lib/family-dna";
 import { DESTINATIONS, MOOD_OPTIONS, SEASON_WINDOW_OPTIONS } from "@/lib/data/destination-knowledge";
 import { scoreDestinations } from "@/lib/discover-scoring";
@@ -18,8 +19,7 @@ function SecLabel({ children }: { children: React.ReactNode }) {
 
 export default async function DiscoverPage() {
   const supabase = await createClient();
-  const { data: family } = await supabase.from("families").select("id").limit(1).single();
-  const familyId = family?.id ?? "";
+  const { id: familyId } = await getFamily();
 
   const dna = await buildFamilyDnaSummary(familyId);
   const { data: pastTrips } = await supabase.from("past_trips").select("country_or_region").eq("family_id", familyId);

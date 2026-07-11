@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft, Star } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getFamily } from "@/lib/family";
 import { WhatCanAI } from "../WhatCanAI";
 
 export default async function ContentIdeasLibraryPage({
@@ -12,11 +13,11 @@ export default async function ContentIdeasLibraryPage({
   const showArchived = archiv === "1";
 
   const supabase = await createClient();
-  const { data: family } = await supabase.from("families").select("id").limit(1).single();
+  const { id: familyId } = await getFamily();
   const { data: allIdeas } = await supabase
     .from("content_ideas")
     .select("id, content_goal, status, is_favorite, created_at, trip_id, trips(title)")
-    .eq("family_id", family?.id ?? "")
+    .eq("family_id", familyId)
     .order("created_at", { ascending: false });
 
   const ideas = (allIdeas ?? []).filter((i) => (showArchived ? i.status === "archived" : i.status !== "archived"));

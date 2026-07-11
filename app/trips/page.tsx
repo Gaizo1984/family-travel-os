@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Map as MapIcon, Globe, CalendarDays } from "lucide-react";
 import { formatDateDE, getTripDuration } from "@/lib/demo-data";
 import { createClient } from "@/lib/supabase/server";
+import { getFamily } from "@/lib/family";
 import { restoreTrip } from "@/lib/actions/trips";
 import { tripCountdownDisplay } from "@/lib/trip-status";
 import { resolveTripImage, getHighlightPhotoByTripId } from "@/lib/trip-images";
@@ -253,22 +254,23 @@ export default async function TripsPage({
   const { f = "alle" } = await searchParams;
 
   const supabase = await createClient();
-  const { data: family } = await supabase.from("families").select("id").limit(1).single();
-  const familyId = family?.id ?? "";
+  const { id: familyId } = await getFamily();
 
-  const { data } = await supabase
-    .from("trips")
-    .select(`
-      id, slug, title, subtitle, status,
-      start_date, end_date, cover_emoji,
-      gradient_from, gradient_via, gradient_to,
-      trip_members ( persons ( id, name, initials, color ) ),
-      stages ( id )
-    `)
-    .order("start_date", { ascending: true, nullsFirst: false });
+  const [{ data }, highlightPhotoByTripId] = await Promise.all([
+    supabase
+      .from("trips")
+      .select(`
+        id, slug, title, subtitle, status,
+        start_date, end_date, cover_emoji,
+        gradient_from, gradient_via, gradient_to,
+        trip_members ( persons ( id, name, initials, color ) ),
+        stages ( id )
+      `)
+      .order("start_date", { ascending: true, nullsFirst: false }),
+    getHighlightPhotoByTripId(supabase, familyId),
+  ]);
 
   const trips = (data ?? []) as unknown as TripRow[];
-  const highlightPhotoByTripId = await getHighlightPhotoByTripId(supabase, familyId);
   const tripImageById = new Map(trips.map((t) => [t.id, resolveTripImage(t, highlightPhotoByTripId.get(t.id) ?? null)]));
   const { planned, past } = applyFilter(trips, f);
 

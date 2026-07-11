@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getFamily } from "@/lib/family";
 import { buildWorldStats } from "@/lib/world-stats";
 
 export default async function YearbookPage({
@@ -12,8 +13,7 @@ export default async function YearbookPage({
   const year = Number(yearParam);
 
   const supabase = await createClient();
-  const { data: family } = await supabase.from("families").select("id").limit(1).single();
-  const familyId = family?.id ?? "";
+  const { id: familyId } = await getFamily();
 
   const [worldStats, { data: photosRaw }] = await Promise.all([
     buildWorldStats(familyId),

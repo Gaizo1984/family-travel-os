@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getFamily } from "@/lib/family";
 import { createPastTrip } from "@/lib/actions/past-trips";
 import { Banner } from "@/components/Banner";
 
@@ -22,8 +23,8 @@ export default async function NewPastTripPage({
   const { error } = await searchParams;
 
   const supabase = await createClient();
-  const { data: family } = await supabase.from("families").select("id").limit(1).single();
-  const { data: persons } = await supabase.from("persons").select("id, name").eq("family_id", family?.id ?? "").order("name");
+  const { id: familyId } = await getFamily();
+  const { data: persons } = await supabase.from("persons").select("id, name").eq("family_id", familyId).order("name");
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -49,7 +50,7 @@ export default async function NewPastTripPage({
         </p>
 
         <form action={createPastTrip} encType="multipart/form-data">
-          <input type="hidden" name="family_id" value={family?.id ?? ""} />
+          <input type="hidden" name="family_id" value={familyId} />
 
           <div className="rounded-xl p-8" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
             {error && (

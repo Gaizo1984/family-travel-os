@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowRight, Users, Clock, CalendarDays, Plane } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getFamily } from "@/lib/family";
 import { createTrip } from "@/lib/actions/trips";
 import { generateTripIdeas } from "@/lib/actions/trip-idea-generation";
 import { COMPASS_CATEGORY_LABELS } from "@/lib/family-dna";
@@ -135,11 +136,11 @@ export default async function PlanPage({
     .select("id, name, initials, color")
     .order("name");
 
-  const { data: family } = await supabase.from("families").select("id").limit(1).single();
+  const { id: familyId } = await getFamily();
   const { data: preferences } = await supabase
     .from("family_preference_categories")
     .select("category_key, weight, note")
-    .eq("family_id", family?.id ?? "")
+    .eq("family_id", familyId)
     .order("weight", { ascending: false });
 
   let fromIdea: { destination: string; route_summary: string | null } | null = null;

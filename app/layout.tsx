@@ -3,6 +3,7 @@ import { Geist } from "next/font/google";
 import Link from "next/link";
 import { LayoutDashboard, Plane, Users, Sun, Camera, Compass, MessageSquare, MoreHorizontal, BookOpenCheck, Images } from "lucide-react";
 import { SplashScreen } from "@/components/SplashScreen";
+import { RoutePrefetcher } from "@/components/RoutePrefetcher";
 import "./globals.css";
 
 const geist = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -73,6 +74,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         style={{ background: "var(--background)", color: "var(--foreground)" }}
       >
         <SplashScreen />
+        <RoutePrefetcher />
 
         {/* Sidebar — desktop */}
         <aside

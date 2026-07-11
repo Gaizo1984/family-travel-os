@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Map as MapIcon, Globe, Users } from "lucide-react";
 import { formatDateDE, getTripDuration } from "@/lib/demo-data";
 import { createClient } from "@/lib/supabase/server";
+import { getFamily } from "@/lib/family";
 import { buildWorldStats } from "@/lib/world-stats";
 import { isTripPastEnd, isTripHistorical, tripCountdownDisplay } from "@/lib/trip-status";
 import { resolveTripImage, getHighlightPhotoByTripId } from "@/lib/trip-images";
@@ -170,10 +171,11 @@ function TripCardElegant({ trip, imgUrl }: { trip: TripRow; imgUrl: string | nul
 
 export default async function Dashboard() {
   const supabase = await createClient();
-  const { data: family } = await supabase.from("families").select("id").limit(1).single();
-  const familyId = family?.id ?? "";
+  const { id: familyId } = await getFamily();
 
-  const [{ data: tripsRaw }, { count: personsCount }, worldStats] = await Promise.all([
+  // Highlightfoto-Query braucht nur familyId (keine Trip-IDs übergeben), hängt
+  // also nicht von den Trips ab — direkt mit in dieselbe parallele Ladung.
+  const [{ data: tripsRaw }, { count: personsCount }, worldStats, highlightPhotoByTripId] = await Promise.all([
     supabase
       .from("trips")
       .select(`
@@ -185,6 +187,7 @@ export default async function Dashboard() {
       .order("start_date", { ascending: true, nullsFirst: false }),
     supabase.from("persons").select("id", { count: "exact", head: true }).eq("family_id", familyId),
     buildWorldStats(familyId),
+    getHighlightPhotoByTripId(supabase, familyId),
   ]);
 
   const trips = (tripsRaw ?? []) as unknown as TripRow[];
@@ -196,7 +199,6 @@ export default async function Dashboard() {
   const pastTrips = trips.filter((t) => isTripHistorical(t));
 
   // Highlightfoto je Reise (falls die Familie eines markiert hat) — erste Stufe der Bildauflösung.
-  const highlightPhotoByTripId = await getHighlightPhotoByTripId(supabase, familyId);
   const tripImageById = new Map(trips.map((t) => [t.id, resolveTripImage(t, highlightPhotoByTripId.get(t.id) ?? null)]));
 
   if (!nextTrip) {

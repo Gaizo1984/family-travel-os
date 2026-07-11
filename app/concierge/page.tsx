@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ChevronRight, Users, MapPin, RefreshCw, Sparkles } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { getFamily } from "@/lib/family";
 import { buildContentStrategyContext } from "@/lib/content-strategy-context";
 import type { ContentStrategyContext } from "@/lib/content-strategy-context";
 import { QUICK_ACTIONS } from "@/lib/concierge";
@@ -44,9 +44,7 @@ function formatTimestamp(iso: string): string {
 }
 
 export default async function ConciergePage() {
-  const supabase = await createClient();
-  const { data: family } = await supabase.from("families").select("id, name").limit(1).single();
-  const familyId = family?.id ?? "";
+  const { id: familyId } = await getFamily();
 
   const ctx = await buildContentStrategyContext(familyId);
 
