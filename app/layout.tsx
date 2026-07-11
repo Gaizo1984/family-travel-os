@@ -14,6 +14,25 @@ export const metadata: Metadata = {
     title: "Travel OS",
     statusBarStyle: "black-translucent",
   },
+  icons: {
+    apple: "/icons/apple-icon-180.png",
+    other: [
+      {
+        rel: "apple-touch-startup-image",
+        url: "/splash/splash-1170x2532.png",
+        media: "(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3)",
+      },
+      {
+        rel: "apple-touch-startup-image",
+        url: "/splash/splash-1668x2388.png",
+        media: "(device-width: 834px) and (device-height: 1194px) and (-webkit-device-pixel-ratio: 2)",
+      },
+      {
+        rel: "apple-touch-startup-image",
+        url: "/splash/splash-1170x2532.png",
+      },
+    ],
+  },
 };
 
 export const viewport: Viewport = {
