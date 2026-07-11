@@ -4,6 +4,7 @@ import { ChevronLeft, AlertTriangle, CircleAlert, CircleCheck } from "lucide-rea
 import { createClient } from "@/lib/supabase/server";
 import { computeTripReadiness, READINESS_THEME_LABELS } from "@/lib/readiness";
 import type { ReadinessTheme } from "@/lib/readiness";
+import { isTripHistorical } from "@/lib/trip-status";
 
 const THEME_ORDER: ReadinessTheme[] = ["documents", "entry", "insurance", "itinerary", "bookings"];
 
@@ -23,11 +24,34 @@ export default async function ReadyToTravelPage({
   const supabase = await createClient();
   const { data: trip } = await supabase
     .from("trips")
-    .select("id, slug, title")
+    .select("id, slug, title, status, start_date, end_date")
     .eq("slug", id)
     .maybeSingle();
 
   if (!trip) notFound();
+
+  if (isTripHistorical(trip)) {
+    return (
+      <div className="flex-1" style={{ background: "var(--background)" }}>
+        <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-9">
+          <Link
+            href={`/trips/${trip.slug}`}
+            className="flex items-center gap-2 mb-8 transition-opacity hover:opacity-70"
+            style={{ color: "var(--muted)", fontSize: "0.78rem", letterSpacing: "0.04em", textDecoration: "none", width: "fit-content" }}
+          >
+            <ChevronLeft size={13} strokeWidth={1.5} />
+            {trip.title}
+          </Link>
+          <div className="rounded-xl p-6 flex items-center gap-4" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+            <CircleCheck size={18} strokeWidth={1.4} style={{ color: "#4C7A5D", flexShrink: 0 }} />
+            <p style={{ color: "var(--muted)", fontSize: "0.82rem" }}>
+              Diese Reise ist bereits abgeschlossen — hier gibt es nichts mehr vorzubereiten.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const result = await computeTripReadiness(trip.id);
 

@@ -57,16 +57,24 @@ function PhotoCard({ photo, url, personName, returnTo }: { photo: PhotoRow; url:
 export default async function MemoriesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; uploaded?: string }>;
+  searchParams: Promise<{ error?: string; uploaded?: string; trip?: string }>;
 }) {
-  const { error, uploaded } = await searchParams;
+  const { error, uploaded, trip: tripFilter } = await searchParams;
   const supabase = await createClient();
   const { data: family } = await supabase.from("families").select("id").limit(1).single();
   const familyId = family?.id ?? "";
-  const returnTo = "/memories";
+  const returnTo = tripFilter ? `/memories?trip=${tripFilter}` : "/memories";
 
   const [{ data: photosRaw }, { data: personsRaw }, { data: tripsRaw }] = await Promise.all([
-    supabase.from("memory_photos").select("id, trip_id, uploaded_by_person_id, storage_path, taken_at, caption, is_highlight, created_at").eq("family_id", familyId).order("taken_at", { ascending: false, nullsFirst: false }),
+    (() => {
+      let query = supabase
+        .from("memory_photos")
+        .select("id, trip_id, uploaded_by_person_id, storage_path, taken_at, caption, is_highlight, created_at")
+        .eq("family_id", familyId)
+        .order("taken_at", { ascending: false, nullsFirst: false });
+      if (tripFilter) query = query.eq("trip_id", tripFilter);
+      return query;
+    })(),
     supabase.from("persons").select("id, name").eq("family_id", familyId),
     supabase.from("trips").select("id, title").eq("family_id", familyId).order("start_date", { ascending: false }),
   ]);
@@ -75,6 +83,7 @@ export default async function MemoriesPage({
   const persons = personsRaw ?? [];
   const trips = tripsRaw ?? [];
   const personNameById = new Map(persons.map((p) => [p.id, p.name]));
+  const filteredTripTitle = tripFilter ? trips.find((t) => t.id === tripFilter)?.title ?? null : null;
 
   const photosWithUrls = await Promise.all(
     photos.map(async (p) => {
@@ -117,8 +126,13 @@ export default async function MemoriesPage({
             Travel Memory
           </div>
           <h1 className="font-light" style={{ color: "var(--foreground)", fontSize: "1.6rem", letterSpacing: "-0.01em" }}>
-            Eure gemeinsame Reisegalerie
+            {filteredTripTitle ? `Erinnerungen: ${filteredTripTitle}` : "Eure gemeinsame Reisegalerie"}
           </h1>
+          {tripFilter && (
+            <Link href="/memories" style={{ color: "var(--accent)", fontSize: "0.72rem", textDecoration: "none" }}>
+              Alle Erinnerungen ansehen →
+            </Link>
+          )}
         </header>
 
         {uploaded && (

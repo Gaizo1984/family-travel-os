@@ -435,20 +435,27 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
     stages.length > 0 ? `${stages.length} ${stages.length === 1 ? "Aufenthalt" : "Aufenthalte"}` : null,
   ].filter(Boolean).join(" · ");
 
-  const readiness = await computeTripReadiness(trip.id);
-  const groupedFindings = groupReadinessFindings(readiness.findings);
+  // §"Vergangene Reisen: keine Boardingpass-/Dokumenten-/Konflikthinweise mehr":
+  // Readiness ist eine reine Vorbereitungs-Checkliste — für abgeschlossene
+  // Reisen gibt es nichts mehr vorzubereiten, daher wird sie gar nicht erst
+  // berechnet, sondern durch eine Erinnerungs-/Statistik-Ansicht ersetzt.
+  const historical = isTripHistorical(trip);
+  const readiness = historical ? null : await computeTripReadiness(trip.id);
+  const groupedFindings = readiness ? groupReadinessFindings(readiness.findings) : [];
   // Konflikte und Hinweise nicht mehr vermischen/verschweigen: Sind beide Arten
   // vorhanden, zeigt die Hero-Pille beide Zahlen statt nur die eine Kategorie —
   // sonst könnte "5 Konflikte" stehen, während unten zusätzlich Hinweise (z. B.
   // fehlende Flugbuchung) existieren, ohne dass die Zahl das widerspiegelt.
-  const readinessLabel = readiness.status === "ready"
+  const readinessLabel = !readiness ? "" : readiness.status === "ready"
     ? "Reisebereit"
     : readiness.conflictCount > 0 && readiness.hintCount > 0
       ? `${readiness.conflictCount} ${readiness.conflictCount === 1 ? "Konflikt" : "Konflikte"} · ${readiness.hintCount} ${readiness.hintCount === 1 ? "Hinweis" : "Hinweise"}`
       : readiness.conflictCount > 0
         ? `${readiness.conflictCount} ${readiness.conflictCount === 1 ? "Konflikt" : "Konflikte"}`
         : `${readiness.hintCount} ${readiness.hintCount === 1 ? "Hinweis" : "Hinweise"}`;
-  const readinessColor = readiness.status === "ready" ? "#4C7A5D" : readiness.status === "conflicts" ? "#B5624A" : "#B89A5E";
+  const readinessColor = !readiness ? "#4C7A5D" : readiness.status === "ready" ? "#4C7A5D" : readiness.status === "conflicts" ? "#B5624A" : "#B89A5E";
+
+  const visitedCountryCount = new Set(stages.map((s) => s.country_code).filter((c): c is string => !!c)).size;
 
   return (
     <div className="flex-1 flex flex-col">
@@ -484,23 +491,43 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
             {statusLabel}
           </span>
 
-          <Link
-            href={`/trips/${trip.slug}/ready-to-travel`}
-            className="flex items-center gap-2 transition-opacity hover:opacity-80"
-            style={{
-              background: "rgba(10,9,7,0.82)",
-              border: `1px solid ${readinessColor}55`,
-              padding: "5px 12px",
-              borderRadius: "20px",
-              textDecoration: "none",
-              whiteSpace: "nowrap",
-            }}
-          >
-            <span className="rounded-full shrink-0" style={{ width: 6, height: 6, background: readinessColor }} />
-            <span style={{ fontSize: "0.64rem", letterSpacing: "0.04em", fontWeight: 500, color: "#F0EBE3" }}>
-              {readiness.status === "ready" ? "Ready to Travel" : readinessLabel}
-            </span>
-          </Link>
+          {readiness ? (
+            <Link
+              href={`/trips/${trip.slug}/ready-to-travel`}
+              className="flex items-center gap-2 transition-opacity hover:opacity-80"
+              style={{
+                background: "rgba(10,9,7,0.82)",
+                border: `1px solid ${readinessColor}55`,
+                padding: "5px 12px",
+                borderRadius: "20px",
+                textDecoration: "none",
+                whiteSpace: "nowrap",
+              }}
+            >
+              <span className="rounded-full shrink-0" style={{ width: 6, height: 6, background: readinessColor }} />
+              <span style={{ fontSize: "0.64rem", letterSpacing: "0.04em", fontWeight: 500, color: "#F0EBE3" }}>
+                {readiness.status === "ready" ? "Ready to Travel" : readinessLabel}
+              </span>
+            </Link>
+          ) : (
+            <Link
+              href={`/memories?trip=${trip.id}`}
+              className="flex items-center gap-2 transition-opacity hover:opacity-80"
+              style={{
+                background: "rgba(10,9,7,0.82)",
+                border: "1px solid rgba(184,154,94,0.35)",
+                padding: "5px 12px",
+                borderRadius: "20px",
+                textDecoration: "none",
+                whiteSpace: "nowrap",
+              }}
+            >
+              <span className="rounded-full shrink-0" style={{ width: 6, height: 6, background: "var(--accent)" }} />
+              <span style={{ fontSize: "0.64rem", letterSpacing: "0.04em", fontWeight: 500, color: "#F0EBE3" }}>
+                Erinnerungen ansehen
+              </span>
+            </Link>
+          )}
 
           <Link
             href={`/trips/${trip.slug}/edit`}
@@ -738,6 +765,33 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
                 {groupedFindings.map((finding, idx) => (
                   <ReadinessStepItem key={finding.key} finding={finding} isLast={idx === groupedFindings.length - 1} />
                 ))}
+              </div>
+            </section>
+          )}
+
+          {historical && (
+            <section>
+              <SectionLabel>Diese Reise ist abgeschlossen</SectionLabel>
+              <div className="rounded-xl p-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+                <div className="flex gap-8 mb-5">
+                  {[
+                    { value: duration, label: duration === 1 ? "Tag" : "Tage" },
+                    { value: stages.length, label: stages.length === 1 ? "Aufenthalt" : "Aufenthalte" },
+                    { value: visitedCountryCount, label: visitedCountryCount === 1 ? "Land" : "Länder" },
+                  ].map(({ value, label }) => (
+                    <div key={label}>
+                      <div className="text-2xl font-light leading-none mb-1" style={{ color: "var(--foreground)" }}>{value}</div>
+                      <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.14em", textTransform: "uppercase" }}>{label}</div>
+                    </div>
+                  ))}
+                </div>
+                <Link
+                  href={`/memories?trip=${trip.id}`}
+                  className="inline-flex items-center gap-1"
+                  style={{ color: "var(--accent)", fontSize: "0.75rem", letterSpacing: "0.04em", textDecoration: "none" }}
+                >
+                  Erinnerungsfotos ansehen <ChevronRight size={13} strokeWidth={1.6} />
+                </Link>
               </div>
             </section>
           )}
