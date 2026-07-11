@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Users, Compass, MessageSquare, ChevronRight, type LucideIcon } from "lucide-react";
+import { Users, Compass, MessageSquare, BookOpenCheck, ChevronRight, type LucideIcon } from "lucide-react";
 
 interface MoreLink {
   href: string;
@@ -11,6 +11,7 @@ interface MoreLink {
 const MORE_LINKS: MoreLink[] = [
   { href: "/family", label: "Familie", description: "Reiseprofile & Vorlieben", Icon: Users },
   { href: "/discover", label: "Entdecken", description: "Ideen & Inspiration", Icon: Compass },
+  { href: "/buchungsportal", label: "Buchungsportal", description: "Hotels, Flüge & Restaurants im Vergleich", Icon: BookOpenCheck },
   { href: "/concierge", label: "Concierge", description: "Persönliche Reiseberatung", Icon: MessageSquare },
 ];
 
