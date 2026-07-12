@@ -1,8 +1,11 @@
 import Link from "next/link";
 import {
   Clock, ArrowRight, Ticket, Car, Users, ChevronRight, Sparkles, Compass,
+  FileQuestion, CloudSun, Shuffle, AlertTriangle, RefreshCw,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { Banner } from "@/components/Banner";
 import { getFamily } from "@/lib/family";
 import { isTripCurrentlyRunning, isTripHistorical, tripCountdownDisplay } from "@/lib/trip-status";
 import { getTripDuration } from "@/lib/demo-data";
@@ -26,11 +29,14 @@ import { computeTripRequirements } from "@/lib/travel-requirements";
 import type { TravelRequirement } from "@/lib/travel-requirements";
 import { scoreDestinations } from "@/lib/discover-scoring";
 import type { ScoredDestination } from "@/lib/discover-scoring";
-import { DESTINATIONS } from "@/lib/data/destination-knowledge";
-import { QUICK_ACTIONS } from "@/lib/concierge";
-import { askConcierge, commitConciergeAction } from "@/lib/actions/concierge-actions";
+import { searchDestinations } from "@/lib/providers/destination-provider";
+import { QUICK_ACTIONS, buildConciergeCards } from "@/lib/concierge";
+import type { QuickActionKey, DisplayCard } from "@/lib/concierge";
+import { askConcierge, commitConciergeAction, refreshConciergeMessage } from "@/lib/actions/concierge-actions";
 import { listTodayConciergeMessages, buildContextFingerprint } from "@/lib/concierge-messages";
 import type { CachedConciergeMessage } from "@/lib/concierge-messages";
+import { computeTripReadiness } from "@/lib/readiness";
+import type { ReadinessFinding } from "@/lib/readiness";
 
 type FlightWithPasses = { id: string; title: string; slug: string };
 
@@ -121,6 +127,20 @@ type TripRow = {
   stages: StageRow[]; bookings: BookingRow[]; journey_events: JourneyEventRow[];
 };
 
+/** §"Schnellaktionen (Icons)": ein Icon je QUICK_ACTIONS-Eintrag, nur für die Darstellung in LUMI. */
+const QUICK_ACTION_ICONS: Record<QuickActionKey, LucideIcon> = {
+  today_important: Sparkles,
+  plan_tomorrow: Clock,
+  whats_missing: FileQuestion,
+  adjust_weather: CloudSun,
+  find_alternative: Shuffle,
+  explain_conflict: AlertTriangle,
+};
+
+function formatTimestamp(iso: string): string {
+  return new Date(iso).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) + " Uhr";
+}
+
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <h2
@@ -144,7 +164,7 @@ function Card({ children, className = "" }: { children: React.ReactNode; classNa
 }
 
 /** §Punkt 3 "Ein-Klick-Übernahme ins Journey": wiederverwendet commitConciergeAction 1:1 (lib/actions/concierge-actions.ts), das bereits genau das tut -- kein neuer Server-Code. */
-function CommitToJourneyButton({ tripId, tripSlug, forDate, eventTitle, label }: { tripId: string; tripSlug: string; forDate: string; eventTitle: string; label: string }) {
+function CommitToJourneyButton({ tripId, tripSlug, forDate, eventTitle, label, className = "mt-3" }: { tripId: string; tripSlug: string; forDate: string; eventTitle: string; label: string; className?: string }) {
   return (
     <form action={commitConciergeAction}>
       <input type="hidden" name="trip_id" value={tripId} />
@@ -153,7 +173,7 @@ function CommitToJourneyButton({ tripId, tripSlug, forDate, eventTitle, label }:
       <input type="hidden" name="event_title" value={eventTitle} />
       <button
         type="submit"
-        className="mt-3"
+        className={className}
         style={{
           background: "transparent", color: "var(--accent)", border: "1px solid rgba(184,154,94,0.4)",
           borderRadius: "20px", padding: "6px 14px", fontSize: "0.62rem", cursor: "pointer",
@@ -221,7 +241,7 @@ function EntdeckenPreview({ items }: { items: ScoredDestination[] }) {
   );
 }
 
-/** §"Frag LUMI" ohne laufende Reise: dieselbe Einschränkung wie /concierge selbst (buildContentStrategyContext braucht eine laufende Reise) -- ehrlicher Verweis statt eines Formulars ohne echten Kontext. */
+/** §"Frag LUMI" ohne laufende Reise: die Kontextfelder (Wetter/bekannter Plan/Highlight) ergeben ohne laufende Reise keinen Sinn -- ehrlicher Hinweis statt eines Formulars ohne echten Kontext. */
 function FragLumiTeaser() {
   return (
     <section className="mb-8">
@@ -230,19 +250,45 @@ function FragLumiTeaser() {
         <p style={{ color: "var(--muted)", fontSize: "0.82rem", lineHeight: 1.6 }}>
           Sobald eine Reise läuft, hilft dir LUMI hier mit Tagesplanung, offenen Punkten und schnellen Antworten.
         </p>
+      </Card>
+    </section>
+  );
+}
+
+/** §Punkt 4 "Intelligente Hinweise": passive Anzeige der bestehenden Reisebereitschafts-Funde (Dokumente/Flüge/Hotels/Mietwagen/offene Aufgaben, lib/readiness.ts) -- bisher nur über die Concierge-Schnellaktionen "Was fehlt?"/"Konflikt erklären" auf Klick erreichbar. */
+function PersonalisierteHinweiseSection({ findings, tripSlug }: { findings: ReadinessFinding[]; tripSlug: string }) {
+  if (findings.length === 0) return null;
+  const top = [...findings].sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "conflict" ? -1 : 1)).slice(0, 4);
+  return (
+    <section className="mb-8">
+      <SectionLabel>Personalisierte Hinweise</SectionLabel>
+      <Card>
+        <div className="space-y-2.5">
+          {top.map((f, i) => (
+            <Link key={i} href={f.href} className="flex items-center justify-between gap-2" style={{ textDecoration: "none" }}>
+              <span style={{ color: f.severity === "conflict" ? "#B5624A" : "var(--muted)", fontSize: "0.78rem" }}>{f.message}</span>
+              <ChevronRight size={12} strokeWidth={1.6} style={{ color: "var(--muted)", flexShrink: 0 }} />
+            </Link>
+          ))}
+        </div>
         <Link
-          href="/concierge"
+          href={`/trips/${tripSlug}/ready-to-travel`}
           className="inline-flex items-center gap-1 mt-3"
-          style={{ color: "var(--accent)", fontSize: "0.75rem", letterSpacing: "0.04em", textDecoration: "none" }}
+          style={{ color: "var(--accent)", fontSize: "0.72rem", letterSpacing: "0.04em", textDecoration: "none" }}
         >
-          Zu LUMI fragen <ChevronRight size={13} strokeWidth={1.6} />
+          Alle Punkte ansehen <ChevronRight size={12} strokeWidth={1.6} />
         </Link>
       </Card>
     </section>
   );
 }
 
-export default async function TodayPage() {
+export default async function TodayPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const { error } = await searchParams;
   const supabase = await createClient();
   const family = await getFamily();
   const familyId = family.id;
@@ -303,7 +349,8 @@ export default async function TodayPage() {
     ...(pastTripsForAvoid ?? []).map((p) => p.country_or_region),
     ...allTrips.filter((t) => t.status === "completed" || t.status === "active").map((t) => t.title),
   ];
-  const discoverPreview = scoreDestinations(DESTINATIONS, dna, { avoidNames }).slice(0, 3);
+  const destinations = (await searchDestinations()) ?? [];
+  const discoverPreview = scoreDestinations(destinations, dna, { avoidNames }).slice(0, 3);
 
   // Warme, kurze Begrüßung statt Namensaufzählung — nutzt den echten Familiennamen, falls hinterlegt.
   const greeting = family?.name ? `Hallo ${family.name}` : "Schön, dass ihr da seid.";
@@ -336,6 +383,7 @@ export default async function TodayPage() {
       <div className="flex-1 flex flex-col" style={{ background: "var(--background)" }}>
         {flightBanner}
         <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-9 w-full">
+          {error && <Banner variant="error">{error}</Banner>}
           <div style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "12px" }}>
             {dateLabel}
           </div>
@@ -514,15 +562,26 @@ export default async function TodayPage() {
   }
   const needsStyleChoice = !recommendation && !highlightTitle;
 
-  // §"Frag LUMI" eingebettet: dieselben Kontextfelder, die app/(app)/concierge/page.tsx
-  // sonst über buildContentStrategyContext neu berechnen würde -- hier direkt aus den
-  // ohnehin schon vorhandenen Variablen dieser Seite, keine zweite Berechnung derselben Daten.
+  // §"Frag LUMI" ist jetzt die vollständige Concierge-Erfahrung (die Seite
+  // selbst wurde entfernt) -- Kontextfelder werden direkt aus den ohnehin
+  // schon vorhandenen Variablen dieser Seite gebaut, keine zweite Berechnung.
   const conciergeMemberNames = activeTrip.trip_members.flatMap((m) => (m.persons ? [m.persons.name] : []));
   const conciergeFingerprint = buildContextFingerprint(weatherSummary, knownPlanText);
   const recentConciergeMessages: CachedConciergeMessage[] = await listTodayConciergeMessages(
     familyId, activeTrip.id, todayIso, conciergeFingerprint,
   );
-  const DETERMINISTIC_QUICK_ACTIONS = QUICK_ACTIONS.filter((qa) => qa.deterministic);
+  // §"today_important" ausgeklammert: ihre einzige Wirkung (Tagesempfehlung
+  // erzeugen/cachen) passiert auf dieser Seite bereits unconditional in der
+  // Hero-Sektion -- ein Klick hier wäre redundant. Ebenso wird die
+  // todayRec-Karte nicht in buildConciergeCards eingespeist (null), da sie
+  // schon prominent als "Empfehlung für heute" gezeigt wird.
+  const EMBEDDED_QUICK_ACTIONS = QUICK_ACTIONS.filter((qa) => qa.key !== "today_important");
+  const conciergeCards: DisplayCard[] = buildConciergeCards(null, recentConciergeMessages);
+
+  // §Punkt 4 "Intelligente Hinweise": dieselbe Reisebereitschafts-Engine wie
+  // "Was fehlt?"/"Konflikt erklären", jetzt zusätzlich passiv angezeigt statt
+  // nur auf Klick erreichbar.
+  const readiness = await computeTripReadiness(activeTrip.id);
 
   // Fahrzeitanalyse: nur reale, heute aktive Mietwagen-Buchung — keine erfundenen Kennzahlen.
   const activeRentalCar = bookings.find(
@@ -587,6 +646,7 @@ export default async function TodayPage() {
       </div>
 
       <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-8 w-full">
+        {error && <Banner variant="error">{error}</Banner>}
 
         <div style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "18px" }}>
           Für deine aktuelle Reise
@@ -617,6 +677,8 @@ export default async function TodayPage() {
             )}
           </Card>
         </section>
+
+        <PersonalisierteHinweiseSection findings={readiness.findings} tripSlug={activeTrip.slug} />
 
         {/* ── Vor einem Jahr wart ihr heute... ── */}
         {onThisDayMemoriesWithUrls.some((m) => m.url) && (
@@ -812,45 +874,44 @@ export default async function TodayPage() {
 
         <EntdeckenPreview items={discoverPreview} />
 
-        {/* ── Frag LUMI: eingebettete Kurzform von /concierge, dieselben Server Actions ── */}
+        {/* ── Frag LUMI: vollständige, ehemals separate Concierge-Erfahrung ── */}
         <section className="mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <SectionLabel>Frag LUMI</SectionLabel>
-            <Link href="/concierge" style={{ color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.04em", textDecoration: "none" }}>
-              Alle Fragen &amp; Antworten
-            </Link>
+          <SectionLabel>Frag LUMI</SectionLabel>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+            {EMBEDDED_QUICK_ACTIONS.map((qa) => {
+              const QaIcon = QUICK_ACTION_ICONS[qa.key];
+              return (
+                <form key={qa.key} action={askConcierge}>
+                  <input type="hidden" name="family_id" value={familyId} />
+                  <input type="hidden" name="trip_id" value={activeTrip.id} />
+                  <input type="hidden" name="trip_slug" value={activeTrip.slug} />
+                  <input type="hidden" name="for_date" value={todayIso} />
+                  <input type="hidden" name="date_label" value={dateLabel} />
+                  <input type="hidden" name="location_label" value={currentLocation.label} />
+                  <input type="hidden" name="weather_summary" value={weatherSummary ?? ""} />
+                  <input type="hidden" name="known_plan_text" value={knownPlanText} />
+                  <input type="hidden" name="highlight_title" value={highlightTitle ?? ""} />
+                  <input type="hidden" name="member_names" value={conciergeMemberNames.join(",")} />
+                  <input type="hidden" name="question_key" value={qa.key} />
+                  <input type="hidden" name="question_text" value={qa.label} />
+                  <button
+                    type="submit"
+                    className="w-full flex items-center gap-2.5 text-left"
+                    style={{
+                      background: "var(--surface)", color: "var(--foreground)", border: "1px solid var(--border)",
+                      borderRadius: "10px", padding: "12px 14px", fontSize: "0.76rem", cursor: "pointer",
+                    }}
+                  >
+                    <QaIcon size={14} strokeWidth={1.5} style={{ color: "var(--accent)", flexShrink: 0 }} />
+                    {qa.label}
+                  </button>
+                </form>
+              );
+            })}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
-            {DETERMINISTIC_QUICK_ACTIONS.map((qa) => (
-              <form key={qa.key} action={askConcierge}>
-                <input type="hidden" name="family_id" value={familyId} />
-                <input type="hidden" name="trip_id" value={activeTrip.id} />
-                <input type="hidden" name="trip_slug" value={activeTrip.slug} />
-                <input type="hidden" name="for_date" value={todayIso} />
-                <input type="hidden" name="date_label" value={dateLabel} />
-                <input type="hidden" name="location_label" value={currentLocation.label} />
-                <input type="hidden" name="weather_summary" value={weatherSummary ?? ""} />
-                <input type="hidden" name="known_plan_text" value={knownPlanText} />
-                <input type="hidden" name="highlight_title" value={highlightTitle ?? ""} />
-                <input type="hidden" name="member_names" value={conciergeMemberNames.join(",")} />
-                <input type="hidden" name="question_key" value={qa.key} />
-                <input type="hidden" name="question_text" value={qa.label} />
-                <button
-                  type="submit"
-                  className="w-full text-left"
-                  style={{
-                    background: "var(--surface)", color: "var(--foreground)", border: "1px solid var(--border)",
-                    borderRadius: "10px", padding: "12px 14px", fontSize: "0.76rem", cursor: "pointer",
-                  }}
-                >
-                  {qa.label}
-                </button>
-              </form>
-            ))}
-          </div>
-
-          <form action={askConcierge} className="rounded-xl overflow-hidden mb-3" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+          <form action={askConcierge} className="rounded-xl overflow-hidden mb-4" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
             <input type="hidden" name="family_id" value={familyId} />
             <input type="hidden" name="trip_id" value={activeTrip.id} />
             <input type="hidden" name="trip_slug" value={activeTrip.slug} />
@@ -885,17 +946,78 @@ export default async function TodayPage() {
             </div>
           </form>
 
-          {recentConciergeMessages.slice(0, 2).map((m) => (
-            <Card key={m.questionKey} className="mb-2.5">
+          {conciergeCards.map((card) => (
+            <div key={card.key} className="rounded-xl p-6 mb-3" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
               <div className="flex items-center gap-2 mb-2">
                 <Sparkles size={12} strokeWidth={1.5} style={{ color: "var(--accent)" }} />
                 <span style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.14em", textTransform: "uppercase" }}>
-                  {m.questionText}
+                  {card.questionLabel}
                 </span>
               </div>
-              <div className="mb-1.5" style={{ color: "var(--foreground)", fontSize: "0.88rem" }}>{m.title}</div>
-              <p style={{ color: "var(--muted)", fontSize: "0.78rem", lineHeight: 1.5 }}>{m.body}</p>
-            </Card>
+              <div className="mb-2" style={{ color: "var(--foreground)", fontSize: "0.95rem", fontWeight: 400 }}>
+                {card.title}
+              </div>
+              <p className="mb-3" style={{ color: "var(--muted)", fontSize: "0.8rem", lineHeight: 1.6 }}>
+                {card.body}
+              </p>
+
+              {card.links.length > 0 && (
+                <div className="mb-3 space-y-1.5">
+                  {card.links.map((l, i) => (
+                    <Link
+                      key={i}
+                      href={l.href}
+                      className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg"
+                      style={{ background: "var(--background)", border: "1px solid var(--border)", textDecoration: "none" }}
+                    >
+                      <span style={{ color: "var(--foreground)", fontSize: "0.74rem" }}>{l.label}</span>
+                      <ChevronRight size={12} strokeWidth={1.6} style={{ color: "var(--muted)", flexShrink: 0 }} />
+                    </Link>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <span style={{ color: "var(--muted)", fontSize: "0.66rem" }}>{formatTimestamp(card.timestamp)}</span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {card.showRefresh && (
+                    <form action={refreshConciergeMessage}>
+                      <input type="hidden" name="family_id" value={familyId} />
+                      <input type="hidden" name="trip_id" value={activeTrip.id} />
+                      <input type="hidden" name="trip_slug" value={activeTrip.slug} />
+                      <input type="hidden" name="for_date" value={todayIso} />
+                      <input type="hidden" name="date_label" value={dateLabel} />
+                      <input type="hidden" name="location_label" value={currentLocation.label} />
+                      <input type="hidden" name="weather_summary" value={weatherSummary ?? ""} />
+                      <input type="hidden" name="known_plan_text" value={knownPlanText} />
+                      <input type="hidden" name="highlight_title" value={highlightTitle ?? ""} />
+                      <input type="hidden" name="member_names" value={conciergeMemberNames.join(",")} />
+                      <input type="hidden" name="question_key" value={card.key} />
+                      <input type="hidden" name="question_text" value={card.questionLabel} />
+                      <button
+                        type="submit"
+                        className="flex items-center gap-1.5"
+                        style={{
+                          background: card.stale ? "rgba(184,154,94,0.12)" : "transparent",
+                          color: card.stale ? "var(--accent)" : "var(--muted)",
+                          border: card.stale ? "1px solid rgba(184,154,94,0.35)" : "1px solid var(--border)",
+                          borderRadius: "20px", padding: "6px 12px", fontSize: "0.62rem", cursor: "pointer",
+                        }}
+                      >
+                        <RefreshCw size={11} strokeWidth={1.6} />
+                        {card.stale ? "Empfehlung aktualisieren" : "Änderung prüfen"}
+                      </button>
+                    </form>
+                  )}
+                  {card.canCommit && (
+                    <CommitToJourneyButton
+                      tripId={activeTrip.id} tripSlug={activeTrip.slug} forDate={todayIso}
+                      eventTitle={card.eventTitle} label={card.commitLabel} className=""
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
           ))}
         </section>
 

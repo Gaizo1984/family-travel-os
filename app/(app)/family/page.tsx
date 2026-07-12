@@ -255,10 +255,10 @@ export default async function FamilyPage() {
             </blockquote>
             <div className="pt-8">
               <Link
-                href="/concierge"
+                href="/today"
                 style={{ display: "inline-flex", alignItems: "center", gap: "7px", color: "var(--muted)", fontSize: "0.65rem", letterSpacing: "0.12em", textTransform: "uppercase", textDecoration: "none", borderBottom: "1px solid var(--border)", paddingBottom: "2px" }}
               >
-                Reiseentscheidungen mit dem Concierge klären
+                Reiseentscheidungen mit LUMI klären
                 <ArrowRight size={10} strokeWidth={1.5} />
               </Link>
             </div>

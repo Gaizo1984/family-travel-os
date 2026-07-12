@@ -51,9 +51,12 @@ export function BookingRowItem({
         </div>
       </div>
       <div className="text-right shrink-0">
-        <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.1em", textTransform: "uppercase" }}>
-          {BOOKING_STATUS_LABELS[booking.status]}
-        </div>
+        {/* §Punkt 8 "Kein sichtbarer Status": bei Flug/Hotel/Mietwagen auch in Listenzeilen ausgeblendet. */}
+        {config.visibleFields.status && (
+          <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+            {BOOKING_STATUS_LABELS[booking.status]}
+          </div>
+        )}
         {booking.amount !== null && (
           <div className="text-sm mt-0.5" style={{ color: "var(--foreground)" }}>
             {formatCurrencyDE(booking.amount, booking.currency)}

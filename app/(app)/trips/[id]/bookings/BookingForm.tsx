@@ -221,7 +221,10 @@ export function BookingForm({
                 </select>
               </div>
             ) : (
-              <input type="hidden" name="status" value={values?.status ?? "pending"} />
+              // §Punkt 8 "Automatisch status='booked' bei vollständiger Buchung":
+              // "booked" wird semantisch auf den vorhandenen Status 'confirmed'
+              // gemappt, kein neuer DB-Wert nötig.
+              <input type="hidden" name="status" value={values?.status ?? "confirmed"} />
             )}
             {config.visibleFields.paymentStatus ? (
               <div>
@@ -239,7 +242,7 @@ export function BookingForm({
         )}
         {!config.visibleFields.status && !config.visibleFields.paymentStatus && (
           <>
-            <input type="hidden" name="status" value={values?.status ?? "pending"} />
+            <input type="hidden" name="status" value={values?.status ?? "confirmed"} />
             <input type="hidden" name="payment_status" value={values?.payment_status ?? "unpaid"} />
           </>
         )}

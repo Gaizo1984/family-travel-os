@@ -58,7 +58,7 @@ export async function askConcierge(formData: FormData) {
   const questionKey = String(formData.get('question_key') ?? '')
   const questionTextRaw = String(formData.get('question_text') ?? '').trim()
 
-  if (!ctx.familyId || !ctx.tripId || !ctx.forDate) redirect('/concierge')
+  if (!ctx.familyId || !ctx.tripId || !ctx.forDate) redirect('/today')
 
   if (questionKey === 'today_important') {
     let rec = await getCachedTodayRecommendation(ctx.familyId, ctx.tripId, ctx.forDate)
@@ -73,7 +73,7 @@ export async function askConcierge(formData: FormData) {
         ctx.highlightTitle, null,
       )
     }
-    redirect('/concierge')
+    redirect('/today')
     return
   }
 
@@ -110,7 +110,7 @@ export async function askConcierge(formData: FormData) {
         { onConflict: 'family_id,trip_id,for_date,question_key' },
       )
     }
-    redirect('/concierge')
+    redirect('/today')
     return
   }
 
@@ -130,14 +130,14 @@ export async function askConcierge(formData: FormData) {
       },
       { onConflict: 'family_id,trip_id,for_date,question_key' },
     )
-    redirect('/concierge')
+    redirect('/today')
     return
   }
 
   // KI-basiert: adjust_weather, find_alternative, Freitext
   const isFreetext = !QUICK_ACTIONS.some((a) => a.key === questionKey)
   const effectiveKey = isFreetext ? normalizeQuestionKey(questionTextRaw) : questionKey
-  if (!questionTextRaw) redirect('/concierge')
+  if (!questionTextRaw) redirect('/today')
 
   await generateAndCacheConciergeMessage(
     ctx.familyId, ctx.tripId, ctx.forDate, effectiveKey, questionTextRaw,
@@ -147,7 +147,7 @@ export async function askConcierge(formData: FormData) {
     },
     false,
   )
-  redirect('/concierge')
+  redirect('/today')
 }
 
 /** §"Hinweis 'Empfehlung aktualisieren' anzeigen statt automatisch neu zu rechnen": bewusster, manueller Regenerier-Schritt. */
@@ -155,7 +155,7 @@ export async function refreshConciergeMessage(formData: FormData) {
   const ctx = readContext(formData)
   const questionKey = String(formData.get('question_key') ?? '')
   const questionText = String(formData.get('question_text') ?? '')
-  if (!ctx.familyId || !ctx.tripId || !ctx.forDate || !questionKey) redirect('/concierge')
+  if (!ctx.familyId || !ctx.tripId || !ctx.forDate || !questionKey) redirect('/today')
 
   await generateAndCacheConciergeMessage(
     ctx.familyId, ctx.tripId, ctx.forDate, questionKey, questionText,
@@ -165,7 +165,7 @@ export async function refreshConciergeMessage(formData: FormData) {
     },
     true,
   )
-  redirect('/concierge')
+  redirect('/today')
 }
 
 /**
@@ -180,7 +180,7 @@ export async function commitConciergeAction(formData: FormData) {
   const forDate = String(formData.get('for_date') ?? '')
   const eventTitle = String(formData.get('event_title') ?? '').trim()
 
-  if (!tripId || !forDate || !eventTitle) redirect(`/concierge?error=${encodeURIComponent('Konnte nicht übernommen werden')}`)
+  if (!tripId || !forDate || !eventTitle) redirect(`/today?error=${encodeURIComponent('Konnte nicht übernommen werden')}`)
 
   const supabase = await createClient()
   const { error } = await supabase.from('journey_events').insert({
@@ -191,6 +191,6 @@ export async function commitConciergeAction(formData: FormData) {
     status: 'idea',
   })
 
-  if (error) redirect(`/concierge?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
+  if (error) redirect(`/today?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
   redirect(`/trips/${tripSlug}`)
 }

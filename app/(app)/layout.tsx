@@ -1,10 +1,12 @@
 import Link from "next/link";
-import { LayoutDashboard, Plane, Users, Sparkles, Camera, Compass, MessageSquare, MoreHorizontal, BookOpenCheck, Images } from "lucide-react";
+import { LayoutDashboard, Plane, Users, Sparkles, Camera, Compass, MoreHorizontal, BookOpenCheck, Images } from "lucide-react";
 import { RoutePrefetcher } from "@/components/RoutePrefetcher";
 
 // §"LUMI Intelligence": /today ist zur zentralen LUMI-Startseite ausgebaut
 // worden (Wetter/Tagesplan/Für dich/Entdecken/Frag LUMI gebündelt) — Nav
 // spiegelt das mit Label/Icon, die URL bleibt /today (keine Linkbrüche).
+// Der frühere eigenständige Concierge-Bereich wurde vollständig entfernt und
+// ist jetzt Teil von LUMI (kein eigener Nav-Eintrag mehr).
 const NAV = [
   { href: "/", label: "Dashboard", Icon: LayoutDashboard },
   { href: "/trips", label: "Reisen", Icon: Plane },
@@ -14,7 +16,6 @@ const NAV = [
   { href: "/discover", label: "Entdecken", Icon: Compass },
   { href: "/buchungsportal", label: "Buchungsportal", Icon: BookOpenCheck },
   { href: "/memories", label: "Memory", Icon: Images },
-  { href: "/concierge", label: "Concierge", Icon: MessageSquare },
 ];
 
 // Mobile Bottom-Nav: nur die 4 häufigsten Bereiche direkt anzeigen (sonst zu

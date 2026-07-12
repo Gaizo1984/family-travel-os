@@ -4,6 +4,7 @@ import { ChevronLeft, FileText, Trash2, Check, Ticket, Luggage } from "lucide-re
 import { createClient } from "@/lib/supabase/server";
 import { BOOKING_TYPE_CONFIG, BOOKING_STATUS_LABELS, PAYMENT_STATUS_LABELS, formatDateTimeDE } from "@/lib/bookings";
 import { uploadBookingDocument, deleteBookingDocument, uploadBoardingPass, uploadBaggageTag } from "@/lib/actions/documents";
+import { toggleBookingCancelled } from "@/lib/actions/bookings";
 import { sortForBoardingPassViewer } from "@/lib/boarding-passes";
 import type { BookingType, BookingStatus, PaymentStatus } from "@/lib/supabase/types";
 import { Banner } from "@/components/Banner";
@@ -119,15 +120,35 @@ export default async function BookingDetailPage({
               {b.title}
             </h1>
           </div>
-          <Link
-            href={`/trips/${trip.slug}/bookings/${b.id}/edit`}
-            style={{
-              fontSize: "0.62rem", letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--accent)",
-              border: "1px solid rgba(184,154,94,0.3)", padding: "8px 16px", borderRadius: "20px", textDecoration: "none",
-            }}
-          >
-            Bearbeiten
-          </Link>
+          <div className="flex items-center gap-2 flex-wrap">
+            {!config.visibleFields.status && (
+              <form action={toggleBookingCancelled}>
+                <input type="hidden" name="booking_id" value={b.id} />
+                <input type="hidden" name="slug" value={trip.slug} />
+                <input type="hidden" name="currently_cancelled" value={String(b.status === "cancelled")} />
+                <button
+                  type="submit"
+                  style={{
+                    fontSize: "0.62rem", letterSpacing: "0.14em", textTransform: "uppercase",
+                    color: b.status === "cancelled" ? "var(--accent)" : "#B5624A",
+                    border: b.status === "cancelled" ? "1px solid rgba(184,154,94,0.3)" : "1px solid rgba(181,98,74,0.35)",
+                    padding: "8px 16px", borderRadius: "20px", background: "transparent", cursor: "pointer",
+                  }}
+                >
+                  {b.status === "cancelled" ? "Stornierung aufheben" : "Als storniert markieren"}
+                </button>
+              </form>
+            )}
+            <Link
+              href={`/trips/${trip.slug}/bookings/${b.id}/edit`}
+              style={{
+                fontSize: "0.62rem", letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--accent)",
+                border: "1px solid rgba(184,154,94,0.3)", padding: "8px 16px", borderRadius: "20px", textDecoration: "none",
+              }}
+            >
+              Bearbeiten
+            </Link>
+          </div>
         </div>
 
         <div
@@ -138,8 +159,10 @@ export default async function BookingDetailPage({
             <MetaItem label={config.startLabel} value={formatDateTimeDE(b.start_datetime)} />
             {config.showEnd && <MetaItem label={config.endLabel} value={formatDateTimeDE(b.end_datetime)} />}
             {config.providerLabel && <MetaItem label={config.providerLabel} value={b.provider ?? "—"} />}
-            <MetaItem label="Buchungsstatus" value={BOOKING_STATUS_LABELS[b.status]} />
-            <MetaItem label="Zahlungsstatus" value={PAYMENT_STATUS_LABELS[b.payment_status]} />
+            {/* §Punkt 8 "Kein sichtbarer Status": bei Flug/Hotel/Mietwagen bleibt der
+                Status jetzt auch auf der Detailseite unsichtbar, nicht nur im Formular. */}
+            {config.visibleFields.status && <MetaItem label="Buchungsstatus" value={BOOKING_STATUS_LABELS[b.status]} />}
+            {config.visibleFields.paymentStatus && <MetaItem label="Zahlungsstatus" value={PAYMENT_STATUS_LABELS[b.payment_status]} />}
             <MetaItem label="Preis" value={b.amount !== null ? formatCurrencyDE(b.amount, b.currency) : "—"} />
             <MetaItem label="Buchungsnummer" value={b.booking_reference ?? "—"} />
             {b.stages && <MetaItem label="Etappe" value={b.stages.title} />}

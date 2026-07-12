@@ -3,9 +3,10 @@ import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { buildFamilyDnaSummary } from "@/lib/family-dna";
-import { DESTINATIONS, MOOD_OPTIONS, SEASON_WINDOW_OPTIONS } from "@/lib/data/destination-knowledge";
+import { MOOD_OPTIONS, SEASON_WINDOW_OPTIONS } from "@/lib/data/destination-knowledge";
 import type { MoodKey, SeasonWindowKey } from "@/lib/data/destination-knowledge";
 import { scoreDestinations } from "@/lib/discover-scoring";
+import { searchDestinations } from "@/lib/providers/destination-provider";
 import { bookmarkTripIdea } from "@/lib/actions/trip-ideas";
 
 export default async function DiscoverResultsPage({
@@ -25,8 +26,9 @@ export default async function DiscoverResultsPage({
 
   const seasonOption = SEASON_WINDOW_OPTIONS.find((s) => s.key === season as SeasonWindowKey);
   const moodOption = MOOD_OPTIONS.find((m) => m.key === mood as MoodKey);
+  const destinations = (await searchDestinations()) ?? [];
 
-  const scored = scoreDestinations(DESTINATIONS, dna, {
+  const scored = scoreDestinations(destinations, dna, {
     seasonMonths: seasonOption?.months ?? null,
     mood: moodOption?.key ?? null,
     avoidNames,

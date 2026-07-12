@@ -1,6 +1,7 @@
 import { computeTripReadiness } from './readiness'
 import { buildTomorrowPrepItems } from './today'
 import type { StageInput, TimelineDay } from './journey'
+import type { CachedConciergeMessage } from './concierge-messages'
 
 /**
  * §"KI arbeitet nur bei echtem Mehrwert": mehrere Schnellaktionen lassen sich
@@ -75,4 +76,72 @@ export function buildPlanTomorrowAnswer(
     body: items.map((i) => i.text).join(' '),
     links: [{ label: 'Zur Reise', href: `/trips/${tripSlug}` }],
   }
+}
+
+export type DisplayCard = {
+  key: string
+  questionLabel: string
+  title: string
+  body: string
+  timestamp: string
+  stale: boolean
+  showRefresh: boolean
+  links: ConciergeLink[]
+  eventTitle: string
+  canCommit: boolean
+  commitLabel: string
+}
+
+/**
+ * §"Concierge vollständig entfernen, alle Funktionen in LUMI integrieren":
+ * portiert die Karten-Aufbau-Logik der ehemaligen app/(app)/concierge/page.tsx
+ * unverändert hierher, damit LUMI (app/(app)/today/page.tsx) exakt dieselbe
+ * Darstellung wiederverwendet statt sie ein zweites Mal zu bauen. Nutzt
+ * `QUICK_ACTIONS[].deterministic` statt des früheren separaten
+ * `DETERMINISTIC_KEYS`-Sets (dasselbe Flag existierte schon, war nur
+ * ungenutzt). `todayRec` optional `null` übergeben, wenn die
+ * "Was ist heute wichtig?"-Empfehlung an anderer Stelle derselben Seite
+ * schon prominent gezeigt wird (sonst doppelt).
+ */
+export function buildConciergeCards(
+  todayRec: { recommendation: { title: string; description: string }; createdAt: string } | null,
+  messages: CachedConciergeMessage[],
+): DisplayCard[] {
+  const cards: DisplayCard[] = []
+
+  if (todayRec) {
+    cards.push({
+      key: 'today_important',
+      questionLabel: 'Was ist heute wichtig?',
+      title: todayRec.recommendation.title,
+      body: todayRec.recommendation.description,
+      timestamp: todayRec.createdAt,
+      stale: false,
+      showRefresh: false,
+      links: [],
+      eventTitle: todayRec.recommendation.title,
+      canCommit: true,
+      commitLabel: 'In Journey übernehmen',
+    })
+  }
+
+  for (const m of messages) {
+    const quickAction = QUICK_ACTIONS.find((qa) => qa.key === m.questionKey)
+    const isAiDriven = quickAction ? !quickAction.deterministic : true
+    cards.push({
+      key: m.questionKey,
+      questionLabel: m.questionText,
+      title: m.title,
+      body: m.body,
+      timestamp: m.createdAt,
+      stale: m.stale,
+      showRefresh: isAiDriven,
+      links: m.links,
+      eventTitle: m.eventTitle,
+      canCommit: isAiDriven,
+      commitLabel: m.questionKey === 'find_alternative' ? 'Alternative speichern' : 'In Journey übernehmen',
+    })
+  }
+
+  return cards.sort((a, b) => b.timestamp.localeCompare(a.timestamp))
 }

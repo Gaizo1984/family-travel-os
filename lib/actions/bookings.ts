@@ -356,3 +356,26 @@ export async function deleteBooking(formData: FormData) {
 
   redirect(`/trips/${slug}`)
 }
+
+/**
+ * §Punkt 8 "Optional intern cancelled": kleiner Toggle für Buchungstypen ohne
+ * sichtbares Status-Feld (Flug/Hotel/Mietwagen) -- schaltet nur zwischen
+ * 'confirmed' und 'cancelled' um, ohne ein allgemeines Status-Dropdown
+ * einzuführen. Reine Ergänzung zum bereits vorhandenen "Buchung löschen".
+ */
+export async function toggleBookingCancelled(formData: FormData) {
+  const bookingId = String(formData.get('booking_id') ?? '')
+  const slug       = String(formData.get('slug') ?? '')
+  const currentlyCancelled = String(formData.get('currently_cancelled') ?? '') === 'true'
+
+  const supabase = await createClient()
+  const { error } = await supabase
+    .from('bookings')
+    .update({ status: currentlyCancelled ? 'confirmed' : 'cancelled' })
+    .eq('id', bookingId)
+
+  if (error)
+    redirect(`/trips/${slug}/bookings/${bookingId}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
+
+  redirect(`/trips/${slug}/bookings/${bookingId}`)
+}
