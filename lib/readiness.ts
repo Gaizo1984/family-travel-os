@@ -1,7 +1,7 @@
 import { createClient } from './supabase/server'
 import type { DocumentType } from './documents'
 import { detectFlightStopoverSuggestions } from './flight-stopovers'
-import { ensureTripDocumentRequirements } from './travel-requirements'
+import { computeTripRequirements } from './travel-requirements'
 import { formatDateDE } from './demo-data'
 
 export type ReadinessSeverity = 'conflict' | 'hint'
@@ -31,7 +31,11 @@ export const READINESS_THEME_LABELS: Record<ReadinessTheme, string> = {
   bookings: 'Buchungen',
 }
 
-const ENTRY_TYPES: DocumentType[] = ['visa', 'esta', 'eta', 'entry_permit']
+// §Nur Visa/Sonstige-Einreisegenehmigung -- für ESTA/eTA übernimmt die
+// Travel Requirements Engine (lib/travel-requirements.ts) die vollständige
+// Anforderungs-/Gültigkeitsprüfung inkl. automatischer Verknüpfung; diese
+// beiden Typen hier zu belassen würde denselben Befund doppelt melden.
+const MANUALLY_ASSIGNED_ENTRY_TYPES: DocumentType[] = ['visa', 'entry_permit']
 
 function addDaysIso(date: string, delta: number): string {
   const d = new Date(date + 'T00:00:00Z')
@@ -87,69 +91,38 @@ export async function computeTripReadiness(tripId: string): Promise<ReadinessRes
   // §Performance: die folgenden Abfragen sind alle unabhängig voneinander
   // (keine hängt vom Ergebnis einer anderen ab, außer der Dokumente-Query, die
   // die Mitreisenden-IDs braucht) — parallel statt seriell laden.
-  const [{ data: memberRows }, { data: assignedEntryDocsRaw }, { count: insuranceCount }, { data: stagesRaw }, { data: bookingsRaw }, stopoverSuggestions, travelRequirementStatuses] =
+  const [{ data: assignedEntryDocsRaw }, { count: insuranceCount }, { data: stagesRaw }, { data: bookingsRaw }, stopoverSuggestions, tripRequirements] =
     await Promise.all([
-      supabase.from('trip_members').select('persons ( id, name )').eq('trip_id', tripId),
       supabase.from('document_trips').select('documents ( id, person_id, doc_type, expires_at, label )').eq('trip_id', tripId),
       supabase.from('insurance_policy_trips').select('policy_id', { count: 'exact', head: true }).eq('trip_id', tripId),
       supabase.from('stages').select('id, title, start_date, end_date, nights, accommodation, sort_order').eq('trip_id', tripId),
       supabase.from('bookings').select('id, type, stage_id, status, start_datetime, end_datetime').eq('trip_id', tripId),
       detectFlightStopoverSuggestions(tripId),
-      ensureTripDocumentRequirements(tripId),
+      computeTripRequirements(tripId, `/trips/${slug}/ready-to-travel`),
     ])
 
-  // ── Einreise: USA/Kanada als Ziel oder Transit (zentraler Travel-Requirement-
-  // Service, siehe lib/travel-requirements.ts) — dieselbe Anforderungs-/
-  // Gültigkeitslogik wie die Reisedokumente-Übersicht, kein zweiter Code-Pfad.
-  for (const status of travelRequirementStatuses) {
-    if (status.status !== 'missing') continue
+  // ── Reisende & Dokumente / Einreise: zentrale Travel Requirements Engine
+  // (lib/travel-requirements.ts) — dieselbe Anforderungs-/Gültigkeitslogik
+  // wie die Reisedokumente-Übersicht und der Concierge (der wiederum diese
+  // Funktion hier aufruft), kein zweiter Code-Pfad. Aktuell registrierte
+  // Regeln: Reisepass (Theme "documents", wie bisher), ESTA/eTA (Theme
+  // "entry"). Neue dokumentbasierte Regeln erscheinen hier automatisch,
+  // ohne diese Datei anzufassen.
+  for (const req of tripRequirements) {
+    if (req.status === 'satisfied') continue
     findings.push({
-      severity: 'conflict', theme: 'entry',
-      message: `${status.label} für ${status.personName} hinzufügen (USA/Kanada als Ziel oder Transit erkannt).`,
-      href: `/family/${status.personId}/documents/new?type=${status.docType}&return_to=${encodeURIComponent(`/trips/${slug}/ready-to-travel`)}&assign_trip=${tripId}`,
+      severity: 'conflict',
+      theme: req.type === 'passport' ? 'documents' : 'entry',
+      message: req.reason,
+      href: req.actionHref ?? `/family/${req.personId}`,
     })
   }
 
-  // ── Reisende & Dokumente: Reisepass je Mitreisendem ──
-  const members = (memberRows ?? [])
-    .flatMap((m) => (m.persons ? [m.persons as unknown as { id: string; name: string }] : []))
-  const memberIds = members.map((m) => m.id)
-
-  const { data: allDocs } = memberIds.length > 0
-    ? await supabase.from('documents').select('id, person_id, doc_type, expires_at').in('person_id', memberIds)
-    : { data: [] }
-
-  const docsByPerson = new Map<string, Array<{ id: string; doc_type: DocumentType; expires_at: string | null }>>()
-  for (const d of allDocs ?? []) {
-    if (!d.person_id) continue
-    const list = docsByPerson.get(d.person_id) ?? []
-    list.push({ id: d.id, doc_type: d.doc_type as DocumentType, expires_at: d.expires_at })
-    docsByPerson.set(d.person_id, list)
-  }
-
-  for (const member of members) {
-    const docs = docsByPerson.get(member.id) ?? []
-    const passport = docs.find((d) => d.doc_type === 'passport')
-    if (!passport) {
-      findings.push({
-        severity: 'conflict', theme: 'documents',
-        message: `${member.name} hat keinen Reisepass hinterlegt.`,
-        href: `/family/${member.id}`,
-      })
-    } else if (passport.expires_at && passport.expires_at <= tripEnd) {
-      findings.push({
-        severity: 'conflict', theme: 'documents',
-        message: `Reisepass von ${member.name} läuft vor oder während des Reiseendes ab.`,
-        href: `/family/${member.id}/documents/${passport.id}`,
-      })
-    }
-  }
-
-  // ── Einreise: dieser Reise zugeordnete Visa/ESTA/eTA ──
+  // ── Einreise: dieser Reise zugeordnetes Visum/Sonstige-Einreisegenehmigung ──
   for (const row of assignedEntryDocsRaw ?? []) {
     const doc = row.documents as unknown as
       { id: string; person_id: string; doc_type: DocumentType; expires_at: string | null; label: string } | null
-    if (!doc || !ENTRY_TYPES.includes(doc.doc_type)) continue
+    if (!doc || !MANUALLY_ASSIGNED_ENTRY_TYPES.includes(doc.doc_type)) continue
     if (doc.expires_at && doc.expires_at <= tripEnd) {
       findings.push({
         severity: 'conflict', theme: 'entry',
