@@ -1,6 +1,6 @@
 import Link from "next/link";
 import {
-  Clock, ArrowRight, Ticket, Car, ChevronRight, Sparkles, Compass,
+  Clock, ArrowRight, Ticket, Car, ChevronRight, Sparkles, Compass, MessageSquare,
   FileQuestion, CloudSun, Shuffle, AlertTriangle, RefreshCw,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -235,6 +235,19 @@ function formatTimestamp(iso: string): string {
 }
 
 /** §Punkt 3 "Icon-Navigation", vollständig datengetrieben: eine Kachel je TODAY_CATEGORIES-Eintrag, kein hartkodiertes JSX pro Kategorie. */
+/**
+ * §"Neue Reiseideen und Frag LUMI ins Dashboard LUMI integrieren, mit
+ * extra Icon analog den dortigen Unterpunkten": zwei zusätzliche, statische
+ * Kacheln neben den TODAY_CATEGORIES -- bewusst NICHT Teil von
+ * TODAY_CATEGORIES selbst, da sie keine KI-Vorschlags-Kategorien sind
+ * (kein concierge_category_suggestions-Cache, eigene, bereits bestehende
+ * Zielseiten) und die generische Kategorie-Architektur sonst verwässern würden.
+ */
+const LUMI_SHORTCUTS: Array<{ href: string; label: string; Icon: LucideIcon }> = [
+  { href: "/discover", label: "Neue Reiseideen", Icon: Compass },
+  { href: "/concierge", label: "Frag LUMI", Icon: MessageSquare },
+];
+
 function CategoryGrid() {
   return (
     <section className="mb-8">
@@ -244,6 +257,17 @@ function CategoryGrid() {
           <Link
             key={key}
             href={`/today/category/${key}`}
+            className="flex flex-col items-center gap-2 rounded-xl p-4 text-center transition-opacity hover:opacity-80"
+            style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}
+          >
+            <Icon size={20} strokeWidth={1.3} style={{ color: "var(--accent)" }} />
+            <span style={{ color: "var(--foreground)", fontSize: "0.72rem", fontWeight: 300 }}>{label}</span>
+          </Link>
+        ))}
+        {LUMI_SHORTCUTS.map(({ href, label, Icon }) => (
+          <Link
+            key={href}
+            href={href}
             className="flex flex-col items-center gap-2 rounded-xl p-4 text-center transition-opacity hover:opacity-80"
             style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}
           >

@@ -62,8 +62,15 @@ export async function resolveTripAiContext(
     locationLabel = mainStage?.location || mainStage?.title || trip.title
     countryCode = mainStage?.country_code ?? null
     const countryName = countryCode ? COUNTRY_NAMES[countryCode] ?? null : null
+    // §Bugfix: fehlte hier bisher (nur im aktive-Reise-Zweig vorhanden) --
+    // kleine Orte wie "Playa Conchal" lassen sich bei Open-Meteo oft nicht
+    // direkt geokodieren (bekanntes Problem, siehe lib/today.ts). Ohne diese
+    // Kandidaten sprang die Auflösung dann sofort auf den ganzen Landesnamen,
+    // während die ANGEZEIGTE Bezeichnung trotzdem "Playa Conchal" blieb --
+    // Label und tatsächlich abgefragte Wetterdaten liefen so auseinander.
     candidates = [
       { query: locationLabel, countryCode },
+      ...nearbyStageGeocodeCandidates(sortedStages, locationLabel, countryCode, todayIso),
       ...(countryName && countryName !== locationLabel ? [{ query: countryName }] : []),
     ]
   }

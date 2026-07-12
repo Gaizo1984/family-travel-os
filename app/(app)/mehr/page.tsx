@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Users, Compass, MessageSquare, BookOpenCheck, Images, Fingerprint, LogOut, ChevronRight, type LucideIcon } from "lucide-react";
+import { Users, BookOpenCheck, Images, Fingerprint, LogOut, ChevronRight, type LucideIcon } from "lucide-react";
 import { logout } from "@/lib/actions/auth";
 
 interface MoreLink {
@@ -9,15 +9,13 @@ interface MoreLink {
   Icon: LucideIcon;
 }
 
-// §"LUMI Dashboard (Concierge 2.0)": Frag LUMI hat wieder einen eigenen
-// Menüpunkt (nicht mehr dauerhaft auf der LUMI-Startseite) -- deshalb auch
-// hier in der mobilen Mehr-Übersicht wieder erreichbar.
+// §"Neue Reiseideen und Frag LUMI ins Dashboard LUMI integrieren": beide
+// sind hier raus, jetzt als Icon-Kacheln direkt auf /today erreichbar
+// (analog zu den dortigen Kategorien) statt in der Mehr-Übersicht.
 const MORE_LINKS: MoreLink[] = [
   { href: "/family", label: "Familie", description: "Reiseprofile & Vorlieben", Icon: Users },
-  { href: "/discover", label: "Neue Reiseideen", description: "Ideen & Inspiration", Icon: Compass },
   { href: "/buchungsportal", label: "Buchungsportal", description: "Hotels, Flüge & Restaurants im Vergleich", Icon: BookOpenCheck },
   { href: "/memories", label: "Travel Memory", description: "Eure gemeinsame Reisegalerie", Icon: Images },
-  { href: "/concierge", label: "Frag LUMI", description: "Persönliche Reiseberatung", Icon: MessageSquare },
   { href: "/mehr/passkeys", label: "Passkeys verwalten", description: "Anmeldung per Fingerabdruck oder Gesichtserkennung", Icon: Fingerprint },
 ];
 
