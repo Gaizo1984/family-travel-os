@@ -62,6 +62,7 @@ export interface Database {
           status: TripStatus; start_date: string | null; end_date: string | null
           cover_emoji: string | null; gradient_from: string | null; gradient_via: string | null
           gradient_to: string | null; budget_amount: number | null; budget_currency: string
+          cover_photo_id: string | null
           created_at: string; updated_at: string
         }
         Insert: {
@@ -69,6 +70,7 @@ export interface Database {
           status?: TripStatus; start_date?: string | null; end_date?: string | null
           cover_emoji?: string | null; gradient_from?: string | null; gradient_via?: string | null
           gradient_to?: string | null; budget_amount?: number | null; budget_currency?: string
+          cover_photo_id?: string | null
           created_at?: string; updated_at?: string
         }
         Update: {
@@ -76,10 +78,12 @@ export interface Database {
           status?: TripStatus; start_date?: string | null; end_date?: string | null
           cover_emoji?: string | null; gradient_from?: string | null; gradient_via?: string | null
           gradient_to?: string | null; budget_amount?: number | null; budget_currency?: string
+          cover_photo_id?: string | null
           created_at?: string; updated_at?: string
         }
         Relationships: [
-          { foreignKeyName: "trips_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }
+          { foreignKeyName: "trips_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] },
+          { foreignKeyName: "trips_cover_photo_id_fkey"; columns: ["cover_photo_id"]; isOneToOne: false; referencedRelation: "memory_photos"; referencedColumns: ["id"] }
         ]
       }
       trip_members: {

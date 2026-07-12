@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { Star, Trash2, Users } from "lucide-react";
+import { Star, Trash2, Users, Image as ImageIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
-import { uploadMemoryPhotos, deleteMemoryPhoto, toggleMemoryHighlight } from "@/lib/actions/memories";
+import { uploadMemoryPhotos, deleteMemoryPhoto, toggleMemoryHighlight, setCoverPhoto } from "@/lib/actions/memories";
 import { MultiPhotoFilePreview } from "@/components/MultiPhotoFilePreview";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
 import { Banner } from "@/components/Banner";
@@ -30,7 +30,7 @@ type PhotoRow = {
   is_selected: boolean; is_duplicate_of: string | null; quality_score: number | null
 };
 
-function PhotoCard({ photo, url, personName, returnTo }: { photo: PhotoRow; url: string | null; personName: string | null; returnTo: string }) {
+function PhotoCard({ photo, url, personName, returnTo, isCover }: { photo: PhotoRow; url: string | null; personName: string | null; returnTo: string; isCover: boolean }) {
   if (!url) return null;
   return (
     <div className="relative rounded-lg overflow-hidden group" style={{ aspectRatio: "1/1" }}>
@@ -42,6 +42,21 @@ function PhotoCard({ photo, url, personName, returnTo }: { photo: PhotoRow; url:
         style={{ background: "linear-gradient(to bottom, rgba(10,9,7,0.5) 0%, transparent 30%, transparent 70%, rgba(10,9,7,0.7) 100%)", pointerEvents: "none" }}
       >
         <div className="flex items-center justify-end gap-1" style={{ pointerEvents: "auto" }}>
+          {photo.trip_id && !isCover && (
+            <form action={setCoverPhoto}>
+              <input type="hidden" name="photo_id" value={photo.id} />
+              <input type="hidden" name="trip_id" value={photo.trip_id} />
+              <input type="hidden" name="return_to" value={returnTo} />
+              <button type="submit" aria-label="Als Titelbild verwenden" style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: "10px", margin: "-6px" }}>
+                <ImageIcon size={14} strokeWidth={1.8} style={{ color: "#F0EBE3" }} />
+              </button>
+            </form>
+          )}
+          {isCover && (
+            <span aria-label="Aktuelles Titelbild" style={{ display: "flex", padding: "10px", margin: "-6px" }}>
+              <ImageIcon size={14} strokeWidth={1.8} fill="#F0EBE3" style={{ color: "#F0EBE3" }} />
+            </span>
+          )}
           <form action={toggleMemoryHighlight}>
             <input type="hidden" name="photo_id" value={photo.id} />
             <input type="hidden" name="next_value" value={(!photo.is_highlight).toString()} />
@@ -90,8 +105,10 @@ export default async function MemoriesPage({
       return query;
     })(),
     supabase.from("persons").select("id, name").eq("family_id", familyId),
-    supabase.from("trips").select("id, title").eq("family_id", familyId).order("start_date", { ascending: false }),
+    supabase.from("trips").select("id, title, cover_photo_id").eq("family_id", familyId).order("start_date", { ascending: false }),
   ]);
+
+  const coverPhotoIds = new Set((tripsRaw ?? []).flatMap((t) => (t.cover_photo_id ? [t.cover_photo_id] : [])));
 
   const allPhotos = (photosRaw ?? []) as PhotoRow[];
   // §"Maximal 30 Erinnerungsbilder je Reise": nicht ausgewählte Fotos (Dubletten
@@ -203,7 +220,7 @@ export default async function MemoriesPage({
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
               {highlightPhotos.map(({ photo, url }) => (
-                <PhotoCard key={photo.id} photo={photo} url={url} personName={photo.uploaded_by_person_id ? personNameById.get(photo.uploaded_by_person_id) ?? null : null} returnTo={returnTo} />
+                <PhotoCard key={photo.id} photo={photo} url={url} personName={photo.uploaded_by_person_id ? personNameById.get(photo.uploaded_by_person_id) ?? null : null} returnTo={returnTo} isCover={coverPhotoIds.has(photo.id)} />
               ))}
             </div>
           </section>
@@ -221,7 +238,7 @@ export default async function MemoriesPage({
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                 {byYear.get(year)!.map(({ photo, url }) => (
-                  <PhotoCard key={photo.id} photo={photo} url={url} personName={photo.uploaded_by_person_id ? personNameById.get(photo.uploaded_by_person_id) ?? null : null} returnTo={returnTo} />
+                  <PhotoCard key={photo.id} photo={photo} url={url} personName={photo.uploaded_by_person_id ? personNameById.get(photo.uploaded_by_person_id) ?? null : null} returnTo={returnTo} isCover={coverPhotoIds.has(photo.id)} />
                 ))}
               </div>
             </section>

@@ -319,3 +319,24 @@ export async function toggleMemoryHighlight(formData: FormData) {
 
   redirect(returnTo)
 }
+
+/**
+ * §"Titelbild der Reise selbst auswählen": bewusst getrennt vom bestehenden
+ * Highlight-Stern (mehrere gleichzeitig möglich, eigene Galerie-Sektion) —
+ * das Titelbild ist eine EXPLIZITE, eindeutige Wahl pro Reise
+ * (trips.cover_photo_id), die in der Bildauflösung (lib/trip-images.ts)
+ * Vorrang vor jeder automatischen Auswahl hat.
+ */
+export async function setCoverPhoto(formData: FormData) {
+  const photoId = String(formData.get('photo_id') ?? '')
+  const tripId = String(formData.get('trip_id') ?? '')
+  const returnTo = String(formData.get('return_to') ?? '').trim() || '/memories'
+
+  if (!photoId || !tripId) redirect(`${returnTo}?error=${encodeURIComponent('Titelbild konnte nicht gesetzt werden')}`)
+
+  const supabase = await createClient()
+  const { error } = await supabase.from('trips').update({ cover_photo_id: photoId }).eq('id', tripId)
+  if (error) redirect(`${returnTo}?error=${encodeURIComponent('Titelbild konnte nicht gesetzt werden: ' + error.message)}`)
+
+  redirect(returnTo)
+}

@@ -43,39 +43,63 @@ export function resolveTripImage(trip: TripImageInput, highlight: HighlightPhoto
 }
 
 /**
- * Lädt je Reise das erste als Highlight markierte Erinnerungsfoto (falls
- * vorhanden) und löst es zu einer signierten URL auf. Gemeinsam genutzt von
- * Dashboard, Trips-Liste und Reisedetail, damit alle drei Seiten dasselbe
- * Bild für dieselbe Reise zeigen.
+ * Löst je Reise das anzuzeigende Erinnerungsfoto auf und signiert es.
+ * Gemeinsam genutzt von Dashboard, Trips-Liste und Reisedetail, damit alle
+ * drei Seiten dasselbe Bild für dieselbe Reise zeigen. Priorität:
+ * 1) explizit vom Nutzer gewähltes Titelbild (trips.cover_photo_id),
+ * 2) sonst das erste als Highlight markierte Foto (bisheriges Verhalten).
  */
 export async function getHighlightPhotoByTripId(
   supabase: SupabaseClient,
   familyId: string,
   tripIds?: string[],
 ): Promise<Map<string, HighlightPhoto>> {
-  let query = supabase
+  // 1) Explizite Titelbild-Wahl hat Vorrang vor jeder automatischen Auswahl.
+  let tripsQuery = supabase.from("trips").select("id, cover_photo_id").eq("family_id", familyId).not("cover_photo_id", "is", null);
+  if (tripIds) tripsQuery = tripsQuery.in("id", tripIds);
+  const { data: tripsWithCover } = await tripsQuery;
+
+  const coverPhotoIdByTripId = new Map<string, string>();
+  for (const t of tripsWithCover ?? []) {
+    if (t.cover_photo_id) coverPhotoIdByTripId.set(t.id, t.cover_photo_id);
+  }
+
+  const coverPhotoIds = Array.from(coverPhotoIdByTripId.values());
+  const coverStoragePathByPhotoId = new Map<string, string>();
+  if (coverPhotoIds.length > 0) {
+    const { data: coverPhotosRaw } = await supabase.from("memory_photos").select("id, storage_path").in("id", coverPhotoIds);
+    for (const p of coverPhotosRaw ?? []) coverStoragePathByPhotoId.set(p.id, p.storage_path);
+  }
+
+  // 2) Für Reisen ohne explizites Titelbild: erstes Highlight-Foto (bisheriges Verhalten).
+  let highlightQuery = supabase
     .from("memory_photos")
     .select("trip_id, storage_path")
     .eq("family_id", familyId)
     .eq("is_highlight", true)
     .not("trip_id", "is", null);
-  if (tripIds) query = query.in("trip_id", tripIds);
-  const { data: highlightPhotosRaw } = await query;
+  if (tripIds) highlightQuery = highlightQuery.in("trip_id", tripIds.filter((id) => !coverPhotoIdByTripId.has(id)));
+  const { data: highlightPhotosRaw } = await highlightQuery;
 
-  // Nur das erste Foto je Reise signieren (falls mehrere Highlights existieren
-  // sollten), dann alle Signaturen parallel statt seriell abrufen.
-  const firstPhotoByTripId = new Map<string, string>();
+  const firstHighlightByTripId = new Map<string, string>();
   for (const p of highlightPhotosRaw ?? []) {
-    if (!p.trip_id || firstPhotoByTripId.has(p.trip_id)) continue;
-    firstPhotoByTripId.set(p.trip_id, p.storage_path);
+    if (!p.trip_id || coverPhotoIdByTripId.has(p.trip_id) || firstHighlightByTripId.has(p.trip_id)) continue;
+    firstHighlightByTripId.set(p.trip_id, p.storage_path);
   }
 
+  // 3) Alle Signaturen (Titelbilder + Highlight-Fallbacks) parallel erzeugen.
   const highlightPhotoByTripId = new Map<string, HighlightPhoto>();
-  await Promise.all(
-    Array.from(firstPhotoByTripId.entries()).map(async ([tripId, storagePath]) => {
+  await Promise.all([
+    ...Array.from(coverPhotoIdByTripId.entries()).map(async ([tripId, photoId]) => {
+      const storagePath = coverStoragePathByPhotoId.get(photoId);
+      if (!storagePath) return;
       const { data: signed } = await supabase.storage.from("documents").createSignedUrl(storagePath, 3600);
       if (signed?.signedUrl) highlightPhotoByTripId.set(tripId, { url: signed.signedUrl, storagePath });
     }),
-  );
+    ...Array.from(firstHighlightByTripId.entries()).map(async ([tripId, storagePath]) => {
+      const { data: signed } = await supabase.storage.from("documents").createSignedUrl(storagePath, 3600);
+      if (signed?.signedUrl) highlightPhotoByTripId.set(tripId, { url: signed.signedUrl, storagePath });
+    }),
+  ]);
   return highlightPhotoByTripId;
 }
