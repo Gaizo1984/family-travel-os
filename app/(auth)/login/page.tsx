@@ -2,6 +2,8 @@ import Link from "next/link";
 import { login } from "@/lib/actions/auth";
 import { Banner } from "@/components/Banner";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
+import { PasskeyLoginButton } from "@/components/PasskeyLoginButton";
+import { PasswordField } from "@/components/PasswordField";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -35,15 +37,16 @@ export default async function LoginPage({
         {error && <Banner variant="error">{error}</Banner>}
         {reset && <Banner variant="success">Passwort erfolgreich geändert. Bitte melde dich mit dem neuen Passwort an.</Banner>}
 
-        <form action={login}>
-          <div className="rounded-xl p-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+        <div className="rounded-xl p-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+          <PasskeyLoginButton />
+          <form action={login}>
             <div className="mb-5">
               <label htmlFor="login-email" style={LABEL_STYLE}>E-Mail</label>
               <input id="login-email" name="email" type="email" autoComplete="email" required style={FIELD_STYLE} />
             </div>
             <div className="mb-2">
               <label htmlFor="login-password" style={LABEL_STYLE}>Passwort</label>
-              <input id="login-password" name="password" type="password" autoComplete="current-password" required style={FIELD_STYLE} />
+              <PasswordField id="login-password" name="password" autoComplete="current-password" required style={FIELD_STYLE} />
             </div>
             <div className="mb-5 text-right">
               <Link href="/login/reset" style={{ color: "var(--accent)", fontSize: "0.7rem", textDecoration: "none" }}>
@@ -51,8 +54,8 @@ export default async function LoginPage({
               </Link>
             </div>
             <SubmitButtonWithProgress label="Anmelden" pendingLabel="Wird angemeldet …" style={{ width: "100%", justifyContent: "center" }} />
-          </div>
-        </form>
+          </form>
+        </div>
       </div>
     </div>
   );

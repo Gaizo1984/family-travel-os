@@ -1,6 +1,7 @@
 import { updatePassword } from "@/lib/actions/auth";
 import { Banner } from "@/components/Banner";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
+import { PasswordField } from "@/components/PasswordField";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -37,17 +38,11 @@ export default async function ResetPasswordPage({
           <div className="rounded-xl p-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
             <div className="mb-5">
               <label htmlFor="new-password" style={LABEL_STYLE}>Neues Passwort</label>
-              <input
-                id="new-password" name="password" type="password"
-                autoComplete="new-password" minLength={10} required style={FIELD_STYLE}
-              />
+              <PasswordField id="new-password" name="password" autoComplete="new-password" minLength={10} required style={FIELD_STYLE} />
             </div>
             <div className="mb-5">
               <label htmlFor="new-password-confirm" style={LABEL_STYLE}>Passwort bestätigen</label>
-              <input
-                id="new-password-confirm" name="password_confirm" type="password"
-                autoComplete="new-password" minLength={10} required style={FIELD_STYLE}
-              />
+              <PasswordField id="new-password-confirm" name="password_confirm" autoComplete="new-password" minLength={10} required style={FIELD_STYLE} />
             </div>
             <SubmitButtonWithProgress label="Passwort speichern" pendingLabel="Wird gespeichert …" style={{ width: "100%", justifyContent: "center" }} />
           </div>
