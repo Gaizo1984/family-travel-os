@@ -2,9 +2,10 @@ import Link from "next/link";
 import { Star, Trash2, Users, Image as ImageIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
-import { uploadMemoryPhotos, deleteMemoryPhoto, toggleMemoryHighlight, setCoverPhoto } from "@/lib/actions/memories";
+import { uploadMemoryPhotos, deleteMemoryPhoto, toggleMemoryHighlight, setCoverPhoto, createMemoryUploadSlots } from "@/lib/actions/memories";
 import { MultiPhotoFilePreview } from "@/components/MultiPhotoFilePreview";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
+import { DirectPhotoUploadForm } from "@/components/DirectPhotoUploadForm";
 import { Banner } from "@/components/Banner";
 import { SignedPhoto } from "@/components/SignedPhoto";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
@@ -39,7 +40,7 @@ function PhotoCard({ photo, url, personName, returnTo, isCover }: { photo: Photo
       </PhotoLightbox>
       <div
         className="absolute inset-0 flex flex-col justify-between p-2"
-        style={{ background: "linear-gradient(to bottom, rgba(10,9,7,0.5) 0%, transparent 30%, transparent 70%, rgba(10,9,7,0.7) 100%)", pointerEvents: "none" }}
+        style={{ background: "linear-gradient(to bottom, rgba(10,9,7,0.5) 0%, transparent 30%, transparent 70%, rgba(10,9,7,0.7) 100%)", pointerEvents: "none", zIndex: 2 }}
       >
         <div className="flex items-center justify-end gap-1" style={{ pointerEvents: "auto" }}>
           {photo.trip_id && !isCover && (
@@ -176,7 +177,7 @@ export default async function MemoriesPage({
 
         {/* ── Upload ── */}
         <section className="mb-12">
-          <form action={uploadMemoryPhotos} encType="multipart/form-data">
+          <DirectPhotoUploadForm action={uploadMemoryPhotos} createSlots={createMemoryUploadSlots} fileInputName="files">
             <input type="hidden" name="family_id" value={familyId} />
             <div className="rounded-xl p-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
@@ -209,7 +210,7 @@ export default async function MemoriesPage({
               </div>
               <SubmitButtonWithProgress label="Fotos speichern" pendingLabel="Fotos werden gespeichert …" />
             </div>
-          </form>
+          </DirectPhotoUploadForm>
         </section>
 
         {/* ── Highlights ── */}

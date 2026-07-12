@@ -2,9 +2,10 @@ import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
-import { generateContentIdeas } from "@/lib/actions/content-idea-generation";
+import { generateContentIdeas, createContentIdeaUploadSlots } from "@/lib/actions/content-idea-generation";
 import { MultiPhotoFilePreview } from "@/components/MultiPhotoFilePreview";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
+import { DirectPhotoUploadForm } from "@/components/DirectPhotoUploadForm";
 import { Banner } from "@/components/Banner";
 
 // §Mehrfachfoto-KI-Analyse kann länger dauern als das Standard-Timeout —
@@ -68,7 +69,7 @@ export default async function NewContentIdeaPage({
           <span>3 Ideen erhalten</span>
         </div>
 
-        <form action={generateContentIdeas} encType="multipart/form-data">
+        <DirectPhotoUploadForm action={generateContentIdeas} createSlots={createContentIdeaUploadSlots} fileInputName="files">
           <div className="rounded-xl p-8" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
             {error && (
               <Banner variant="error">
@@ -142,7 +143,7 @@ export default async function NewContentIdeaPage({
               <SubmitButtonWithProgress label="Ideen entwickeln →" pendingLabel="Fotos werden analysiert …" />
             </div>
           </div>
-        </form>
+        </DirectPhotoUploadForm>
       </div>
     </div>
   );

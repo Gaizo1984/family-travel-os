@@ -9,11 +9,20 @@ import {
   PHOTO_ASSESSMENT_SCHEMA_FIELD, PHOTO_ASSESSMENT_PROMPT_FRAGMENT, MAX_PHOTOS_ANALYZED_PER_CALL,
   parsePhotoAssessments,
 } from '@/lib/photo-quality-analysis'
+import { createUploadSlots, downloadAndClearStagedUpload, type UploadSlot } from '@/lib/actions/photo-staging'
+import { parseStagedPaths } from '@/lib/staged-paths'
+import { getFamily } from '@/lib/family'
 
 /** Gleiches Modell wie die bestehende Pass-/ESTA-/Beleg-/Reiseideen-KI. */
 const OPENAI_MODEL = 'gpt-5.4'
 
 const MAX_PHOTOS_PER_UPLOAD = 20
+
+/** §Root-Cause-Fix "This page couldn't load" bei Mehrfach-Foto-Upload — siehe lib/actions/photo-staging.ts. */
+export async function createContentIdeaUploadSlots(count: number): Promise<UploadSlot[]> {
+  const { id: familyId } = await getFamily()
+  return createUploadSlots(familyId, count)
+}
 
 const CONTENT_STYLE_LABELS: Record<string, string> = {
   luxury: 'Luxury — elegant, hochwertig, ruhig',
@@ -94,18 +103,23 @@ export async function generateContentIdeas(formData: FormData) {
   if (!family?.id)
     redirect(`${newPath}?error=${encodeURIComponent('Familiendaten nicht gefunden')}`)
 
-  const rawFiles = formData.getAll('files').filter((f): f is File => f instanceof File && f.size > 0)
-  if (rawFiles.length > MAX_PHOTOS_PER_UPLOAD)
+  const stagedPaths = parseStagedPaths(formData.get('uploaded_paths'))
+  if (stagedPaths.length > MAX_PHOTOS_PER_UPLOAD)
     redirect(`${newPath}?error=${encodeURIComponent(`Maximal ${MAX_PHOTOS_PER_UPLOAD} Fotos pro Upload.`)}`)
 
-  for (const f of rawFiles) {
-    if (!f.type.startsWith('image/'))
+  const uploadedPhotos: PhotoInput[] = []
+  for (let i = 0; i < stagedPaths.length; i++) {
+    const staged = await downloadAndClearStagedUpload(stagedPaths[i])
+    if (!staged)
+      redirect(`${newPath}?error=${encodeURIComponent('Foto-Upload fehlgeschlagen. Bitte erneut versuchen.')}`)
+    if (!staged.mimeType.startsWith('image/'))
       redirect(`${newPath}?error=${encodeURIComponent('Für die Bildanalyse werden Fotos (JPEG, PNG oder WebP) benötigt — Video wird diese Phase nicht inhaltlich analysiert.')}`)
-    if (f.size > 10 * 1024 * 1024)
+    if (staged.buffer.length > 10 * 1024 * 1024)
       redirect(`${newPath}?error=${encodeURIComponent('Mindestens eine Datei ist zu groß (maximal 10 MB pro Foto).')}`)
+    uploadedPhotos.push({ index: i, buffer: staged.buffer, mimeType: staged.mimeType })
   }
 
-  if (rawFiles.length === 0 && !contextText && !contentGoal)
+  if (uploadedPhotos.length === 0 && !contextText && !contentGoal)
     redirect(`${newPath}?error=${encodeURIComponent('Bitte mindestens ein Foto oder einen Kontext angeben.')}`)
 
   if (!process.env.OPENAI_API_KEY)
@@ -135,13 +149,6 @@ export async function generateContentIdeas(formData: FormData) {
   const { data: existingPhotosRaw } = await supabase
     .from('content_project_photos').select('id, phash').eq('project_id', projectId).not('phash', 'is', null)
   const existingPhotos = (existingPhotosRaw ?? []) as { id: string; phash: string }[]
-
-  const uploadedPhotos: PhotoInput[] = []
-  for (let i = 0; i < rawFiles.length; i++) {
-    const file = rawFiles[i]
-    const buffer = Buffer.from(await file.arrayBuffer())
-    uploadedPhotos.push({ index: i, buffer, mimeType: file.type })
-  }
 
   // §"KI nur bei echtem Mehrwert": Dubletten werden NIE per KI erkannt, nur
   // per deterministischem Perceptual Hash (lib/image-hash.ts) — sowohl gegen

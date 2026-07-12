@@ -7,7 +7,21 @@ import { after } from 'next/server'
 import { compressImageForStorage } from '@/lib/image-compression'
 import { computeDHash, hammingDistance, DUPLICATE_HASH_THRESHOLD } from '@/lib/image-hash'
 import { assessPhotoBatch, MAX_PHOTOS_ANALYZED_PER_CALL } from '@/lib/photo-quality-analysis'
+import { createUploadSlots, downloadAndClearStagedUpload, type UploadSlot } from '@/lib/actions/photo-staging'
+import { parseStagedPaths } from '@/lib/staged-paths'
+import { getFamily } from '@/lib/family'
 import type { SupabaseClient } from '@supabase/supabase-js'
+
+/**
+ * §Root-Cause-Fix "This page couldn't load" bei Mehrfach-Foto-Upload: siehe
+ * lib/actions/photo-staging.ts — Fotos gehen jetzt direkt vom Browser zu
+ * Supabase Storage, nicht mehr über den (von Vercel auf 4,5 MB begrenzten)
+ * Server-Action-Request-Body.
+ */
+export async function createMemoryUploadSlots(count: number): Promise<UploadSlot[]> {
+  const { id: familyId } = await getFamily()
+  return createUploadSlots(familyId, count)
+}
 
 const MAX_PHOTOS_PER_UPLOAD = 20
 /** §"Maximal 30 Erinnerungsbilder je Reise": Kappung als Auswahl (is_selected), kein Löschen. */
@@ -86,18 +100,11 @@ export async function uploadMemoryPhotos(formData: FormData) {
 
   if (!familyId) redirect(`${backPath}?error=${encodeURIComponent('Familie nicht gefunden')}`)
 
-  const rawFiles = formData.getAll('files').filter((f): f is File => f instanceof File && f.size > 0)
-  if (rawFiles.length === 0)
+  const stagedPaths = parseStagedPaths(formData.get('uploaded_paths'))
+  if (stagedPaths.length === 0)
     redirect(`${backPath}?error=${encodeURIComponent('Bitte mindestens ein Foto auswählen.')}`)
-  if (rawFiles.length > MAX_PHOTOS_PER_UPLOAD)
+  if (stagedPaths.length > MAX_PHOTOS_PER_UPLOAD)
     redirect(`${backPath}?error=${encodeURIComponent(`Maximal ${MAX_PHOTOS_PER_UPLOAD} Fotos pro Upload.`)}`)
-
-  for (const f of rawFiles) {
-    if (!f.type.startsWith('image/'))
-      redirect(`${backPath}?error=${encodeURIComponent('Nur Fotos werden unterstützt (JPEG, PNG, WebP).')}`)
-    if (f.size > 15 * 1024 * 1024)
-      redirect(`${backPath}?error=${encodeURIComponent('Mindestens eine Datei ist zu groß (maximal 15 MB pro Foto).')}`)
-  }
 
   const supabase = await createClient()
   const tripId = String(formData.get('trip_id') ?? '').trim() || await suggestTripId(supabase, familyId, takenAt)
@@ -108,12 +115,15 @@ export async function uploadMemoryPhotos(formData: FormData) {
   // berichten, wie viele Fotos gespeichert wurden bzw. fehlgeschlagen sind.
   let savedCount = 0
   let failedCount = 0
-  for (const file of rawFiles) {
+  for (const stagingPath of stagedPaths) {
     try {
-      const rawBuffer = Buffer.from(await file.arrayBuffer())
-      console.error('[Memories][DIAGNOSTIC] Datei empfangen', { name: file.name, type: file.type, size: rawBuffer.length })
+      const staged = await downloadAndClearStagedUpload(stagingPath)
+      if (!staged) { failedCount++; continue }
+      if (!staged.mimeType.startsWith('image/')) { failedCount++; continue }
+      if (staged.buffer.length > 15 * 1024 * 1024) { failedCount++; continue }
+      console.error('[Memories][DIAGNOSTIC] Datei aus Staging geladen', { mimeType: staged.mimeType, size: staged.buffer.length })
 
-      const compressed = await compressImageForStorage(rawBuffer)
+      const compressed = await compressImageForStorage(staged.buffer)
       console.error('[Memories][DIAGNOSTIC] Komprimiert', { size: compressed.length, magicValid: isValidWebpBuffer(compressed) })
 
       const storagePath = `memories/${familyId}/${crypto.randomUUID()}.webp`
@@ -169,7 +179,7 @@ export async function uploadMemoryPhotos(formData: FormData) {
   if (savedCount === 0)
     redirect(`${backPath}?error=${encodeURIComponent('Keines der Fotos konnte gespeichert werden.')}`)
   if (failedCount > 0)
-    redirect(`${backPath}?uploaded=${savedCount}&error=${encodeURIComponent(`${failedCount} von ${rawFiles.length} Fotos konnten nicht gespeichert werden.`)}`)
+    redirect(`${backPath}?uploaded=${savedCount}&error=${encodeURIComponent(`${failedCount} von ${stagedPaths.length} Fotos konnten nicht gespeichert werden.`)}`)
 
   redirect(`${backPath}?uploaded=${savedCount}`)
 }

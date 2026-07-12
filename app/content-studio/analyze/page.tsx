@@ -2,9 +2,10 @@ import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
-import { analyzePhotos } from "@/lib/actions/photo-analysis-generation";
+import { analyzePhotos, createPhotoAnalysisUploadSlots } from "@/lib/actions/photo-analysis-generation";
 import { MultiPhotoFilePreview } from "@/components/MultiPhotoFilePreview";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
+import { DirectPhotoUploadForm } from "@/components/DirectPhotoUploadForm";
 import { Banner } from "@/components/Banner";
 
 // §Bilder analysieren macht bei mehreren Fotos 2 KI-Calls (Kategorisierung +
@@ -68,7 +69,7 @@ export default async function AnalyzePhotosPage({
           <span>3 Ergebnisse</span>
         </div>
 
-        <form action={analyzePhotos} encType="multipart/form-data">
+        <DirectPhotoUploadForm action={analyzePhotos} createSlots={createPhotoAnalysisUploadSlots} fileInputName="files">
           <div className="rounded-xl p-8" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
             {error && <Banner variant="error">{error}</Banner>}
 
@@ -100,7 +101,7 @@ export default async function AnalyzePhotosPage({
               <SubmitButtonWithProgress label="Bilder analysieren →" pendingLabel="Bilder werden analysiert …" />
             </div>
           </div>
-        </form>
+        </DirectPhotoUploadForm>
       </div>
     </div>
   );

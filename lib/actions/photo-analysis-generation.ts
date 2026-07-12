@@ -7,11 +7,19 @@ import { computeDHash, hammingDistance, DUPLICATE_HASH_THRESHOLD } from '@/lib/i
 import { getFamily } from '@/lib/family'
 import { buildTripDigest } from '@/lib/trip-digest'
 import { PHOTO_CATEGORIES, RECOMMENDATIONS, type PhotoCategory, type Recommendation } from '@/lib/photo-analysis'
+import { createUploadSlots, downloadAndClearStagedUpload, type UploadSlot } from '@/lib/actions/photo-staging'
+import { parseStagedPaths } from '@/lib/staged-paths'
 
 /** Gleiches Modell wie die übrigen KI-Flows (Pass/ESTA/Beleg/Reiseideen/Content). */
 const OPENAI_MODEL = 'gpt-5.4'
 const MAX_PHOTOS_PER_UPLOAD = 20
 const MAX_PHOTOS_ANALYZED_PER_CALL = 20
+
+/** §Root-Cause-Fix "This page couldn't load" bei Mehrfach-Foto-Upload — siehe lib/actions/photo-staging.ts. */
+export async function createPhotoAnalysisUploadSlots(count: number): Promise<UploadSlot[]> {
+  const { id: familyId } = await getFamily()
+  return createUploadSlots(familyId, count)
+}
 
 const PHOTO_CATEGORIZATION_SCHEMA = {
   type: 'object',
@@ -96,16 +104,22 @@ export async function analyzePhotos(formData: FormData) {
   if (!tripId)
     redirect(`${newPath}?error=${encodeURIComponent('Bitte eine Reise auswählen.')}`)
 
-  const rawFiles = formData.getAll('files').filter((f): f is File => f instanceof File && f.size > 0)
-  if (rawFiles.length === 0)
+  const stagedPaths = parseStagedPaths(formData.get('uploaded_paths'))
+  if (stagedPaths.length === 0)
     redirect(`${newPath}?error=${encodeURIComponent('Bitte mindestens ein Foto auswählen.')}`)
-  if (rawFiles.length > MAX_PHOTOS_PER_UPLOAD)
+  if (stagedPaths.length > MAX_PHOTOS_PER_UPLOAD)
     redirect(`${newPath}?error=${encodeURIComponent(`Maximal ${MAX_PHOTOS_PER_UPLOAD} Fotos pro Upload.`)}`)
-  for (const f of rawFiles) {
-    if (!f.type.startsWith('image/'))
+
+  const uploadedPhotos: PhotoInput[] = []
+  for (const stagingPath of stagedPaths) {
+    const staged = await downloadAndClearStagedUpload(stagingPath)
+    if (!staged)
+      redirect(`${newPath}?error=${encodeURIComponent('Foto-Upload fehlgeschlagen. Bitte erneut versuchen.')}`)
+    if (!staged.mimeType.startsWith('image/'))
       redirect(`${newPath}?error=${encodeURIComponent('Nur Fotos werden unterstützt (JPEG, PNG, WebP).')}`)
-    if (f.size > 10 * 1024 * 1024)
+    if (staged.buffer.length > 10 * 1024 * 1024)
       redirect(`${newPath}?error=${encodeURIComponent('Mindestens eine Datei ist zu groß (maximal 10 MB pro Foto).')}`)
+    uploadedPhotos.push({ buffer: staged.buffer, mimeType: staged.mimeType })
   }
   if (!process.env.OPENAI_API_KEY)
     redirect(`${newPath}?error=${encodeURIComponent('Die Bildanalyse-KI ist aktuell nicht konfiguriert.')}`)
@@ -140,10 +154,6 @@ export async function analyzePhotos(formData: FormData) {
   const { data: existingPhotosRaw } = await supabase
     .from('content_project_photos').select('id, phash').eq('project_id', projectId).not('phash', 'is', null)
   const hashPool = (existingPhotosRaw ?? []) as { id: string; phash: string }[]
-
-  const uploadedPhotos: PhotoInput[] = await Promise.all(
-    rawFiles.map(async (f) => ({ buffer: Buffer.from(await f.arrayBuffer()), mimeType: f.type })),
-  )
 
   type NewPhotoRow = { id: string; isDuplicate: boolean; buffer: Buffer; mimeType: string }
   const newPhotoRows: NewPhotoRow[] = []
