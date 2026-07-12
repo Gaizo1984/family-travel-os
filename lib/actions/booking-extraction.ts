@@ -31,14 +31,13 @@ const BOOKING_SCHEMA = {
     start_time: { type: ['string', 'null'], description: 'Uhrzeit dazu, HH:MM, falls vorhanden' },
     end_date: { type: ['string', 'null'], description: 'Landung/Check-out/Rückgabe, ISO 8601 JJJJ-MM-TT' },
     end_time: { type: ['string', 'null'], description: 'Uhrzeit dazu, HH:MM, falls vorhanden' },
-    booking_date: { type: ['string', 'null'], description: 'Nur für Hotels: Datum, an dem die Buchung vorgenommen wurde, ISO 8601' },
     booking_reference: { type: ['string', 'null'] },
     amount: { type: ['number', 'null'] },
     currency: { type: ['string', 'null'], description: 'ISO-4217-Code, z. B. EUR, USD' },
   },
   required: [
     'readable', 'title', 'direction', 'provider', 'flight_number', 'from', 'to', 'terminal', 'gate',
-    'location', 'start_date', 'start_time', 'end_date', 'end_time', 'booking_date', 'booking_reference',
+    'location', 'start_date', 'start_time', 'end_date', 'end_time', 'booking_reference',
     'amount', 'currency',
   ],
   additionalProperties: false,
@@ -58,8 +57,8 @@ function buildPrompt(type: BookingType): string {
     `zutreffend ist, setze es auf null. Setze "readable" auf false, wenn das Dokument nicht sinnvoll ` +
     `lesbar ist (z. B. zu unscharf, falscher Dokumenttyp, leere Seite). Alle Datumsangaben im Format ` +
     `JJJJ-MM-TT, Uhrzeiten im Format HH:MM. Fülle nur Felder, die zum jeweiligen Buchungstyp passen ` +
-    `(z. B. "direction"/"flight_number"/"terminal"/"gate" nur bei Flügen, "location"/"booking_date" nur ` +
-    `bei Hotels) — alle anderen bleiben null.`
+    `(z. B. "direction"/"flight_number"/"terminal"/"gate" nur bei Flügen, "location" nur bei Hotels) — ` +
+    `alle anderen bleiben null.`
   )
 }
 
@@ -87,7 +86,6 @@ function buildDraft(type: BookingType, parsed: ExtractionResult): BookingDraft {
     set('gate', parsed.gate)
   } else if (type === 'accommodation') {
     set('location', parsed.location)
-    set('booking_date', parsed.booking_date)
   } else if (type === 'rental_car') {
     // §pickup_location/dropoff_location sind in der Maske ausgeblendet (siehe
     // lib/bookings.ts), werden aber bei erfolgreicher Auslesung trotzdem aus

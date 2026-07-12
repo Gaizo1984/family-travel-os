@@ -7,6 +7,7 @@ import { restoreTrip } from "@/lib/actions/trips";
 import { tripCountdownDisplay } from "@/lib/trip-status";
 import { resolveTripImage, getHighlightPhotoByTripId, type ResolvedTripImage } from "@/lib/trip-images";
 import { buildWorldStats } from "@/lib/world-stats";
+import { isTripHistorical, isTripCurrentlyRunning } from "@/lib/trip-status";
 import { SignedPhoto } from "@/components/SignedPhoto";
 
 const H_FG    = "#F0EBE3";
@@ -38,15 +39,24 @@ type TripRow = {
   stages: Array<{ id: string }>
 }
 
+/**
+ * §"Bei Reisen ist es immer noch falsch... die App muss am Datum erkennen,
+ * dass die Reise abgeschlossen ist": nicht mehr auf den manuell gepflegten
+ * status verlassen, sondern dieselbe datumsbasierte Einordnung wie
+ * Dashboard/Familienseite/Reisegeschichte nutzen (lib/trip-status.ts) --
+ * eine Reise mit vergangenem Enddatum gilt als erlebt, auch wenn ihr Status
+ * nie manuell auf "completed" gesetzt wurde.
+ */
 function applyFilter(trips: TripRow[], f: string): { planned: TripRow[]; past: TripRow[] } {
-  const active  = trips.filter((t) => t.status === "active");
-  const planned = trips.filter((t) => t.status === "planned");
-  const past    = trips.filter((t) => t.status === "completed");
-  if (f === "aktiv")      return { planned: active, past: [] };
-  if (f === "geplant")    return { planned: [...active, ...planned], past: [] };
+  const nonArchived = trips.filter((t) => t.status !== "archived");
+  const past     = nonArchived.filter((t) => isTripHistorical(t));
+  const running  = nonArchived.filter((t) => !isTripHistorical(t) && isTripCurrentlyRunning(t));
+  const upcoming = nonArchived.filter((t) => !isTripHistorical(t) && !isTripCurrentlyRunning(t));
+  if (f === "aktiv")      return { planned: running, past: [] };
+  if (f === "geplant")    return { planned: [...running, ...upcoming], past: [] };
   if (f === "vergangen")  return { planned: [], past };
   if (f === "archiviert") return { planned: [], past: [] };
-  return { planned: [...active, ...planned], past };
+  return { planned: [...running, ...upcoming], past };
 }
 
 function PlannedCard({ trip, img }: { trip: TripRow; img: ResolvedTripImage | null }) {
@@ -88,7 +98,7 @@ function PlannedCard({ trip, img }: { trip: TripRow; img: ResolvedTripImage | nu
 
       <div className="absolute top-6 left-7">
         <span style={{ color: "#C8A96E", fontSize: "0.6rem", letterSpacing: "0.22em", textTransform: "uppercase" }}>
-          {trip.status === "active" ? "Aktive Reise" : "In Planung"}
+          {isTripCurrentlyRunning(trip) ? "Aktive Reise" : "In Planung"}
         </span>
       </div>
 

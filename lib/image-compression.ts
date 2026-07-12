@@ -10,6 +10,14 @@ const MAX_WIDTH = 2000
  */
 export async function compressImageForStorage(buffer: Buffer): Promise<Buffer> {
   const compressed = await sharp(buffer)
+    // §"Bilder im Querformat stehen auf dem Kopf": Fotos von Smartphones
+    // speichern die Pixel oft unrotiert und markieren die tatsächliche
+    // Ausrichtung nur im EXIF-Orientation-Tag. Ohne .rotate() übernimmt
+    // resize()/webp() die rohen (falsch orientierten) Pixel, und der Tag
+    // geht beim WebP-Reencoding ohnehin verloren -- .rotate() ohne
+    // Argumente wendet die EXIF-Rotation VOR dem Resize physisch auf die
+    // Pixel an, danach ist das Bild unabhängig vom (verworfenen) Tag korrekt.
+    .rotate()
     .resize({ width: MAX_WIDTH, withoutEnlargement: true })
     .webp({ quality: 82 })
     .toBuffer()

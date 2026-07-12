@@ -8,9 +8,9 @@ const LABEL_STYLE: React.CSSProperties = {
   letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px",
 };
 const FIELD_STYLE: React.CSSProperties = {
-  width: "100%", padding: "14px 12px", background: "var(--background)",
+  width: "100%", padding: "14px 6px", background: "var(--background)",
   border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)",
-  fontSize: "0.9rem", fontWeight: 300, outline: "none", minHeight: "44px",
+  fontSize: "0.82rem", fontWeight: 300, outline: "none", minHeight: "44px",
 };
 const QUICK_ACTION_STYLE: React.CSSProperties = {
   fontSize: "0.65rem", color: "var(--accent)", background: "var(--background)",
@@ -85,7 +85,11 @@ export function DateSelectFields({
   return (
     <div className="mb-5">
       <label style={LABEL_STYLE}>{label}</label>
-      <div className="grid grid-cols-3 gap-2">
+      {/* §"Längere Monatsnamen wie September sind abgeschnitten": bei
+          gleich breiten Dritteln reicht der Platz für "September"/"Dezember"
+          nicht -- Monat bekommt bewusst mehr Raum als Jahr (4 Ziffern) und
+          Tag (max. 2 Ziffern), die von Natur aus schmaler sein dürfen. */}
+      <div className="grid gap-2" style={{ gridTemplateColumns: "0.85fr 1.3fr 0.85fr" }}>
         <select
           name={`${namePrefix}_year`} value={parts.year}
           onChange={(e) => update({ year: e.target.value })}

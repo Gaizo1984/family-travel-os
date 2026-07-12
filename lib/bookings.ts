@@ -132,7 +132,6 @@ export const BOOKING_TYPE_CONFIG: Record<BookingType, BookingTypeConfig> = {
     showEnd: true, startLabel: 'Check-in', endLabel: 'Check-out',
     detailFields: [
       { key: 'location', label: 'Ort', placeholder: 'z. B. Dubai' },
-      { key: 'booking_date', label: 'Buchungsdatum', type: 'date' },
       { key: 'room_info', label: 'Zimmer / Tarif', placeholder: 'optional', visible: false },
     ],
     visibleFields: { bookingReference: true, status: false, paymentStatus: false, notes: false },
