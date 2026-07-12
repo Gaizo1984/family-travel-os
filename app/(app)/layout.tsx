@@ -1,7 +1,6 @@
 import Link from "next/link";
-import { LayoutDashboard, Plane, Users, Sun, Camera, Compass, MessageSquare, MoreHorizontal, BookOpenCheck, Images, LogOut } from "lucide-react";
+import { LayoutDashboard, Plane, Users, Sun, Camera, Compass, MessageSquare, MoreHorizontal, BookOpenCheck, Images } from "lucide-react";
 import { RoutePrefetcher } from "@/components/RoutePrefetcher";
-import { logout } from "@/lib/actions/auth";
 
 const NAV = [
   { href: "/", label: "Dashboard", Icon: LayoutDashboard },
@@ -36,26 +35,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <>
       <RoutePrefetcher />
-
-      {/* Logout — permanent oben rechts auf jeder geschützten Seite, dezent
-          (keine Warnfarbe). Nutzt die bestehende logout-Server-Action direkt,
-          keine zweite Logout-Logik. */}
-      <form
-        action={logout}
-        style={{ position: "fixed", top: "max(16px, env(safe-area-inset-top))", right: "16px", zIndex: 40 }}
-      >
-        <button
-          type="submit"
-          aria-label="Abmelden"
-          style={{
-            width: "44px", height: "44px", display: "flex", alignItems: "center", justifyContent: "center",
-            background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "50%",
-            color: "var(--muted)", cursor: "pointer", WebkitAppearance: "none", appearance: "none",
-          }}
-        >
-          <LogOut size={16} strokeWidth={1.6} />
-        </button>
-      </form>
 
       {/* Sidebar — desktop */}
       <aside

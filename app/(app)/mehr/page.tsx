@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Users, Compass, MessageSquare, BookOpenCheck, Images, Fingerprint, ChevronRight, type LucideIcon } from "lucide-react";
+import { Users, Compass, MessageSquare, BookOpenCheck, Images, Fingerprint, LogOut, ChevronRight, type LucideIcon } from "lucide-react";
+import { logout } from "@/lib/actions/auth";
 
 interface MoreLink {
   href: string;
@@ -21,19 +22,34 @@ export default function MehrPage() {
   return (
     <div className="flex-1 flex flex-col">
       <div className="flex-1 px-5 md:px-8 pb-16 max-w-4xl w-full mx-auto">
-        <header className="pt-9 pb-9">
-          <h1
-            className="text-2xl font-light mb-1"
-            style={{ color: "var(--foreground)", letterSpacing: "0.01em" }}
-          >
-            Mehr
-          </h1>
-          <p
-            className="text-xs"
-            style={{ color: "var(--muted)", letterSpacing: "0.08em", fontSize: "0.7rem" }}
-          >
-            Weitere Bereiche von LUMI
-          </p>
+        <header className="flex items-start justify-between gap-4 pt-9 pb-9">
+          <div>
+            <h1
+              className="text-2xl font-light mb-1"
+              style={{ color: "var(--foreground)", letterSpacing: "0.01em" }}
+            >
+              Mehr
+            </h1>
+            <p
+              className="text-xs"
+              style={{ color: "var(--muted)", letterSpacing: "0.08em", fontSize: "0.7rem" }}
+            >
+              Weitere Bereiche von LUMI
+            </p>
+          </div>
+          <form action={logout} style={{ flexShrink: 0 }}>
+            <button
+              type="submit"
+              aria-label="Abmelden"
+              style={{
+                width: "44px", height: "44px", display: "flex", alignItems: "center", justifyContent: "center",
+                background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "50%",
+                color: "var(--muted)", cursor: "pointer", WebkitAppearance: "none", appearance: "none",
+              }}
+            >
+              <LogOut size={16} strokeWidth={1.6} />
+            </button>
+          </form>
         </header>
 
         <div className="flex flex-col gap-3">
