@@ -179,17 +179,17 @@ export default async function FamilyPage() {
             Unsere Welt
           </h2>
 
-          <div className="flex gap-12 md:gap-20 mb-8">
+          <div className="grid grid-cols-3 gap-3 md:gap-8 mb-8">
             {[
               { Icon: MapIcon, value: tripsCount, label: "Reisen" },
               { Icon: Globe, value: countryCodes.size, label: "Länder" },
               { Icon: CalendarDays, value: travelDays, label: "Reisetage" },
             ].map(({ Icon, value, label }) => (
-              <div key={label} className="flex items-center gap-4">
+              <div key={label} className="flex items-center gap-2 md:gap-4 min-w-0">
                 <Icon size={13} strokeWidth={1.4} style={{ color: "var(--accent)", flexShrink: 0 }} />
-                <div>
-                  <div className="text-4xl font-light leading-none mb-1" style={{ color: "var(--foreground)" }}>{value}</div>
-                  <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.14em", textTransform: "uppercase" }}>{label}</div>
+                <div className="min-w-0">
+                  <div className="text-3xl md:text-4xl font-light leading-none mb-1 truncate" style={{ color: "var(--foreground)" }}>{value}</div>
+                  <div className="truncate" style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.14em", textTransform: "uppercase" }}>{label}</div>
                 </div>
               </div>
             ))}
@@ -212,8 +212,8 @@ export default async function FamilyPage() {
           </div>
 
           {timelineEntries.length > 0 ? (
-            <div className="rounded-xl p-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-              <div className="flex items-start">
+            <div className="rounded-xl p-6 overflow-x-auto scroll-hide" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+              <div className="flex items-start" style={{ width: "max-content", minWidth: "100%" }}>
                 {timelineEntries.flatMap((h, idx) => [
                   <div key={h.key} className="flex flex-col items-center" style={{ minWidth: "80px" }}>
                     <div
