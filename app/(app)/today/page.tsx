@@ -1,7 +1,9 @@
 import Link from "next/link";
 import {
-  Clock, ArrowRight, Ticket, Car, ChevronRight,
+  Clock, ArrowRight, Ticket, Car, ChevronRight, Sparkles, Compass,
+  FileQuestion, CloudSun, Shuffle, AlertTriangle, RefreshCw,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { Banner } from "@/components/Banner";
 import { getFamily } from "@/lib/family";
@@ -26,9 +28,16 @@ import { computeTripRequirements } from "@/lib/travel-requirements";
 import type { TravelRequirement } from "@/lib/travel-requirements";
 import { computeTripReadiness } from "@/lib/readiness";
 import type { ReadinessFinding } from "@/lib/readiness";
-import { askConcierge } from "@/lib/actions/concierge-actions";
+import { askConcierge, refreshConciergeMessage, commitConciergeAction } from "@/lib/actions/concierge-actions";
 import { TODAY_CATEGORIES } from "@/lib/today-categories";
 import { resolveTripAiContext } from "@/lib/today-trip-context";
+import { scoreDestinations } from "@/lib/discover-scoring";
+import type { ScoredDestination } from "@/lib/discover-scoring";
+import { searchDestinations } from "@/lib/providers/destination-provider";
+import { QUICK_ACTIONS, buildConciergeCards } from "@/lib/concierge";
+import type { QuickActionKey, DisplayCard } from "@/lib/concierge";
+import { listTodayConciergeMessages, buildContextFingerprint } from "@/lib/concierge-messages";
+import type { CachedConciergeMessage } from "@/lib/concierge-messages";
 
 type FlightWithPasses = { id: string; title: string; slug: string };
 
@@ -160,6 +169,71 @@ function PersonalisierteHinweiseSection({ findings, tripSlug }: { findings: Read
   );
 }
 
+/** §"Neue Reiseideen" wieder eingebettet: kompakte Vorschau derselben scoreDestinations()-Bewertung wie /discover, nicht dupliziert -- reasoning kommt direkt aus lib/discover-scoring.ts. */
+function EntdeckenPreview({ items }: { items: ScoredDestination[] }) {
+  if (items.length === 0) return null;
+  return (
+    <section className="mb-8">
+      <div className="flex items-center justify-between mb-4">
+        <SectionLabel>Neue Reiseideen</SectionLabel>
+        <Link href="/discover" style={{ color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.04em", textDecoration: "none" }}>
+          Alle Ideen ansehen
+        </Link>
+      </div>
+      <div className="space-y-2.5">
+        {items.map(({ destination, reasoning }) => (
+          <Card key={destination.name}>
+            <div className="flex items-start gap-3">
+              <Compass size={14} strokeWidth={1.4} style={{ color: "var(--accent)", flexShrink: 0, marginTop: "2px" }} />
+              <div>
+                <div style={{ color: "var(--foreground)", fontSize: "0.88rem", marginBottom: "3px" }}>{destination.name}</div>
+                <p style={{ color: "var(--muted)", fontSize: "0.76rem", lineHeight: 1.5, fontStyle: "italic" }}>{reasoning}</p>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** §Ein-Klick-Übernahme ins Journey: wiederverwendet commitConciergeAction 1:1 (lib/actions/concierge-actions.ts). */
+function CommitToJourneyButton({ tripId, tripSlug, forDate, eventTitle, label, className = "mt-3" }: { tripId: string; tripSlug: string; forDate: string; eventTitle: string; label: string; className?: string }) {
+  return (
+    <form action={commitConciergeAction}>
+      <input type="hidden" name="trip_id" value={tripId} />
+      <input type="hidden" name="trip_slug" value={tripSlug} />
+      <input type="hidden" name="for_date" value={forDate} />
+      <input type="hidden" name="event_title" value={eventTitle} />
+      <input type="hidden" name="return_to" value="/today" />
+      <button
+        type="submit"
+        className={className}
+        style={{
+          background: "transparent", color: "var(--accent)", border: "1px solid rgba(184,154,94,0.4)",
+          borderRadius: "20px", padding: "6px 14px", fontSize: "0.62rem", cursor: "pointer",
+        }}
+      >
+        {label}
+      </button>
+    </form>
+  );
+}
+
+/** §"Schnellaktionen (Icons)": ein Icon je QUICK_ACTIONS-Eintrag. */
+const QUICK_ACTION_ICONS: Record<QuickActionKey, LucideIcon> = {
+  today_important: Sparkles,
+  plan_tomorrow: Clock,
+  whats_missing: FileQuestion,
+  adjust_weather: CloudSun,
+  find_alternative: Shuffle,
+  explain_conflict: AlertTriangle,
+};
+
+function formatTimestamp(iso: string): string {
+  return new Date(iso).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) + " Uhr";
+}
+
 /** §Punkt 3 "Icon-Navigation", vollständig datengetrieben: eine Kachel je TODAY_CATEGORIES-Eintrag, kein hartkodiertes JSX pro Kategorie. */
 function CategoryGrid() {
   return (
@@ -215,7 +289,7 @@ export default async function TodayPage({
   const tomorrowIso = addDaysIso(todayIso, 1);
   const nowHHMM = nowHHMMInFamilyTimezone();
 
-  const [{ data: trips }, onThisDayMemories, dna] = await Promise.all([
+  const [{ data: trips }, onThisDayMemories, dna, { data: pastTripsForAvoid }] = await Promise.all([
     supabase
       .from("trips")
       .select(`
@@ -228,6 +302,7 @@ export default async function TodayPage({
       .eq("family_id", familyId),
     findOnThisDayMemories(familyId, todayIso),
     buildFamilyDnaSummary(familyId),
+    supabase.from("past_trips").select("country_or_region").eq("family_id", familyId),
   ]);
 
   const onThisDayMemoriesWithUrls = await Promise.all(
@@ -461,6 +536,28 @@ export default async function TodayPage({
 
   const readiness = await computeTripReadiness(activeTrip.id);
 
+  // §"Neue Reiseideen" wieder eingebettet: identischer Aufruf wie
+  // app/(app)/discover/page.tsx (avoidNames aus past_trips + bereits
+  // erlebten/laufenden Reisen), nur mit 3 statt 1 Treffer für die Vorschau.
+  const avoidNames = [
+    ...(pastTripsForAvoid ?? []).map((p) => p.country_or_region),
+    ...allTrips.filter((t) => t.status === "completed" || t.status === "active").map((t) => t.title),
+  ];
+  const destinations = (await searchDestinations()) ?? [];
+  const discoverPreview = scoreDestinations(destinations, dna, { avoidNames }).slice(0, 3);
+
+  // §"Frag LUMI" wieder eingebettet: Kontextfelder direkt aus den ohnehin
+  // schon vorhandenen Variablen dieser Seite, keine zweite Berechnung.
+  const conciergeFingerprint = buildContextFingerprint(weatherSummary, knownPlanText);
+  const recentConciergeMessages: CachedConciergeMessage[] = await listTodayConciergeMessages(
+    familyId, activeTrip.id, todayIso, conciergeFingerprint,
+  );
+  // §"today_important" ausgeklammert: ihre einzige Wirkung (Tagesempfehlung
+  // erzeugen/cachen) passiert bereits über den "Tagesplanung erstellen"-
+  // Button weiter oben -- ein Klick hier wäre redundant.
+  const EMBEDDED_QUICK_ACTIONS = QUICK_ACTIONS.filter((qa) => qa.key !== "today_important");
+  const conciergeCards: DisplayCard[] = buildConciergeCards(null, recentConciergeMessages);
+
   const activeRentalCar = bookings.find(
     (b) => b.type === "rental_car" && b.status !== "cancelled"
       && b.start_datetime && b.end_datetime
@@ -633,7 +730,7 @@ export default async function TodayPage({
             <input type="hidden" name="member_names" value={conciergeMemberNames.join(",")} />
             <input type="hidden" name="question_key" value="find_alternative" />
             <input type="hidden" name="question_text" value="Alternative finden" />
-            <input type="hidden" name="return_to" value="/concierge" />
+            <input type="hidden" name="return_to" value="/today" />
             <button
               type="submit"
               style={{
@@ -702,6 +799,158 @@ export default async function TodayPage({
             </details>
           </section>
         )}
+
+        <EntdeckenPreview items={discoverPreview} />
+
+        {/* ── Frag LUMI: wieder eingebettet (mit Nutzer abgestimmt) ── */}
+        <section className="mb-8">
+          <SectionLabel>Frag LUMI</SectionLabel>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+            {EMBEDDED_QUICK_ACTIONS.map((qa) => {
+              const QaIcon = QUICK_ACTION_ICONS[qa.key];
+              return (
+                <form key={qa.key} action={askConcierge}>
+                  <input type="hidden" name="family_id" value={familyId} />
+                  <input type="hidden" name="trip_id" value={activeTrip.id} />
+                  <input type="hidden" name="trip_slug" value={activeTrip.slug} />
+                  <input type="hidden" name="for_date" value={todayIso} />
+                  <input type="hidden" name="date_label" value={dateLabel} />
+                  <input type="hidden" name="location_label" value={currentLocation.label} />
+                  <input type="hidden" name="weather_summary" value={weatherSummary ?? ""} />
+                  <input type="hidden" name="known_plan_text" value={knownPlanText} />
+                  <input type="hidden" name="highlight_title" value={highlightTitle ?? ""} />
+                  <input type="hidden" name="member_names" value={conciergeMemberNames.join(",")} />
+                  <input type="hidden" name="question_key" value={qa.key} />
+                  <input type="hidden" name="question_text" value={qa.label} />
+                  <input type="hidden" name="return_to" value="/today" />
+                  <button
+                    type="submit"
+                    className="w-full flex items-center gap-2.5 text-left"
+                    style={{
+                      background: "var(--surface)", color: "var(--foreground)", border: "1px solid var(--border)",
+                      borderRadius: "10px", padding: "12px 14px", fontSize: "0.76rem", cursor: "pointer",
+                    }}
+                  >
+                    <QaIcon size={14} strokeWidth={1.5} style={{ color: "var(--accent)", flexShrink: 0 }} />
+                    {qa.label}
+                  </button>
+                </form>
+              );
+            })}
+          </div>
+
+          <form action={askConcierge} className="rounded-xl overflow-hidden mb-4" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+            <input type="hidden" name="family_id" value={familyId} />
+            <input type="hidden" name="trip_id" value={activeTrip.id} />
+            <input type="hidden" name="trip_slug" value={activeTrip.slug} />
+            <input type="hidden" name="for_date" value={todayIso} />
+            <input type="hidden" name="date_label" value={dateLabel} />
+            <input type="hidden" name="location_label" value={currentLocation.label} />
+            <input type="hidden" name="weather_summary" value={weatherSummary ?? ""} />
+            <input type="hidden" name="known_plan_text" value={knownPlanText} />
+            <input type="hidden" name="highlight_title" value={highlightTitle ?? ""} />
+            <input type="hidden" name="member_names" value={conciergeMemberNames.join(",")} />
+            <input type="hidden" name="question_key" value="freetext" />
+            <input type="hidden" name="return_to" value="/today" />
+            <textarea
+              name="question_text"
+              rows={2}
+              required
+              placeholder="Frag LUMI etwas, z. B. Sollen wir bei diesem Wetter lieber drinnen bleiben?"
+              style={{
+                width: "100%", padding: "14px 16px", background: "transparent", border: "none", outline: "none",
+                resize: "none", color: "var(--foreground)", fontSize: "0.82rem", lineHeight: 1.5, fontWeight: 300,
+              }}
+            />
+            <div className="flex items-center justify-end px-4 pb-3">
+              <button
+                type="submit"
+                style={{
+                  background: "var(--foreground)", color: "var(--surface)", border: "none", borderRadius: "6px",
+                  padding: "9px 18px", fontSize: "0.6rem", letterSpacing: "0.12em", textTransform: "uppercase", cursor: "pointer",
+                }}
+              >
+                LUMI fragen
+              </button>
+            </div>
+          </form>
+
+          {conciergeCards.map((card) => (
+            <div key={card.key} className="rounded-xl p-6 mb-3" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+              <div className="flex items-center gap-2 mb-2">
+                <Sparkles size={12} strokeWidth={1.5} style={{ color: "var(--accent)" }} />
+                <span style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.14em", textTransform: "uppercase" }}>
+                  {card.questionLabel}
+                </span>
+              </div>
+              <div className="mb-2" style={{ color: "var(--foreground)", fontSize: "0.95rem", fontWeight: 400 }}>
+                {card.title}
+              </div>
+              <p className="mb-3" style={{ color: "var(--muted)", fontSize: "0.8rem", lineHeight: 1.6 }}>
+                {card.body}
+              </p>
+
+              {card.links.length > 0 && (
+                <div className="mb-3 space-y-1.5">
+                  {card.links.map((l, i) => (
+                    <Link
+                      key={i}
+                      href={l.href}
+                      className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg"
+                      style={{ background: "var(--background)", border: "1px solid var(--border)", textDecoration: "none" }}
+                    >
+                      <span style={{ color: "var(--foreground)", fontSize: "0.74rem" }}>{l.label}</span>
+                      <ChevronRight size={12} strokeWidth={1.6} style={{ color: "var(--muted)", flexShrink: 0 }} />
+                    </Link>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <span style={{ color: "var(--muted)", fontSize: "0.66rem" }}>{formatTimestamp(card.timestamp)}</span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {card.showRefresh && (
+                    <form action={refreshConciergeMessage}>
+                      <input type="hidden" name="family_id" value={familyId} />
+                      <input type="hidden" name="trip_id" value={activeTrip.id} />
+                      <input type="hidden" name="trip_slug" value={activeTrip.slug} />
+                      <input type="hidden" name="for_date" value={todayIso} />
+                      <input type="hidden" name="date_label" value={dateLabel} />
+                      <input type="hidden" name="location_label" value={currentLocation.label} />
+                      <input type="hidden" name="weather_summary" value={weatherSummary ?? ""} />
+                      <input type="hidden" name="known_plan_text" value={knownPlanText} />
+                      <input type="hidden" name="highlight_title" value={highlightTitle ?? ""} />
+                      <input type="hidden" name="member_names" value={conciergeMemberNames.join(",")} />
+                      <input type="hidden" name="question_key" value={card.key} />
+                      <input type="hidden" name="question_text" value={card.questionLabel} />
+                      <input type="hidden" name="return_to" value="/today" />
+                      <button
+                        type="submit"
+                        className="flex items-center gap-1.5"
+                        style={{
+                          background: card.stale ? "rgba(184,154,94,0.12)" : "transparent",
+                          color: card.stale ? "var(--accent)" : "var(--muted)",
+                          border: card.stale ? "1px solid rgba(184,154,94,0.35)" : "1px solid var(--border)",
+                          borderRadius: "20px", padding: "6px 12px", fontSize: "0.62rem", cursor: "pointer",
+                        }}
+                      >
+                        <RefreshCw size={11} strokeWidth={1.6} />
+                        {card.stale ? "Empfehlung aktualisieren" : "Änderung prüfen"}
+                      </button>
+                    </form>
+                  )}
+                  {card.canCommit && (
+                    <CommitToJourneyButton
+                      tripId={activeTrip.id} tripSlug={activeTrip.slug} forDate={todayIso}
+                      eventTitle={card.eventTitle} label={card.commitLabel} className=""
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </section>
 
         {/* ── Vault ausgelagert: kompakter Verweis auf die Reise ── */}
         <Link

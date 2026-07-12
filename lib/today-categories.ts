@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { Compass, UtensilsCrossed, Waves, Trees, Users, ShoppingBag } from 'lucide-react'
+import { Compass, UtensilsCrossed, Waves, Trees, Users } from 'lucide-react'
 import { searchExcursions } from './providers/excursion-provider'
 import { searchRestaurants } from './providers/restaurant-provider'
 
@@ -10,9 +10,10 @@ import { searchRestaurants } from './providers/restaurant-provider'
  * weiteren Eintrag hier — keine neue Route, keine neue Migration, keine
  * Änderung an app/(app)/today/category/[category]/page.tsx. `category` in
  * der concierge_category_suggestions-Tabelle ist deshalb bewusst TEXT statt
- * ENUM (siehe Migration 20260712000007).
+ * ENUM (siehe Migration 20260712000007). "Shopping" wurde entfernt (Bugfix-
+ * Sprint), "Familie" bleibt als reine KI-Kategorie ohne Sonderbehandlung.
  */
-export type TodayCategoryKey = 'activities' | 'restaurants' | 'beaches' | 'nature' | 'family' | 'shopping'
+export type TodayCategoryKey = 'activities' | 'restaurants' | 'beaches' | 'nature' | 'family'
 
 export type CuratedResult = { id: string; name: string; description: string; photo: string }
 
@@ -57,14 +58,9 @@ export const TODAY_CATEGORIES: TodayCategoryConfig[] = [
     aiQuestionTemplate: (loc) => `Welche Naturerlebnisse und Landschaften empfiehlst du uns rund um ${loc}?`,
   },
   {
-    key: 'family', label: 'Familie', Icon: Users,
+    key: 'family', label: 'Familie & Kinder', Icon: Users,
     aiButtonLabel: 'Kinderaktivitäten suchen',
     aiQuestionTemplate: (loc) => `Welche familien- und kinderfreundlichen Aktivitäten empfiehlst du uns in ${loc}?`,
-  },
-  {
-    key: 'shopping', label: 'Shopping', Icon: ShoppingBag,
-    aiButtonLabel: 'Shopping-Tipps',
-    aiQuestionTemplate: (loc) => `Welche Shopping-Möglichkeiten empfiehlst du uns in ${loc}?`,
   },
 ]
 

@@ -19,7 +19,7 @@ interface RestaurantProvider {
 }
 
 async function curatedRestaurantSearch(params: RestaurantSearchParams): Promise<RestaurantResult[] | null> {
-  let results = RESTAURANTS.map((r, i) => ({
+  const results = RESTAURANTS.map((r, i) => ({
     id: `curated-restaurant-${i}`,
     name: r.name,
     destination: r.destination,
@@ -29,13 +29,14 @@ async function curatedRestaurantSearch(params: RestaurantSearchParams): Promise<
     photo: r.photo,
   }))
 
-  if (params.destinationName) {
-    const needle = params.destinationName.toLowerCase()
-    const filtered = results.filter((r) => r.destination.toLowerCase().includes(needle) || needle.includes(r.destination.toLowerCase()))
-    if (filtered.length > 0) results = filtered
-  }
+  if (!params.destinationName) return results
 
-  return results
+  // §"Keine weltweiten Platzhaltervorschläge mehr": kein Treffer für das
+  // gesuchte Ziel bedeutet "keine kuratierten Daten dafür" (null), nicht die
+  // volle, unpassende Weltliste.
+  const needle = params.destinationName.toLowerCase()
+  const filtered = results.filter((r) => r.destination.toLowerCase().includes(needle) || needle.includes(r.destination.toLowerCase()))
+  return filtered.length > 0 ? filtered : null
 }
 
 const curatedRestaurantProvider: RestaurantProvider = { search: curatedRestaurantSearch }

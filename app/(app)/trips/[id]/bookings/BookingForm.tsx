@@ -196,6 +196,7 @@ export function BookingForm({
           defaultStartTime={start.time}
           defaultEndDate={end.date}
           defaultEndTime={end.time}
+          showNightsHelper={config.value === "accommodation"}
         />
 
         {/* Buchungsnummer */}

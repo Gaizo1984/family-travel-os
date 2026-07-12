@@ -37,6 +37,18 @@ export async function getCategorySuggestion(familyId: string, tripId: string, ca
 }
 
 /**
+ * §"Tagestrips bis 2-2,5 Std. erlauben, keine weltweiten Platzhalter": feste
+ * Ergänzung für JEDE Kategorie-Frage an einer zentralen Stelle statt in
+ * jeder aiQuestionTemplate (lib/today-categories.ts) einzeln wiederholt.
+ * Nur an die KI angehängt, NICHT in question_text gespeichert -- die
+ * gespeicherte/angezeigte Frage bleibt die kurze, saubere Nutzerfrage.
+ */
+const PLAUSIBILITY_HINT =
+  ' Auch Tagesausflüge bis etwa 2 bis 2,5 Stunden Fahrzeit sind willkommen, ' +
+  'besonders wenn sich mehrere Stopps sinnvoll zu einer Route kombinieren lassen. ' +
+  'Schlage nichts vor, das nicht plausibel in der Nähe des genannten Ortes liegt.'
+
+/**
  * §"KI nur auf Klick": einziger Auslöser für einen OpenAI-Aufruf innerhalb
  * einer Kategorie-Seite (Aktivitäten/Strände/...). Nutzt dieselbe
  * `generateConciergeAnswer` wie Frag LUMI (lib/concierge-ai.ts) — keine
@@ -63,7 +75,8 @@ export async function generateCategorySuggestion(formData: FormData) {
   if (!familyId || !tripId || !category || !questionText) redirect(returnTo)
 
   const result = await generateConciergeAnswer({
-    questionText, dateLabel, locationLabel, weatherSummary, knownPlanText, highlightTitle, memberNames, isRegenerate,
+    questionText: questionText + PLAUSIBILITY_HINT,
+    dateLabel, locationLabel, weatherSummary, knownPlanText, highlightTitle, memberNames, isRegenerate,
   })
 
   if (!result)

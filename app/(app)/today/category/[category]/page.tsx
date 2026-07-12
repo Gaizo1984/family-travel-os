@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, RefreshCw, Sparkles, Users } from "lucide-react";
+import { ChevronLeft, RefreshCw, Sparkles } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { isTripCurrentlyRunning, isTripHistorical } from "@/lib/trip-status";
@@ -8,7 +8,6 @@ import { todayIsoInFamilyTimezone } from "@/lib/time";
 import { getTodayCategoryConfig } from "@/lib/today-categories";
 import { resolveTripAiContext } from "@/lib/today-trip-context";
 import { generateCategorySuggestion, getCategorySuggestion } from "@/lib/actions/category-suggestions";
-import { buildFamilyDnaSummary, TRAVEL_NEED_OPTIONS } from "@/lib/family-dna";
 import { Banner } from "@/components/Banner";
 import type { StageInput, TimelineBooking } from "@/lib/journey";
 
@@ -112,10 +111,9 @@ export default async function TodayCategoryPage({
   const dateLabel = new Date(todayIso).toLocaleDateString("de-DE", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
   const weatherSummary = context.weather ? `${context.weather.currentTemp}°C` : null;
 
-  const [cachedSuggestion, curatedResults, dna] = await Promise.all([
+  const [cachedSuggestion, curatedResults] = await Promise.all([
     getCategorySuggestion(familyId, context.tripId, config.key),
     config.curatedSearch ? config.curatedSearch(context.locationLabel) : Promise.resolve(null),
-    config.key === "family" ? buildFamilyDnaSummary(familyId) : Promise.resolve(null),
   ]);
 
   const questionText = config.aiQuestionTemplate(context.locationLabel);
@@ -137,30 +135,6 @@ export default async function TodayCategoryPage({
         <p className="mb-8" style={{ color: "var(--muted)", fontSize: "0.78rem" }}>📍 {context.locationLabel}</p>
 
         {error && <Banner variant="error">{error}</Banner>}
-
-        {/* §Familie: umgezogene Familien-DNA-Hinweise (vormals auf der LUMI-Startseite). */}
-        {config.key === "family" && dna && dna.persons.some((p) => p.travel_needs.length > 0 || p.interest_tags.length > 0) && (
-          <section className="mb-8">
-            <SectionLabel>Für dich mitgedacht</SectionLabel>
-            <Card>
-              <div className="space-y-3">
-                {dna.persons.filter((p) => p.travel_needs.length > 0 || p.interest_tags.length > 0).map((p) => {
-                  const needLabels = p.travel_needs.map((k) => TRAVEL_NEED_OPTIONS.find((o) => o.key === k)?.label ?? k);
-                  const allTags = [...needLabels, ...p.interest_tags];
-                  return (
-                    <div key={p.id} className="flex items-start gap-3">
-                      <Users size={13} strokeWidth={1.4} style={{ color: "var(--accent)", flexShrink: 0, marginTop: "2px" }} />
-                      <div>
-                        <span style={{ color: "var(--foreground)", fontSize: "0.82rem" }}>{p.name}: </span>
-                        <span style={{ color: "var(--muted)", fontSize: "0.8rem" }}>{allTags.join(", ")}</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </Card>
-          </section>
-        )}
 
         {/* Kuratierte Treffer: kostenlos, sofort sichtbar, kein Klick nötig. */}
         {curatedResults && curatedResults.length > 0 && (

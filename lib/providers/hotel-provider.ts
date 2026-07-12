@@ -27,7 +27,7 @@ interface HotelProvider {
 }
 
 async function curatedHotelSearch(params: HotelSearchParams): Promise<HotelResult[] | null> {
-  let results = HOTELS.map((h, i) => ({
+  const results = HOTELS.map((h, i) => ({
     id: `curated-hotel-${i}`,
     name: h.name,
     destination: h.destination,
@@ -38,13 +38,14 @@ async function curatedHotelSearch(params: HotelSearchParams): Promise<HotelResul
     highlights: h.highlights,
   }))
 
-  if (params.destinationName) {
-    const needle = params.destinationName.toLowerCase()
-    const filtered = results.filter((r) => r.destination.toLowerCase().includes(needle) || needle.includes(r.destination.toLowerCase()))
-    if (filtered.length > 0) results = filtered
-  }
+  if (!params.destinationName) return results
 
-  return results
+  // §"Keine weltweiten Platzhaltervorschläge mehr": kein Treffer für das
+  // gesuchte Ziel bedeutet "keine kuratierten Daten dafür" (null), nicht die
+  // volle, unpassende Weltliste.
+  const needle = params.destinationName.toLowerCase()
+  const filtered = results.filter((r) => r.destination.toLowerCase().includes(needle) || needle.includes(r.destination.toLowerCase()))
+  return filtered.length > 0 ? filtered : null
 }
 
 const curatedHotelProvider: HotelProvider = { search: curatedHotelSearch }

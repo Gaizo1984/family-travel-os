@@ -24,7 +24,7 @@ interface ExcursionProvider {
 }
 
 async function curatedExcursionSearch(params: ExcursionSearchParams): Promise<ExcursionResult[] | null> {
-  let results = EXCURSIONS.map((e, i) => ({
+  const results = EXCURSIONS.map((e, i) => ({
     id: `curated-excursion-${i}`,
     title: e.name,
     destination: e.destination,
@@ -34,13 +34,14 @@ async function curatedExcursionSearch(params: ExcursionSearchParams): Promise<Ex
     photo: e.photo,
   }))
 
-  if (params.destinationName) {
-    const needle = params.destinationName.toLowerCase()
-    const filtered = results.filter((r) => r.destination.toLowerCase().includes(needle) || needle.includes(r.destination.toLowerCase()))
-    if (filtered.length > 0) results = filtered
-  }
+  if (!params.destinationName) return results
 
-  return results
+  // §"Keine weltweiten Platzhaltervorschläge mehr": kein Treffer für das
+  // gesuchte Ziel bedeutet "keine kuratierten Daten dafür" (null), nicht die
+  // volle, unpassende Weltliste (z. B. Oman-Ausflüge auf einer Costa-Rica-Reise).
+  const needle = params.destinationName.toLowerCase()
+  const filtered = results.filter((r) => r.destination.toLowerCase().includes(needle) || needle.includes(r.destination.toLowerCase()))
+  return filtered.length > 0 ? filtered : null
 }
 
 const curatedExcursionProvider: ExcursionProvider = { search: curatedExcursionSearch }

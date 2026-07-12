@@ -28,9 +28,11 @@ type TripRowForContext = {
  * denselben granularen Ort nennen ("Playa Conchal" statt nur "Costa Rica"),
  * deshalb EIN gemeinsamer Auflösungsweg statt zweier unabhängiger
  * Implementierungen. Nutzt `resolveCurrentLocation` (lib/today.ts,
- * unverändert) für eine laufende Reise; für eine bevorstehende Reise gibt es
- * noch kein "wo sind wir gerade"-Problem, deshalb die erste Etappe mit Ort
- * als granularer Fallback (statt nur Reisetitel/Land).
+ * unverändert) für eine laufende Reise. Für eine bevorstehende Reise galt
+ * bisher fälschlich "die chronologisch erste Etappe" als Ort -- das kann ein
+ * kurzer Zwischenstopp vor dem eigentlichen Ziel sein (z. B. 1 Nacht
+ * Flughafen-Hotel vor 10 Nächten Playa Conchal). Die Etappe mit den meisten
+ * Nächten gilt stattdessen als "das eigentliche Urlaubsziel".
  */
 export async function resolveTripAiContext(
   trip: TripRowForContext,
@@ -54,9 +56,11 @@ export async function resolveTripAiContext(
       ...(countryName && countryName !== locationLabel ? [{ query: countryName }] : []),
     ]
   } else {
-    const firstStage = sortedStages.find((s) => s.location || s.title)
-    locationLabel = firstStage?.location || firstStage?.title || trip.title
-    countryCode = firstStage?.country_code ?? null
+    const mainStage = [...sortedStages]
+      .filter((s) => s.location || s.title)
+      .sort((a, b) => (b.nights ?? 0) - (a.nights ?? 0))[0]
+    locationLabel = mainStage?.location || mainStage?.title || trip.title
+    countryCode = mainStage?.country_code ?? null
     const countryName = countryCode ? COUNTRY_NAMES[countryCode] ?? null : null
     candidates = [
       { query: locationLabel, countryCode },
