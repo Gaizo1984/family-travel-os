@@ -1,9 +1,7 @@
 import Link from "next/link";
 import {
-  Clock, ArrowRight, Ticket, Car, Users, ChevronRight, Sparkles, Compass,
-  FileQuestion, CloudSun, Shuffle, AlertTriangle, RefreshCw,
+  Clock, ArrowRight, Ticket, Car, ChevronRight,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { Banner } from "@/components/Banner";
 import { getFamily } from "@/lib/family";
@@ -14,11 +12,10 @@ import type { StageInput, TimelineBooking, TimelineEvent, TimelineDay } from "@/
 import { sortBookingsChronologically } from "@/lib/bookings";
 import { buildTodayTimelineItems, findNextUpcoming, buildTomorrowPrepItems, resolveCurrentLocation, nearbyStageGeocodeCandidates, detectDayHighlight } from "@/lib/today";
 import { getWeatherForLocation, describeWeatherCode } from "@/lib/weather";
-import type { WeatherLocationCandidate } from "@/lib/weather";
-import { getCachedTodayRecommendation, generateAndCacheTodayRecommendation, DAY_STYLE_OPTIONS } from "@/lib/today-recommendation";
-import { chooseTodayStyle } from "@/lib/actions/today-style";
-import { buildFamilyDnaSummary, formatFamilyDnaForPrompt, TRAVEL_NEED_OPTIONS } from "@/lib/family-dna";
-import type { FamilyDnaSummary } from "@/lib/family-dna";
+import type { WeatherLocationCandidate, WeatherResult } from "@/lib/weather";
+import { getCachedTodayRecommendation } from "@/lib/today-recommendation";
+import { generateTodayPlan } from "@/lib/actions/today-plan";
+import { buildFamilyDnaSummary, formatFamilyDnaForPrompt } from "@/lib/family-dna";
 import { COUNTRY_STAGE_IMAGES, FALLBACK_STAGE_IMAGE, resolveStageImages } from "@/lib/stage-images";
 import { SignedPhoto } from "@/components/SignedPhoto";
 import { COUNTRY_NAMES } from "@/lib/geo-suggestions";
@@ -27,27 +24,16 @@ import type { BookingType, BookingStatus } from "@/lib/supabase/types";
 import type { JourneyEventCategory, JourneyEventStatus } from "@/lib/journey-events";
 import { computeTripRequirements } from "@/lib/travel-requirements";
 import type { TravelRequirement } from "@/lib/travel-requirements";
-import { scoreDestinations } from "@/lib/discover-scoring";
-import type { ScoredDestination } from "@/lib/discover-scoring";
-import { searchDestinations } from "@/lib/providers/destination-provider";
-import { QUICK_ACTIONS, buildConciergeCards } from "@/lib/concierge";
-import type { QuickActionKey, DisplayCard } from "@/lib/concierge";
-import { askConcierge, commitConciergeAction, refreshConciergeMessage } from "@/lib/actions/concierge-actions";
-import { listTodayConciergeMessages, buildContextFingerprint } from "@/lib/concierge-messages";
-import type { CachedConciergeMessage } from "@/lib/concierge-messages";
 import { computeTripReadiness } from "@/lib/readiness";
 import type { ReadinessFinding } from "@/lib/readiness";
+import { askConcierge } from "@/lib/actions/concierge-actions";
+import { TODAY_CATEGORIES } from "@/lib/today-categories";
+import { resolveTripAiContext } from "@/lib/today-trip-context";
 
 type FlightWithPasses = { id: string; title: string; slug: string };
 
 /**
- * §7.2: prominenter Schnellzugriff auf Boardingpässe am Flugtag, ohne Umweg über
- * Reise → Flüge → Flugdetail. Nur relevant, wenn heute wirklich ein Abflug- oder
- * Ankunftstag ist UND für diesen Flug bereits mindestens ein Boardingpass
- * hochgeladen wurde — sonst bliebe der Zugriff leer/irreführend.
- */
-/**
- * §Performance-Audit: liest den Flugtag-Treffer jetzt aus den ohnehin schon
+ * §Performance-Audit: liest den Flugtag-Treffer aus den ohnehin schon
  * geladenen `trips` (inkl. verschachtelter `bookings`) statt einer eigenen,
  * unfilterten `bookings`-Abfrage über alle Reisen der Familie -- nur der
  * Boardingpass-Abgleich (documents) bleibt eine echte zusätzliche Abfrage.
@@ -127,20 +113,6 @@ type TripRow = {
   stages: StageRow[]; bookings: BookingRow[]; journey_events: JourneyEventRow[];
 };
 
-/** §"Schnellaktionen (Icons)": ein Icon je QUICK_ACTIONS-Eintrag, nur für die Darstellung in LUMI. */
-const QUICK_ACTION_ICONS: Record<QuickActionKey, LucideIcon> = {
-  today_important: Sparkles,
-  plan_tomorrow: Clock,
-  whats_missing: FileQuestion,
-  adjust_weather: CloudSun,
-  find_alternative: Shuffle,
-  explain_conflict: AlertTriangle,
-};
-
-function formatTimestamp(iso: string): string {
-  return new Date(iso).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) + " Uhr";
-}
-
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <h2
@@ -152,116 +124,21 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+function Card({ children }: { children: React.ReactNode }) {
   return (
-    <div
-      className={`rounded-xl p-6 ${className}`}
-      style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
-    >
+    <div className="rounded-xl p-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
       {children}
     </div>
   );
 }
 
-/** §Punkt 3 "Ein-Klick-Übernahme ins Journey": wiederverwendet commitConciergeAction 1:1 (lib/actions/concierge-actions.ts), das bereits genau das tut -- kein neuer Server-Code. */
-function CommitToJourneyButton({ tripId, tripSlug, forDate, eventTitle, label, className = "mt-3" }: { tripId: string; tripSlug: string; forDate: string; eventTitle: string; label: string; className?: string }) {
-  return (
-    <form action={commitConciergeAction}>
-      <input type="hidden" name="trip_id" value={tripId} />
-      <input type="hidden" name="trip_slug" value={tripSlug} />
-      <input type="hidden" name="for_date" value={forDate} />
-      <input type="hidden" name="event_title" value={eventTitle} />
-      <button
-        type="submit"
-        className={className}
-        style={{
-          background: "transparent", color: "var(--accent)", border: "1px solid rgba(184,154,94,0.4)",
-          borderRadius: "20px", padding: "6px 14px", fontSize: "0.62rem", cursor: "pointer",
-        }}
-      >
-        {label}
-      </button>
-    </form>
-  );
-}
-
-/** §"Für dich": Verallgemeinerung von "Für die Familie mitgedacht" -- mit aktiver Reise auf Mitreisende gefiltert, sonst die ganze Familie (buildFamilyDnaSummary ist bereits familienweit). */
-function FuerDichSection({ people }: { people: FamilyDnaSummary["persons"] }) {
-  if (people.length === 0) return null;
-  return (
-    <section className="mb-8">
-      <SectionLabel>Für dich</SectionLabel>
-      <Card>
-        <div className="space-y-3">
-          {people.map((p) => {
-            const needLabels = p.travel_needs.map((k) => TRAVEL_NEED_OPTIONS.find((o) => o.key === k)?.label ?? k);
-            const allTags = [...needLabels, ...p.interest_tags];
-            if (allTags.length === 0) return null;
-            return (
-              <div key={p.id} className="flex items-start gap-3">
-                <Users size={13} strokeWidth={1.4} style={{ color: "var(--accent)", flexShrink: 0, marginTop: "2px" }} />
-                <div>
-                  <span style={{ color: "var(--foreground)", fontSize: "0.82rem" }}>{p.name}: </span>
-                  <span style={{ color: "var(--muted)", fontSize: "0.8rem" }}>{allTags.join(", ")}</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </Card>
-    </section>
-  );
-}
-
-/** §Punkt 5 "LUMI schlägt 2-3 Ziele vor, mit Begründung": kompakte Vorschau derselben scoreDestinations()-Bewertung wie /discover, nicht dupliziert -- reasoning kommt direkt aus lib/discover-scoring.ts. */
-function EntdeckenPreview({ items }: { items: ScoredDestination[] }) {
-  if (items.length === 0) return null;
-  return (
-    <section className="mb-8">
-      <div className="flex items-center justify-between mb-4">
-        <SectionLabel>Entdecken</SectionLabel>
-        <Link href="/discover" style={{ color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.04em", textDecoration: "none" }}>
-          Alle Ideen ansehen
-        </Link>
-      </div>
-      <div className="space-y-2.5">
-        {items.map(({ destination, reasoning }) => (
-          <Card key={destination.name}>
-            <div className="flex items-start gap-3">
-              <Compass size={14} strokeWidth={1.4} style={{ color: "var(--accent)", flexShrink: 0, marginTop: "2px" }} />
-              <div>
-                <div style={{ color: "var(--foreground)", fontSize: "0.88rem", marginBottom: "3px" }}>{destination.name}</div>
-                <p style={{ color: "var(--muted)", fontSize: "0.76rem", lineHeight: 1.5, fontStyle: "italic" }}>{reasoning}</p>
-              </div>
-            </div>
-          </Card>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-/** §"Frag LUMI" ohne laufende Reise: die Kontextfelder (Wetter/bekannter Plan/Highlight) ergeben ohne laufende Reise keinen Sinn -- ehrlicher Hinweis statt eines Formulars ohne echten Kontext. */
-function FragLumiTeaser() {
-  return (
-    <section className="mb-8">
-      <SectionLabel>Frag LUMI</SectionLabel>
-      <Card>
-        <p style={{ color: "var(--muted)", fontSize: "0.82rem", lineHeight: 1.6 }}>
-          Sobald eine Reise läuft, hilft dir LUMI hier mit Tagesplanung, offenen Punkten und schnellen Antworten.
-        </p>
-      </Card>
-    </section>
-  );
-}
-
-/** §Punkt 4 "Intelligente Hinweise": passive Anzeige der bestehenden Reisebereitschafts-Funde (Dokumente/Flüge/Hotels/Mietwagen/offene Aufgaben, lib/readiness.ts) -- bisher nur über die Concierge-Schnellaktionen "Was fehlt?"/"Konflikt erklären" auf Klick erreichbar. */
+/** §Punkt 4 "Intelligente Hinweise": passive Anzeige der bestehenden Reisebereitschafts-Funde (Dokumente/Flüge/Hotels/Mietwagen/offene Aufgaben, lib/readiness.ts) -- vorher nur über Concierge-Schnellaktionen auf Klick erreichbar. */
 function PersonalisierteHinweiseSection({ findings, tripSlug }: { findings: ReadinessFinding[]; tripSlug: string }) {
   if (findings.length === 0) return null;
   const top = [...findings].sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "conflict" ? -1 : 1)).slice(0, 4);
   return (
     <section className="mb-8">
-      <SectionLabel>Personalisierte Hinweise</SectionLabel>
+      <SectionLabel>Wichtig für eure Reise</SectionLabel>
       <Card>
         <div className="space-y-2.5">
           {top.map((f, i) => (
@@ -283,6 +160,47 @@ function PersonalisierteHinweiseSection({ findings, tripSlug }: { findings: Read
   );
 }
 
+/** §Punkt 3 "Icon-Navigation", vollständig datengetrieben: eine Kachel je TODAY_CATEGORIES-Eintrag, kein hartkodiertes JSX pro Kategorie. */
+function CategoryGrid() {
+  return (
+    <section className="mb-8">
+      <SectionLabel>Entdecken für diese Reise</SectionLabel>
+      <div className="grid grid-cols-3 gap-3">
+        {TODAY_CATEGORIES.map(({ key, label, Icon }) => (
+          <Link
+            key={key}
+            href={`/today/category/${key}`}
+            className="flex flex-col items-center gap-2 rounded-xl p-4 text-center transition-opacity hover:opacity-80"
+            style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}
+          >
+            <Icon size={20} strokeWidth={1.3} style={{ color: "var(--accent)" }} />
+            <span style={{ color: "var(--foreground)", fontSize: "0.72rem", fontWeight: 300 }}>{label}</span>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** Kompakter 5-Tage-Streifen direkt im Hero (Punkt 1: Wetter zuerst sichtbar, nicht erst weiter unten). */
+function WeatherStrip({ weather }: { weather: WeatherResult }) {
+  return (
+    <div className="flex gap-3 mt-4">
+      {weather.daily.map((d) => {
+        const info = describeWeatherCode(d.code);
+        const label = new Date(d.date).toLocaleDateString("de-DE", { weekday: "short" });
+        return (
+          <div key={d.date} className="flex flex-col items-center gap-0.5">
+            <span style={{ color: "#A89880", fontSize: "0.58rem", textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</span>
+            <info.icon size={14} strokeWidth={1.4} style={{ color: "#F0EBE3" }} />
+            <span style={{ color: "#F0EBE3", fontSize: "0.68rem" }}>{d.tempMax}°</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default async function TodayPage({
   searchParams,
 }: {
@@ -297,7 +215,7 @@ export default async function TodayPage({
   const tomorrowIso = addDaysIso(todayIso, 1);
   const nowHHMM = nowHHMMInFamilyTimezone();
 
-  const [{ data: trips }, onThisDayMemories, dna, { data: pastTripsForAvoid }] = await Promise.all([
+  const [{ data: trips }, onThisDayMemories, dna] = await Promise.all([
     supabase
       .from("trips")
       .select(`
@@ -309,12 +227,7 @@ export default async function TodayPage({
       `)
       .eq("family_id", familyId),
     findOnThisDayMemories(familyId, todayIso),
-    // §Wird jetzt VOR der activeTrip-Weiche geladen, weil "Für dich" und
-    // "Entdecken" (LUMI-Punkte 3+5) unabhängig davon sichtbar sein müssen, ob
-    // gerade eine Reise läuft -- vorher wurde buildFamilyDnaSummary erst
-    // weiter unten, nur im aktive-Reise-Zweig, aufgerufen.
     buildFamilyDnaSummary(familyId),
-    supabase.from("past_trips").select("country_or_region").eq("family_id", familyId),
   ]);
 
   const onThisDayMemoriesWithUrls = await Promise.all(
@@ -332,8 +245,8 @@ export default async function TodayPage({
   const activeTrip = allTrips.find((t) => isTripCurrentlyRunning(t, todayIso));
   const flightToday = await findTodaysFlightWithBoardingPasses(allTrips, todayIso);
 
-  // §Punkt 1 "Was ist heute wichtig?" auch ohne laufende Reise: die zeitlich
-  // nächste bevorstehende Reise (weder laufend noch historisch/archiviert).
+  // §Punkt 1/2 "Was ist heute wichtig?" auch ohne laufende Reise: die
+  // zeitlich nächste bevorstehende Reise (weder laufend noch historisch/archiviert).
   const upcomingTrips = allTrips
     .filter((t) => t.status !== "archived" && !isTripCurrentlyRunning(t, todayIso) && !isTripHistorical(t, todayIso))
     .sort((a, b) => (a.start_date ?? "").localeCompare(b.start_date ?? ""));
@@ -342,19 +255,7 @@ export default async function TodayPage({
     ? (await computeTripRequirements(nextTrip.id)).filter((r) => r.status !== "satisfied")
     : [];
 
-  // §Punkt 5 "2-3 Ziele vorschlagen, mit Begründung": identischer Aufruf wie
-  // app/(app)/discover/page.tsx (avoidNames aus past_trips + bereits
-  // erlebten/laufenden Reisen), nur mit 3 statt 1 Treffer für die Vorschau.
-  const avoidNames = [
-    ...(pastTripsForAvoid ?? []).map((p) => p.country_or_region),
-    ...allTrips.filter((t) => t.status === "completed" || t.status === "active").map((t) => t.title),
-  ];
-  const destinations = (await searchDestinations()) ?? [];
-  const discoverPreview = scoreDestinations(destinations, dna, { avoidNames }).slice(0, 3);
-
-  // Warme, kurze Begrüßung statt Namensaufzählung — nutzt den echten Familiennamen, falls hinterlegt.
   const greeting = family?.name ? `Hallo ${family.name}` : "Schön, dass ihr da seid.";
-
   const dateLabel = new Date(todayIso).toLocaleDateString("de-DE", {
     weekday: "long", day: "2-digit", month: "long", year: "numeric",
   });
@@ -373,82 +274,82 @@ export default async function TodayPage({
     </Link>
   );
 
-  // ── Kein aktiver Reisetag: LUMI zeigt trotzdem, was heute zählt ──
-  if (!activeTrip) {
+  // ── Kein aktiver Reisetag, aber eine bevorstehende Reise: Wetter zuerst ──
+  if (!activeTrip && nextTrip) {
+    const nextContext = await resolveTripAiContext(nextTrip, false, todayIso);
+    const nextTripDuration = nextTrip.start_date && nextTrip.end_date ? getTripDuration(nextTrip.start_date, nextTrip.end_date) : 0;
+    const nextTripCountdown = tripCountdownDisplay(nextTrip, nextTripDuration, todayIso);
+    const nextWeather = nextContext.weather;
+    const nextWeatherInfo = nextWeather ? describeWeatherCode(nextWeather.currentCode) : null;
     const hasOnThisDay = onThisDayMemoriesWithUrls.some((m) => m.url);
-    const nextTripDuration = nextTrip?.start_date && nextTrip?.end_date ? getTripDuration(nextTrip.start_date, nextTrip.end_date) : 0;
-    const nextTripCountdown = nextTrip ? tripCountdownDisplay(nextTrip, nextTripDuration, todayIso) : null;
 
     return (
       <div className="flex-1 flex flex-col" style={{ background: "var(--background)" }}>
         {flightBanner}
-        <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-9 w-full">
+
+        {/* ── Hero: Wetter/Ort zuerst, ganz oben ── */}
+        <div className="relative" style={{ height: "320px", flexShrink: 0 }}>
+          <div className="absolute inset-0" style={{ background: "linear-gradient(135deg, #1a1714, #332c24)" }} />
+          <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(10,9,7,0.97) 0%, rgba(10,9,7,0.55) 55%, rgba(10,9,7,0.15) 100%)" }} />
+          <div className="absolute inset-x-0 bottom-0 px-5 md:px-10 pb-8">
+            <div className="mb-1" style={{ color: "#A89880", fontSize: "0.8rem" }}>📍 {nextContext.locationLabel}</div>
+            {nextWeather && nextWeatherInfo && (
+              <div className="flex items-center gap-1.5 mb-3" style={{ color: "#F0EBE3", fontSize: "0.95rem" }}>
+                <nextWeatherInfo.icon size={16} strokeWidth={1.6} />
+                {nextWeather.currentTemp}°C · {nextWeatherInfo.label}
+              </div>
+            )}
+            <h1 className="text-2xl md:text-3xl font-light leading-tight mb-2" style={{ color: "#F0EBE3", letterSpacing: "-0.01em" }}>
+              {nextTrip.title}
+            </h1>
+            <div className="flex items-center gap-3 flex-wrap">
+              <span style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase" }}>
+                {nextTripCountdown.value} {nextTripCountdown.label}
+              </span>
+            </div>
+            {nextWeather && <WeatherStrip weather={nextWeather} />}
+          </div>
+        </div>
+
+        <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-8 w-full">
           {error && <Banner variant="error">{error}</Banner>}
           <div style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "12px" }}>
             {dateLabel}
           </div>
-          <h1 className="font-light mb-6" style={{ color: "var(--foreground)", fontSize: "1.6rem", letterSpacing: "-0.01em" }}>
+          <h2 className="font-light mb-6" style={{ color: "var(--foreground)", fontSize: "1.3rem", letterSpacing: "-0.01em" }}>
             {greeting}
-          </h1>
+          </h2>
 
-          {/* ── Was ist heute wichtig? ── */}
-          <section className="mb-8">
-            <SectionLabel>Was ist heute wichtig?</SectionLabel>
-            {nextTrip && nextTripCountdown ? (
+          {/* ── Heute: nur das Wichtigste ── */}
+          {nextTripRequirements.length > 0 && (
+            <section className="mb-8">
+              <SectionLabel>Heute wichtig</SectionLabel>
               <Card>
-                <div className="flex items-center justify-between gap-4 flex-wrap">
-                  <div>
-                    <div style={{ color: "var(--foreground)", fontSize: "0.95rem", marginBottom: "3px" }}>{nextTrip.title}</div>
-                    <div style={{ color: "var(--muted)", fontSize: "0.72rem" }}>Eure nächste Reise</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-2xl font-light leading-none" style={{ color: "var(--accent)" }}>{nextTripCountdown.value}</div>
-                    <div style={{ color: "var(--muted)", fontSize: "0.62rem", letterSpacing: "0.08em", textTransform: "uppercase", marginTop: "3px" }}>
-                      {nextTripCountdown.label}
-                    </div>
-                  </div>
+                <div className="space-y-2.5">
+                  {nextTripRequirements.map((r, i) => (
+                    <Link key={i} href={r.actionHref ?? `/trips/${nextTrip.slug}`} className="flex items-center justify-between gap-2" style={{ textDecoration: "none" }}>
+                      <span style={{ color: "var(--muted)", fontSize: "0.78rem" }}>{r.reason}</span>
+                      <ChevronRight size={12} strokeWidth={1.6} style={{ color: "var(--muted)", flexShrink: 0 }} />
+                    </Link>
+                  ))}
                 </div>
-                {nextTripRequirements.length > 0 && (
-                  <div className="mt-4 pt-4 space-y-2" style={{ borderTop: "1px solid var(--border)" }}>
-                    {nextTripRequirements.map((r, i) => (
-                      <Link
-                        key={i}
-                        href={r.actionHref ?? `/trips/${nextTrip.slug}`}
-                        className="flex items-center justify-between gap-2"
-                        style={{ textDecoration: "none" }}
-                      >
-                        <span style={{ color: "var(--muted)", fontSize: "0.76rem" }}>{r.reason}</span>
-                        <ChevronRight size={12} strokeWidth={1.6} style={{ color: "var(--muted)", flexShrink: 0 }} />
-                      </Link>
-                    ))}
-                  </div>
-                )}
-                <Link
-                  href={`/trips/${nextTrip.slug}`}
-                  className="inline-flex items-center gap-1 mt-4"
-                  style={{ color: "var(--accent)", fontSize: "0.75rem", letterSpacing: "0.04em", textDecoration: "none" }}
-                >
-                  Zur Reise <ChevronRight size={13} strokeWidth={1.6} />
-                </Link>
               </Card>
-            ) : (
-              <Card>
-                <p style={{ color: "var(--muted)", fontSize: "0.85rem", lineHeight: 1.6 }}>
-                  Aktuell läuft keine Reise und keine ist geplant. Sobald eine Reise ansteht, zeigt euch
-                  LUMI hier Countdown, offene Punkte, Wetter und Tagesplan.
-                </p>
-                <Link
-                  href="/trips"
-                  className="inline-flex items-center gap-1 mt-4"
-                  style={{ color: "var(--accent)", fontSize: "0.75rem", letterSpacing: "0.04em", textDecoration: "none" }}
-                >
-                  Zu euren Reisen <ChevronRight size={13} strokeWidth={1.6} />
-                </Link>
-              </Card>
-            )}
-          </section>
+            </section>
+          )}
 
-          {/* ── Vor einem Jahr wart ihr heute... (bereits geladen, bisher hier ungenutzt) ── */}
+          <Link
+            href={`/trips/${nextTrip.slug}`}
+            className="flex items-center gap-3 p-4 rounded-xl mb-8"
+            style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}
+          >
+            <span className="flex-1 min-w-0" style={{ color: "var(--foreground)", fontSize: "0.8rem" }}>
+              Zur Reise · Buchungen, Dokumente, Budget
+            </span>
+            <ChevronRight size={14} strokeWidth={1.6} style={{ color: "var(--muted)" }} />
+          </Link>
+
+          <CategoryGrid />
+
           {hasOnThisDay && (
             <section className="mb-8">
               <SectionLabel>Vor {onThisDayMemoriesWithUrls[0].yearsAgo === 1 ? "einem Jahr" : `${onThisDayMemoriesWithUrls[0].yearsAgo} Jahren`} wart ihr heute...</SectionLabel>
@@ -467,10 +368,37 @@ export default async function TodayPage({
               </div>
             </section>
           )}
+        </div>
+      </div>
+    );
+  }
 
-          <FuerDichSection people={dna.persons.filter((p) => p.travel_needs.length > 0 || p.interest_tags.length > 0)} />
-          <EntdeckenPreview items={discoverPreview} />
-          <FragLumiTeaser />
+  // ── Gar keine Reise (weder aktiv noch bevorstehend): ehrlicher, ruhiger Leerzustand ──
+  if (!activeTrip) {
+    return (
+      <div className="flex-1 flex flex-col" style={{ background: "var(--background)" }}>
+        {flightBanner}
+        <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-9 w-full">
+          {error && <Banner variant="error">{error}</Banner>}
+          <div style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "12px" }}>
+            {dateLabel}
+          </div>
+          <h1 className="font-light mb-6" style={{ color: "var(--foreground)", fontSize: "1.6rem", letterSpacing: "-0.01em" }}>
+            {greeting}
+          </h1>
+          <Card>
+            <p style={{ color: "var(--muted)", fontSize: "0.85rem", lineHeight: 1.6 }}>
+              Aktuell läuft keine Reise und keine ist geplant. Sobald eine Reise ansteht, zeigt euch
+              LUMI hier Wetter, Countdown und alles Wichtige.
+            </p>
+            <Link
+              href="/trips"
+              className="inline-flex items-center gap-1 mt-4"
+              style={{ color: "var(--accent)", fontSize: "0.75rem", letterSpacing: "0.04em", textDecoration: "none" }}
+            >
+              Zu euren Reisen <ChevronRight size={13} strokeWidth={1.6} />
+            </Link>
+          </Card>
         </div>
       </div>
     );
@@ -491,26 +419,13 @@ export default async function TodayPage({
 
   // Eine einzige Standortquelle für Untertitel, Wetter und Hero-Bild — siehe
   // resolveCurrentLocation für die Prioritätskette (Etappe → Unterkunft → Reiseziel).
-  // Keine Kombination mehrerer Quellen zu einem Text wie "Atlanta, Costa Rica".
   const currentLocation = resolveCurrentLocation(activeTrip, stages, bookings, todayIso);
-  const heroSubtitle = `📍 ${currentLocation.label}`;
-  // §Etappen-Titelbild (lib/stage-images.ts) hat Vorrang -- resolveStageImages
-  // fällt intern bereits auf die Länder-Zuordnung zurück, falls die aktuelle
-  // Etappe kein eigenes Titelbild hat; nur ohne zugehörige Etappe (Reiseziel-
-  // Rückfallstufe in resolveCurrentLocation) wird direkt über den Ländercode aufgelöst.
   const stageImages = await resolveStageImages(supabase, stages);
   const heroImage = (currentLocation.stageId && stageImages.get(currentLocation.stageId)) || {
     url: (currentLocation.countryCode && COUNTRY_STAGE_IMAGES[currentLocation.countryCode]) || FALLBACK_STAGE_IMAGE,
     storagePath: null,
   };
 
-  // Wetter wird exakt für denselben Standort geladen: der aufgelöste Name zuerst;
-  // schlägt die Geokodierung fehl (z. B. bei Hotelnamen oder kleinen Provinzen,
-  // die im Geocoding-Datensatz nicht erfasst sind — "Westin Reserva Conchal" und
-  // "Guanacaste" liefern beide keinen Treffer in Costa Rica), zunächst andere
-  // Etappen derselben Reise im selben Land (real näher am Aufenthaltsort als die
-  // grobe Landeskoordinate), erst zuletzt das Land selbst — ohne den angezeigten
-  // Standort-Text zu verändern.
   const countryName = currentLocation.countryCode ? COUNTRY_NAMES[currentLocation.countryCode] ?? null : null;
   const weatherCandidates: WeatherLocationCandidate[] = [
     { query: currentLocation.label, countryCode: currentLocation.countryCode },
@@ -522,68 +437,30 @@ export default async function TodayPage({
   const prepItems = buildTomorrowPrepItems(tomorrowDay, stages, tomorrowIso);
   const highlightTitle = detectDayHighlight(timelineItems);
 
-  // Wetter und der Empfehlungs-Cache-Check hängen nicht voneinander ab —
-  // parallel laden. Familien-DNA (dna) ist bereits weiter oben geladen (wird
-  // jetzt auch ohne aktive Reise für "Für dich"/"Entdecken" gebraucht).
   const [weather, cachedRecommendation] = await Promise.all([
     getWeatherForLocation(weatherCandidates),
     getCachedTodayRecommendation(familyId, activeTrip.id, todayIso),
   ]);
   const currentWeather = weather ? describeWeatherCode(weather.currentCode) : null;
-  // Open-Meteo liefert "heute" (daily[0]) im lokalen Zeitfenster des ZIELORTS
-  // (timezone=auto) — bei einem Standort mit anderer UTC-Differenz als
-  // Deutschland kann das ein anderer Kalendertag sein als unser eigenes,
-  // familienzeitbasiertes todayIso. Für den Tageswert daher explizit den
-  // Eintrag suchen, der wirklich zu unserem "heute" passt, statt blind Index 0
-  // zu nehmen — sonst würde z. B. die Regenwahrscheinlichkeit für "gestern"
-  // (aus Zielort-Sicht) als "heute" angezeigt.
   const todayForecast = weather?.daily.find((d) => d.date === todayIso) ?? weather?.daily[0] ?? null;
   const todayPrecipitation = todayForecast?.precipitationProbability ?? null;
 
-  const tripMemberIds = new Set(activeTrip.trip_members.flatMap((m) => (m.persons ? [m.persons.id] : [])));
-  const tripMemberDna = dna.persons.filter((p) => tripMemberIds.has(p.id) && (p.travel_needs.length > 0 || p.interest_tags.length > 0));
+  const tripDuration = activeTrip.start_date && activeTrip.end_date ? getTripDuration(activeTrip.start_date, activeTrip.end_date) : 0;
+  const dayCountdown = tripCountdownDisplay(activeTrip, tripDuration, todayIso);
 
   const knownPlanText = timelineItems.map((i) => `${i.time ?? ""} ${i.title}`.trim()).join(", ");
   const weatherSummary = currentWeather ? `${weather!.currentTemp}°C, ${currentWeather.label}` : null;
   const familyDnaText = formatFamilyDnaForPrompt(dna, todayIso);
-
-  // §"Nur einmal pro Kalendertag generieren, bis Mitternacht wiederverwenden":
-  // zuerst den Cache prüfen (kein KI-Aufruf). Existiert noch nichts, wird bei
-  // erkanntem Kalender-Highlight sofort automatisch generiert; ohne Highlight
-  // zeigt die Seite stattdessen den Tagesstil-Auswähler (kein KI-Aufruf, bis
-  // die Familie eine Wahl trifft).
-  let recommendation = cachedRecommendation;
-  if (!recommendation && highlightTitle) {
-    recommendation = await generateAndCacheTodayRecommendation(
-      familyId, activeTrip.id, todayIso,
-      { dateLabel, locationLabel: currentLocation.label, weatherSummary, familyDnaText, knownPlanText },
-      highlightTitle, null,
-    );
-  }
-  const needsStyleChoice = !recommendation && !highlightTitle;
-
-  // §"Frag LUMI" ist jetzt die vollständige Concierge-Erfahrung (die Seite
-  // selbst wurde entfernt) -- Kontextfelder werden direkt aus den ohnehin
-  // schon vorhandenen Variablen dieser Seite gebaut, keine zweite Berechnung.
   const conciergeMemberNames = activeTrip.trip_members.flatMap((m) => (m.persons ? [m.persons.name] : []));
-  const conciergeFingerprint = buildContextFingerprint(weatherSummary, knownPlanText);
-  const recentConciergeMessages: CachedConciergeMessage[] = await listTodayConciergeMessages(
-    familyId, activeTrip.id, todayIso, conciergeFingerprint,
-  );
-  // §"today_important" ausgeklammert: ihre einzige Wirkung (Tagesempfehlung
-  // erzeugen/cachen) passiert auf dieser Seite bereits unconditional in der
-  // Hero-Sektion -- ein Klick hier wäre redundant. Ebenso wird die
-  // todayRec-Karte nicht in buildConciergeCards eingespeist (null), da sie
-  // schon prominent als "Empfehlung für heute" gezeigt wird.
-  const EMBEDDED_QUICK_ACTIONS = QUICK_ACTIONS.filter((qa) => qa.key !== "today_important");
-  const conciergeCards: DisplayCard[] = buildConciergeCards(null, recentConciergeMessages);
 
-  // §Punkt 4 "Intelligente Hinweise": dieselbe Reisebereitschafts-Engine wie
-  // "Was fehlt?"/"Konflikt erklären", jetzt zusätzlich passiv angezeigt statt
-  // nur auf Klick erreichbar.
+  // §"Wichtig: KI nur auf ausdrückliche Nutzeraktion": kein automatischer
+  // Aufruf mehr bei erkanntem Highlight -- nur noch Lesezugriff auf den Cache,
+  // die Generierung selbst passiert ausschließlich über den
+  // "Tagesplanung erstellen"-Button (lib/actions/today-plan.ts).
+  const recommendation = cachedRecommendation;
+
   const readiness = await computeTripReadiness(activeTrip.id);
 
-  // Fahrzeitanalyse: nur reale, heute aktive Mietwagen-Buchung — keine erfundenen Kennzahlen.
   const activeRentalCar = bookings.find(
     (b) => b.type === "rental_car" && b.status !== "cancelled"
       && b.start_datetime && b.end_datetime
@@ -594,8 +471,8 @@ export default async function TodayPage({
     <div className="flex-1 flex flex-col" style={{ background: "var(--background)" }}>
       {flightBanner}
 
-      {/* ── Hero ── */}
-      <div className="relative" style={{ height: "380px", flexShrink: 0 }}>
+      {/* ── Hero: Wetter/Ort zuerst, ganz oben ── */}
+      <div className="relative" style={{ height: "420px", flexShrink: 0 }}>
         {heroImage.storagePath ? (
           <SignedPhoto
             storagePath={heroImage.storagePath} initialUrl={heroImage.url} alt={currentLocation.label}
@@ -610,55 +487,36 @@ export default async function TodayPage({
           style={{ background: "linear-gradient(to top, rgba(10,9,7,0.97) 0%, rgba(10,9,7,0.6) 45%, rgba(10,9,7,0.18) 100%)" }}
         />
         <div className="absolute inset-x-0 bottom-0 px-5 md:px-10 pb-8">
-          <h1 className="text-3xl md:text-4xl font-light leading-tight mb-1" style={{ color: "#F0EBE3", letterSpacing: "-0.01em" }}>
-            {greeting}
-          </h1>
-          <div className="mb-4" style={{ color: "#A89880", fontSize: "0.8rem" }}>{heroSubtitle}</div>
-
-          <div style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.28em", textTransform: "uppercase", marginBottom: "6px" }}>
-            {dateLabel}
-          </div>
+          <div className="mb-1" style={{ color: "#A89880", fontSize: "0.8rem" }}>📍 {currentLocation.label}</div>
           {weather && (
-            <div className="flex items-center gap-1.5 mb-4" style={{ color: "#A89880", fontSize: "0.72rem" }}>
-              {currentWeather && <currentWeather.icon size={12} strokeWidth={1.6} />}
-              <span>
-                {weather.currentTemp}°C · {currentWeather?.label}
-                {weather.rainStartsAt
-                  ? ` · Regen ab ${weather.rainStartsAt} Uhr`
-                  : todayPrecipitation !== null && ` · ${todayPrecipitation}% Regen`}
-                {weather.sunset && ` · 🌇 ${weather.sunset.slice(11, 16)}`}
-              </span>
+            <div className="flex items-center gap-1.5 mb-3" style={{ color: "#F0EBE3", fontSize: "0.95rem" }}>
+              {currentWeather && <currentWeather.icon size={16} strokeWidth={1.6} />}
+              {weather.currentTemp}°C · {currentWeather?.label}
+              {weather.rainStartsAt
+                ? ` · Regen ab ${weather.rainStartsAt} Uhr`
+                : todayPrecipitation !== null && ` · ${todayPrecipitation}% Regen`}
             </div>
           )}
 
-          {recommendation && (
-            <p
-              className="overflow-hidden"
-              style={{
-                color: "#D8CFC2", fontSize: "0.82rem", fontWeight: 300, lineHeight: 1.5, maxWidth: "640px",
-                display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical",
-              }}
-            >
-              {recommendation.daySummary}
-            </p>
-          )}
+          <h1 className="text-2xl md:text-3xl font-light leading-tight mb-2" style={{ color: "#F0EBE3", letterSpacing: "-0.01em" }}>
+            {greeting}
+          </h1>
+          <span style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase" }}>
+            {dateLabel} · {dayCountdown.value} {dayCountdown.label}
+          </span>
+
+          {weather && <WeatherStrip weather={weather} />}
         </div>
       </div>
 
       <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-8 w-full">
         {error && <Banner variant="error">{error}</Banner>}
 
-        <div style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "18px" }}>
-          Für deine aktuelle Reise
-        </div>
-
-        {/* ── Was machen wir jetzt? (beibehalten, prominent) ── */}
+        {/* ── Heute: nur das Wichtigste ── */}
         <section className="mb-8">
           <SectionLabel>Was machen wir jetzt?</SectionLabel>
           <Card>
             {nextUp ? (
-              // Nur Icon/Titel/Uhrzeit — Details (Ort, Anbieter) stehen bereits identisch
-              // unten in "Heutiger Tag", keine doppelte Darstellung derselben Angaben.
               <div className="flex items-center gap-4">
                 <div className="shrink-0 flex items-center justify-center rounded-lg" style={{ width: 40, height: 40, background: "var(--accent-subtle)" }}>
                   <nextUp.icon size={17} strokeWidth={1.4} style={{ color: "var(--accent)" }} />
@@ -680,106 +538,7 @@ export default async function TodayPage({
 
         <PersonalisierteHinweiseSection findings={readiness.findings} tripSlug={activeTrip.slug} />
 
-        {/* ── Vor einem Jahr wart ihr heute... ── */}
-        {onThisDayMemoriesWithUrls.some((m) => m.url) && (
-          <section className="mb-8">
-            <SectionLabel>Vor {onThisDayMemoriesWithUrls[0].yearsAgo === 1 ? "einem Jahr" : `${onThisDayMemoriesWithUrls[0].yearsAgo} Jahren`} wart ihr heute...</SectionLabel>
-            <div className="flex gap-3 overflow-x-auto pb-1">
-              {onThisDayMemoriesWithUrls.map((m) => m.url && (
-                <div key={m.id} className="relative shrink-0 rounded-lg overflow-hidden" style={{ width: 120, height: 120 }}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={m.url} alt={m.caption ?? ""} className="absolute inset-0 w-full h-full object-cover" />
-                  {m.caption && (
-                    <div className="absolute inset-x-0 bottom-0 p-2" style={{ background: "linear-gradient(to top, rgba(10,9,7,0.85), transparent)" }}>
-                      <span style={{ color: "#F0EBE3", fontSize: "0.6rem" }}>{m.caption}</span>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* ── KI-Empfehlung: nur eine Hauptempfehlung, keine konkurrierenden Vorschläge ── */}
-        {recommendation && (
-          <section className="mb-8">
-            <SectionLabel>Empfehlung für heute</SectionLabel>
-            <Card>
-              <div style={{ color: "var(--foreground)", fontSize: "1rem", fontWeight: 400, marginBottom: "6px" }}>
-                {recommendation.recommendation.title}
-              </div>
-              <p style={{ color: "var(--muted)", fontSize: "0.82rem", lineHeight: 1.5 }}>
-                {recommendation.recommendation.description}
-              </p>
-              {recommendation.highlightTitle && (
-                <p className="mt-3" style={{ color: "var(--accent)", fontSize: "0.68rem" }}>
-                  Rund um euer Highlight heute: {recommendation.highlightTitle}
-                </p>
-              )}
-              <CommitToJourneyButton
-                tripId={activeTrip.id} tripSlug={activeTrip.slug} forDate={todayIso}
-                eventTitle={recommendation.recommendation.title} label="In Journey übernehmen"
-              />
-            </Card>
-          </section>
-        )}
-
-        {/* ── Alternative des Tages: EINE bewusst andere Option, kein zweiter Konkurrent ── */}
-        {recommendation?.alternative && (
-          <section className="mb-8">
-            <SectionLabel>Alternative des Tages</SectionLabel>
-            <Card>
-              <div style={{ color: "var(--foreground)", fontSize: "0.92rem", fontWeight: 400, marginBottom: "6px" }}>
-                {recommendation.alternative.title}
-              </div>
-              <p style={{ color: "var(--muted)", fontSize: "0.8rem", lineHeight: 1.5 }}>
-                {recommendation.alternative.description}
-              </p>
-              <CommitToJourneyButton
-                tripId={activeTrip.id} tripSlug={activeTrip.slug} forDate={todayIso}
-                eventTitle={recommendation.alternative.title} label="Alternative speichern"
-              />
-            </Card>
-          </section>
-        )}
-
-        {/* ── Tagesstil-Auswahl: nur wenn kein Highlight erkannt und noch nicht gewählt ── */}
-        {needsStyleChoice && (
-          <section className="mb-8">
-            <SectionLabel>Wie soll euer Tag heute sein?</SectionLabel>
-            <Card>
-              <p className="mb-4" style={{ color: "var(--muted)", fontSize: "0.8rem" }}>
-                Kein besonderes Highlight für heute erkannt — wählt einen Tagesstil, dann entwickelt der Concierge eine passende Empfehlung. Gilt bis Mitternacht.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {DAY_STYLE_OPTIONS.map((opt) => (
-                  <form key={opt.key} action={chooseTodayStyle}>
-                    <input type="hidden" name="family_id" value={familyId} />
-                    <input type="hidden" name="trip_id" value={activeTrip.id} />
-                    <input type="hidden" name="for_date" value={todayIso} />
-                    <input type="hidden" name="day_style" value={opt.key} />
-                    <input type="hidden" name="date_label" value={dateLabel} />
-                    <input type="hidden" name="location_label" value={currentLocation.label} />
-                    <input type="hidden" name="weather_summary" value={weatherSummary ?? ""} />
-                    <input type="hidden" name="family_dna_text" value={familyDnaText} />
-                    <input type="hidden" name="known_plan_text" value={knownPlanText} />
-                    <button
-                      type="submit"
-                      style={{
-                        background: "var(--surface)", color: "var(--foreground)", border: "1px solid var(--border)",
-                        borderRadius: "20px", padding: "8px 16px", fontSize: "0.78rem", cursor: "pointer",
-                      }}
-                    >
-                      {opt.label}
-                    </button>
-                  </form>
-                ))}
-              </div>
-            </Card>
-          </section>
-        )}
-
-        {/* ── Timeline — vollständig aus dem Journey Journal ── */}
+        {/* ── Timeline: Reservierungen/Tagesprogramm ── */}
         <section className="mb-8">
           <SectionLabel>Heutiger Tag</SectionLabel>
           {timelineItems.length > 0 ? (
@@ -809,29 +568,103 @@ export default async function TodayPage({
           )}
         </section>
 
-        {/* ── Wetter: 5-Tage-Ausblick ── */}
-        {weather && (
-          <section className="mb-8">
-            <SectionLabel>Wetter · 5-Tage-Ausblick</SectionLabel>
+        {/* ── Tagesplanung: nur auf Klick, keine Automatik mehr ── */}
+        <section className="mb-8">
+          <SectionLabel>Tagesplanung</SectionLabel>
+          {recommendation ? (
+            <>
+              <Card>
+                <div style={{ color: "var(--foreground)", fontSize: "1rem", fontWeight: 400, marginBottom: "6px" }}>
+                  {recommendation.recommendation.title}
+                </div>
+                <p style={{ color: "var(--muted)", fontSize: "0.82rem", lineHeight: 1.5 }}>
+                  {recommendation.recommendation.description}
+                </p>
+              </Card>
+              {recommendation.alternative && (
+                <Card>
+                  <div className="mt-3" style={{ color: "var(--muted)", fontSize: "0.68rem", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "6px" }}>
+                    Alternative
+                  </div>
+                  <div style={{ color: "var(--foreground)", fontSize: "0.9rem", marginBottom: "4px" }}>{recommendation.alternative.title}</div>
+                  <p style={{ color: "var(--muted)", fontSize: "0.78rem", lineHeight: 1.5 }}>{recommendation.alternative.description}</p>
+                </Card>
+              )}
+            </>
+          ) : (
             <Card>
-              <div className="grid grid-cols-5 gap-2">
-                {weather.daily.map((d) => {
-                  const info = describeWeatherCode(d.code);
-                  const label = new Date(d.date).toLocaleDateString("de-DE", { weekday: "short" });
-                  return (
-                    <div key={d.date} className="flex flex-col items-center gap-1">
-                      <span style={{ color: "var(--muted)", fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</span>
-                      <info.icon size={16} strokeWidth={1.4} style={{ color: "var(--accent)" }} />
-                      <span style={{ color: "var(--foreground)", fontSize: "0.72rem" }}>{d.tempMax}°</span>
-                      <span style={{ color: "var(--muted)", fontSize: "0.64rem" }}>{d.tempMin}°</span>
-                      {d.precipitationProbability !== null && (
-                        <span style={{ color: "var(--muted)", fontSize: "0.6rem" }}>{d.precipitationProbability}%</span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+              <p className="mb-4" style={{ color: "var(--muted)", fontSize: "0.82rem", lineHeight: 1.6 }}>
+                LUMI erstellt euch auf Wunsch einen Tagesplan aus Wetter, Reiseziel, Buchungen und euren Vorlieben.
+              </p>
+              <form action={generateTodayPlan}>
+                <input type="hidden" name="family_id" value={familyId} />
+                <input type="hidden" name="trip_id" value={activeTrip.id} />
+                <input type="hidden" name="for_date" value={todayIso} />
+                <input type="hidden" name="date_label" value={dateLabel} />
+                <input type="hidden" name="location_label" value={currentLocation.label} />
+                <input type="hidden" name="weather_summary" value={weatherSummary ?? ""} />
+                <input type="hidden" name="family_dna_text" value={familyDnaText} />
+                <input type="hidden" name="known_plan_text" value={knownPlanText} />
+                <input type="hidden" name="highlight_title" value={highlightTitle ?? ""} />
+                <button
+                  type="submit"
+                  style={{
+                    background: "var(--foreground)", color: "var(--surface)", border: "none", borderRadius: "6px",
+                    padding: "10px 20px", fontSize: "0.62rem", letterSpacing: "0.12em", textTransform: "uppercase", cursor: "pointer",
+                  }}
+                >
+                  Tagesplanung erstellen
+                </button>
+              </form>
             </Card>
+          )}
+
+          {/* Schlechtwetter-Alternativen: dieselbe bestehende Concierge-Schnellaktion, Antwort erscheint unter Frag LUMI. */}
+          <form action={askConcierge} className="mt-3">
+            <input type="hidden" name="family_id" value={familyId} />
+            <input type="hidden" name="trip_id" value={activeTrip.id} />
+            <input type="hidden" name="trip_slug" value={activeTrip.slug} />
+            <input type="hidden" name="for_date" value={todayIso} />
+            <input type="hidden" name="date_label" value={dateLabel} />
+            <input type="hidden" name="location_label" value={currentLocation.label} />
+            <input type="hidden" name="weather_summary" value={weatherSummary ?? ""} />
+            <input type="hidden" name="known_plan_text" value={knownPlanText} />
+            <input type="hidden" name="highlight_title" value={highlightTitle ?? ""} />
+            <input type="hidden" name="member_names" value={conciergeMemberNames.join(",")} />
+            <input type="hidden" name="question_key" value="find_alternative" />
+            <input type="hidden" name="question_text" value="Alternative finden" />
+            <input type="hidden" name="return_to" value="/concierge" />
+            <button
+              type="submit"
+              style={{
+                background: "transparent", color: "var(--accent)", border: "1px solid rgba(184,154,94,0.4)",
+                borderRadius: "20px", padding: "8px 16px", fontSize: "0.68rem", cursor: "pointer",
+              }}
+            >
+              Schlechtwetter-Alternativen
+            </button>
+          </form>
+        </section>
+
+        <CategoryGrid />
+
+        {/* ── Vor einem Jahr wart ihr heute... ── */}
+        {onThisDayMemoriesWithUrls.some((m) => m.url) && (
+          <section className="mb-8">
+            <SectionLabel>Vor {onThisDayMemoriesWithUrls[0].yearsAgo === 1 ? "einem Jahr" : `${onThisDayMemoriesWithUrls[0].yearsAgo} Jahren`} wart ihr heute...</SectionLabel>
+            <div className="flex gap-3 overflow-x-auto pb-1">
+              {onThisDayMemoriesWithUrls.map((m) => m.url && (
+                <div key={m.id} className="relative shrink-0 rounded-lg overflow-hidden" style={{ width: 120, height: 120 }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={m.url} alt={m.caption ?? ""} className="absolute inset-0 w-full h-full object-cover" />
+                  {m.caption && (
+                    <div className="absolute inset-x-0 bottom-0 p-2" style={{ background: "linear-gradient(to top, rgba(10,9,7,0.85), transparent)" }}>
+                      <span style={{ color: "#F0EBE3", fontSize: "0.6rem" }}>{m.caption}</span>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </section>
         )}
 
@@ -854,8 +687,6 @@ export default async function TodayPage({
           </Card>
         </section>
 
-        <FuerDichSection people={tripMemberDna} />
-
         {/* ── Fahrzeitanalyse: eingeklappt, nur reale Mietwagen-Daten ── */}
         {activeRentalCar && (activeRentalCar.details?.pickup_location || activeRentalCar.details?.dropoff_location) && (
           <section className="mb-8">
@@ -871,155 +702,6 @@ export default async function TodayPage({
             </details>
           </section>
         )}
-
-        <EntdeckenPreview items={discoverPreview} />
-
-        {/* ── Frag LUMI: vollständige, ehemals separate Concierge-Erfahrung ── */}
-        <section className="mb-8">
-          <SectionLabel>Frag LUMI</SectionLabel>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
-            {EMBEDDED_QUICK_ACTIONS.map((qa) => {
-              const QaIcon = QUICK_ACTION_ICONS[qa.key];
-              return (
-                <form key={qa.key} action={askConcierge}>
-                  <input type="hidden" name="family_id" value={familyId} />
-                  <input type="hidden" name="trip_id" value={activeTrip.id} />
-                  <input type="hidden" name="trip_slug" value={activeTrip.slug} />
-                  <input type="hidden" name="for_date" value={todayIso} />
-                  <input type="hidden" name="date_label" value={dateLabel} />
-                  <input type="hidden" name="location_label" value={currentLocation.label} />
-                  <input type="hidden" name="weather_summary" value={weatherSummary ?? ""} />
-                  <input type="hidden" name="known_plan_text" value={knownPlanText} />
-                  <input type="hidden" name="highlight_title" value={highlightTitle ?? ""} />
-                  <input type="hidden" name="member_names" value={conciergeMemberNames.join(",")} />
-                  <input type="hidden" name="question_key" value={qa.key} />
-                  <input type="hidden" name="question_text" value={qa.label} />
-                  <button
-                    type="submit"
-                    className="w-full flex items-center gap-2.5 text-left"
-                    style={{
-                      background: "var(--surface)", color: "var(--foreground)", border: "1px solid var(--border)",
-                      borderRadius: "10px", padding: "12px 14px", fontSize: "0.76rem", cursor: "pointer",
-                    }}
-                  >
-                    <QaIcon size={14} strokeWidth={1.5} style={{ color: "var(--accent)", flexShrink: 0 }} />
-                    {qa.label}
-                  </button>
-                </form>
-              );
-            })}
-          </div>
-
-          <form action={askConcierge} className="rounded-xl overflow-hidden mb-4" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-            <input type="hidden" name="family_id" value={familyId} />
-            <input type="hidden" name="trip_id" value={activeTrip.id} />
-            <input type="hidden" name="trip_slug" value={activeTrip.slug} />
-            <input type="hidden" name="for_date" value={todayIso} />
-            <input type="hidden" name="date_label" value={dateLabel} />
-            <input type="hidden" name="location_label" value={currentLocation.label} />
-            <input type="hidden" name="weather_summary" value={weatherSummary ?? ""} />
-            <input type="hidden" name="known_plan_text" value={knownPlanText} />
-            <input type="hidden" name="highlight_title" value={highlightTitle ?? ""} />
-            <input type="hidden" name="member_names" value={conciergeMemberNames.join(",")} />
-            <input type="hidden" name="question_key" value="freetext" />
-            <textarea
-              name="question_text"
-              rows={2}
-              required
-              placeholder="Frag LUMI etwas, z. B. Sollen wir bei diesem Wetter lieber drinnen bleiben?"
-              style={{
-                width: "100%", padding: "14px 16px", background: "transparent", border: "none", outline: "none",
-                resize: "none", color: "var(--foreground)", fontSize: "0.82rem", lineHeight: 1.5, fontWeight: 300,
-              }}
-            />
-            <div className="flex items-center justify-end px-4 pb-3">
-              <button
-                type="submit"
-                style={{
-                  background: "var(--foreground)", color: "var(--surface)", border: "none", borderRadius: "6px",
-                  padding: "9px 18px", fontSize: "0.6rem", letterSpacing: "0.12em", textTransform: "uppercase", cursor: "pointer",
-                }}
-              >
-                LUMI fragen
-              </button>
-            </div>
-          </form>
-
-          {conciergeCards.map((card) => (
-            <div key={card.key} className="rounded-xl p-6 mb-3" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-              <div className="flex items-center gap-2 mb-2">
-                <Sparkles size={12} strokeWidth={1.5} style={{ color: "var(--accent)" }} />
-                <span style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.14em", textTransform: "uppercase" }}>
-                  {card.questionLabel}
-                </span>
-              </div>
-              <div className="mb-2" style={{ color: "var(--foreground)", fontSize: "0.95rem", fontWeight: 400 }}>
-                {card.title}
-              </div>
-              <p className="mb-3" style={{ color: "var(--muted)", fontSize: "0.8rem", lineHeight: 1.6 }}>
-                {card.body}
-              </p>
-
-              {card.links.length > 0 && (
-                <div className="mb-3 space-y-1.5">
-                  {card.links.map((l, i) => (
-                    <Link
-                      key={i}
-                      href={l.href}
-                      className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg"
-                      style={{ background: "var(--background)", border: "1px solid var(--border)", textDecoration: "none" }}
-                    >
-                      <span style={{ color: "var(--foreground)", fontSize: "0.74rem" }}>{l.label}</span>
-                      <ChevronRight size={12} strokeWidth={1.6} style={{ color: "var(--muted)", flexShrink: 0 }} />
-                    </Link>
-                  ))}
-                </div>
-              )}
-
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <span style={{ color: "var(--muted)", fontSize: "0.66rem" }}>{formatTimestamp(card.timestamp)}</span>
-                <div className="flex items-center gap-2 flex-wrap">
-                  {card.showRefresh && (
-                    <form action={refreshConciergeMessage}>
-                      <input type="hidden" name="family_id" value={familyId} />
-                      <input type="hidden" name="trip_id" value={activeTrip.id} />
-                      <input type="hidden" name="trip_slug" value={activeTrip.slug} />
-                      <input type="hidden" name="for_date" value={todayIso} />
-                      <input type="hidden" name="date_label" value={dateLabel} />
-                      <input type="hidden" name="location_label" value={currentLocation.label} />
-                      <input type="hidden" name="weather_summary" value={weatherSummary ?? ""} />
-                      <input type="hidden" name="known_plan_text" value={knownPlanText} />
-                      <input type="hidden" name="highlight_title" value={highlightTitle ?? ""} />
-                      <input type="hidden" name="member_names" value={conciergeMemberNames.join(",")} />
-                      <input type="hidden" name="question_key" value={card.key} />
-                      <input type="hidden" name="question_text" value={card.questionLabel} />
-                      <button
-                        type="submit"
-                        className="flex items-center gap-1.5"
-                        style={{
-                          background: card.stale ? "rgba(184,154,94,0.12)" : "transparent",
-                          color: card.stale ? "var(--accent)" : "var(--muted)",
-                          border: card.stale ? "1px solid rgba(184,154,94,0.35)" : "1px solid var(--border)",
-                          borderRadius: "20px", padding: "6px 12px", fontSize: "0.62rem", cursor: "pointer",
-                        }}
-                      >
-                        <RefreshCw size={11} strokeWidth={1.6} />
-                        {card.stale ? "Empfehlung aktualisieren" : "Änderung prüfen"}
-                      </button>
-                    </form>
-                  )}
-                  {card.canCommit && (
-                    <CommitToJourneyButton
-                      tripId={activeTrip.id} tripSlug={activeTrip.slug} forDate={todayIso}
-                      eventTitle={card.eventTitle} label={card.commitLabel} className=""
-                    />
-                  )}
-                </div>
-              </div>
-            </div>
-          ))}
-        </section>
 
         {/* ── Vault ausgelagert: kompakter Verweis auf die Reise ── */}
         <Link

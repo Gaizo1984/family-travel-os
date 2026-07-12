@@ -1,21 +1,22 @@
 import Link from "next/link";
-import { LayoutDashboard, Plane, Users, Sparkles, Camera, Compass, MoreHorizontal, BookOpenCheck, Images } from "lucide-react";
+import { LayoutDashboard, Plane, Users, Sparkles, Camera, Compass, MessageSquare, MoreHorizontal, BookOpenCheck, Images } from "lucide-react";
 import { RoutePrefetcher } from "@/components/RoutePrefetcher";
 
-// §"LUMI Intelligence": /today ist zur zentralen LUMI-Startseite ausgebaut
-// worden (Wetter/Tagesplan/Für dich/Entdecken/Frag LUMI gebündelt) — Nav
-// spiegelt das mit Label/Icon, die URL bleibt /today (keine Linkbrüche).
-// Der frühere eigenständige Concierge-Bereich wurde vollständig entfernt und
-// ist jetzt Teil von LUMI (kein eigener Nav-Eintrag mehr).
+// §"LUMI Dashboard (Concierge 2.0)": LUMI (/today) ist jetzt ein ruhiges,
+// geführtes Concierge-Dashboard -- "Frag LUMI" bekommt bewusst wieder einen
+// eigenen Menüpunkt statt dauerhaft auf der Startseite zu stehen (kein
+// "Chatbot-Gefühl"). "Entdecken" heißt jetzt "Neue Reiseideen" (3 passive
+// Vorschläge + expliziter "Neue Ideen generieren"-Button).
 const NAV = [
   { href: "/", label: "Dashboard", Icon: LayoutDashboard },
   { href: "/trips", label: "Reisen", Icon: Plane },
   { href: "/family", label: "Familie", Icon: Users },
   { href: "/today", label: "LUMI", Icon: Sparkles },
   { href: "/content-studio", label: "Content", Icon: Camera },
-  { href: "/discover", label: "Entdecken", Icon: Compass },
+  { href: "/discover", label: "Neue Reiseideen", Icon: Compass },
   { href: "/buchungsportal", label: "Buchungsportal", Icon: BookOpenCheck },
   { href: "/memories", label: "Memory", Icon: Images },
+  { href: "/concierge", label: "Frag LUMI", Icon: MessageSquare },
 ];
 
 // Mobile Bottom-Nav: nur die 4 häufigsten Bereiche direkt anzeigen (sonst zu

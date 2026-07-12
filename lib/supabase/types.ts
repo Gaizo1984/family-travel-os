@@ -490,6 +490,27 @@ export interface Database {
           { foreignKeyName: "concierge_messages_trip_id_fkey";   columns: ["trip_id"];   isOneToOne: false; referencedRelation: "trips";   referencedColumns: ["id"] }
         ]
       }
+      concierge_category_suggestions: {
+        Row: {
+          id: string; family_id: string; trip_id: string; category: string
+          question_text: string; title: string; body: string; event_title: string
+          updated_at: string; created_at: string
+        }
+        Insert: {
+          id?: string; family_id: string; trip_id: string; category: string
+          question_text: string; title: string; body: string; event_title: string
+          updated_at?: string; created_at?: string
+        }
+        Update: {
+          id?: string; family_id?: string; trip_id?: string; category?: string
+          question_text?: string; title?: string; body?: string; event_title?: string
+          updated_at?: string; created_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "concierge_category_suggestions_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] },
+          { foreignKeyName: "concierge_category_suggestions_trip_id_fkey";   columns: ["trip_id"];   isOneToOne: false; referencedRelation: "trips";   referencedColumns: ["id"] }
+        ]
+      }
       content_ideas: {
         Row: {
           id: string; family_id: string; project_id: string | null; trip_id: string | null

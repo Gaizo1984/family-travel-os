@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Users, Compass, BookOpenCheck, Images, Fingerprint, LogOut, ChevronRight, type LucideIcon } from "lucide-react";
+import { Users, Compass, MessageSquare, BookOpenCheck, Images, Fingerprint, LogOut, ChevronRight, type LucideIcon } from "lucide-react";
 import { logout } from "@/lib/actions/auth";
 
 interface MoreLink {
@@ -9,13 +9,15 @@ interface MoreLink {
   Icon: LucideIcon;
 }
 
-// §Concierge wurde vollständig entfernt und ist jetzt Teil von LUMI (/today,
-// bereits eigener Top-Level-Nav-Punkt) -- keine doppelte Kachel hier nötig.
+// §"LUMI Dashboard (Concierge 2.0)": Frag LUMI hat wieder einen eigenen
+// Menüpunkt (nicht mehr dauerhaft auf der LUMI-Startseite) -- deshalb auch
+// hier in der mobilen Mehr-Übersicht wieder erreichbar.
 const MORE_LINKS: MoreLink[] = [
   { href: "/family", label: "Familie", description: "Reiseprofile & Vorlieben", Icon: Users },
-  { href: "/discover", label: "Entdecken", description: "Ideen & Inspiration", Icon: Compass },
+  { href: "/discover", label: "Neue Reiseideen", description: "Ideen & Inspiration", Icon: Compass },
   { href: "/buchungsportal", label: "Buchungsportal", description: "Hotels, Flüge & Restaurants im Vergleich", Icon: BookOpenCheck },
   { href: "/memories", label: "Travel Memory", description: "Eure gemeinsame Reisegalerie", Icon: Images },
+  { href: "/concierge", label: "Frag LUMI", description: "Persönliche Reiseberatung", Icon: MessageSquare },
   { href: "/mehr/passkeys", label: "Passkeys verwalten", description: "Anmeldung per Fingerabdruck oder Gesichtserkennung", Icon: Fingerprint },
 ];
 

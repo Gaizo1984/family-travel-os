@@ -42,6 +42,10 @@ function readContext(formData: FormData) {
     knownPlanText: String(formData.get('known_plan_text') ?? ''),
     highlightTitle: String(formData.get('highlight_title') ?? '').trim() || null,
     memberNames: String(formData.get('member_names') ?? '').split(',').map((s) => s.trim()).filter(Boolean),
+    // §"Frag LUMI" hat keinen festen Ort mehr (eigener Menüpunkt /concierge
+    // UND Auslöser innerhalb der Kategorie-Seiten) -- die aufrufende Seite
+    // bestimmt per return_to, wohin nach dem Absenden zurückgeleitet wird.
+    returnTo: String(formData.get('return_to') ?? '').trim() || '/today',
   }
 }
 
@@ -58,7 +62,7 @@ export async function askConcierge(formData: FormData) {
   const questionKey = String(formData.get('question_key') ?? '')
   const questionTextRaw = String(formData.get('question_text') ?? '').trim()
 
-  if (!ctx.familyId || !ctx.tripId || !ctx.forDate) redirect('/today')
+  if (!ctx.familyId || !ctx.tripId || !ctx.forDate) redirect(ctx.returnTo)
 
   if (questionKey === 'today_important') {
     let rec = await getCachedTodayRecommendation(ctx.familyId, ctx.tripId, ctx.forDate)
@@ -73,7 +77,7 @@ export async function askConcierge(formData: FormData) {
         ctx.highlightTitle, null,
       )
     }
-    redirect('/today')
+    redirect(ctx.returnTo)
     return
   }
 
@@ -110,7 +114,7 @@ export async function askConcierge(formData: FormData) {
         { onConflict: 'family_id,trip_id,for_date,question_key' },
       )
     }
-    redirect('/today')
+    redirect(ctx.returnTo)
     return
   }
 
@@ -130,14 +134,14 @@ export async function askConcierge(formData: FormData) {
       },
       { onConflict: 'family_id,trip_id,for_date,question_key' },
     )
-    redirect('/today')
+    redirect(ctx.returnTo)
     return
   }
 
   // KI-basiert: adjust_weather, find_alternative, Freitext
   const isFreetext = !QUICK_ACTIONS.some((a) => a.key === questionKey)
   const effectiveKey = isFreetext ? normalizeQuestionKey(questionTextRaw) : questionKey
-  if (!questionTextRaw) redirect('/today')
+  if (!questionTextRaw) redirect(ctx.returnTo)
 
   await generateAndCacheConciergeMessage(
     ctx.familyId, ctx.tripId, ctx.forDate, effectiveKey, questionTextRaw,
@@ -147,7 +151,7 @@ export async function askConcierge(formData: FormData) {
     },
     false,
   )
-  redirect('/today')
+  redirect(ctx.returnTo)
 }
 
 /** §"Hinweis 'Empfehlung aktualisieren' anzeigen statt automatisch neu zu rechnen": bewusster, manueller Regenerier-Schritt. */
@@ -155,7 +159,7 @@ export async function refreshConciergeMessage(formData: FormData) {
   const ctx = readContext(formData)
   const questionKey = String(formData.get('question_key') ?? '')
   const questionText = String(formData.get('question_text') ?? '')
-  if (!ctx.familyId || !ctx.tripId || !ctx.forDate || !questionKey) redirect('/today')
+  if (!ctx.familyId || !ctx.tripId || !ctx.forDate || !questionKey) redirect(ctx.returnTo)
 
   await generateAndCacheConciergeMessage(
     ctx.familyId, ctx.tripId, ctx.forDate, questionKey, questionText,
@@ -165,7 +169,7 @@ export async function refreshConciergeMessage(formData: FormData) {
     },
     true,
   )
-  redirect('/today')
+  redirect(ctx.returnTo)
 }
 
 /**
@@ -179,8 +183,9 @@ export async function commitConciergeAction(formData: FormData) {
   const tripSlug = String(formData.get('trip_slug') ?? '')
   const forDate = String(formData.get('for_date') ?? '')
   const eventTitle = String(formData.get('event_title') ?? '').trim()
+  const returnTo = String(formData.get('return_to') ?? '').trim() || '/today'
 
-  if (!tripId || !forDate || !eventTitle) redirect(`/today?error=${encodeURIComponent('Konnte nicht übernommen werden')}`)
+  if (!tripId || !forDate || !eventTitle) redirect(`${returnTo}?error=${encodeURIComponent('Konnte nicht übernommen werden')}`)
 
   const supabase = await createClient()
   const { error } = await supabase.from('journey_events').insert({
@@ -191,6 +196,6 @@ export async function commitConciergeAction(formData: FormData) {
     status: 'idea',
   })
 
-  if (error) redirect(`/today?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
+  if (error) redirect(`${returnTo}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
   redirect(`/trips/${tripSlug}`)
 }

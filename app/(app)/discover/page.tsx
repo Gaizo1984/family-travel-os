@@ -1,11 +1,15 @@
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Sparkles } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { buildFamilyDnaSummary } from "@/lib/family-dna";
 import { MOOD_OPTIONS, SEASON_WINDOW_OPTIONS } from "@/lib/data/destination-knowledge";
 import { scoreDestinations } from "@/lib/discover-scoring";
 import { searchDestinations } from "@/lib/providers/destination-provider";
+import { generateTripIdeas } from "@/lib/actions/trip-idea-generation";
+
+/** §"Neue Reiseideen": Standard-Wunschtext für den "Neue Ideen generieren"-Button, da generateTripIdeas mindestens 10 Zeichen Freitext verlangt -- alle anderen Felder bleiben optional/leer. */
+const DEFAULT_WISH_TEXT = "Überrascht uns mit Zielen, die zu unseren Vorlieben passen.";
 
 const H_FG    = "#F0EBE3";
 const H_MUTED = "#A89880";
@@ -34,7 +38,10 @@ export default async function DiscoverPage() {
   const avoidNames = [...(pastTrips ?? []).map((p) => p.country_or_region), ...(trips ?? []).map((t) => t.title)];
   const destinations = destinationsOrNull ?? [];
 
-  const top = scoreDestinations(destinations, dna, { avoidNames })[0];
+  // §"Drei Vorschläge anhand unserer Präferenzen": rein deterministisch,
+  // kostenlos (lib/discover-scoring.ts) -- erst der separate Button unten
+  // ("Neue Ideen generieren") löst einen echten OpenAI-Aufruf aus.
+  const [top, ...more] = scoreDestinations(destinations, dna, { avoidNames }).slice(0, 3);
 
   return (
     <div className="flex-1 flex flex-col" style={{ background: "var(--background)" }}>
@@ -80,6 +87,42 @@ export default async function DiscoverPage() {
             </div>
           </section>
         )}
+
+        {/* ── Zwei weitere Vorschläge, kompakter ── */}
+        {more.length > 0 && (
+          <section className="mb-10 grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {more.map((s) => (
+              <div key={s.destination.name} className="rounded-xl p-5" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+                <div style={{ color: "var(--foreground)", fontSize: "0.92rem", marginBottom: "4px" }}>{s.destination.name}</div>
+                <p style={{ color: "var(--muted)", fontSize: "0.72rem", lineHeight: 1.5, fontStyle: "italic" }}>{s.reasoning}</p>
+              </div>
+            ))}
+          </section>
+        )}
+
+        {/* ── Neue Ideen generieren: einziger Auslöser für einen echten KI-Aufruf hier ── */}
+        <section className="mb-10">
+          <div className="rounded-xl p-6 flex items-center justify-between flex-wrap gap-4" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+            <div>
+              <div style={{ color: "var(--foreground)", fontSize: "0.88rem", fontWeight: 400, marginBottom: "4px" }}>Noch nicht das Richtige dabei?</div>
+              <p style={{ color: "var(--muted)", fontSize: "0.72rem" }}>LUMI entwickelt drei neue, individuelle Reiseideen aus euren Vorlieben.</p>
+            </div>
+            <form action={generateTripIdeas}>
+              <input type="hidden" name="wish_text" value={DEFAULT_WISH_TEXT} />
+              <button
+                type="submit"
+                className="flex items-center gap-2"
+                style={{
+                  background: "var(--foreground)", color: "var(--surface)", border: "none", borderRadius: "6px",
+                  padding: "10px 18px", fontSize: "0.62rem", letterSpacing: "0.12em", textTransform: "uppercase", cursor: "pointer", whiteSpace: "nowrap",
+                }}
+              >
+                <Sparkles size={12} strokeWidth={1.6} />
+                Neue Ideen generieren
+              </button>
+            </form>
+          </div>
+        </section>
 
         {/* ── Wann wollt ihr reisen? ── */}
         <section className="mb-10">

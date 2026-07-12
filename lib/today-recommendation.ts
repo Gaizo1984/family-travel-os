@@ -2,15 +2,6 @@ import { createClient } from './supabase/server'
 import { generateTodayRecommendation } from './today-ai'
 import type { TodayRecommendation } from './today-ai'
 
-/** Fest vorgegebenes Vokabular für die morgendliche Tagesstil-Frage — nur wenn kein Kalender-Highlight vorliegt. */
-export const DAY_STYLE_OPTIONS = [
-  { key: 'entspannung', label: 'Entspannung' },
-  { key: 'abenteuer', label: 'Abenteuer' },
-  { key: 'familie', label: 'Familie' },
-  { key: 'kulinarik', label: 'Kulinarik' },
-  { key: 'ueberraschung', label: 'Überraschung' },
-] as const
-
 export type CachedTodayRecommendation = TodayRecommendation & {
   dayStyle: string | null
   highlightTitle: string | null
