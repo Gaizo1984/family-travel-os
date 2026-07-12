@@ -22,20 +22,19 @@ export default async function DiscoverPage() {
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
 
-  const dna = await buildFamilyDnaSummary(familyId);
-  const { data: pastTrips } = await supabase.from("past_trips").select("country_or_region").eq("family_id", familyId);
-  const { data: trips } = await supabase.from("trips").select("title").eq("family_id", familyId).in("status", ["completed", "active"]);
+  // §Performance-Audit: fünf voneinander unabhängige Ladevorgänge (alle
+  // brauchen nur familyId) liefen bisher seriell hintereinander.
+  const [dna, { data: pastTrips }, { data: trips }, destinationsOrNull, { data: ideas }] = await Promise.all([
+    buildFamilyDnaSummary(familyId),
+    supabase.from("past_trips").select("country_or_region").eq("family_id", familyId),
+    supabase.from("trips").select("title").eq("family_id", familyId).in("status", ["completed", "active"]),
+    searchDestinations(),
+    supabase.from("trip_ideas").select("id, destination").eq("family_id", familyId).order("created_at", { ascending: false }).limit(4),
+  ]);
   const avoidNames = [...(pastTrips ?? []).map((p) => p.country_or_region), ...(trips ?? []).map((t) => t.title)];
-  const destinations = (await searchDestinations()) ?? [];
+  const destinations = destinationsOrNull ?? [];
 
   const top = scoreDestinations(destinations, dna, { avoidNames })[0];
-
-  const { data: ideas } = await supabase
-    .from("trip_ideas")
-    .select("id, destination")
-    .eq("family_id", familyId)
-    .order("created_at", { ascending: false })
-    .limit(4);
 
   return (
     <div className="flex-1 flex flex-col" style={{ background: "var(--background)" }}>

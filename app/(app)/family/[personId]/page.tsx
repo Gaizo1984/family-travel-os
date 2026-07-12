@@ -77,27 +77,18 @@ export default async function PersonDetailPage({
 
   if (!person) notFound();
 
-  let photoUrl: string | null = null;
-  if (person.photo_storage_path) {
-    const { data: signed } = await supabase.storage.from("documents").createSignedUrl(person.photo_storage_path, 3600);
-    photoUrl = signed?.signedUrl ?? null;
-  }
-
-  const { data: documents } = await supabase
-    .from("documents")
-    .select("id, doc_type, label, expires_at, details")
-    .eq("person_id", person.id)
-    .order("created_at", { ascending: true });
-
+  // §Performance-Audit: vier voneinander unabhängige Ladevorgänge (alle
+  // brauchen nur person.id/photo_storage_path) liefen bisher seriell.
+  const [signedPhoto, { data: documents }, personWorldStats, { data: memoryPhotosRaw }] = await Promise.all([
+    person.photo_storage_path
+      ? supabase.storage.from("documents").createSignedUrl(person.photo_storage_path, 3600)
+      : Promise.resolve({ data: null }),
+    supabase.from("documents").select("id, doc_type, label, expires_at, details").eq("person_id", person.id).order("created_at", { ascending: true }),
+    buildPersonWorldStats(person.id),
+    supabase.from("memory_photos").select("id, storage_path, caption, is_highlight, taken_at, created_at").eq("uploaded_by_person_id", person.id).order("taken_at", { ascending: false, nullsFirst: false }).limit(12),
+  ]);
+  const photoUrl = signedPhoto.data?.signedUrl ?? null;
   const docs = (documents ?? []) as unknown as DocumentRow[];
-  const personWorldStats = await buildPersonWorldStats(person.id);
-
-  const { data: memoryPhotosRaw } = await supabase
-    .from("memory_photos")
-    .select("id, storage_path, caption, is_highlight, taken_at, created_at")
-    .eq("uploaded_by_person_id", person.id)
-    .order("taken_at", { ascending: false, nullsFirst: false })
-    .limit(12);
 
   const memoryPhotos = await Promise.all(
     (memoryPhotosRaw ?? []).map(async (p) => {

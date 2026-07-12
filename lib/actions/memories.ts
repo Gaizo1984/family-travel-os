@@ -206,44 +206,56 @@ async function analyzeTripMemoryPhotos(supabase: SupabaseClient, tripId: string)
     .eq('trip_id', tripId)
   const photos = photosRaw ?? []
 
-  // Dubletten-Erkennung: fehlende Hashes nachrechnen, dann gegen alle anderen Fotos derselben Reise abgleichen.
+  // §Performance-Audit: Hash-Nachrechnung pro Foto war eine sequenzielle
+  // for-Schleife (Signed-URL → Download → Hash → Update, jedes Foto wartet
+  // auf das vorige) -- unabhängig pro Foto, deshalb jetzt per Promise.all.
+  // Läuft ohnehin im Hintergrund (after()), aber bei 20-30 Fotos je Reise
+  // war das unnötig seriell.
   const hashById = new Map<string, string>()
   for (const p of photos) {
-    if (p.phash) { hashById.set(p.id, p.phash); continue }
+    if (p.phash) hashById.set(p.id, p.phash)
+  }
+  const missingHashPhotos = photos.filter((p) => !p.phash)
+  const computedHashes = await Promise.all(missingHashPhotos.map(async (p) => {
     try {
       const { data: signed } = await supabase.storage.from('documents').createSignedUrl(p.storage_path, 60)
-      if (!signed?.signedUrl) continue
+      if (!signed?.signedUrl) return null
       const res = await fetch(signed.signedUrl)
       const buffer = Buffer.from(await res.arrayBuffer())
       const phash = await computeDHash(buffer)
-      if (phash) {
-        hashById.set(p.id, phash)
-        await supabase.from('memory_photos').update({ phash }).eq('id', p.id)
-      }
+      return phash ? { id: p.id, phash } : null
     } catch {
       // ein fehlerhaftes Foto darf die Dublettenerkennung der übrigen Fotos nicht abbrechen
-      continue
+      return null
     }
-  }
+  }))
+  await Promise.all(computedHashes.map((h) => {
+    if (!h) return null
+    hashById.set(h.id, h.phash)
+    return supabase.from('memory_photos').update({ phash: h.phash }).eq('id', h.id)
+  }))
 
   // Nur gegen frühere Fotos in der Liste prüfen (Index-Vergleich), damit
-  // Duplikat-Ketten eindeutig auf das jeweils erste Foto zeigen.
+  // Duplikat-Ketten eindeutig auf das jeweils erste Foto zeigen. Die
+  // Vergleichs-Entscheidung selbst ist rein synchron (nur Map-Lookups +
+  // hammingDistance) -- nur die Update-Schreibvorgänge sind async und
+  // laufen deshalb gebündelt statt einzeln nacheinander.
+  const duplicateUpdates: Array<{ id: string; duplicateOfId: string }> = []
   for (let i = 0; i < photos.length; i++) {
     const p = photos[i]
     if (p.is_duplicate_of || !hashById.has(p.id)) continue
     const ownHash = hashById.get(p.id)!
-    let duplicateOfId: string | null = null
     for (let j = 0; j < i; j++) {
       const other = photos[j]
       if (hashById.has(other.id) && hammingDistance(hashById.get(other.id)!, ownHash) <= DUPLICATE_HASH_THRESHOLD) {
-        duplicateOfId = other.id
+        duplicateUpdates.push({ id: p.id, duplicateOfId: other.id })
         break
       }
     }
-    if (duplicateOfId) {
-      await supabase.from('memory_photos').update({ is_duplicate_of: duplicateOfId, is_selected: false }).eq('id', p.id)
-    }
   }
+  await Promise.all(duplicateUpdates.map(({ id, duplicateOfId }) =>
+    supabase.from('memory_photos').update({ is_duplicate_of: duplicateOfId, is_selected: false }).eq('id', id),
+  ))
 
   // Nicht-doppelte, noch nicht analysierte Fotos in Batches der KI-Qualitätsbewertung übergeben.
   const { data: toAnalyzeRaw } = await supabase

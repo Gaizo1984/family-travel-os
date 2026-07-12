@@ -46,23 +46,23 @@ type FlightWithPasses = { id: string; title: string; slug: string };
  * Ankunftstag ist UND für diesen Flug bereits mindestens ein Boardingpass
  * hochgeladen wurde — sonst bliebe der Zugriff leer/irreführend.
  */
-async function findTodaysFlightWithBoardingPasses(): Promise<FlightWithPasses | null> {
-  const supabase = await createClient();
-  const todayIso = todayIsoInFamilyTimezone();
-
-  const { data: flights } = await supabase
-    .from("bookings")
-    .select("id, title, start_datetime, end_datetime, trips ( slug )")
-    .eq("type", "flight")
-    .neq("status", "cancelled");
-
-  const todaysFlights = (flights ?? [])
-    .filter((f) => f.start_datetime?.slice(0, 10) === todayIso || f.end_datetime?.slice(0, 10) === todayIso)
-    .map((f) => ({ id: f.id, title: f.title, slug: (f.trips as unknown as { slug: string } | null)?.slug ?? null }))
-    .filter((f): f is FlightWithPasses => f.slug !== null);
+/**
+ * §Performance-Audit: liest den Flugtag-Treffer jetzt aus den ohnehin schon
+ * geladenen `trips` (inkl. verschachtelter `bookings`) statt einer eigenen,
+ * unfilterten `bookings`-Abfrage über alle Reisen der Familie -- nur der
+ * Boardingpass-Abgleich (documents) bleibt eine echte zusätzliche Abfrage.
+ */
+async function findTodaysFlightWithBoardingPasses(trips: TripRow[], todayIso: string): Promise<FlightWithPasses | null> {
+  const todaysFlights: FlightWithPasses[] = trips.flatMap((t) =>
+    t.bookings
+      .filter((b) => b.type === "flight" && b.status !== "cancelled"
+        && (b.start_datetime?.slice(0, 10) === todayIso || b.end_datetime?.slice(0, 10) === todayIso))
+      .map((b) => ({ id: b.id, title: b.title, slug: t.slug })),
+  );
 
   if (todaysFlights.length === 0) return null;
 
+  const supabase = await createClient();
   const { data: passDocs } = await supabase
     .from("documents")
     .select("booking_id")
@@ -297,7 +297,7 @@ export default async function TodayPage({
   const tomorrowIso = addDaysIso(todayIso, 1);
   const nowHHMM = nowHHMMInFamilyTimezone();
 
-  const [{ data: trips }, flightToday, onThisDayMemories, dna, { data: pastTripsForAvoid }] = await Promise.all([
+  const [{ data: trips }, onThisDayMemories, dna, { data: pastTripsForAvoid }] = await Promise.all([
     supabase
       .from("trips")
       .select(`
@@ -308,7 +308,6 @@ export default async function TodayPage({
         journey_events ( id, stage_id, date, time, category, title, location, status )
       `)
       .eq("family_id", familyId),
-    findTodaysFlightWithBoardingPasses(),
     findOnThisDayMemories(familyId, todayIso),
     // §Wird jetzt VOR der activeTrip-Weiche geladen, weil "Für dich" und
     // "Entdecken" (LUMI-Punkte 3+5) unabhängig davon sichtbar sein müssen, ob
@@ -331,6 +330,7 @@ export default async function TodayPage({
   // von einem anderen Kalendertag ausgehen als der Rest dieser Seite.
   const allTrips = (trips ?? []) as unknown as TripRow[];
   const activeTrip = allTrips.find((t) => isTripCurrentlyRunning(t, todayIso));
+  const flightToday = await findTodaysFlightWithBoardingPasses(allTrips, todayIso);
 
   // §Punkt 1 "Was ist heute wichtig?" auch ohne laufende Reise: die zeitlich
   // nächste bevorstehende Reise (weder laufend noch historisch/archiviert).

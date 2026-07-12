@@ -40,25 +40,33 @@ export default async function TripDocumentsPage({
   const memberIds = members.map((m) => m.id);
   const returnTo = `/trips/${trip.slug}/documents`;
 
-  const { data: passports } = memberIds.length > 0
-    ? await supabase
-        .from("documents")
-        .select("id, person_id")
-        .eq("doc_type", "passport")
-        .in("person_id", memberIds)
-    : { data: [] };
+  // §Performance-Audit: die vier folgenden Abfragen sind bis auf eine
+  // Ausnahme unabhängig voneinander (nur trip.id/memberIds nötig) und laufen
+  // deshalb parallel statt seriell. Einzige echte Abhängigkeit:
+  // document_trips (weiter unten) muss NACH computeTripRequirements laufen,
+  // da dessen Auto-Verknüpfung (Upsert) hier gelesen wird — bleibt deshalb
+  // bewusst außerhalb dieses Promise.all.
+  const [{ data: passports }, , { data: policyRows }, { data: bookingDocRows }] = await Promise.all([
+    memberIds.length > 0
+      ? supabase.from("documents").select("id, person_id").eq("doc_type", "passport").in("person_id", memberIds)
+      : Promise.resolve({ data: [] as { id: string; person_id: string | null }[] }),
+    // §Travel Requirements Engine (lib/travel-requirements.ts): verknüpft
+    // automatisch bereits vorhandene, gültige ESTA/eTA-Dokumente mit dieser
+    // Reise (idempotent), bevor unten die zugeordneten Dokumente geladen
+    // werden — dieselbe Engine wie in lib/readiness.ts, kein zweiter
+    // Code-Pfad für "was ist zugeordnet/gültig".
+    computeTripRequirements(trip.id),
+    // Zentrale Versicherungen, die dieser Reise zugeordnet sind.
+    supabase.from("insurance_policy_trips").select("insurance_policies ( id, label, provider )").eq("trip_id", trip.id),
+    // Buchungsunterlagen (§11 Dokumenten-Hub): dieselbe Datei, die auf der jeweiligen
+    // Buchungsdetailseite hochgeladen wurde — hier nur referenziert, kein zweiter Upload.
+    supabase.from("documents").select("id, label, booking_id, bookings ( id, title, type )").eq("trip_id", trip.id).not("booking_id", "is", null),
+  ]);
 
   const passportByPerson = new Map<string, string>();
   for (const p of passports ?? []) {
     if (p.person_id && !passportByPerson.has(p.person_id)) passportByPerson.set(p.person_id, p.id);
   }
-
-  // §Travel Requirements Engine (lib/travel-requirements.ts): verknüpft
-  // automatisch bereits vorhandene, gültige ESTA/eTA-Dokumente mit dieser
-  // Reise (idempotent), bevor unten die zugeordneten Dokumente geladen
-  // werden — dieselbe Engine wie in lib/readiness.ts, kein zweiter
-  // Code-Pfad für "was ist zugeordnet/gültig".
-  await computeTripRequirements(trip.id);
 
   // Visa/ESTA/eTA, die dieser Reise über document_trips zugeordnet sind.
   const { data: entryDocRows } = await supabase
@@ -75,23 +83,9 @@ export default async function TripDocumentsPage({
     entryDocsByPerson.set(doc.person_id, list);
   }
 
-  // Zentrale Versicherungen, die dieser Reise zugeordnet sind.
-  const { data: policyRows } = await supabase
-    .from("insurance_policy_trips")
-    .select("insurance_policies ( id, label, provider )")
-    .eq("trip_id", trip.id);
-
   const assignedPolicies = (policyRows ?? [])
     .map((r) => r.insurance_policies as unknown as Policy | null)
     .filter((p): p is Policy => p !== null);
-
-  // Buchungsunterlagen (§11 Dokumenten-Hub): dieselbe Datei, die auf der jeweiligen
-  // Buchungsdetailseite hochgeladen wurde — hier nur referenziert, kein zweiter Upload.
-  const { data: bookingDocRows } = await supabase
-    .from("documents")
-    .select("id, label, booking_id, bookings ( id, title, type )")
-    .eq("trip_id", trip.id)
-    .not("booking_id", "is", null);
 
   const bookingDocuments = (bookingDocRows ?? [])
     .map((row) => {

@@ -93,15 +93,13 @@ function DocGroup({
 export default async function TravelVaultPage() {
   const supabase = await createClient();
 
-  const { data: persons } = await supabase.from("persons").select("id, name, initials").order("name");
+  // §Performance-Audit: drei voneinander unabhängige Abfragen liefen bisher seriell.
+  const [{ data: persons }, { data: documents }, { data: policiesRaw }] = await Promise.all([
+    supabase.from("persons").select("id, name, initials").order("name"),
+    supabase.from("documents").select("id, person_id, doc_type, label, expires_at, details").not("person_id", "is", null).order("created_at", { ascending: true }),
+    supabase.from("insurance_policies").select("id, label, provider, insurance_policy_persons ( persons ( id, name, initials ) )").order("created_at", { ascending: true }),
+  ]);
   const personList = (persons ?? []) as PersonRow[];
-
-  const { data: documents } = await supabase
-    .from("documents")
-    .select("id, person_id, doc_type, label, expires_at, details")
-    .not("person_id", "is", null)
-    .order("created_at", { ascending: true });
-
   const docs = (documents ?? []) as unknown as DocumentRow[];
 
   const identityByPerson = new Map<string, DocumentRow[]>();
@@ -117,11 +115,6 @@ export default async function TravelVaultPage() {
       entryByPerson.set(doc.person_id, list);
     }
   }
-
-  const { data: policiesRaw } = await supabase
-    .from("insurance_policies")
-    .select("id, label, provider, insurance_policy_persons ( persons ( id, name, initials ) )")
-    .order("created_at", { ascending: true });
 
   const policies = (policiesRaw ?? []) as unknown as PolicyRow[];
 

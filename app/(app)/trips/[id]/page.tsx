@@ -379,7 +379,6 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
   const stages    = sortStagesChronologically(trip.stages);
   const bookings  = sortBookingsChronologically(trip.bookings);
   const journeyEvents = trip.journey_events ?? [];
-  const stageImages = await resolveStageImages(supabase, stages);
 
   const totalNights = stages.reduce((sum, s) => sum + (s.nights ?? 0), 0);
   const routeChips = buildRouteChips(
@@ -411,9 +410,12 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
   // Reisen gibt es nichts mehr vorzubereiten, daher wird sie gar nicht erst
   // berechnet, sondern durch eine Erinnerungs-/Statistik-Ansicht ersetzt.
   const historical = isTripHistorical(trip);
-  // Beide unabhängig voneinander (Highlight-Foto braucht nur familyId/trip.id,
-  // Readiness nur trip.id) — parallel statt seriell laden.
-  const [highlightPhotoByTripId, readiness] = await Promise.all([
+  // §Performance-Audit: alle drei unabhängig voneinander (Etappenbilder
+  // brauchen nur stages, Highlight-Foto nur familyId/trip.id, Readiness nur
+  // trip.id) — resolveStageImages lief bisher separat davor statt in
+  // derselben Parallel-Ladung.
+  const [stageImages, highlightPhotoByTripId, readiness] = await Promise.all([
+    resolveStageImages(supabase, stages),
     getHighlightPhotoByTripId(supabase, familyId, [trip.id]),
     historical ? Promise.resolve(null) : computeTripReadiness(trip.id),
   ]);
