@@ -9,6 +9,8 @@ import { DirectPhotoUploadForm } from "@/components/DirectPhotoUploadForm";
 import { Banner } from "@/components/Banner";
 import { SignedPhoto } from "@/components/SignedPhoto";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
+import { DateSelectFields } from "@/components/DateSelectFields";
+import { getDateFieldRange } from "@/lib/documents";
 
 // §Der Upload selbst ist jetzt schnell (Analyse läuft per after() im
 // Hintergrund) — großzügigeres Timeout als zusätzliches Sicherheitsnetz.
@@ -195,10 +197,7 @@ export default async function MemoriesPage({
                     {persons.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                   </select>
                 </div>
-                <div>
-                  <label htmlFor="mem-date" style={LABEL_STYLE}>Aufnahmedatum</label>
-                  <input id="mem-date" name="taken_at" type="date" style={FIELD_STYLE} />
-                </div>
+                <DateSelectFields label="Aufnahmedatum" namePrefix="taken_at" range={getDateFieldRange("issue")} />
                 <div>
                   <label htmlFor="mem-caption" style={LABEL_STYLE}>Bildunterschrift</label>
                   <input id="mem-caption" name="caption" type="text" style={FIELD_STYLE} />

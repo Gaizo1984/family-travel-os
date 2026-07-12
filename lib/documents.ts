@@ -182,10 +182,11 @@ export const GERMAN_MONTHS = [
 
 export type DateFieldRange = { minYear: number; maxYear: number }
 
-export function getDateFieldRange(kind: 'birth' | 'issue' | 'expiry'): DateFieldRange {
+export function getDateFieldRange(kind: 'birth' | 'issue' | 'expiry' | 'travel'): DateFieldRange {
   const currentYear = new Date().getFullYear()
   if (kind === 'birth') return { minYear: currentYear - 110, maxYear: currentYear }
   if (kind === 'issue') return { minYear: currentYear - 15, maxYear: currentYear }
+  if (kind === 'travel') return { minYear: currentYear - 1, maxYear: currentYear + 5 }
   return { minYear: currentYear, maxYear: currentYear + 15 }
 }
 
@@ -233,6 +234,21 @@ export function combineIsoDate(day: string, month: string, year: string, fieldLa
     throw new Error(`${fieldLabel}: ungültiges Datum`)
 
   return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
+}
+
+/**
+ * Liest ein Jahr/Monat/Tag-Feldtrio (Namenskonvention der gemeinsamen
+ * DateSelectFields-Komponente: `${prefix}_year`/`_month`/`_day`) direkt aus
+ * FormData und kombiniert es zu einem ISO-Datum — gemeinsame Hilfsfunktion
+ * für alle Server-Actions, die Datumsfelder dieser Komponente entgegennehmen
+ * (Dokumente, Reisen, Etappen, Buchungen), statt dieselbe Logik in jeder
+ * Action erneut zu schreiben.
+ */
+export function readDateGroupFromFormData(formData: FormData, prefix: string, fieldLabel: string): string | null {
+  const day = String(formData.get(`${prefix}_day`) ?? '').trim()
+  const month = String(formData.get(`${prefix}_month`) ?? '').trim()
+  const year = String(formData.get(`${prefix}_year`) ?? '').trim()
+  return combineIsoDate(day, month, year, fieldLabel)
 }
 
 export const ALLOWED_DOCUMENT_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']

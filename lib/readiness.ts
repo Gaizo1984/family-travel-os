@@ -1,6 +1,7 @@
 import { createClient } from './supabase/server'
 import type { DocumentType } from './documents'
 import { detectFlightStopoverSuggestions } from './flight-stopovers'
+import { ensureTripDocumentRequirements } from './travel-requirements'
 import { formatDateDE } from './demo-data'
 
 export type ReadinessSeverity = 'conflict' | 'hint'
@@ -86,7 +87,7 @@ export async function computeTripReadiness(tripId: string): Promise<ReadinessRes
   // §Performance: die folgenden Abfragen sind alle unabhängig voneinander
   // (keine hängt vom Ergebnis einer anderen ab, außer der Dokumente-Query, die
   // die Mitreisenden-IDs braucht) — parallel statt seriell laden.
-  const [{ data: memberRows }, { data: assignedEntryDocsRaw }, { count: insuranceCount }, { data: stagesRaw }, { data: bookingsRaw }, stopoverSuggestions] =
+  const [{ data: memberRows }, { data: assignedEntryDocsRaw }, { count: insuranceCount }, { data: stagesRaw }, { data: bookingsRaw }, stopoverSuggestions, travelRequirementStatuses] =
     await Promise.all([
       supabase.from('trip_members').select('persons ( id, name )').eq('trip_id', tripId),
       supabase.from('document_trips').select('documents ( id, person_id, doc_type, expires_at, label )').eq('trip_id', tripId),
@@ -94,7 +95,20 @@ export async function computeTripReadiness(tripId: string): Promise<ReadinessRes
       supabase.from('stages').select('id, title, start_date, end_date, nights, accommodation, sort_order').eq('trip_id', tripId),
       supabase.from('bookings').select('id, type, stage_id, status, start_datetime, end_datetime').eq('trip_id', tripId),
       detectFlightStopoverSuggestions(tripId),
+      ensureTripDocumentRequirements(tripId),
     ])
+
+  // ── Einreise: USA/Kanada als Ziel oder Transit (zentraler Travel-Requirement-
+  // Service, siehe lib/travel-requirements.ts) — dieselbe Anforderungs-/
+  // Gültigkeitslogik wie die Reisedokumente-Übersicht, kein zweiter Code-Pfad.
+  for (const status of travelRequirementStatuses) {
+    if (status.status !== 'missing') continue
+    findings.push({
+      severity: 'conflict', theme: 'entry',
+      message: `${status.label} für ${status.personName} hinzufügen (USA/Kanada als Ziel oder Transit erkannt).`,
+      href: `/family/${status.personId}/documents/new?type=${status.docType}&return_to=${encodeURIComponent(`/trips/${slug}/ready-to-travel`)}&assign_trip=${tripId}`,
+    })
+  }
 
   // ── Reisende & Dokumente: Reisepass je Mitreisendem ──
   const members = (memberRows ?? [])

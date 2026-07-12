@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
+import { readDateGroupFromFormData } from '@/lib/documents'
 
 function slugify(text: string): string {
   return text
@@ -17,8 +18,6 @@ function slugify(text: string): string {
 export async function createTrip(formData: FormData) {
   const title     = String(formData.get('title') ?? '').trim()
   const subtitle  = String(formData.get('subtitle') ?? '').trim()
-  const startDate = String(formData.get('start_date') ?? '').trim()
-  const endDate   = String(formData.get('end_date') ?? '').trim()
   const statusRaw = String(formData.get('status') ?? '').trim()
   const status    = (['planned', 'active', 'completed'] as const).includes(statusRaw as 'planned' | 'active' | 'completed')
     ? (statusRaw as 'planned' | 'active' | 'completed')
@@ -30,6 +29,15 @@ export async function createTrip(formData: FormData) {
   // Formular-Teil von /plan) posten hierher — Redirect-Ziel bei Fehlern richtet
   // sich nach dem Referer, damit beide Formulare ihre eigene Fehleranzeige behalten.
   const referer = String(formData.get('_referer') ?? '/plan')
+
+  let startDate: string | null
+  let endDate: string | null
+  try {
+    startDate = readDateGroupFromFormData(formData, 'start_date', 'Startdatum')
+    endDate = readDateGroupFromFormData(formData, 'end_date', 'Enddatum')
+  } catch (e) {
+    redirect(`${referer}?error=${encodeURIComponent(e instanceof Error ? e.message : 'Ungültiges Datum')}`)
+  }
 
   if (title.length < 2)
     redirect(`${referer}?error=${encodeURIComponent('Reisenname: mindestens 2 Zeichen erforderlich')}`)
@@ -97,8 +105,6 @@ export async function updateTrip(formData: FormData) {
   const tripId    = String(formData.get('trip_id') ?? '')
   const title     = String(formData.get('title') ?? '').trim()
   const subtitle  = String(formData.get('subtitle') ?? '').trim()
-  const startDate = String(formData.get('start_date') ?? '').trim()
-  const endDate   = String(formData.get('end_date') ?? '').trim()
   const status    = String(formData.get('status') ?? '').trim()
   const memberIds = formData.getAll('members').map(String)
 
@@ -111,6 +117,15 @@ export async function updateTrip(formData: FormData) {
     redirect(`/trips?error=${encodeURIComponent('Reise nicht gefunden')}`)
 
   const editPath = `/trips/${trip.slug}/edit`
+
+  let startDate: string | null
+  let endDate: string | null
+  try {
+    startDate = readDateGroupFromFormData(formData, 'start_date', 'Startdatum')
+    endDate = readDateGroupFromFormData(formData, 'end_date', 'Enddatum')
+  } catch (e) {
+    redirect(`${editPath}?error=${encodeURIComponent(e instanceof Error ? e.message : 'Ungültiges Datum')}`)
+  }
 
   if (title.length < 2)
     redirect(`${editPath}?error=${encodeURIComponent('Reisenname: mindestens 2 Zeichen erforderlich')}`)

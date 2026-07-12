@@ -2,15 +2,10 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { ALLOWED_DOCUMENT_MIME_TYPES, MAX_DOCUMENT_FILE_SIZE, buildStoragePath, buildBookingStoragePath, combineIsoDate } from '@/lib/documents'
+import { ALLOWED_DOCUMENT_MIME_TYPES, MAX_DOCUMENT_FILE_SIZE, buildStoragePath, buildBookingStoragePath, readDateGroupFromFormData } from '@/lib/documents'
 import type { DocumentType, DocumentDetails } from '@/lib/documents'
 
-function readDateGroup(formData: FormData, prefix: string, fieldLabel: string): string | null {
-  const day   = String(formData.get(`${prefix}_day`) ?? '').trim()
-  const month = String(formData.get(`${prefix}_month`) ?? '').trim()
-  const year  = String(formData.get(`${prefix}_year`) ?? '').trim()
-  return combineIsoDate(day, month, year, fieldLabel)
-}
+const readDateGroup = readDateGroupFromFormData
 
 function readCommonFields(formData: FormData) {
   const personId    = String(formData.get('person_id') ?? '')

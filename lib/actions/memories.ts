@@ -10,6 +10,7 @@ import { assessPhotoBatch, MAX_PHOTOS_ANALYZED_PER_CALL } from '@/lib/photo-qual
 import { createUploadSlots, downloadAndClearStagedUpload, type UploadSlot } from '@/lib/actions/photo-staging'
 import { parseStagedPaths } from '@/lib/staged-paths'
 import { getFamily } from '@/lib/family'
+import { readDateGroupFromFormData } from '@/lib/documents'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 /**
@@ -93,12 +94,18 @@ async function suggestTripId(supabase: SupabaseClient, familyId: string, takenAt
 export async function uploadMemoryPhotos(formData: FormData) {
   const familyId = String(formData.get('family_id') ?? '')
   const uploadedByPersonId = String(formData.get('uploaded_by_person_id') ?? '').trim() || null
-  const takenAt = String(formData.get('taken_at') ?? '').trim() || null
   const caption = String(formData.get('caption') ?? '').trim() || null
 
   const backPath = '/memories'
 
   if (!familyId) redirect(`${backPath}?error=${encodeURIComponent('Familie nicht gefunden')}`)
+
+  let takenAt: string | null
+  try {
+    takenAt = readDateGroupFromFormData(formData, 'taken_at', 'Aufnahmedatum')
+  } catch (e) {
+    redirect(`${backPath}?error=${encodeURIComponent(e instanceof Error ? e.message : 'Ungültiges Datum')}`)
+  }
 
   const stagedPaths = parseStagedPaths(formData.get('uploaded_paths'))
   if (stagedPaths.length === 0)

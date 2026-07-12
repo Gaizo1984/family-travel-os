@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { BOOKING_TYPE_CONFIG, combineDateTime } from '@/lib/bookings'
 import { suggestCountryCode } from '@/lib/geo-suggestions'
+import { readDateGroupFromFormData } from '@/lib/documents'
 import type { BookingType, BookingStatus, PaymentStatus } from '@/lib/supabase/types'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
@@ -148,9 +149,9 @@ function readCommonFields(formData: FormData) {
   const currency          = String(formData.get('currency') ?? '').trim() || 'EUR'
   const notes             = String(formData.get('notes') ?? '').trim()
 
-  const startDate = String(formData.get('start_date') ?? '').trim()
+  const startDate = readDateGroupFromFormData(formData, 'start_date', 'Startdatum') ?? ''
   const startTime = String(formData.get('start_time') ?? '').trim()
-  const endDate   = String(formData.get('end_date') ?? '').trim()
+  const endDate   = readDateGroupFromFormData(formData, 'end_date', 'Enddatum') ?? ''
   const endTime   = String(formData.get('end_time') ?? '').trim()
 
   const details: Record<string, string> = {}
@@ -169,7 +170,15 @@ export async function createBooking(formData: FormData) {
   const tripId   = String(formData.get('trip_id') ?? '')
   const slug     = String(formData.get('slug') ?? '')
   const category = String(formData.get('category') ?? '').trim()
-  const f = readCommonFields(formData)
+  const type     = String(formData.get('type') ?? '')
+  const fallbackPath = `/trips/${slug}/bookings/new?type=${type}${category ? `&category=${category}` : ''}`
+
+  let f: ReturnType<typeof readCommonFields>
+  try {
+    f = readCommonFields(formData)
+  } catch (e) {
+    redirect(`${fallbackPath}&error=${encodeURIComponent(e instanceof Error ? e.message : 'Ungültiges Datum')}`)
+  }
 
   const newPath = `/trips/${slug}/bookings/new?type=${f.type}${category ? `&category=${category}` : ''}`
 
@@ -225,9 +234,14 @@ export async function createBooking(formData: FormData) {
 export async function updateBooking(formData: FormData) {
   const bookingId = String(formData.get('booking_id') ?? '')
   const slug       = String(formData.get('slug') ?? '')
-  const f = readCommonFields(formData)
-
   const editPath = `/trips/${slug}/bookings/${bookingId}/edit`
+
+  let f: ReturnType<typeof readCommonFields>
+  try {
+    f = readCommonFields(formData)
+  } catch (e) {
+    redirect(`${editPath}?error=${encodeURIComponent(e instanceof Error ? e.message : 'Ungültiges Datum')}`)
+  }
 
   if (!f.config)
     redirect(`/trips/${slug}?error=${encodeURIComponent('Ungültiger Buchungstyp')}`)

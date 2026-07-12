@@ -1,23 +1,26 @@
 'use client'
 
 import { useState } from 'react'
-
-const FIELD_STYLE: React.CSSProperties = {
-  width: '100%', padding: '12px 16px', background: 'var(--background)',
-  border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--foreground)',
-  fontSize: '0.85rem', outline: 'none',
-}
+import { DateSelectFields } from '@/components/DateSelectFields'
+import { getDateFieldRange } from '@/lib/documents'
 
 const LABEL_STYLE: React.CSSProperties = {
   display: 'block', color: 'var(--muted)', fontSize: '0.55rem',
   letterSpacing: '0.18em', textTransform: 'uppercase', marginBottom: '8px',
 }
+const FIELD_STYLE: React.CSSProperties = {
+  width: '100%', padding: '14px 16px', background: 'var(--background)',
+  border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--foreground)',
+  fontSize: '0.85rem', outline: 'none',
+}
 
-function computeNights(start: string, end: string): number | null {
+function computeNights(start: string | null, end: string | null): number | null {
   if (!start || !end) return null
   const diff = Math.round((new Date(end).getTime() - new Date(start).getTime()) / 86400000)
   return diff >= 0 ? diff : null
 }
+
+const RANGE = getDateFieldRange('travel')
 
 export function StageDateFields({
   defaultStartDate = '',
@@ -26,35 +29,20 @@ export function StageDateFields({
   defaultStartDate?: string
   defaultEndDate?: string
 }) {
-  const [startDate, setStartDate] = useState(defaultStartDate)
-  const [endDate, setEndDate] = useState(defaultEndDate)
-  const nights = computeNights(startDate, endDate)
+  const [startIso, setStartIso] = useState<string | null>(defaultStartDate || null)
+  const [endIso, setEndIso] = useState<string | null>(defaultEndDate || null)
+  const nights = computeNights(startIso, endIso)
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
-      <div>
-        <label htmlFor="stage-start" style={LABEL_STYLE}>Von</label>
-        <input
-          id="stage-start"
-          name="start_date"
-          type="date"
-          value={startDate}
-          onChange={(e) => setStartDate(e.target.value)}
-          style={FIELD_STYLE}
-        />
-      </div>
-      <div>
-        <label htmlFor="stage-end" style={LABEL_STYLE}>Bis</label>
-        <input
-          id="stage-end"
-          name="end_date"
-          type="date"
-          value={endDate}
-          min={startDate || undefined}
-          onChange={(e) => setEndDate(e.target.value)}
-          style={FIELD_STYLE}
-        />
-      </div>
+      <DateSelectFields
+        label="Von" namePrefix="start_date" defaultIso={defaultStartDate || null}
+        range={RANGE} quickActions onChange={(iso) => setStartIso(iso)}
+      />
+      <DateSelectFields
+        label="Bis" namePrefix="end_date" defaultIso={defaultEndDate || null}
+        range={RANGE} quickActions onChange={(iso) => setEndIso(iso)}
+      />
       <div>
         <span style={LABEL_STYLE}>Nächte</span>
         <div style={{ ...FIELD_STYLE, color: 'var(--muted)' }}>

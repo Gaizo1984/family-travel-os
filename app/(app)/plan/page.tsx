@@ -6,6 +6,8 @@ import { createTrip } from "@/lib/actions/trips";
 import { generateTripIdeas } from "@/lib/actions/trip-idea-generation";
 import { COMPASS_CATEGORY_LABELS } from "@/lib/family-dna";
 import { Banner } from "@/components/Banner";
+import { DateSelectFields } from "@/components/DateSelectFields";
+import { getDateFieldRange } from "@/lib/documents";
 
 // ── Verified Unsplash photos ──────────────────────────────────────────────────
 
@@ -458,55 +460,9 @@ export default async function PlanPage({
               </div>
 
               {/* Daten */}
-              <div className="grid grid-cols-2 gap-4 mb-5">
-                <div>
-                  <label
-                    htmlFor="trip-start"
-                    style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px" }}
-                  >
-                    Von *
-                  </label>
-                  <input
-                    id="trip-start"
-                    name="start_date"
-                    type="date"
-                    required
-                    style={{
-                      width: "100%",
-                      padding: "12px 16px",
-                      background: "var(--background)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "8px",
-                      color: "var(--foreground)",
-                      fontSize: "0.88rem",
-                      outline: "none",
-                    }}
-                  />
-                </div>
-                <div>
-                  <label
-                    htmlFor="trip-end"
-                    style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px" }}
-                  >
-                    Bis *
-                  </label>
-                  <input
-                    id="trip-end"
-                    name="end_date"
-                    type="date"
-                    required
-                    style={{
-                      width: "100%",
-                      padding: "12px 16px",
-                      background: "var(--background)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "8px",
-                      color: "var(--foreground)",
-                      fontSize: "0.88rem",
-                      outline: "none",
-                    }}
-                  />
-                </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <DateSelectFields label="Von *" namePrefix="start_date" range={getDateFieldRange("travel")} quickActions />
+                <DateSelectFields label="Bis *" namePrefix="end_date" range={getDateFieldRange("travel")} quickActions />
               </div>
 
               {/* Wer reist mit */}

@@ -3,9 +3,10 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { suggestCountryCode } from '@/lib/geo-suggestions'
+import { readDateGroupFromFormData } from '@/lib/documents'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-function computeNights(startDate: string, endDate: string): number | null {
+function computeNights(startDate: string | null, endDate: string | null): number | null {
   if (!startDate || !endDate) return null
   const diff = Math.round((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000)
   return diff >= 0 ? diff : null
@@ -25,8 +26,8 @@ async function ensureAccommodationBooking(
   tripId: string,
   stageId: string,
   accommodation: string,
-  startDate: string,
-  endDate: string,
+  startDate: string | null,
+  endDate: string | null,
 ): Promise<void> {
   if (!accommodation) return
 
@@ -58,12 +59,19 @@ export async function createStage(formData: FormData) {
   const tripId        = String(formData.get('trip_id') ?? '')
   const slug          = String(formData.get('slug') ?? '')
   const title         = String(formData.get('title') ?? '').trim()
-  const startDate     = String(formData.get('start_date') ?? '').trim()
-  const endDate       = String(formData.get('end_date') ?? '').trim()
   const accommodation = String(formData.get('accommodation') ?? '').trim()
   const notes         = String(formData.get('notes') ?? '').trim()
 
   const newPath = `/trips/${slug}/stages/new`
+
+  let startDate: string | null
+  let endDate: string | null
+  try {
+    startDate = readDateGroupFromFormData(formData, 'start_date', 'Startdatum')
+    endDate = readDateGroupFromFormData(formData, 'end_date', 'Enddatum')
+  } catch (e) {
+    redirect(`${newPath}?error=${encodeURIComponent(e instanceof Error ? e.message : 'Ungültiges Datum')}`)
+  }
 
   if (title.length < 2)
     redirect(`${newPath}?error=${encodeURIComponent('Ziel: mindestens 2 Zeichen erforderlich')}`)
@@ -114,12 +122,19 @@ export async function updateStage(formData: FormData) {
   const stageId       = String(formData.get('stage_id') ?? '')
   const slug          = String(formData.get('slug') ?? '')
   const title         = String(formData.get('title') ?? '').trim()
-  const startDate     = String(formData.get('start_date') ?? '').trim()
-  const endDate       = String(formData.get('end_date') ?? '').trim()
   const accommodation = String(formData.get('accommodation') ?? '').trim()
   const notes         = String(formData.get('notes') ?? '').trim()
 
   const editPath = `/trips/${slug}/stages/${stageId}/edit`
+
+  let startDate: string | null
+  let endDate: string | null
+  try {
+    startDate = readDateGroupFromFormData(formData, 'start_date', 'Startdatum')
+    endDate = readDateGroupFromFormData(formData, 'end_date', 'Enddatum')
+  } catch (e) {
+    redirect(`${editPath}?error=${encodeURIComponent(e instanceof Error ? e.message : 'Ungültiges Datum')}`)
+  }
 
   if (title.length < 2)
     redirect(`${editPath}?error=${encodeURIComponent('Ziel: mindestens 2 Zeichen erforderlich')}`)

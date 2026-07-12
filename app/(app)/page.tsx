@@ -205,12 +205,14 @@ export default async function Dashboard() {
   if (!nextTrip) {
     return (
       <div className="flex-1 flex flex-col">
-        <header className="flex items-start justify-between gap-4 px-7 md:px-10 pt-9 pb-7">
+        <header className="px-7 md:px-10 pt-9 pb-7">
           <div>
             <h1 className="text-lg font-light mb-1" style={{ color: "var(--foreground)", letterSpacing: "0.01em" }}>Hallo!</h1>
             <p className="text-xs" style={{ color: "var(--muted)", fontSize: "0.7rem" }}>Noch keine Reisen angelegt.</p>
           </div>
-          <Link href="/trips/new" className="btn-neue-reise" style={{ flexShrink: 0 }}>+ Neue Reise</Link>
+          <div className="flex justify-end mt-4">
+            <Link href="/trips/new" className="btn-neue-reise">+ Neue Reise</Link>
+          </div>
         </header>
       </div>
     );
@@ -218,7 +220,7 @@ export default async function Dashboard() {
 
   return (
     <div className="flex-1 flex flex-col">
-      <header className="flex items-start justify-between gap-4 px-7 md:px-10 pt-9 pb-7">
+      <header className="px-7 md:px-10 pt-9 pb-7">
         <div style={{ minWidth: 0 }}>
           <h1 className="text-lg font-light mb-1" style={{ color: "var(--foreground)", letterSpacing: "0.01em" }}>
             Hallo Sarah & Marcel
@@ -227,7 +229,9 @@ export default async function Dashboard() {
             Eure Reisen. Eure Erinnerungen.
           </p>
         </div>
-        <Link href="/trips/new" className="btn-neue-reise" style={{ flexShrink: 0 }}>+ Neue Reise</Link>
+        <div className="flex justify-end mt-4">
+          <Link href="/trips/new" className="btn-neue-reise">+ Neue Reise</Link>
+        </div>
       </header>
 
       <div className="flex-1 px-5 md:px-8 pb-10 space-y-7">

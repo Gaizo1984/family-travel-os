@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { DOCUMENT_TYPE_CONFIG } from "@/lib/documents";
 import type { DocumentType } from "@/lib/documents";
 import { unassignPolicyFromTrip } from "@/lib/actions/insurance";
+import { ensureTripDocumentRequirements } from "@/lib/travel-requirements";
 import { BOOKING_TYPE_CONFIG } from "@/lib/bookings";
 import type { BookingType } from "@/lib/supabase/types";
 
@@ -51,6 +52,13 @@ export default async function TripDocumentsPage({
   for (const p of passports ?? []) {
     if (p.person_id && !passportByPerson.has(p.person_id)) passportByPerson.set(p.person_id, p.id);
   }
+
+  // §Zentraler Travel-Requirement-Service (lib/travel-requirements.ts):
+  // verknüpft automatisch bereits vorhandene, gültige ESTA/eTA-Dokumente mit
+  // dieser Reise (idempotent), bevor unten die zugeordneten Dokumente
+  // geladen werden — dieselbe Logik wie in lib/readiness.ts, kein zweiter
+  // Code-Pfad für "was ist zugeordnet/gültig".
+  await ensureTripDocumentRequirements(trip.id);
 
   // Visa/ESTA/eTA, die dieser Reise über document_trips zugeordnet sind.
   const { data: entryDocRows } = await supabase
