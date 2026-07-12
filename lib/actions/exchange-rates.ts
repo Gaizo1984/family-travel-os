@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { resolveQuickCurrency } from '@/app/trips/[id]/CurrencyQuickSelect'
+import { resolveQuickCurrency } from '@/components/CurrencyQuickSelect'
 
 /**
  * Holt einen aktuellen Wechselkurs von EODHD (Forex-Endpoint, bereits vorhandener,

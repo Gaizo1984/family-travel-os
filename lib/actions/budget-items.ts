@@ -3,7 +3,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { BUDGET_CATEGORY_ORDER } from '@/lib/budget'
-import { resolveQuickCurrency } from '@/app/trips/[id]/CurrencyQuickSelect'
+import { resolveQuickCurrency } from '@/components/CurrencyQuickSelect'
 
 function readCommonFields(formData: FormData) {
   const tripId              = String(formData.get('trip_id') ?? '')

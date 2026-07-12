@@ -3,7 +3,7 @@
 import { useEffect } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 
-/** Bottom-Nav-Routen (app/layout.tsx MOBILE_NAV) — beim App-Start werden die
+/** Bottom-Nav-Routen (app/(app)/layout.tsx MOBILE_NAV) — beim App-Start werden die
  *  jeweils anderen im Hintergrund vorab geladen, damit der erste Wechsel
  *  zwischen den Haupt-Tabs sofort reagiert. */
 const MAIN_NAV_ROUTES = ['/', '/trips', '/today', '/content-studio', '/mehr']
