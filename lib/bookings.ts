@@ -7,9 +7,31 @@ export type DetailField = {
   key: string
   label: string
   placeholder?: string
-  /** 'select' rendert ein Dropdown statt eines Text-Inputs (z. B. Zwischenstopp-Übernachtung ja/nein). */
-  type?: 'text' | 'select'
+  /** 'select' rendert ein Dropdown, 'date' ein einzelnes Datumsfeld (DateSelectFields, ohne Uhrzeit). */
+  type?: 'text' | 'select' | 'date'
   options?: { value: string; label: string }[]
+  /**
+   * §Vereinfachte Masken (Flug/Hotel/Mietwagen): Felder, die nicht mehr in der
+   * sichtbaren Maske stehen, aber aus bereits gespeicherten Buchungen nicht
+   * stillschweigend verloren gehen dürfen, werden als verstecktes Feld statt
+   * gar nicht gerendert (siehe BookingForm.tsx) -- `visible: false` markiert
+   * genau diesen Fall.
+   */
+  visible?: boolean
+  /** Gruppiert Felder für einen gemeinsamen Einklapp-Abschnitt, siehe `collapsibleGroups`. */
+  group?: string
+}
+
+/** Steuert, ob die generischen Standardfelder (jenseits von Titel/Preis/Datum) sichtbar sind. */
+export type BookingVisibleFields = {
+  bookingReference: boolean
+  status: boolean
+  paymentStatus: boolean
+  notes: boolean
+}
+
+const DEFAULT_VISIBLE_FIELDS: BookingVisibleFields = {
+  bookingReference: true, status: true, paymentStatus: true, notes: true,
 }
 
 export type BookingTypeConfig = {
@@ -19,10 +41,17 @@ export type BookingTypeConfig = {
   providerLabel: string | null
   titleLabel: string
   titlePlaceholder: string
+  /** false = kein Titel-Eingabefeld (Titel wird serverseitig abgeleitet, siehe lib/actions/bookings.ts). */
+  showTitleField: boolean
   showEnd: boolean
   startLabel: string
   endLabel: string
   detailFields: DetailField[]
+  visibleFields: BookingVisibleFields
+  /** Bietet diese Maske den "Daten automatisch auslesen"-Button (OCR über booking-extraction.ts)? */
+  supportsExtraction: boolean
+  /** Gruppen-Schlüssel (siehe DetailField.group) -> Label des Einklapp-Buttons, z. B. { layover: '+ Zwischenstopp hinzufügen' }. */
+  collapsibleGroups?: Record<string, string>
 }
 
 export const BOOKING_TYPE_ORDER: BookingType[] = [
@@ -73,88 +102,127 @@ export const BOOKING_TYPE_CONFIG: Record<BookingType, BookingTypeConfig> = {
   flight: {
     value: 'flight', label: 'Flug', icon: Plane,
     providerLabel: 'Airline', titleLabel: 'Titel / Bezeichnung', titlePlaceholder: 'z. B. Hinflug Frankfurt – Muscat',
-    showEnd: true, startLabel: 'Abflug', endLabel: 'Ankunft',
+    showTitleField: false,
+    showEnd: true, startLabel: 'Abflug', endLabel: 'Landung',
     detailFields: [
+      {
+        key: 'direction', label: 'Hinflug / Rückflug', type: 'select',
+        options: [{ value: 'outbound', label: 'Hinflug' }, { value: 'return', label: 'Rückflug' }],
+      },
       { key: 'flight_number', label: 'Flugnummer', placeholder: 'z. B. EK052' },
       { key: 'from', label: 'Abflughafen', placeholder: 'z. B. FRA' },
       { key: 'to', label: 'Zielflughafen', placeholder: 'z. B. DXB' },
-      { key: 'layover_airport', label: 'Zwischenstopp-Flughafen (optional)', placeholder: 'z. B. IST' },
+      { key: 'terminal', label: 'Terminal', placeholder: 'optional' },
+      { key: 'gate', label: 'Gate', placeholder: 'optional' },
+      { key: 'layover_airport', label: 'Zwischenstopp-Flughafen', placeholder: 'z. B. IST', group: 'layover' },
       {
-        key: 'layover_overnight', label: 'Übernachtung am Zwischenstopp', type: 'select',
+        key: 'layover_overnight', label: 'Übernachtung am Zwischenstopp', type: 'select', group: 'layover',
         options: [{ value: '', label: 'Nein' }, { value: 'ja', label: 'Ja' }],
       },
-      { key: 'layover_nights', label: 'Nächte am Zwischenstopp', placeholder: 'z. B. 2' },
+      { key: 'layover_nights', label: 'Nächte am Zwischenstopp', placeholder: 'z. B. 2', group: 'layover' },
     ],
+    visibleFields: { bookingReference: false, status: false, paymentStatus: false, notes: false },
+    supportsExtraction: true,
+    collapsibleGroups: { layover: '+ Zwischenstopp hinzufügen' },
   },
   accommodation: {
     value: 'accommodation', label: 'Hotel / Unterkunft', icon: BedDouble,
-    providerLabel: 'Anbieter', titleLabel: 'Unterkunftsname', titlePlaceholder: 'z. B. Atlantis The Palm',
+    providerLabel: null, titleLabel: 'Hotelname', titlePlaceholder: 'z. B. Atlantis The Palm',
+    showTitleField: true,
     showEnd: true, startLabel: 'Check-in', endLabel: 'Check-out',
     detailFields: [
-      { key: 'room_info', label: 'Zimmer / Tarif', placeholder: 'optional' },
+      { key: 'location', label: 'Ort', placeholder: 'z. B. Dubai' },
+      { key: 'booking_date', label: 'Buchungsdatum', type: 'date' },
+      { key: 'room_info', label: 'Zimmer / Tarif', placeholder: 'optional', visible: false },
     ],
+    visibleFields: { bookingReference: true, status: false, paymentStatus: false, notes: false },
+    supportsExtraction: true,
   },
   transfer: {
     value: 'transfer', label: 'Transfer', icon: Car,
     providerLabel: 'Anbieter', titleLabel: 'Titel / Bezeichnung', titlePlaceholder: 'z. B. Flughafentransfer',
+    showTitleField: true,
     showEnd: true, startLabel: 'Abholung', endLabel: 'Ankunft',
     detailFields: [
       { key: 'from', label: 'Abholort', placeholder: 'z. B. Flughafen Dubai' },
       { key: 'to', label: 'Zielort', placeholder: 'z. B. Hotel' },
     ],
+    visibleFields: DEFAULT_VISIBLE_FIELDS,
+    supportsExtraction: false,
   },
   rental_car: {
     value: 'rental_car', label: 'Mietwagen', icon: Car,
-    providerLabel: 'Anbieter', titleLabel: 'Titel / Bezeichnung', titlePlaceholder: 'z. B. Mietwagen SUV',
+    providerLabel: null, titleLabel: 'Titel / Bezeichnung', titlePlaceholder: 'z. B. Mietwagen SUV',
+    showTitleField: true,
     showEnd: true, startLabel: 'Abholung', endLabel: 'Rückgabe',
     detailFields: [
-      { key: 'pickup_location', label: 'Abholort', placeholder: 'z. B. Flughafen Muscat' },
-      { key: 'dropoff_location', label: 'Rückgabeort', placeholder: 'z. B. Flughafen Muscat' },
+      { key: 'pickup_location', label: 'Abholort', placeholder: 'z. B. Flughafen Muscat', visible: false },
+      { key: 'dropoff_location', label: 'Rückgabeort', placeholder: 'z. B. Flughafen Muscat', visible: false },
     ],
+    visibleFields: { bookingReference: false, status: false, paymentStatus: false, notes: false },
+    supportsExtraction: true,
   },
   activity: {
     value: 'activity', label: 'Aktivität / Ausflug', icon: Compass,
     providerLabel: 'Anbieter', titleLabel: 'Aktivität', titlePlaceholder: 'z. B. Wüstensafari',
+    showTitleField: true,
     showEnd: false, startLabel: 'Datum / Uhrzeit', endLabel: '',
     detailFields: [
       { key: 'meeting_point', label: 'Treffpunkt', placeholder: 'optional' },
     ],
+    visibleFields: DEFAULT_VISIBLE_FIELDS,
+    supportsExtraction: false,
   },
   restaurant: {
     value: 'restaurant', label: 'Restaurant', icon: UtensilsCrossed,
     providerLabel: null, titleLabel: 'Restaurantname', titlePlaceholder: 'z. B. Al Mahara',
+    showTitleField: true,
     showEnd: false, startLabel: 'Datum / Uhrzeit', endLabel: '',
     detailFields: [],
+    visibleFields: DEFAULT_VISIBLE_FIELDS,
+    supportsExtraction: false,
   },
   train: {
     value: 'train', label: 'Zug / Bahn', icon: TrainFront,
     providerLabel: 'Betreiber', titleLabel: 'Titel / Bezeichnung', titlePlaceholder: 'z. B. Zug nach Salzburg',
+    showTitleField: true,
     showEnd: true, startLabel: 'Abfahrt', endLabel: 'Ankunft',
     detailFields: [
       { key: 'from', label: 'Start', placeholder: 'z. B. Wien Hbf' },
       { key: 'to', label: 'Ziel', placeholder: 'z. B. Salzburg Hbf' },
     ],
+    visibleFields: DEFAULT_VISIBLE_FIELDS,
+    supportsExtraction: false,
   },
   ferry: {
     value: 'ferry', label: 'Fähre / Schiff', icon: Ship,
     providerLabel: 'Betreiber', titleLabel: 'Titel / Bezeichnung', titlePlaceholder: 'z. B. Fähre nach Sansibar',
+    showTitleField: true,
     showEnd: true, startLabel: 'Abfahrt', endLabel: 'Ankunft',
     detailFields: [
       { key: 'from', label: 'Start', placeholder: 'z. B. Dar es Salaam' },
       { key: 'to', label: 'Ziel', placeholder: 'z. B. Stone Town' },
     ],
+    visibleFields: DEFAULT_VISIBLE_FIELDS,
+    supportsExtraction: false,
   },
   insurance: {
     value: 'insurance', label: 'Versicherung', icon: Shield,
     providerLabel: 'Anbieter', titleLabel: 'Titel / Bezeichnung', titlePlaceholder: 'z. B. Reiseversicherung',
+    showTitleField: true,
     showEnd: true, startLabel: 'Gültig ab', endLabel: 'Gültig bis',
     detailFields: [],
+    visibleFields: DEFAULT_VISIBLE_FIELDS,
+    supportsExtraction: false,
   },
   other: {
     value: 'other', label: 'Sonstiges', icon: FileText,
     providerLabel: 'Anbieter', titleLabel: 'Titel / Bezeichnung', titlePlaceholder: 'z. B. Sonstige Buchung',
+    showTitleField: true,
     showEnd: true, startLabel: 'Von', endLabel: 'Bis',
     detailFields: [],
+    visibleFields: DEFAULT_VISIBLE_FIELDS,
+    supportsExtraction: false,
   },
 }
 

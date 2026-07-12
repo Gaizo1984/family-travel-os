@@ -139,7 +139,7 @@ function readCommonFields(formData: FormData) {
   const type = String(formData.get('type') ?? '') as BookingType
   const config = BOOKING_TYPE_CONFIG[type]
 
-  const title             = String(formData.get('title') ?? '').trim()
+  let title               = String(formData.get('title') ?? '').trim()
   const provider          = String(formData.get('provider') ?? '').trim()
   const stageId            = String(formData.get('stage_id') ?? '').trim()
   const bookingReference  = String(formData.get('booking_reference') ?? '').trim()
@@ -153,23 +153,39 @@ function readCommonFields(formData: FormData) {
   // darf bei einem ungültigen Datum nicht mitten im Einlesen abbrechen, sonst
   // gehen alle bereits gelesenen Felder (Titel, Preis, ...) verloren, bevor
   // sie für die Formular-Wiederherstellung (siehe redirectWithDraft) zur
-  // Verfügung stehen.
+  // Verfügung stehen. Detail-Felder vom Typ 'date' (z. B. Buchungsdatum)
+  // nutzen dieselbe Datumsgruppen-Lesung wie Start-/Enddatum und laufen
+  // deshalb im selben try-Block.
   let startDate = ''
   let endDate = ''
   let dateError: string | null = null
+  const details: Record<string, string> = {}
   try {
     startDate = readDateGroupFromFormData(formData, 'start_date', 'Startdatum') ?? ''
     endDate = readDateGroupFromFormData(formData, 'end_date', 'Enddatum') ?? ''
+    for (const field of config?.detailFields ?? []) {
+      if (field.type === 'date') {
+        const iso = readDateGroupFromFormData(formData, field.key, field.label)
+        if (iso) details[field.key] = iso
+        continue
+      }
+      const value = String(formData.get(field.key) ?? '').trim()
+      if (value) details[field.key] = value
+    }
   } catch (e) {
     dateError = e instanceof Error ? e.message : 'Ungültiges Datum'
   }
   const startTime = String(formData.get('start_time') ?? '').trim()
   const endTime   = String(formData.get('end_time') ?? '').trim()
 
-  const details: Record<string, string> = {}
-  for (const field of config?.detailFields ?? []) {
-    const value = String(formData.get(field.key) ?? '').trim()
-    if (value) details[field.key] = value
+  // §Flugmaske hat kein eigenes Titel-Eingabefeld mehr (config.showTitleField
+  // === false) -- der Titel wird aus der gewählten Richtung und, falls
+  // vorhanden, der Flugroute abgeleitet, damit bestehende Konsumenten von
+  // booking.title (Listen, Buchungsdetail) unverändert funktionieren.
+  if (type === 'flight') {
+    const directionLabel = details.direction === 'return' ? 'Rückflug' : 'Hinflug'
+    const route = details.from && details.to ? ` ${details.from}–${details.to}` : ''
+    title = `${directionLabel}${route}`
   }
 
   return {

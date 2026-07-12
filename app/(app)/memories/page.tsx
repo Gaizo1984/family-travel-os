@@ -33,6 +33,39 @@ type PhotoRow = {
   is_selected: boolean; is_duplicate_of: string | null; quality_score: number | null
 };
 
+type LegacyPastTripPhoto = { id: string; country_or_region: string; places: string | null };
+
+/**
+ * §Punkt 6 "Reisehistorie-Konsistenz": manuell erfasste vergangene Reisen
+ * (past_trips) haben nur ein einzelnes Foto und kein Highlight-/Titelbild-/
+ * Lösch-Konzept (im Gegensatz zu memory_photos) — echte Verschmelzung der
+ * Fotomodelle wäre eine Schema-Änderung über diesen Sprint hinaus. Deshalb
+ * hier bewusst eine schlanke, nicht-interaktive Kachel statt PhotoCard,
+ * damit vergangene Reisen in der Galerie sichtbar sind, ohne Funktionen
+ * vorzutäuschen (Highlight/Löschen/Titelbild), die es für sie nicht gibt.
+ */
+function LegacyPastTripTile({ entry, url }: { entry: LegacyPastTripPhoto; url: string | null }) {
+  if (!url) return null;
+  return (
+    <Link
+      href={`/family/history/${entry.id}/edit`}
+      className="relative block rounded-lg overflow-hidden"
+      style={{ aspectRatio: "1/1" }}
+    >
+      <SignedPhoto storagePath={null} initialUrl={url} alt={entry.country_or_region} loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
+      <div
+        className="absolute inset-0 flex flex-col justify-end p-2"
+        style={{ background: "linear-gradient(to bottom, transparent 50%, rgba(10,9,7,0.75) 100%)" }}
+      >
+        <div style={{ color: "#F0EBE3", fontSize: "0.62rem", lineHeight: 1.3 }}>
+          {entry.country_or_region}
+          {entry.places && <div style={{ color: "#C9A96E", fontSize: "0.58rem" }}>{entry.places}</div>}
+        </div>
+      </div>
+    </Link>
+  );
+}
+
 function PhotoCard({ photo, url, personName, returnTo, isCover }: { photo: PhotoRow; url: string | null; personName: string | null; returnTo: string; isCover: boolean }) {
   if (!url) return null;
   return (
@@ -97,7 +130,7 @@ export default async function MemoriesPage({
   const { id: familyId } = await getFamily();
   const returnTo = tripFilter ? `/memories?trip=${tripFilter}` : "/memories";
 
-  const [{ data: photosRaw }, { data: personsRaw }, { data: tripsRaw }] = await Promise.all([
+  const [{ data: photosRaw }, { data: personsRaw }, { data: tripsRaw }, { data: pastTripsRaw }] = await Promise.all([
     (() => {
       let query = supabase
         .from("memory_photos")
@@ -109,6 +142,7 @@ export default async function MemoriesPage({
     })(),
     supabase.from("persons").select("id, name").eq("family_id", familyId),
     supabase.from("trips").select("id, title, cover_photo_id").eq("family_id", familyId).order("start_date", { ascending: false }),
+    supabase.from("past_trips").select("id, country_or_region, year, places, photo_storage_path").eq("family_id", familyId).not("photo_storage_path", "is", null),
   ]);
 
   const coverPhotoIds = new Set((tripsRaw ?? []).flatMap((t) => (t.cover_photo_id ? [t.cover_photo_id] : [])));
@@ -154,7 +188,27 @@ export default async function MemoriesPage({
     if (!byYear.has(year)) byYear.set(year, []);
     byYear.get(year)!.push(entry);
   }
-  const years = [...byYear.keys()].sort((a, b) => b - a);
+
+  // §Punkt 6: past_trips gehören zu keiner Reise (kein trip_id) -- bei aktivem
+  // Reise-Filter deshalb nicht mit einmischen, sonst würden sie fälschlich in
+  // jeder gefilterten Ansicht erscheinen.
+  const legacyByYear = new Map<number, { entry: LegacyPastTripPhoto; url: string | null }[]>();
+  if (!tripFilter) {
+    const legacyWithUrls = await Promise.all(
+      (pastTripsRaw ?? [])
+        .filter((p): p is typeof p & { photo_storage_path: string } => Boolean(p.photo_storage_path))
+        .map(async (p) => {
+          const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.photo_storage_path, 3600);
+          return { year: p.year, entry: { id: p.id, country_or_region: p.country_or_region, places: p.places }, url: signed?.signedUrl ?? null };
+        }),
+    );
+    for (const { year, entry, url } of legacyWithUrls) {
+      if (!legacyByYear.has(year)) legacyByYear.set(year, []);
+      legacyByYear.get(year)!.push({ entry, url });
+    }
+  }
+
+  const years = [...new Set([...byYear.keys(), ...legacyByYear.keys()])].sort((a, b) => b - a);
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -228,21 +282,28 @@ export default async function MemoriesPage({
 
         {/* ── Timeline nach Jahr ── */}
         {years.length > 0 ? (
-          years.map((year) => (
-            <section key={year} className="mb-12">
-              <div className="flex items-center justify-between mb-4">
-                <Link href={`/memories/yearbook/${year}`} className="text-lg font-light" style={{ color: "var(--foreground)", textDecoration: "none" }}>
-                  {year}
-                </Link>
-                <span style={{ color: "var(--muted)", fontSize: "0.68rem" }}>{byYear.get(year)!.length} Fotos</span>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                {byYear.get(year)!.map(({ photo, url }) => (
-                  <PhotoCard key={photo.id} photo={photo} url={url} personName={photo.uploaded_by_person_id ? personNameById.get(photo.uploaded_by_person_id) ?? null : null} returnTo={returnTo} isCover={coverPhotoIds.has(photo.id)} />
-                ))}
-              </div>
-            </section>
-          ))
+          years.map((year) => {
+            const yearPhotos = byYear.get(year) ?? [];
+            const yearLegacy = legacyByYear.get(year) ?? [];
+            return (
+              <section key={year} className="mb-12">
+                <div className="flex items-center justify-between mb-4">
+                  <Link href={`/memories/yearbook/${year}`} className="text-lg font-light" style={{ color: "var(--foreground)", textDecoration: "none" }}>
+                    {year}
+                  </Link>
+                  <span style={{ color: "var(--muted)", fontSize: "0.68rem" }}>{yearPhotos.length} Fotos</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  {yearPhotos.map(({ photo, url }) => (
+                    <PhotoCard key={photo.id} photo={photo} url={url} personName={photo.uploaded_by_person_id ? personNameById.get(photo.uploaded_by_person_id) ?? null : null} returnTo={returnTo} isCover={coverPhotoIds.has(photo.id)} />
+                  ))}
+                  {yearLegacy.map(({ entry, url }) => (
+                    <LegacyPastTripTile key={entry.id} entry={entry} url={url} />
+                  ))}
+                </div>
+              </section>
+            );
+          })
         ) : (
           <p style={{ color: "var(--muted)", fontSize: "0.82rem" }}>
             Noch keine Erinnerungsfotos hochgeladen — legt oben eure ersten Fotos an.

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { updateBooking } from "@/lib/actions/bookings";
+import { extractBookingData } from "@/lib/actions/booking-extraction";
 import { BOOKING_TYPE_CONFIG } from "@/lib/bookings";
 import type { BookingType } from "@/lib/supabase/types";
 import { BookingForm } from "../../BookingForm";
@@ -19,10 +20,10 @@ export default async function EditBookingPage({
   searchParams,
 }: {
   params: Promise<{ id: string; bookingId: string }>;
-  searchParams: Promise<{ error?: string; draft?: string }>;
+  searchParams: Promise<{ error?: string; draft?: string; storage_path?: string }>;
 }) {
   const { id, bookingId } = await params;
-  const { error, draft: draftRaw } = await searchParams;
+  const { error, draft: draftRaw, storage_path } = await searchParams;
 
   // §Formular-Daten nach einem Validierungsfehler wiederherstellen (siehe
   // lib/actions/bookings.ts::redirectWithDraft) -- sonst würde hier nach
@@ -75,10 +76,13 @@ export default async function EditBookingPage({
         <BookingForm
           config={config}
           action={updateBooking}
-          hiddenFields={{ booking_id: booking.id, slug: trip.slug, type: booking.type }}
+          extractAction={extractBookingData}
+          hiddenFields={{ booking_id: booking.id, slug: trip.slug, type: booking.type, mode: "edit" }}
           submitLabel="Änderungen speichern"
           cancelHref={`/trips/${trip.slug}/bookings/${booking.id}`}
           errorMessage={error}
+          infoMessage={draft ? "Automatisch ausgelesen — bitte prüfen und bei Bedarf korrigieren." : undefined}
+          existingStoragePath={storage_path}
           values={draft ?? {
             stage_id: booking.stage_id,
             title: booking.title,

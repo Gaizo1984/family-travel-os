@@ -6,6 +6,7 @@ import { getFamily } from "@/lib/family";
 import { restoreTrip } from "@/lib/actions/trips";
 import { tripCountdownDisplay } from "@/lib/trip-status";
 import { resolveTripImage, getHighlightPhotoByTripId, type ResolvedTripImage } from "@/lib/trip-images";
+import { buildWorldStats } from "@/lib/world-stats";
 import { SignedPhoto } from "@/components/SignedPhoto";
 
 const H_FG    = "#F0EBE3";
@@ -247,6 +248,88 @@ function PastCard({ trip, img }: { trip: TripRow; img: ResolvedTripImage | null 
   );
 }
 
+type LegacyPastTripRow = {
+  id: string
+  country_or_region: string
+  year: number
+  places: string | null
+  duration_days: number | null
+  photo_storage_path: string | null
+}
+
+/**
+ * §Punkt 6 "Reisehistorie-Konsistenz": manuell erfasste vergangene Reisen
+ * (past_trips) müssen hier genauso auftauchen wie in Unsere Welt/Timeline
+ * (lib/world-stats.ts, family/history/page.tsx) -- gleiche Kartenoptik wie
+ * PastCard, aber auf die schlankere past_trips-Datenform zugeschnitten
+ * (kein Slug/keine Etappen, Link führt auf die Bearbeiten-Seite statt auf
+ * eine Reisedetailseite, die für diese Einträge nicht existiert).
+ */
+function LegacyPastCard({ entry, url, members }: { entry: LegacyPastTripRow; url: string | null; members: PersonRow[] }) {
+  const subtitle = [entry.places, entry.duration_days ? `${entry.duration_days} Tage` : null].filter(Boolean).join(" · ") || `${entry.year}`;
+
+  return (
+    <Link
+      href={`/family/history/${entry.id}/edit`}
+      className="group relative block overflow-hidden rounded-xl"
+      style={{ height: "320px" }}
+    >
+      {url ? (
+        <SignedPhoto
+          storagePath={entry.photo_storage_path}
+          initialUrl={url}
+          alt={entry.country_or_region}
+          className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+          style={{ transformOrigin: "center" }}
+        />
+      ) : (
+        <div className="absolute inset-0" style={{ background: "linear-gradient(135deg, #1a1a1a, #333)" }} />
+      )}
+      <div
+        className="absolute inset-0"
+        style={{ background: "linear-gradient(to top, rgba(10,9,7,0.96) 0%, rgba(10,9,7,0.48) 55%, rgba(10,9,7,0.06) 100%)" }}
+      />
+
+      <div className="absolute top-5 left-6">
+        <span style={{ color: H_MUTED, fontSize: "0.58rem", letterSpacing: "0.2em", textTransform: "uppercase" }}>
+          Erlebt · {entry.year}
+        </span>
+      </div>
+
+      <div className="absolute inset-x-0 bottom-0 p-6">
+        <h3 className="text-2xl font-light mb-1" style={{ color: H_FG, letterSpacing: "0.01em" }}>
+          {entry.country_or_region}
+        </h3>
+        <p className="text-xs mb-5" style={{ color: H_MUTED, letterSpacing: "0.14em", textTransform: "uppercase", fontSize: "0.62rem" }}>
+          {subtitle}
+        </p>
+
+        <div style={{ height: "1px", background: H_BORDER, marginBottom: "14px" }} />
+
+        <div className="flex items-end justify-between">
+          <div style={{ color: H_MUTED, fontSize: "0.58rem", letterSpacing: "0.12em", textTransform: "uppercase" }}>
+            Manuell erfasst
+          </div>
+          <div className="flex -space-x-1.5">
+            {members.map((m) => (
+              <div
+                key={m.id}
+                className="w-7 h-7 rounded-full flex items-center justify-center"
+                style={{
+                  background: "rgba(240,235,227,0.09)", color: H_FG,
+                  border: "1px solid rgba(240,235,227,0.18)", backdropFilter: "blur(4px)", fontSize: "0.55rem",
+                }}
+              >
+                {m.initials}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </Link>
+  );
+}
+
 export default async function TripsPage({
   searchParams,
 }: {
@@ -257,7 +340,7 @@ export default async function TripsPage({
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
 
-  const [{ data }, highlightPhotoByTripId] = await Promise.all([
+  const [{ data }, highlightPhotoByTripId, worldStats, { data: pastTripsRaw }, { data: pastTravelersRaw }] = await Promise.all([
     supabase
       .from("trips")
       .select(`
@@ -269,22 +352,41 @@ export default async function TripsPage({
       `)
       .order("start_date", { ascending: true, nullsFirst: false }),
     getHighlightPhotoByTripId(supabase, familyId),
+    // §Punkt 6: dieselbe Reisebilanz-Quelle wie die Familienseite ("Unsere
+    // Welt") statt einer eigenen, hier abweichenden Berechnung.
+    buildWorldStats(familyId),
+    supabase
+      .from("past_trips")
+      .select("id, country_or_region, year, places, duration_days, photo_storage_path")
+      .eq("family_id", familyId)
+      .order("year", { ascending: false }),
+    supabase.from("past_trip_travelers").select("past_trip_id, persons ( id, name, initials, color )"),
   ]);
 
   const trips = (data ?? []) as unknown as TripRow[];
   const tripImageById = new Map(trips.map((t) => [t.id, resolveTripImage(t, highlightPhotoByTripId.get(t.id) ?? null)]));
   const { planned, past } = applyFilter(trips, f);
 
-  const visibleTrips  = trips.filter((t) => t.status !== "archived");
   const archivedTrips = trips.filter((t) => t.status === "archived");
 
-  const completedTrips = trips.filter((t) => t.status === "completed");
-  const totalDays = completedTrips.reduce((acc, t) =>
-    t.start_date && t.end_date
-      ? acc + getTripDuration(t.start_date, t.end_date)
-      : acc,
-    0
-  );
+  // §Punkt 6 "Reisehistorie-Konsistenz": manuell erfasste vergangene Reisen
+  // (past_trips) erscheinen hier wie überall sonst (Timeline, Unsere Welt),
+  // statt nur in trips zu suchen.
+  const pastTrips = (pastTripsRaw ?? []) as LegacyPastTripRow[];
+  const travelersByPastTrip = new Map<string, PersonRow[]>();
+  (pastTravelersRaw ?? []).forEach((row) => {
+    const person = row.persons as unknown as PersonRow | null;
+    if (!person) return;
+    const list = travelersByPastTrip.get(row.past_trip_id) ?? [];
+    list.push(person);
+    travelersByPastTrip.set(row.past_trip_id, list);
+  });
+  const pastTripPhotoUrlById = new Map<string, string>();
+  await Promise.all(pastTrips.map(async (p) => {
+    if (!p.photo_storage_path) return;
+    const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.photo_storage_path, 3600);
+    if (signed?.signedUrl) pastTripPhotoUrlById.set(p.id, signed.signedUrl);
+  }));
 
   return (
     <div className="flex-1 flex flex-col">
@@ -346,7 +448,7 @@ export default async function TripsPage({
           </section>
         )}
 
-        {past.length > 0 && (
+        {(past.length > 0 || (pastTrips.length > 0 && (f === "alle" || f === "vergangen"))) && (
           <section className="mb-14">
             <div className="mb-5" style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.24em", textTransform: "uppercase" }}>
               Erlebt
@@ -354,6 +456,14 @@ export default async function TripsPage({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {past.map((trip) => (
                 <PastCard key={trip.id} trip={trip} img={tripImageById.get(trip.id) ?? null} />
+              ))}
+              {(f === "alle" || f === "vergangen") && pastTrips.map((entry) => (
+                <LegacyPastCard
+                  key={entry.id}
+                  entry={entry}
+                  url={pastTripPhotoUrlById.get(entry.id) ?? null}
+                  members={travelersByPastTrip.get(entry.id) ?? []}
+                />
               ))}
             </div>
           </section>
@@ -414,9 +524,9 @@ export default async function TripsPage({
             </div>
             <div className="flex gap-12 md:gap-20">
               {[
-                { Icon: MapIcon,     value: visibleTrips.length, label: "Reisen" },
-                { Icon: Globe,       value: 6,            label: "Länder" },
-                { Icon: CalendarDays, value: totalDays,   label: "Reisetage" },
+                { Icon: MapIcon,      value: worldStats.tripsCount,          label: "Reisen" },
+                { Icon: Globe,        value: worldStats.countryCodes.size,   label: "Länder" },
+                { Icon: CalendarDays, value: worldStats.travelDays,          label: "Reisetage" },
               ].map(({ Icon, value, label }) => (
                 <div key={label} className="flex items-center gap-4">
                   <Icon size={13} strokeWidth={1.4} style={{ color: "var(--accent)", flexShrink: 0 }} />

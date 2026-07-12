@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { createBooking } from "@/lib/actions/bookings";
+import { extractBookingData } from "@/lib/actions/booking-extraction";
 import { BOOKING_TYPE_ORDER, BOOKING_TYPE_CONFIG, BOOKING_CATEGORIES } from "@/lib/bookings";
 import type { BookingCategory } from "@/lib/bookings";
 import type { BookingType } from "@/lib/supabase/types";
@@ -20,10 +21,10 @@ export default async function NewBookingPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ type?: string; category?: string; error?: string; draft?: string }>;
+  searchParams: Promise<{ type?: string; category?: string; error?: string; draft?: string; storage_path?: string }>;
 }) {
   const { id } = await params;
-  const { type, category, error, draft: draftRaw } = await searchParams;
+  const { type, category, error, draft: draftRaw, storage_path } = await searchParams;
 
   // §Formular-Daten nach einem Validierungsfehler wiederherstellen (siehe
   // lib/actions/bookings.ts::redirectWithDraft) -- statt die Seite leer neu
@@ -122,13 +123,16 @@ export default async function NewBookingPage({
         <BookingForm
           config={config}
           action={createBooking}
+          extractAction={extractBookingData}
           hiddenFields={{
-            trip_id: trip.id, slug: trip.slug, type: config.value,
+            trip_id: trip.id, slug: trip.slug, type: config.value, mode: "create",
             ...(categoryConfig ? { category: categoryConfig.value } : {}),
           }}
           submitLabel="Buchung speichern"
           cancelHref={`/trips/${trip.slug}`}
           errorMessage={error}
+          infoMessage={draft ? "Automatisch ausgelesen — bitte prüfen und bei Bedarf korrigieren." : undefined}
+          existingStoragePath={storage_path}
           values={draft ?? undefined}
         />
       </div>
