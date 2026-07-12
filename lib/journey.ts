@@ -13,6 +13,8 @@ export type StageInput = {
   sort_order: number
   /** Optional, da nicht jede Aufrufstelle die Spalte selektiert (z. B. Etappen-Unterseiten ohne Bildauswahl). */
   country_code?: string | null
+  /** Optional, da nicht jede Aufrufstelle die Spalte selektiert -- siehe lib/stage-images.ts::resolveStageImages. */
+  cover_photo_id?: string | null
 }
 
 /** Gleiche Sortierlogik wie bisher inline auf der Trip-Detailseite — hier zentral, damit Journey und Trip-Seite dieselbe Reihenfolge verwenden. */

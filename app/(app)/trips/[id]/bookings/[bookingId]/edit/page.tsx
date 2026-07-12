@@ -7,15 +7,31 @@ import { BOOKING_TYPE_CONFIG } from "@/lib/bookings";
 import type { BookingType } from "@/lib/supabase/types";
 import { BookingForm } from "../../BookingForm";
 
+type BookingDraft = {
+  stage_id: string | null; title: string; provider: string | null; booking_reference: string | null
+  status: string; payment_status: string; amount: number | null; currency: string
+  start_datetime: string | null; end_datetime: string | null; notes: string | null
+  details: Record<string, string> | null;
+};
+
 export default async function EditBookingPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string; bookingId: string }>;
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; draft?: string }>;
 }) {
   const { id, bookingId } = await params;
-  const { error } = await searchParams;
+  const { error, draft: draftRaw } = await searchParams;
+
+  // §Formular-Daten nach einem Validierungsfehler wiederherstellen (siehe
+  // lib/actions/bookings.ts::redirectWithDraft) -- sonst würde hier nach
+  // einem Fehler wieder der alte DB-Stand statt der gerade eingegebenen
+  // Werte angezeigt.
+  let draft: BookingDraft | null = null;
+  if (draftRaw) {
+    try { draft = JSON.parse(draftRaw) as BookingDraft; } catch { draft = null; }
+  }
 
   const supabase = await createClient();
   const { data: trip } = await supabase
@@ -63,7 +79,7 @@ export default async function EditBookingPage({
           submitLabel="Änderungen speichern"
           cancelHref={`/trips/${trip.slug}/bookings/${booking.id}`}
           errorMessage={error}
-          values={{
+          values={draft ?? {
             stage_id: booking.stage_id,
             title: booking.title,
             provider: booking.provider,

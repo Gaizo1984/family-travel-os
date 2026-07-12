@@ -186,7 +186,7 @@ export function getDateFieldRange(kind: 'birth' | 'issue' | 'expiry' | 'travel')
   const currentYear = new Date().getFullYear()
   if (kind === 'birth') return { minYear: currentYear - 110, maxYear: currentYear }
   if (kind === 'issue') return { minYear: currentYear - 15, maxYear: currentYear }
-  if (kind === 'travel') return { minYear: currentYear - 1, maxYear: currentYear + 5 }
+  if (kind === 'travel') return { minYear: currentYear - 6, maxYear: currentYear + 5 }
   return { minYear: currentYear, maxYear: currentYear + 15 }
 }
 

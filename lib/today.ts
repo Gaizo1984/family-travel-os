@@ -79,6 +79,8 @@ export function detectDayHighlight(items: TodayTimelineItem[]): string | null {
 export type CurrentLocation = {
   label: string
   countryCode: string | null
+  /** Für ein evtl. explizit gewähltes Etappen-Titelbild (lib/stage-images.ts) -- null bei der Reiseziel-Rückfallstufe, da dort keine einzelne Etappe zutrifft. */
+  stageId: string | null
   source: 'stage' | 'accommodation' | 'destination'
 }
 
@@ -105,21 +107,21 @@ export function resolveCurrentLocation(
   )
   if (currentAccommodation) {
     const relatedStage = stages.find((s) => s.id === currentAccommodation.stage_id)
-    return { label: currentAccommodation.title, countryCode: relatedStage?.country_code ?? null, source: 'accommodation' }
+    return { label: currentAccommodation.title, countryCode: relatedStage?.country_code ?? null, stageId: relatedStage?.id ?? null, source: 'accommodation' }
   }
 
   const currentStage = stages.find(
     (s) => s.start_date && s.end_date && s.start_date <= todayIso && todayIso <= s.end_date,
   )
   if (currentStage) {
-    return { label: currentStage.location || currentStage.title, countryCode: currentStage.country_code ?? null, source: 'stage' }
+    return { label: currentStage.location || currentStage.title, countryCode: currentStage.country_code ?? null, stageId: currentStage.id, source: 'stage' }
   }
 
   const countryCode = suggestCountryCode(`${trip.title} ${trip.subtitle ?? ''}`)
     ?? stages.find((s) => s.country_code)?.country_code
     ?? null
   const label = countryCode ? COUNTRY_NAMES[countryCode] ?? trip.title : trip.title
-  return { label, countryCode, source: 'destination' }
+  return { label, countryCode, stageId: null, source: 'destination' }
 }
 
 /**

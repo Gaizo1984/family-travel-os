@@ -15,7 +15,7 @@ import type { JourneyEventCategory, JourneyEventStatus } from "@/lib/journey-eve
 import { computeTripReadiness } from "@/lib/readiness";
 import type { ReadinessFinding, ReadinessSeverity } from "@/lib/readiness";
 import { isTripHistorical, isTripCurrentlyRunning } from "@/lib/trip-status";
-import { COUNTRY_STAGE_IMAGES, FALLBACK_STAGE_IMAGE } from "@/lib/stage-images";
+import { resolveStageImages, FALLBACK_STAGE_IMAGE, type ResolvedStageImage } from "@/lib/stage-images";
 import { resolveTripImage, getHighlightPhotoByTripId } from "@/lib/trip-images";
 import { SignedPhoto } from "@/components/SignedPhoto";
 
@@ -35,6 +35,7 @@ type StageRow = {
   accommodation: string | null
   sort_order: number
   country_code: string | null
+  cover_photo_id: string | null
 }
 
 type BookingRow = {
@@ -90,8 +91,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-function StageCard({ stage, idx, slug }: { stage: StageRow; idx: number; slug: string }) {
-  const imgUrl = (stage.country_code && COUNTRY_STAGE_IMAGES[stage.country_code]) || FALLBACK_STAGE_IMAGE;
+function StageCard({ stage, idx, slug, img }: { stage: StageRow; idx: number; slug: string; img: ResolvedStageImage }) {
   const dateRange = stage.start_date
     ? stage.end_date && stage.end_date !== stage.start_date
       ? `${formatDateDE(stage.start_date)} – ${formatDateDE(stage.end_date)}`
@@ -100,9 +100,14 @@ function StageCard({ stage, idx, slug }: { stage: StageRow; idx: number; slug: s
   return (
     <div className="group relative shrink-0 overflow-hidden rounded-xl" style={{ width: 210, height: 285 }}>
       <Link href={`/trips/${slug}/stages/${stage.id}`} className="absolute inset-0 block">
-        {imgUrl && (
+        {img.storagePath ? (
+          <SignedPhoto
+            storagePath={img.storagePath} initialUrl={img.url} alt={stage.title}
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+        ) : (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={imgUrl} alt={stage.title} className="absolute inset-0 w-full h-full object-cover" />
+          <img src={img.url} alt={stage.title} className="absolute inset-0 w-full h-full object-cover" />
         )}
         <div
           className="absolute inset-0"
@@ -359,7 +364,7 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
       .select(`
         id, slug, title, subtitle, status, start_date, end_date, gradient_from, gradient_to,
         trip_members ( persons ( id, name, initials, color ) ),
-        stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code ),
+        stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code, cover_photo_id ),
         bookings ( id, type, title, provider, status, amount, currency, start_datetime, end_datetime, stage_id, details, created_at ),
         journey_events ( id, stage_id, date, time, category, title, location, status )
       `)
@@ -374,6 +379,7 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
   const stages    = sortStagesChronologically(trip.stages);
   const bookings  = sortBookingsChronologically(trip.bookings);
   const journeyEvents = trip.journey_events ?? [];
+  const stageImages = await resolveStageImages(supabase, stages);
 
   const totalNights = stages.reduce((sum, s) => sum + (s.nights ?? 0), 0);
   const routeChips = buildRouteChips(
@@ -703,7 +709,10 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
               <div className="overflow-x-auto scroll-hide -mx-1 px-1">
                 <div className="flex gap-4 pb-3" style={{ width: "max-content" }}>
                   {stages.map((stage, idx) => (
-                    <StageCard key={stage.id} stage={stage} idx={idx} slug={trip.slug} />
+                    <StageCard
+                      key={stage.id} stage={stage} idx={idx} slug={trip.slug}
+                      img={stageImages.get(stage.id) ?? { url: FALLBACK_STAGE_IMAGE, storagePath: null }}
+                    />
                   ))}
                 </div>
               </div>

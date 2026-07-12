@@ -149,9 +149,21 @@ function readCommonFields(formData: FormData) {
   const currency          = String(formData.get('currency') ?? '').trim() || 'EUR'
   const notes             = String(formData.get('notes') ?? '').trim()
 
-  const startDate = readDateGroupFromFormData(formData, 'start_date', 'Startdatum') ?? ''
+  // §Bewusst nicht werfen wie combineIsoDate es sonst tut: readCommonFields
+  // darf bei einem ungültigen Datum nicht mitten im Einlesen abbrechen, sonst
+  // gehen alle bereits gelesenen Felder (Titel, Preis, ...) verloren, bevor
+  // sie für die Formular-Wiederherstellung (siehe redirectWithDraft) zur
+  // Verfügung stehen.
+  let startDate = ''
+  let endDate = ''
+  let dateError: string | null = null
+  try {
+    startDate = readDateGroupFromFormData(formData, 'start_date', 'Startdatum') ?? ''
+    endDate = readDateGroupFromFormData(formData, 'end_date', 'Enddatum') ?? ''
+  } catch (e) {
+    dateError = e instanceof Error ? e.message : 'Ungültiges Datum'
+  }
   const startTime = String(formData.get('start_time') ?? '').trim()
-  const endDate   = readDateGroupFromFormData(formData, 'end_date', 'Enddatum') ?? ''
   const endTime   = String(formData.get('end_time') ?? '').trim()
 
   const details: Record<string, string> = {}
@@ -162,38 +174,60 @@ function readCommonFields(formData: FormData) {
 
   return {
     type, config, title, provider, stageId, bookingReference, status, paymentStatus,
-    amountRaw, currency, notes, startDate, startTime, endDate, endTime, details,
+    amountRaw, currency, notes, startDate, startTime, endDate, endTime, details, dateError,
   }
+}
+
+/**
+ * §Formular-Daten bei Validierungsfehlern nicht verlieren (Nutzer-Feedback:
+ * "Flug anlegen ist fehlerhaft... alle bis dahin getätigten Angaben werden
+ * direkt gelöscht"): dieselbe draft-Query-Parameter-Technik, die es in
+ * diesem Projekt schon für die KI-Dokumentenauslesung gibt
+ * (app/(app)/family/[personId]/documents/new/page.tsx) -- das Formular wird
+ * beim erneuten Rendern mit den zuletzt eingegebenen Werten statt leer
+ * vorausgefüllt. `pathWithTrailingSeparator` muss bereits auf "?" oder "&"
+ * enden.
+ */
+function redirectWithDraft(pathWithTrailingSeparator: string, error: string, f: ReturnType<typeof readCommonFields>): never {
+  const draft = {
+    stage_id: f.stageId || null,
+    title: f.title,
+    provider: f.provider || null,
+    booking_reference: f.bookingReference || null,
+    status: f.status,
+    payment_status: f.paymentStatus,
+    amount: f.amountRaw ? Number(f.amountRaw) : null,
+    currency: f.currency,
+    start_datetime: combineDateTime(f.startDate, f.startTime),
+    end_datetime: combineDateTime(f.endDate, f.endTime),
+    notes: f.notes || null,
+    details: Object.keys(f.details).length > 0 ? f.details : null,
+  }
+  redirect(`${pathWithTrailingSeparator}error=${encodeURIComponent(error)}&draft=${encodeURIComponent(JSON.stringify(draft))}`)
 }
 
 export async function createBooking(formData: FormData) {
   const tripId   = String(formData.get('trip_id') ?? '')
   const slug     = String(formData.get('slug') ?? '')
   const category = String(formData.get('category') ?? '').trim()
-  const type     = String(formData.get('type') ?? '')
-  const fallbackPath = `/trips/${slug}/bookings/new?type=${type}${category ? `&category=${category}` : ''}`
+  const f = readCommonFields(formData)
 
-  let f: ReturnType<typeof readCommonFields>
-  try {
-    f = readCommonFields(formData)
-  } catch (e) {
-    redirect(`${fallbackPath}&error=${encodeURIComponent(e instanceof Error ? e.message : 'Ungültiges Datum')}`)
-  }
+  const newPath = `/trips/${slug}/bookings/new?type=${f.type}${category ? `&category=${category}` : ''}&`
 
-  const newPath = `/trips/${slug}/bookings/new?type=${f.type}${category ? `&category=${category}` : ''}`
-
+  if (f.dateError)
+    redirectWithDraft(newPath, f.dateError, f)
   if (!f.config)
     redirect(`/trips/${slug}?error=${encodeURIComponent('Ungültiger Buchungstyp')}`)
   if (f.title.length < 2)
-    redirect(`${newPath}&error=${encodeURIComponent(`${f.config.titleLabel}: mindestens 2 Zeichen erforderlich`)}`)
+    redirectWithDraft(newPath, `${f.config.titleLabel}: mindestens 2 Zeichen erforderlich`, f)
   if (!f.startDate)
-    redirect(`${newPath}&error=${encodeURIComponent(`${f.config.startLabel}: Datum ist erforderlich`)}`)
+    redirectWithDraft(newPath, `${f.config.startLabel}: Datum ist erforderlich`, f)
 
   const startDatetime = combineDateTime(f.startDate, f.startTime)
   const endDatetime = f.config.showEnd ? combineDateTime(f.endDate, f.endTime) : null
 
   if (endDatetime && startDatetime && new Date(endDatetime) < new Date(startDatetime))
-    redirect(`${newPath}&error=${encodeURIComponent('Enddatum darf nicht vor dem Startdatum liegen')}`)
+    redirectWithDraft(newPath, 'Enddatum darf nicht vor dem Startdatum liegen', f)
 
   const supabase = await createClient()
   let stageId = f.stageId || await suggestStageId(supabase, tripId, f.startDate)
@@ -216,7 +250,7 @@ export async function createBooking(formData: FormData) {
   }).select('id').single()
 
   if (error)
-    redirect(`${newPath}&error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
+    redirectWithDraft(newPath, 'Speicherfehler: ' + error.message, f)
 
   await maybeCreateLayoverStage(supabase, tripId, f.type, f.details, endDatetime)
 
@@ -234,21 +268,17 @@ export async function createBooking(formData: FormData) {
 export async function updateBooking(formData: FormData) {
   const bookingId = String(formData.get('booking_id') ?? '')
   const slug       = String(formData.get('slug') ?? '')
-  const editPath = `/trips/${slug}/bookings/${bookingId}/edit`
+  const editPath = `/trips/${slug}/bookings/${bookingId}/edit?`
+  const f = readCommonFields(formData)
 
-  let f: ReturnType<typeof readCommonFields>
-  try {
-    f = readCommonFields(formData)
-  } catch (e) {
-    redirect(`${editPath}?error=${encodeURIComponent(e instanceof Error ? e.message : 'Ungültiges Datum')}`)
-  }
-
+  if (f.dateError)
+    redirectWithDraft(editPath, f.dateError, f)
   if (!f.config)
     redirect(`/trips/${slug}?error=${encodeURIComponent('Ungültiger Buchungstyp')}`)
   if (f.title.length < 2)
-    redirect(`${editPath}?error=${encodeURIComponent(`${f.config.titleLabel}: mindestens 2 Zeichen erforderlich`)}`)
+    redirectWithDraft(editPath, `${f.config.titleLabel}: mindestens 2 Zeichen erforderlich`, f)
   if (!f.startDate)
-    redirect(`${editPath}?error=${encodeURIComponent(`${f.config.startLabel}: Datum ist erforderlich`)}`)
+    redirectWithDraft(editPath, `${f.config.startLabel}: Datum ist erforderlich`, f)
 
   const supabase = await createClient()
 
@@ -263,7 +293,7 @@ export async function updateBooking(formData: FormData) {
   const endDatetime = f.config.showEnd ? combineDateTime(f.endDate, f.endTime) : null
 
   if (endDatetime && startDatetime && new Date(endDatetime) < new Date(startDatetime))
-    redirect(`${editPath}?error=${encodeURIComponent('Enddatum darf nicht vor dem Startdatum liegen')}`)
+    redirectWithDraft(editPath, 'Enddatum darf nicht vor dem Startdatum liegen', f)
 
   let stageId = existing?.stage_id ?? null
   if (!stageId && tripId) stageId = await suggestStageId(supabase, tripId, f.startDate)
@@ -291,7 +321,7 @@ export async function updateBooking(formData: FormData) {
     .eq('id', bookingId)
 
   if (error)
-    redirect(`${editPath}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
+    redirectWithDraft(editPath, 'Speicherfehler: ' + error.message, f)
 
   if (tripId) await maybeCreateLayoverStage(supabase, tripId, f.type, f.details, endDatetime)
 

@@ -8,15 +8,30 @@ import type { BookingCategory } from "@/lib/bookings";
 import type { BookingType } from "@/lib/supabase/types";
 import { BookingForm } from "../BookingForm";
 
+type BookingDraft = {
+  stage_id: string | null; title: string; provider: string | null; booking_reference: string | null
+  status: string; payment_status: string; amount: number | null; currency: string
+  start_datetime: string | null; end_datetime: string | null; notes: string | null
+  details: Record<string, string> | null;
+};
+
 export default async function NewBookingPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ type?: string; category?: string; error?: string }>;
+  searchParams: Promise<{ type?: string; category?: string; error?: string; draft?: string }>;
 }) {
   const { id } = await params;
-  const { type, category, error } = await searchParams;
+  const { type, category, error, draft: draftRaw } = await searchParams;
+
+  // §Formular-Daten nach einem Validierungsfehler wiederherstellen (siehe
+  // lib/actions/bookings.ts::redirectWithDraft) -- statt die Seite leer neu
+  // zu rendern.
+  let draft: BookingDraft | null = null;
+  if (draftRaw) {
+    try { draft = JSON.parse(draftRaw) as BookingDraft; } catch { draft = null; }
+  }
 
   const supabase = await createClient();
   const { data: trip } = await supabase
@@ -114,6 +129,7 @@ export default async function NewBookingPage({
           submitLabel="Buchung speichern"
           cancelHref={`/trips/${trip.slug}`}
           errorMessage={error}
+          values={draft ?? undefined}
         />
       </div>
     </div>

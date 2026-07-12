@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, ImageIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { updateStage, deleteStage } from "@/lib/actions/stages";
+import { updateStage, deleteStage, setStageCoverPhoto, clearStageCoverPhoto } from "@/lib/actions/stages";
 import { StageDateFields } from "../../StageDateFields";
 import { Banner } from "@/components/Banner";
+import { SignedPhoto } from "@/components/SignedPhoto";
 
 type StageRow = {
   id: string
@@ -15,6 +16,7 @@ type StageRow = {
   nights: number | null
   accommodation: string | null
   notes: string | null
+  cover_photo_id: string | null
 }
 
 export default async function EditStagePage({
@@ -39,7 +41,7 @@ export default async function EditStagePage({
 
   const { data: stage } = await supabase
     .from("stages")
-    .select("id, title, location, start_date, end_date, nights, accommodation, notes")
+    .select("id, title, location, start_date, end_date, nights, accommodation, notes, cover_photo_id")
     .eq("id", stageId)
     .eq("trip_id", trip.id)
     .maybeSingle();
@@ -47,12 +49,25 @@ export default async function EditStagePage({
   if (!stage) notFound();
   const s = stage as StageRow;
 
-  const { count: stageCount } = await supabase
-    .from("stages")
-    .select("id", { count: "exact", head: true })
-    .eq("trip_id", trip.id);
+  const [{ count: stageCount }, { data: photosRaw }] = await Promise.all([
+    supabase.from("stages").select("id", { count: "exact", head: true }).eq("trip_id", trip.id),
+    supabase
+      .from("memory_photos")
+      .select("id, storage_path, caption")
+      .eq("trip_id", trip.id)
+      .eq("is_selected", true)
+      .order("taken_at", { ascending: false, nullsFirst: false })
+      .limit(30),
+  ]);
 
   const canDelete = (stageCount ?? 0) > 1;
+
+  const galleryPhotos = await Promise.all(
+    (photosRaw ?? []).map(async (p) => {
+      const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.storage_path, 3600);
+      return { id: p.id, storagePath: p.storage_path, caption: p.caption, url: signed?.signedUrl ?? null };
+    }),
+  );
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -161,6 +176,68 @@ export default async function EditStagePage({
             </div>
           </div>
         </form>
+
+        <div
+          className="rounded-xl p-6 mb-6"
+          style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+        >
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+            <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase" }}>
+              Etappenbild
+            </div>
+            {s.cover_photo_id && (
+              <form action={clearStageCoverPhoto}>
+                <input type="hidden" name="stage_id" value={s.id} />
+                <input type="hidden" name="slug" value={trip.slug} />
+                <button
+                  type="submit"
+                  style={{
+                    fontSize: "0.6rem", letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--muted)",
+                    background: "transparent", border: "1px solid var(--border)", padding: "5px 12px",
+                    borderRadius: "20px", cursor: "pointer", whiteSpace: "nowrap",
+                  }}
+                >
+                  Automatisches Bild verwenden
+                </button>
+              </form>
+            )}
+          </div>
+          {galleryPhotos.length > 0 ? (
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+              {galleryPhotos.map((photo) => photo.url && (
+                <div key={photo.id} className="relative rounded-lg overflow-hidden" style={{ aspectRatio: "1/1" }}>
+                  <SignedPhoto
+                    storagePath={photo.storagePath} initialUrl={photo.url} alt={photo.caption ?? ""}
+                    className="absolute inset-0 w-full h-full object-cover"
+                  />
+                  {s.cover_photo_id === photo.id ? (
+                    <span
+                      className="absolute top-1.5 right-1.5 flex items-center justify-center rounded-full"
+                      style={{ width: "26px", height: "26px", background: "rgba(10,9,7,0.6)", backdropFilter: "blur(4px)" }}
+                    >
+                      <ImageIcon size={13} strokeWidth={1.8} fill="#F0EBE3" style={{ color: "#F0EBE3" }} />
+                    </span>
+                  ) : (
+                    <form action={setStageCoverPhoto} className="absolute inset-0">
+                      <input type="hidden" name="stage_id" value={s.id} />
+                      <input type="hidden" name="photo_id" value={photo.id} />
+                      <input type="hidden" name="slug" value={trip.slug} />
+                      <button
+                        type="submit"
+                        aria-label="Als Etappenbild verwenden"
+                        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", background: "none", border: "none", cursor: "pointer" }}
+                      />
+                    </form>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
+              Noch keine Fotos dieser Reise in Travel Memory — sobald welche hochgeladen sind, könnt ihr hier eines für diese Etappe auswählen.
+            </p>
+          )}
+        </div>
 
         <div
           className="rounded-xl p-6 flex items-center justify-between flex-wrap gap-3"

@@ -195,3 +195,38 @@ export async function deleteStage(formData: FormData) {
 
   redirect(`/trips/${slug}`)
 }
+
+/**
+ * §"Bei Etappen werden falsche Bilder dargestellt... aus der Galerie
+ * auswählen können": bewusst getrennt von der automatischen
+ * Länder-Bildauflösung (lib/stage-images.ts) -- das Etappen-Titelbild ist
+ * eine explizite, eindeutige Wahl, die dort Vorrang bekommt. Gleiches
+ * Muster wie setCoverPhoto für Reisen in lib/actions/memories.ts.
+ */
+export async function setStageCoverPhoto(formData: FormData) {
+  const stageId = String(formData.get('stage_id') ?? '')
+  const photoId = String(formData.get('photo_id') ?? '')
+  const slug = String(formData.get('slug') ?? '')
+  const returnTo = `/trips/${slug}/stages/${stageId}/edit`
+
+  if (!stageId || !photoId)
+    redirect(`${returnTo}?error=${encodeURIComponent('Titelbild konnte nicht gesetzt werden')}`)
+
+  const supabase = await createClient()
+  const { error } = await supabase.from('stages').update({ cover_photo_id: photoId }).eq('id', stageId)
+  if (error)
+    redirect(`${returnTo}?error=${encodeURIComponent('Titelbild konnte nicht gesetzt werden: ' + error.message)}`)
+
+  redirect(returnTo)
+}
+
+export async function clearStageCoverPhoto(formData: FormData) {
+  const stageId = String(formData.get('stage_id') ?? '')
+  const slug = String(formData.get('slug') ?? '')
+  const returnTo = `/trips/${slug}/stages/${stageId}/edit`
+
+  const supabase = await createClient()
+  await supabase.from('stages').update({ cover_photo_id: null }).eq('id', stageId)
+
+  redirect(returnTo)
+}

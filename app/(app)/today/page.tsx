@@ -14,7 +14,8 @@ import type { WeatherLocationCandidate } from "@/lib/weather";
 import { getCachedTodayRecommendation, generateAndCacheTodayRecommendation, DAY_STYLE_OPTIONS } from "@/lib/today-recommendation";
 import { chooseTodayStyle } from "@/lib/actions/today-style";
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt, TRAVEL_NEED_OPTIONS } from "@/lib/family-dna";
-import { COUNTRY_STAGE_IMAGES, FALLBACK_STAGE_IMAGE } from "@/lib/stage-images";
+import { COUNTRY_STAGE_IMAGES, FALLBACK_STAGE_IMAGE, resolveStageImages } from "@/lib/stage-images";
+import { SignedPhoto } from "@/components/SignedPhoto";
 import { COUNTRY_NAMES } from "@/lib/geo-suggestions";
 import { todayIsoInFamilyTimezone, nowHHMMInFamilyTimezone } from "@/lib/time";
 import type { BookingType, BookingStatus } from "@/lib/supabase/types";
@@ -91,7 +92,7 @@ type PersonRow = { id: string; name: string };
 type StageRow = {
   id: string; title: string; location: string | null; nights: number | null;
   start_date: string | null; end_date: string | null; accommodation: string | null;
-  sort_order: number; country_code: string | null;
+  sort_order: number; country_code: string | null; cover_photo_id: string | null;
 };
 type BookingRow = {
   id: string; type: BookingType; title: string; provider: string | null; status: BookingStatus;
@@ -146,7 +147,7 @@ export default async function TodayPage() {
       .select(`
         id, slug, title, subtitle, status, start_date, end_date,
         trip_members ( persons ( id, name ) ),
-        stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code ),
+        stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code, cover_photo_id ),
         bookings ( id, type, title, provider, status, start_datetime, end_datetime, stage_id, details, created_at ),
         journey_events ( id, stage_id, date, time, category, title, location, status )
       `)
@@ -237,7 +238,15 @@ export default async function TodayPage() {
   // Keine Kombination mehrerer Quellen zu einem Text wie "Atlanta, Costa Rica".
   const currentLocation = resolveCurrentLocation(activeTrip, stages, bookings, todayIso);
   const heroSubtitle = `📍 ${currentLocation.label}`;
-  const heroPhoto = (currentLocation.countryCode && COUNTRY_STAGE_IMAGES[currentLocation.countryCode]) || FALLBACK_STAGE_IMAGE;
+  // §Etappen-Titelbild (lib/stage-images.ts) hat Vorrang -- resolveStageImages
+  // fällt intern bereits auf die Länder-Zuordnung zurück, falls die aktuelle
+  // Etappe kein eigenes Titelbild hat; nur ohne zugehörige Etappe (Reiseziel-
+  // Rückfallstufe in resolveCurrentLocation) wird direkt über den Ländercode aufgelöst.
+  const stageImages = await resolveStageImages(supabase, stages);
+  const heroImage = (currentLocation.stageId && stageImages.get(currentLocation.stageId)) || {
+    url: (currentLocation.countryCode && COUNTRY_STAGE_IMAGES[currentLocation.countryCode]) || FALLBACK_STAGE_IMAGE,
+    storagePath: null,
+  };
 
   // Wetter wird exakt für denselben Standort geladen: der aufgelöste Name zuerst;
   // schlägt die Geokodierung fehl (z. B. bei Hotelnamen oder kleinen Provinzen,
@@ -311,8 +320,15 @@ export default async function TodayPage() {
 
       {/* ── Hero ── */}
       <div className="relative" style={{ height: "380px", flexShrink: 0 }}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={heroPhoto} alt={currentLocation.label} className="absolute inset-0 w-full h-full object-cover" />
+        {heroImage.storagePath ? (
+          <SignedPhoto
+            storagePath={heroImage.storagePath} initialUrl={heroImage.url} alt={currentLocation.label}
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={heroImage.url} alt={currentLocation.label} className="absolute inset-0 w-full h-full object-cover" />
+        )}
         <div
           className="absolute inset-0"
           style={{ background: "linear-gradient(to top, rgba(10,9,7,0.97) 0%, rgba(10,9,7,0.6) 45%, rgba(10,9,7,0.18) 100%)" }}
