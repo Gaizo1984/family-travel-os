@@ -1,12 +1,15 @@
 import Link from "next/link";
-import { LayoutDashboard, Plane, Users, Sun, Camera, Compass, MessageSquare, MoreHorizontal, BookOpenCheck, Images } from "lucide-react";
+import { LayoutDashboard, Plane, Users, Sparkles, Camera, Compass, MessageSquare, MoreHorizontal, BookOpenCheck, Images } from "lucide-react";
 import { RoutePrefetcher } from "@/components/RoutePrefetcher";
 
+// §"LUMI Intelligence": /today ist zur zentralen LUMI-Startseite ausgebaut
+// worden (Wetter/Tagesplan/Für dich/Entdecken/Frag LUMI gebündelt) — Nav
+// spiegelt das mit Label/Icon, die URL bleibt /today (keine Linkbrüche).
 const NAV = [
   { href: "/", label: "Dashboard", Icon: LayoutDashboard },
   { href: "/trips", label: "Reisen", Icon: Plane },
   { href: "/family", label: "Familie", Icon: Users },
-  { href: "/today", label: "Heute", Icon: Sun },
+  { href: "/today", label: "LUMI", Icon: Sparkles },
   { href: "/content-studio", label: "Content", Icon: Camera },
   { href: "/discover", label: "Entdecken", Icon: Compass },
   { href: "/buchungsportal", label: "Buchungsportal", Icon: BookOpenCheck },
@@ -19,7 +22,7 @@ const NAV = [
 const MOBILE_NAV = [
   { href: "/", label: "Dashboard", Icon: LayoutDashboard },
   { href: "/trips", label: "Reisen", Icon: Plane },
-  { href: "/today", label: "Heute", Icon: Sun },
+  { href: "/today", label: "LUMI", Icon: Sparkles },
   { href: "/content-studio", label: "Content", Icon: Camera },
   { href: "/mehr", label: "Mehr", Icon: MoreHorizontal },
 ];

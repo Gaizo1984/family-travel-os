@@ -653,12 +653,29 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
 
           <section id="journey">
             <div className="flex items-center justify-between mb-5">
-              <h2
-                className="text-xs font-medium"
-                style={{ color: "var(--muted)", letterSpacing: "0.2em", textTransform: "uppercase", fontSize: "0.65rem" }}
-              >
-                Journey
-              </h2>
+              <div className="flex items-center gap-2.5">
+                <h2
+                  className="text-xs font-medium"
+                  style={{ color: "var(--muted)", letterSpacing: "0.2em", textTransform: "uppercase", fontSize: "0.65rem" }}
+                >
+                  Journey
+                </h2>
+                {/* §Punkt 4 "Nach der Reise zeigt Journey den tatsächlich erlebten
+                    Ablauf": reine Darstellungs-Ergänzung auf Basis der bereits
+                    vorhandenen datumsbasierten Reise-Historie (lib/trip-status.ts),
+                    kein neues journey_events-Statusfeld. */}
+                {isTripHistorical(trip) && (
+                  <span
+                    style={{
+                      color: "var(--accent)", fontSize: "0.56rem", letterSpacing: "0.12em", textTransform: "uppercase",
+                      background: "rgba(184,154,94,0.12)", border: "1px solid rgba(184,154,94,0.3)",
+                      borderRadius: "20px", padding: "2px 9px",
+                    }}
+                  >
+                    Erlebt
+                  </span>
+                )}
+              </div>
               <Link
                 href={`/trips/${trip.slug}/journey-events/new`}
                 style={{ color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.08em", textDecoration: "none" }}
