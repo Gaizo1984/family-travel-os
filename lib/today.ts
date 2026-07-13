@@ -76,6 +76,38 @@ export function detectDayHighlight(items: TodayTimelineItem[]): string | null {
   return match?.title ?? null
 }
 
+export type LumiIntent =
+  | { type: 'category'; category: 'restaurants' | 'beaches' | 'nature' | 'activities' }
+  | { type: 'day_plan' }
+
+/**
+ * §"Frag LUMI produktiv aufwerten" (LUMI Intelligence v1, §7): dasselbe
+ * deterministische Keyword-Muster wie `detectDayHighlight` -- erkennt eine
+ * Freitext-Frage als "eigentlich eine Kategorie-/Tagesplan-Anfrage" und
+ * leitet auf die bereits gebaute strukturierte Seite (Places/Routes-
+ * gestützt) um, statt eine reine KI-Fließtextantwort zu erzeugen. Trifft
+ * keine der Regeln zu, bleibt der bestehende `generateConciergeAnswer`-Pfad
+ * die Antwort -- das ist beabsichtigt, nicht jede Frage lässt sich
+ * strukturieren.
+ */
+const DAY_PLAN_KEYWORDS = ['tagestrip', 'tagesplan', 'tag planen', 'route', 'stopps', 'regen', 'schlechtwetter']
+const CATEGORY_KEYWORDS: Record<'restaurants' | 'beaches' | 'nature' | 'activities', string[]> = {
+  restaurants: ['restaurant', 'essen', 'abendessen', 'mittagessen', 'lokal'],
+  beaches: ['strand', 'strände', 'meer', 'baden'],
+  nature: ['natur', 'wanderung', 'wasserfall', 'nationalpark', 'aussicht'],
+  activities: ['aktivität', 'aktivitäten', 'ausflug', 'unternehmen', 'sehenswürdigkeit'],
+}
+
+export function detectLumiIntent(questionText: string): LumiIntent | null {
+  const text = questionText.toLowerCase()
+  if (DAY_PLAN_KEYWORDS.some((kw) => text.includes(kw))) return { type: 'day_plan' }
+  const categoryKeys = Object.keys(CATEGORY_KEYWORDS) as Array<keyof typeof CATEGORY_KEYWORDS>
+  for (const category of categoryKeys) {
+    if (CATEGORY_KEYWORDS[category].some((kw) => text.includes(kw))) return { type: 'category', category }
+  }
+  return null
+}
+
 export type CurrentLocation = {
   label: string
   countryCode: string | null

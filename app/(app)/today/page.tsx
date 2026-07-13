@@ -1,7 +1,7 @@
 import Link from "next/link";
 import {
   Clock, ArrowRight, Ticket, Car, ChevronRight, Sparkles, Compass, MessageSquare,
-  FileQuestion, CloudSun, Shuffle, AlertTriangle, RefreshCw,
+  FileQuestion, CloudSun, Shuffle, AlertTriangle, RefreshCw, Route,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
@@ -244,6 +244,7 @@ function formatTimestamp(iso: string): string {
  * Zielseiten) und die generische Kategorie-Architektur sonst verwässern würden.
  */
 const LUMI_SHORTCUTS: Array<{ href: string; label: string; Icon: LucideIcon }> = [
+  { href: "/today/plan", label: "Tagesplaner", Icon: Route },
   { href: "/discover", label: "Neue Reiseideen", Icon: Compass },
   { href: "/concierge", label: "Frag LUMI", Icon: MessageSquare },
 ];
@@ -689,18 +690,38 @@ export default async function TodayPage({
           )}
         </section>
 
-        {/* ── Tagesplanung: nur auf Klick, keine Automatik mehr ── */}
+        {/* ── "Heute empfiehlt LUMI": nur auf Klick, max. 1x täglich aus Cache ── */}
         <section className="mb-8">
-          <SectionLabel>Tagesplanung</SectionLabel>
+          <SectionLabel>Heute empfiehlt LUMI</SectionLabel>
           {recommendation ? (
             <>
               <Card>
                 <div style={{ color: "var(--foreground)", fontSize: "1rem", fontWeight: 400, marginBottom: "6px" }}>
                   {recommendation.recommendation.title}
                 </div>
-                <p style={{ color: "var(--muted)", fontSize: "0.82rem", lineHeight: 1.5 }}>
+                <p className="mb-3" style={{ color: "var(--muted)", fontSize: "0.82rem", lineHeight: 1.5 }}>
                   {recommendation.recommendation.description}
                 </p>
+                <div className="flex flex-wrap gap-x-3 gap-y-1 mb-3" style={{ color: "var(--muted)", fontSize: "0.68rem" }}>
+                  {recommendation.recommendation.suggestedTimeWindow && <span>🕐 {recommendation.recommendation.suggestedTimeWindow}</span>}
+                  {recommendation.recommendation.weatherFit && <span>☀ {recommendation.recommendation.weatherFit}</span>}
+                </div>
+                <form action={commitConciergeAction}>
+                  <input type="hidden" name="trip_id" value={activeTrip.id} />
+                  <input type="hidden" name="trip_slug" value={activeTrip.slug} />
+                  <input type="hidden" name="for_date" value={todayIso} />
+                  <input type="hidden" name="event_title" value={recommendation.recommendation.title} />
+                  <input type="hidden" name="return_to" value="/today" />
+                  <button
+                    type="submit"
+                    style={{
+                      background: "transparent", color: "var(--accent)", border: "1px solid rgba(184,154,94,0.4)",
+                      borderRadius: "20px", padding: "6px 14px", fontSize: "0.62rem", cursor: "pointer",
+                    }}
+                  >
+                    In Tagesplan übernehmen
+                  </button>
+                </form>
               </Card>
               {recommendation.alternative && (
                 <Card>
@@ -708,7 +729,10 @@ export default async function TodayPage({
                     Alternative
                   </div>
                   <div style={{ color: "var(--foreground)", fontSize: "0.9rem", marginBottom: "4px" }}>{recommendation.alternative.title}</div>
-                  <p style={{ color: "var(--muted)", fontSize: "0.78rem", lineHeight: 1.5 }}>{recommendation.alternative.description}</p>
+                  <p className="mb-2" style={{ color: "var(--muted)", fontSize: "0.78rem", lineHeight: 1.5 }}>{recommendation.alternative.description}</p>
+                  {recommendation.alternative.weatherFit && (
+                    <div style={{ color: "var(--muted)", fontSize: "0.66rem" }}>☀ {recommendation.alternative.weatherFit}</div>
+                  )}
                 </Card>
               )}
             </>

@@ -1,6 +1,6 @@
 import { createClient } from './supabase/server'
 import { generateTodayRecommendation } from './today-ai'
-import type { TodayRecommendation } from './today-ai'
+import type { TodayRecommendation, TodayRecommendationPart } from './today-ai'
 
 export type CachedTodayRecommendation = TodayRecommendation & {
   dayStyle: string | null
@@ -31,8 +31,8 @@ export async function getCachedTodayRecommendation(
   if (!data) return null
   return {
     daySummary: data.day_summary,
-    recommendation: data.recommendation as unknown as { title: string; description: string },
-    alternative: data.alternative as unknown as { title: string; description: string } | null,
+    recommendation: data.recommendation as unknown as TodayRecommendationPart,
+    alternative: data.alternative as unknown as TodayRecommendationPart | null,
     dayStyle: data.day_style,
     highlightTitle: data.highlight_title,
     createdAt: data.created_at,

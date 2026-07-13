@@ -6,6 +6,7 @@ import {
   QUICK_ACTIONS, buildWhatsMissingAnswer, buildExplainConflictAnswer, buildPlanTomorrowAnswer,
 } from '@/lib/concierge'
 import { normalizeQuestionKey, generateAndCacheConciergeMessage } from '@/lib/concierge-messages'
+import { detectLumiIntent } from '@/lib/today'
 import { getCachedTodayRecommendation, generateAndCacheTodayRecommendation } from '@/lib/today-recommendation'
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt } from '@/lib/family-dna'
 import { sortStagesChronologically, buildJourneyTimeline } from '@/lib/journey'
@@ -142,6 +143,16 @@ export async function askConcierge(formData: FormData) {
   const isFreetext = !QUICK_ACTIONS.some((a) => a.key === questionKey)
   const effectiveKey = isFreetext ? normalizeQuestionKey(questionTextRaw) : questionKey
   if (!questionTextRaw) redirect(ctx.returnTo)
+
+  // §"Strukturierte Empfehlungskarten statt Fließtext" (LUMI Intelligence v1,
+  // §7): erkennt eine Freitext-Frage als Kategorie-/Tagesplan-Anfrage und
+  // leitet auf die bereits mit echten Places-/Routes-Daten arbeitende Seite
+  // um -- kein zweiter, paralleler KI-Textpfad für dasselbe Ergebnis.
+  if (isFreetext) {
+    const intent = detectLumiIntent(questionTextRaw)
+    if (intent?.type === 'category') redirect(`/today/category/${intent.category}`)
+    if (intent?.type === 'day_plan') redirect('/today/plan')
+  }
 
   await generateAndCacheConciergeMessage(
     ctx.familyId, ctx.tripId, ctx.forDate, effectiveKey, questionTextRaw,

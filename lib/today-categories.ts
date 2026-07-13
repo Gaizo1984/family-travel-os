@@ -1,7 +1,6 @@
 import type { LucideIcon } from 'lucide-react'
 import { Compass, UtensilsCrossed, Waves, Trees, Users } from 'lucide-react'
-import { searchExcursions } from './providers/excursion-provider'
-import { searchRestaurants } from './providers/restaurant-provider'
+import type { PlacesCategory } from './providers/places-provider'
 
 /**
  * §"Vollständig generisch, keine eigene Seite pro Kategorie": jede Kategorie
@@ -11,51 +10,56 @@ import { searchRestaurants } from './providers/restaurant-provider'
  * Änderung an app/(app)/today/category/[category]/page.tsx. `category` in
  * der concierge_category_suggestions-Tabelle ist deshalb bewusst TEXT statt
  * ENUM (siehe Migration 20260712000007). "Shopping" wurde entfernt (Bugfix-
- * Sprint), "Familie" bleibt als reine KI-Kategorie ohne Sonderbehandlung.
+ * Sprint), "Familie" bleibt als reine KI-Kategorie ohne Places-Anbindung
+ * (es gibt keine passende Places-Kategorie für "familienfreundlich").
  */
 export type TodayCategoryKey = 'activities' | 'restaurants' | 'beaches' | 'nature' | 'family'
-
-export type CuratedResult = { id: string; name: string; description: string; photo: string }
 
 export type TodayCategoryConfig = {
   key: TodayCategoryKey
   label: string
   Icon: LucideIcon
-  /** Beschriftung des Buttons, der den einzigen, kostenpflichtigen KI-Aufruf auslöst -- nie automatisch. */
+  /** Beschriftung des Buttons, der den einzigen, kostenpflichtigen Aufruf (Places/Routes/KI) auslöst -- nie automatisch. */
   aiButtonLabel: string
   aiQuestionTemplate: (locationLabel: string) => string
-  /** Nur gesetzt, wenn echtes kuratiertes Datenmaterial existiert (Aktivitäten/Restaurants) -- kostenlos, sofort sichtbar, kein Klick nötig. */
-  curatedSearch?: (destinationName: string) => Promise<CuratedResult[] | null>
+  /**
+   * §"LUMI Intelligence v1": nur gesetzt für Kategorien mit echter
+   * Places-Anbindung (Aktivitäten/Restaurants/Strände/Natur) --
+   * `lib/actions/category-places.ts` nutzt dies für `searchPlaces` und die
+   * Fahrzeit-Filterung. "Familie" bleibt ohne Places-Kategorie auf dem
+   * bisherigen reinen KI-Textpfad (`generateCategorySuggestion`).
+   */
+  placesCategory?: PlacesCategory
+  /** Bevorzugte Fahrzeit-Obergrenze (Minuten) -- Treffer darüber werden nachrangig gezeigt, nicht ausgeschlossen. */
+  preferredMaxMinutes?: number
+  /** Harte Fahrzeit-Obergrenze (Minuten) -- Treffer darüber werden gar nicht erst angezeigt. */
+  hardMaxMinutes?: number
 }
 
 export const TODAY_CATEGORIES: TodayCategoryConfig[] = [
   {
     key: 'activities', label: 'Aktivitäten', Icon: Compass,
-    aiButtonLabel: 'Ausflug planen',
+    aiButtonLabel: 'Vorschläge laden',
     aiQuestionTemplate: (loc) => `Welche Ausflüge und Aktivitäten empfiehlst du uns rund um ${loc}?`,
-    curatedSearch: async (destinationName) => {
-      const results = await searchExcursions({ destinationName })
-      return results ? results.map((r) => ({ id: r.id, name: r.title, description: r.description, photo: r.photo })) : null
-    },
+    placesCategory: 'attraction', preferredMaxMinutes: 90, hardMaxMinutes: 150,
   },
   {
     key: 'restaurants', label: 'Restaurants', Icon: UtensilsCrossed,
-    aiButtonLabel: 'Restaurant finden',
+    aiButtonLabel: 'Vorschläge laden',
     aiQuestionTemplate: (loc) => `Welche Restaurants empfiehlst du uns für unseren Aufenthalt in ${loc}?`,
-    curatedSearch: async (destinationName) => {
-      const results = await searchRestaurants({ destinationName })
-      return results ? results.map((r) => ({ id: r.id, name: r.name, description: r.cuisine, photo: r.photo })) : null
-    },
+    placesCategory: 'restaurant', preferredMaxMinutes: 30, hardMaxMinutes: 60,
   },
   {
     key: 'beaches', label: 'Strände', Icon: Waves,
-    aiButtonLabel: 'Die schönsten Strände',
+    aiButtonLabel: 'Vorschläge laden',
     aiQuestionTemplate: (loc) => `Welche Strände empfiehlst du uns in der Nähe von ${loc}?`,
+    placesCategory: 'beach', preferredMaxMinutes: 60, hardMaxMinutes: 90,
   },
   {
     key: 'nature', label: 'Natur', Icon: Trees,
-    aiButtonLabel: 'Naturerlebnisse finden',
+    aiButtonLabel: 'Vorschläge laden',
     aiQuestionTemplate: (loc) => `Welche Naturerlebnisse und Landschaften empfiehlst du uns rund um ${loc}?`,
+    placesCategory: 'nature', preferredMaxMinutes: 90, hardMaxMinutes: 150,
   },
   {
     key: 'family', label: 'Familie & Kinder', Icon: Users,

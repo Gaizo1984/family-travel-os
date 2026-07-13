@@ -179,17 +179,17 @@ export interface Database {
         Row: {
           id: string; trip_id: string; stage_id: string | null; date: string; time: string | null
           category: string; title: string; location: string | null; notes: string | null
-          status: string; created_at: string; updated_at: string
+          status: string; metadata: Json | null; created_at: string; updated_at: string
         }
         Insert: {
           id?: string; trip_id: string; stage_id?: string | null; date: string; time?: string | null
           category: string; title: string; location?: string | null; notes?: string | null
-          status?: string; created_at?: string; updated_at?: string
+          status?: string; metadata?: Json | null; created_at?: string; updated_at?: string
         }
         Update: {
           id?: string; trip_id?: string; stage_id?: string | null; date?: string; time?: string | null
           category?: string; title?: string; location?: string | null; notes?: string | null
-          status?: string; created_at?: string; updated_at?: string
+          status?: string; metadata?: Json | null; created_at?: string; updated_at?: string
         }
         Relationships: [
           { foreignKeyName: "journey_events_trip_id_fkey";  columns: ["trip_id"];  isOneToOne: false; referencedRelation: "trips";  referencedColumns: ["id"] },
@@ -525,6 +525,24 @@ export interface Database {
           summary?: string | null; error_message?: string | null; result?: Json | null; ran_at?: string
         }
         Relationships: []
+      }
+      category_places_cache: {
+        Row: {
+          id: string; family_id: string; trip_id: string; category: string
+          origin_key: string; origin_label: string; results: Json; updated_at: string
+        }
+        Insert: {
+          id?: string; family_id: string; trip_id: string; category: string
+          origin_key: string; origin_label: string; results: Json; updated_at?: string
+        }
+        Update: {
+          id?: string; family_id?: string; trip_id?: string; category?: string
+          origin_key?: string; origin_label?: string; results?: Json; updated_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "category_places_cache_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] },
+          { foreignKeyName: "category_places_cache_trip_id_fkey";   columns: ["trip_id"];   isOneToOne: false; referencedRelation: "trips";   referencedColumns: ["id"] }
+        ]
       }
       content_ideas: {
         Row: {

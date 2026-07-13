@@ -80,7 +80,15 @@ export async function generateTripIdeas(formData: FormData) {
   const selectedTravelers = (allPersons ?? []).filter((p) => travelerIds.length === 0 || travelerIds.includes(p.id))
 
   const { data: pastTrips } = await supabase.from('past_trips').select('country_or_region, year').eq('family_id', family.id)
-  const { data: completedTrips } = await supabase.from('trips').select('title').eq('family_id', family.id).in('status', ['completed', 'active'])
+  const { data: completedTrips } = await supabase.from('trips').select('id, title').eq('family_id', family.id).in('status', ['completed', 'active'])
+  // §"Lieblingshotels" (LUMI Intelligence v1, §8): kein eigenes Favoriten-Flag
+  // im Schema -- bisher genutzte Unterkunftsnamen aus abgeschlossenen/
+  // laufenden Reisen sind die nächstliegende, ohne Migration verfügbare
+  // Annäherung, ergänzend zu den bereits vorhandenen Hotelkriterien-Tags.
+  const completedTripIds = (completedTrips ?? []).map((t) => t.id)
+  const { data: pastAccommodations } = completedTripIds.length > 0
+    ? await supabase.from('bookings').select('title').eq('type', 'accommodation').in('trip_id', completedTripIds)
+    : { data: [] as Array<{ title: string }> }
 
   const dnaSummary = await buildFamilyDnaSummary(family.id)
   const dnaText = formatFamilyDnaForPrompt(dnaSummary, roughTimeframe || undefined)
@@ -89,6 +97,7 @@ export async function generateTripIdeas(formData: FormData) {
     ...(completedTrips ?? []).map((t) => t.title),
     ...(pastTrips ?? []).map((p) => `${p.country_or_region} (${p.year})`),
   ].join(', ')
+  const favoriteHotelsText = [...new Set((pastAccommodations ?? []).map((b) => b.title))].join(', ')
 
   const contextParts = [
     `Reisewunsch: "${wishText}"`,
@@ -99,6 +108,7 @@ export async function generateTripIdeas(formData: FormData) {
     `Mitreisende: ${selectedTravelers.map((p) => p.name).join(', ')}`,
     dnaText || null,
     travelHistoryText ? `Bisherige Reisen (zur Vermeidung von Wiederholungen): ${travelHistoryText}` : null,
+    favoriteHotelsText ? `Bisher genutzte Hotels (Anhaltspunkt für den bevorzugten Hotelstil): ${favoriteHotelsText}` : null,
   ].filter(Boolean).join('\n')
 
   let parsed: {
