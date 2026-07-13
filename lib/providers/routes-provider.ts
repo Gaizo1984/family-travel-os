@@ -4,7 +4,11 @@ const COMPUTE_ROUTE_MATRIX_URL = 'https://routes.googleapis.com/distanceMatrix/v
 export type LatLng = { lat: number; lng: number }
 
 export type RouteLeg = { durationSeconds: number; distanceMeters: number }
-export type ComputeRouteResult = { durationSeconds: number; distanceMeters: number; legs: RouteLeg[] }
+export type ComputeRouteResult = {
+  durationSeconds: number; distanceMeters: number; legs: RouteLeg[]
+  /** Nur gesetzt, wenn `optimizeWaypointOrder` angefragt wurde -- Reihenfolge der `waypoints`-Indizes, wie sie die Routes API tatsächlich befährt (verhindert Zickzackrouten). */
+  optimizedWaypointOrder: number[] | null
+}
 
 export type RouteMatrixElement = {
   originIndex: number
@@ -31,7 +35,7 @@ function parseDurationSeconds(duration: unknown): number | null {
  * Matrix API (Legacy), siehe Architekturvorgabe.
  */
 interface RoutesProvider {
-  computeRoute(params: { origin: LatLng; destination: LatLng; waypoints?: LatLng[] }): Promise<ComputeRouteResult | null>
+  computeRoute(params: { origin: LatLng; destination: LatLng; waypoints?: LatLng[]; optimizeWaypointOrder?: boolean }): Promise<ComputeRouteResult | null>
   computeRouteMatrix(params: { origins: LatLng[]; destinations: LatLng[] }): Promise<RouteMatrixElement[] | null>
 }
 
@@ -39,9 +43,15 @@ async function googleComputeRoute(params: {
   origin: LatLng
   destination: LatLng
   waypoints?: LatLng[]
+  optimizeWaypointOrder?: boolean
 }): Promise<ComputeRouteResult | null> {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY
   if (!apiKey) return null
+
+  const fieldMask = [
+    'routes.duration', 'routes.distanceMeters', 'routes.legs.duration', 'routes.legs.distanceMeters',
+    ...(params.optimizeWaypointOrder ? ['routes.optimizedIntermediateWaypointIndex'] : []),
+  ].join(',')
 
   try {
     const res = await fetch(COMPUTE_ROUTES_URL, {
@@ -49,7 +59,7 @@ async function googleComputeRoute(params: {
       headers: {
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask': 'routes.duration,routes.distanceMeters,routes.legs.duration,routes.legs.distanceMeters',
+        'X-Goog-FieldMask': fieldMask,
       },
       body: JSON.stringify({
         origin: toWaypoint(params.origin),
@@ -58,6 +68,7 @@ async function googleComputeRoute(params: {
         travelMode: 'DRIVE',
         routingPreference: 'TRAFFIC_AWARE',
         languageCode: 'de',
+        optimizeWaypointOrder: params.optimizeWaypointOrder ?? false,
       }),
       cache: 'no-store',
     })
@@ -75,6 +86,7 @@ async function googleComputeRoute(params: {
       durationSeconds: parseDurationSeconds(route.duration) ?? 0,
       distanceMeters: route.distanceMeters ?? 0,
       legs,
+      optimizedWaypointOrder: Array.isArray(route.optimizedIntermediateWaypointIndex) ? route.optimizedIntermediateWaypointIndex : null,
     }
   } catch {
     return null
@@ -121,7 +133,7 @@ const googleRoutesProvider: RoutesProvider = { computeRoute: googleComputeRoute,
 /** Einziger Zuweisungspunkt für den aktiven Routen-Anbieter — siehe RoutesProvider-Kommentar oben. */
 const activeRoutesProvider: RoutesProvider = googleRoutesProvider
 
-export async function computeRoute(params: { origin: LatLng; destination: LatLng; waypoints?: LatLng[] }): Promise<ComputeRouteResult | null> {
+export async function computeRoute(params: { origin: LatLng; destination: LatLng; waypoints?: LatLng[]; optimizeWaypointOrder?: boolean }): Promise<ComputeRouteResult | null> {
   return activeRoutesProvider.computeRoute(params)
 }
 

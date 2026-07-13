@@ -5,12 +5,11 @@ import type { DevTestRun } from '@/lib/dev-test-runs'
 
 export function WeatherTestCard({ lastRun }: { lastRun: DevTestRun | null }) {
   const result = lastRun?.result as unknown as WeatherTestResult | undefined
-  const mismatch = result && !result.resolvedLocationName.toLowerCase().includes(result.query.toLowerCase().split(',')[0].trim().toLowerCase())
 
   return (
     <DevTestCard
-      title="Wetter (Open-Meteo)"
-      description="Aktuelles Wetter, 5-Tage-Forecast, Abgleich Eingabe ↔ aufgelöster Ort."
+      title="Wetter (Open-Meteo, koordinatenbasiert)"
+      description="Ort wird zuerst über Google Geocoding aufgelöst, Open-Meteo bekommt nur noch Koordinaten -- kein eigenes Geocoding mehr."
       lastRun={lastRun}
     >
       <form action={runWeatherTest} className="flex flex-col gap-2 sm:flex-row sm:items-end">
@@ -23,10 +22,9 @@ export function WeatherTestCard({ lastRun }: { lastRun: DevTestRun | null }) {
 
       {result && (
         <div style={{ marginTop: '0.85rem', fontSize: '0.72rem', color: '#d1d5db' }}>
-          <div>
-            Eingabe: <strong>{result.query}</strong> → aufgelöst als: <strong>{result.resolvedLocationName}</strong>
-            {mismatch && <span style={{ color: '#f87171', marginLeft: '0.5rem' }}>⚠ prüfen, ob das derselbe Ort ist</span>}
-          </div>
+          <div>Eingegebener Ort: <strong>{result.query}</strong></div>
+          <div>Aufgelöster Ort (Google): <strong>{result.resolvedLocationName}</strong></div>
+          <div style={{ color: '#9ca3af' }}>Verwendete Koordinaten: {result.lat.toFixed(5)}, {result.lng.toFixed(5)}</div>
           <div style={{ marginTop: '0.3rem' }}>
             Aktuell: {result.currentTemp}°C, {describeWeatherCode(result.currentCode).label}
           </div>

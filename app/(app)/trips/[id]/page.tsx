@@ -470,7 +470,7 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
     <div className="flex-1 flex flex-col">
 
       {/* ── CINEMATIC HERO ── */}
-      <div className="relative" style={{ height: 450 }}>
+      <div className="relative" style={{ height: 360 }}>
         {heroImage ? (
           <SignedPhoto storagePath={heroImage.storagePath} initialUrl={heroImage.url} alt={trip.title} className="absolute inset-0 w-full h-full object-cover" />
         ) : (
@@ -479,9 +479,13 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
             style={{ background: `linear-gradient(135deg, ${trip.gradient_from ?? "#1a1a1a"}, ${trip.gradient_to ?? "#333"})` }}
           />
         )}
+        {/* Nur dezenter Verlauf für Lesbarkeit oben/unten -- die Bildmitte bleibt frei, damit das Foto trägt. */}
         <div
           className="absolute inset-0"
-          style={{ background: "linear-gradient(to top, rgba(10,9,7,0.97) 0%, rgba(10,9,7,0.62) 45%, rgba(10,9,7,0.18) 100%)" }}
+          style={{
+            background:
+              "linear-gradient(180deg, rgba(10,9,7,0.55) 0%, rgba(10,9,7,0.1) 30%, rgba(10,9,7,0.05) 55%, rgba(10,9,7,0.82) 100%)",
+          }}
         />
 
         <div className="absolute top-6 left-7" style={{ maxWidth: "calc(100% - 130px)" }}>
@@ -586,50 +590,50 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
           </details>
         </div>
 
-        <div className="absolute inset-x-0 bottom-0 px-7 md:px-10 pb-8 md:pb-10">
-          <div style={{ color: "#C8A96E", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "10px" }}>
-            Eure Reise
+        <div className="absolute inset-x-0 bottom-0 px-4 md:px-6 pb-3 md:pb-4 flex flex-col gap-2.5">
+          <div className="px-3 md:px-4">
+            <div style={{ color: "#C8A96E", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "6px" }}>
+              Eure Reise
+            </div>
+            <h1
+              className="font-light leading-tight"
+              style={{ color: H_FG, letterSpacing: "-0.01em", fontSize: "clamp(1.7rem, 4.5vw, 2.7rem)" }}
+            >
+              {trip.title}
+            </h1>
           </div>
-          <h1
-            className="text-4xl md:text-5xl font-light leading-tight mb-2"
-            style={{ color: H_FG, letterSpacing: "-0.01em" }}
+
+          <div
+            className="px-4 py-3 rounded-lg flex flex-col gap-2"
+            style={{ background: "rgba(10,9,7,0.55)", backdropFilter: "blur(10px)", border: `1px solid ${H_BORDER}` }}
           >
-            {trip.title}
-          </h1>
-          <p className="text-sm font-light mb-1" style={{ color: H_MUTED, letterSpacing: "0.04em" }}>
-            {trip.start_date ? formatDateDE(trip.start_date) : "—"}
-            {trip.end_date ? ` – ${formatDateDE(trip.end_date)}` : ""}
-            {duration ? ` · ${duration} Tage` : ""}
-          </p>
-          {heroMetaParts && (
-            <p className="text-sm font-light mb-5" style={{ color: H_MUTED, letterSpacing: "0.04em" }}>
-              {heroMetaParts}
-            </p>
-          )}
+            {routeChips.length > 0 && <RouteChips chips={routeChips} />}
 
-          {routeChips.length > 0 && (
-            <div className="mb-5">
-              <RouteChips chips={routeChips} />
-            </div>
-          )}
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div style={{ color: "#D8CFC0", letterSpacing: "0.02em", fontSize: "0.65rem" }}>
+                {trip.start_date ? formatDateDE(trip.start_date) : "—"}
+                {trip.end_date ? ` – ${formatDateDE(trip.end_date)}` : ""}
+                {duration ? ` · ${duration} Tage` : ""}
+                {heroMetaParts ? ` · ${heroMetaParts}` : ""}
+              </div>
 
-          <div className="mb-5" style={{ height: "1px", background: H_BORDER }} />
-
-          <div className="flex items-center gap-4">
-            <div className="flex -space-x-2">
-              {members.map((m) => (
-                <div
-                  key={m.id}
-                  className="w-8 h-8 rounded-full flex items-center justify-center"
-                  style={{ background: "rgba(240,235,227,0.1)", color: H_FG, border: "1px solid rgba(240,235,227,0.2)", backdropFilter: "blur(6px)", fontSize: "0.6rem", letterSpacing: "0.04em" }}
-                >
-                  {m.initials}
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="flex -space-x-1.5">
+                  {members.map((m) => (
+                    <div
+                      key={m.id}
+                      className="w-6 h-6 rounded-full flex items-center justify-center"
+                      style={{ background: "rgba(240,235,227,0.14)", color: H_FG, border: "1px solid rgba(240,235,227,0.22)", fontSize: "0.55rem", letterSpacing: "0.02em" }}
+                    >
+                      {m.initials}
+                    </div>
+                  ))}
                 </div>
-              ))}
+                <span style={{ color: H_MUTED, fontSize: "0.62rem", letterSpacing: "0.06em" }}>
+                  {members.length} Reisende
+                </span>
+              </div>
             </div>
-            <span style={{ color: H_MUTED, fontSize: "0.68rem", letterSpacing: "0.08em" }}>
-              {members.length} Reisende
-            </span>
           </div>
         </div>
       </div>

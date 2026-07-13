@@ -14,7 +14,7 @@ export function PlacesTestCard({ lastRun }: { lastRun: DevTestRun | null }) {
   return (
     <DevTestCard
       title="Google Places API (New)"
-      description="Hauptort, Koordinaten, Top-Treffer je Kategorie mit Bewertung, Öffnungszeiten, Foto, Entfernung."
+      description="Hotel/Hauptort, Koordinaten, Top-Treffer je Kategorie mit Bewertung, Öffnungszeiten, echter Fahrzeit, Foto."
       lastRun={lastRun}
     >
       <form action={runPlacesTest} className="flex flex-col gap-2 sm:flex-row sm:items-end">
@@ -27,8 +27,8 @@ export function PlacesTestCard({ lastRun }: { lastRun: DevTestRun | null }) {
           />
         </label>
         <label style={{ flex: 1 }}>
-          <div style={{ fontSize: '0.68rem', color: '#9ca3af', marginBottom: '0.25rem' }}>Referenzpunkt/Hotel (optional)</div>
-          <input name="reference_point" placeholder="z. B. Westin Reserva Conchal" style={inputStyle} />
+          <div style={{ fontSize: '0.68rem', color: '#9ca3af', marginBottom: '0.25rem' }}>Hotel (Referenzpunkt, optional)</div>
+          <input name="hotel" placeholder="z. B. The Westin Reserva Conchal" style={inputStyle} />
         </label>
         <button type="submit" style={buttonStyle}>Testen</button>
       </form>
@@ -36,7 +36,8 @@ export function PlacesTestCard({ lastRun }: { lastRun: DevTestRun | null }) {
       {result && (
         <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
           <div style={{ fontSize: '0.72rem', color: '#e5e7eb' }}>
-            Erkannter Hauptort: <strong>{result.formattedAddress}</strong> ({result.lat.toFixed(4)}, {result.lng.toFixed(4)})
+            Ausgangspunkt ({result.origin.source === 'hotel' ? 'Hotel' : 'Ort'}): <strong>{result.origin.formattedAddress}</strong>{' '}
+            ({result.origin.lat.toFixed(4)}, {result.origin.lng.toFixed(4)})
           </div>
           {CATEGORIES.map((category) => {
             const items = result.categories?.[category] ?? []
@@ -48,7 +49,7 @@ export function PlacesTestCard({ lastRun }: { lastRun: DevTestRun | null }) {
                 ) : (
                   <ul className="flex flex-col gap-1.5">
                     {items.map((p) => (
-                      <li key={p.id} className="flex items-center gap-2" style={{ fontSize: '0.72rem', color: '#d1d5db' }}>
+                      <li key={p.id} className="flex items-center gap-2 flex-wrap" style={{ fontSize: '0.72rem', color: '#d1d5db' }}>
                         {p.photoName && (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
@@ -61,8 +62,11 @@ export function PlacesTestCard({ lastRun }: { lastRun: DevTestRun | null }) {
                         )}
                         <span style={{ flex: 1 }}>{p.name}</span>
                         {p.rating != null && <span style={{ color: '#fbbf24' }}>★ {p.rating} ({p.userRatingCount ?? 0})</span>}
-                        {p.openNow != null && <span style={{ color: p.openNow ? '#4ade80' : '#f87171' }}>{p.openNow ? 'geöffnet' : 'geschlossen'}</span>}
+                        {p.openNow != null && <span style={{ color: p.openNow ? '#4ade80' : '#f87171' }}>{p.openNow ? 'geöffnet' : 'Jetzt geschlossen'}</span>}
                         {p.distanceKm != null && <span style={{ color: '#6b7280' }}>{p.distanceKm} km Luftlinie</span>}
+                        {p.durationMinutes != null && (
+                          <span style={{ color: '#9ca3af' }}>{p.durationMinutes} Min ({p.travelDistanceKm} km Fahrstrecke)</span>
+                        )}
                       </li>
                     ))}
                   </ul>

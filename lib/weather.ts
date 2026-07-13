@@ -190,3 +190,18 @@ export async function getWeatherForLocation(candidates: WeatherLocationCandidate
   }
   return null
 }
+
+/**
+ * §"Open-Meteo darf nicht erneut versuchen, den Ortsnamen selbst
+ * aufzulösen": rein additive Variante für Aufrufer, die die Koordinaten
+ * bereits über eine zuverlässigere Geokodierung (z. B. Google Geocoding im
+ * Developer-Bereich) ermittelt haben -- überspringt Open-Meteos eigene,
+ * für kleine Orte unzuverlässige Geokodierung komplett und ruft nur noch
+ * den Forecast ab. Nutzt denselben `activeProvider` wie `getWeatherForLocation`,
+ * keine zweite Wetterlogik.
+ */
+export async function getWeatherForCoordinates(lat: number, lon: number, label?: string): Promise<WeatherResult | null> {
+  const forecast = await activeProvider.forecast(lat, lon)
+  if (!forecast) return null
+  return { locationName: label ?? `${lat.toFixed(4)}, ${lon.toFixed(4)}`, ...forecast }
+}

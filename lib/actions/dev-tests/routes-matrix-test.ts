@@ -1,12 +1,13 @@
 'use server'
 
 import { redirect } from 'next/navigation'
-import { geocodeLocation } from '@/lib/providers/places-provider'
+import { geocodeLocation, resolveReferencePoint } from '@/lib/providers/places-provider'
 import { computeRouteMatrix } from '@/lib/providers/routes-provider'
 import { recordTestRun } from '@/lib/dev-test-runs'
 
 export type ComputeRouteMatrixTestResult = {
   origin: string
+  originSource: 'hotel' | 'location'
   destinations: Array<{ name: string; durationMinutes: number | null; distanceKm: number | null; reachable: boolean }>
 }
 
@@ -17,7 +18,8 @@ export async function runComputeRouteMatrixTest(formData: FormData) {
 
   if (!origin || destinationNames.length === 0) redirect('/mehr/developer')
 
-  const originGeo = await geocodeLocation(origin)
+  // §"Ursprung" fungiert als Hotel/Referenzpunkt -- Places-Text-Search zuerst.
+  const originGeo = await resolveReferencePoint({ hotel: origin, location: origin })
   const destGeos = await Promise.all(destinationNames.map((d) => geocodeLocation(d)))
 
   if (!originGeo) {
@@ -52,7 +54,7 @@ export async function runComputeRouteMatrixTest(formData: FormData) {
     }
   })
 
-  const result: ComputeRouteMatrixTestResult = { origin, destinations }
+  const result: ComputeRouteMatrixTestResult = { origin: originGeo.formattedAddress, originSource: originGeo.source, destinations }
   await recordTestRun('routes_compute_route_matrix', {
     success: true,
     summary: `${origin} → ${destinations.length} Ziele`,

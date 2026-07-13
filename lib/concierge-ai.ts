@@ -63,7 +63,18 @@ Antworte mit GENAU EINER starken, konkreten Empfehlung — keine Liste konkurrie
   }
 }
 
-export type FiveRecommendationsResult = { title: string; reason: string }[]
+export type RecommendationCandidate = {
+  name: string; category: string
+  rating: number | null; userRatingCount: number | null; openNow: boolean | null
+  durationMinutes: number | null; distanceKm: number | null
+}
+export type RecommendationFamilyMember = { name: string; age: number | null; isMinor: boolean }
+
+export type AiRecommendationPick = {
+  placeName: string; why: string
+  kinderEignung: string; wetterEignung: string; tripLength: string; besondereHinweise: string
+}
+export type FiveRecommendationsResult = AiRecommendationPick[]
 
 const FIVE_RECOMMENDATIONS_SCHEMA = {
   type: 'object',
@@ -75,10 +86,14 @@ const FIVE_RECOMMENDATIONS_SCHEMA = {
       items: {
         type: 'object',
         properties: {
-          title: { type: 'string', description: 'Name des empfohlenen Orts, exakt wie in der Liste der Places-Treffer.' },
-          reason: { type: 'string', description: 'Kurze Begründung (max. 30 Wörter), warum das für diese Familie passt.' },
+          place_name: { type: 'string', description: 'Name des empfohlenen Orts, EXAKT wie in der gelieferten Kandidatenliste.' },
+          why: { type: 'string', description: 'Kurze Begründung (max. 30 Wörter), warum das für diese Familie passt -- nur basierend auf den gelieferten Fakten.' },
+          kinder_eignung: { type: 'string', description: 'Eignung für JEDES einzelne minderjährige Familienmitglied namentlich ansprechen. Falls ungeeignet: das ausdrücklich sagen und eine familiengeeignete Alternative AUS DER KANDIDATENLISTE nennen.' },
+          wetter_eignung: { type: 'string', description: 'Kurze Einschätzung zur Wettertauglichkeit, basierend auf dem gelieferten Wetterkontext (falls vorhanden).' },
+          trip_length: { type: 'string', description: 'Kurztrip, Halbtag oder Tagestrip -- abgeleitet aus der gelieferten Fahrzeit. Orte direkt am Hotel als einfache Nahoption kennzeichnen, nicht als großen Ausflug.' },
+          besondere_hinweise: { type: 'string', description: 'Zusätzliche wichtige Hinweise, leerer String falls keine.' },
         },
-        required: ['title', 'reason'],
+        required: ['place_name', 'why', 'kinder_eignung', 'wetter_eignung', 'trip_length', 'besondere_hinweise'],
         additionalProperties: false,
       },
     },
@@ -88,27 +103,48 @@ const FIVE_RECOMMENDATIONS_SCHEMA = {
 }
 
 /**
- * §Developer-Bereich, Testmodul "OpenAI-Empfehlungen": nimmt eine bereits
- * vorhandene Liste von Places-Treffern (kein neuer Places-Aufruf) und lässt
- * daraus genau 5 familienpassende Empfehlungen auswählen/begründen -- eigene
- * Schema-Form (Array statt Einzelantwort), sonst gleicher Aufrufstil wie
- * `generateConciergeAnswer`. Nur auf ausdrücklichen Klick, nie automatisch.
+ * §"OpenAI-Empfehlungen faktenbasiert machen": die KI wählt und bewertet
+ * nur, harte Fakten (Fahrzeit, Entfernung, Bewertung, Öffnungsstatus)
+ * liefert ausschließlich der Aufrufer aus bereits geladenen Places-/Routes-
+ * Daten -- die KI gibt nur `place_name` (zum Rückabgleich) plus qualitative
+ * Einschätzungen zurück, nie Zahlen. Das verhindert Zahlen-Halluzination
+ * strukturell statt nur per Prompt-Bitte. Nur auf ausdrücklichen Klick.
  */
 export async function generateFiveRecommendations(context: {
   locationLabel: string
-  placeNames: string[]
+  candidates: RecommendationCandidate[]
   familyDnaText: string
+  members: RecommendationFamilyMember[]
+  weatherSummary: string | null
 }): Promise<FiveRecommendationsResult | null> {
   if (!process.env.OPENAI_API_KEY) return null
-  if (context.placeNames.length === 0) return null
+  if (context.candidates.length === 0) return null
+
+  const memberText = context.members.length > 0
+    ? context.members.map((m) => `${m.name}${m.age !== null ? ` (${m.age} Jahre${m.isMinor ? ', minderjährig' : ''})` : ''}`).join(', ')
+    : 'keine Familienmitglieder hinterlegt'
+
+  const candidateText = context.candidates
+    .map((c) => {
+      const parts = [
+        `${c.name} [${c.category}]`,
+        c.rating !== null ? `Bewertung ${c.rating} (${c.userRatingCount ?? 0} Rezensionen)` : 'keine Bewertung bekannt',
+        c.openNow !== null ? (c.openNow ? 'jetzt geöffnet' : 'jetzt geschlossen') : 'Öffnungsstatus unbekannt',
+        c.durationMinutes !== null ? `${c.durationMinutes} Min Fahrzeit, ${c.distanceKm} km` : 'Fahrzeit unbekannt',
+      ]
+      return `- ${parts.join(', ')}`
+    })
+    .join('\n')
 
   const prompt = `Du bist der persönliche Reise-Concierge dieser Familie für ${context.locationLabel}.
 ${context.familyDnaText || 'Keine besonderen Präferenzen bekannt.'}
+Familienmitglieder (jedes MUSS in kinder_eignung berücksichtigt werden, keines darf stillschweigend fehlen): ${memberText}.
+${context.weatherSummary ? `Aktuelles Wetter: ${context.weatherSummary}.` : 'Kein Wetterkontext verfügbar.'}
 
-Hier ist eine Liste tatsächlich vor Ort verfügbarer Orte (Restaurants, Sehenswürdigkeiten, Strände, Naturziele):
-${context.placeNames.map((n) => `- ${n}`).join('\n')}
+Kandidaten (ausschließlich echte, bereits geprüfte Orte -- wähle NUR aus dieser Liste, erfinde nichts):
+${candidateText}
 
-Wähle genau 5 dieser Orte aus der Liste aus, die am besten zu dieser Familie passen, und begründe jede Wahl kurz. Erfinde keine neuen Orte, wähle ausschließlich aus der gegebenen Liste.`
+Wähle genau 5 dieser Orte aus, die am besten zu dieser Familie passen. Regeln für trip_length: Fahrzeiten über 90 Minuten je Strecke sind kein normaler Ausflug mehr -- kennzeichne sie klar als Tagestrip, sinnvoll nur mit weiteren kombinierbaren Stopps. Orte mit sehr kurzer Fahrzeit (nahe am Hotel) sind eine einfache Nahoption, kein großer Ausflug. Gib place_name exakt wie in der Liste zurück, ohne Zusätze. Keine pauschalen Aussagen ohne Grundlage in den gelieferten Daten.`
 
   try {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -119,7 +155,11 @@ Wähle genau 5 dieser Orte aus der Liste aus, die am besten zu dieser Familie pa
     })
 
     const parsed = JSON.parse(response.output_text)
-    return parsed.recommendations
+    return parsed.recommendations.map((r: any) => ({
+      placeName: r.place_name, why: r.why,
+      kinderEignung: r.kinder_eignung, wetterEignung: r.wetter_eignung,
+      tripLength: r.trip_length, besondereHinweise: r.besondere_hinweise,
+    }))
   } catch {
     return null
   }

@@ -1,15 +1,20 @@
 'use server'
 
 import { redirect } from 'next/navigation'
-import { geocodeLocation } from '@/lib/providers/places-provider'
+import { geocodeLocation, resolveReferencePoint } from '@/lib/providers/places-provider'
 import { computeRoute } from '@/lib/providers/routes-provider'
 import { recordTestRun } from '@/lib/dev-test-runs'
 
 export type ComputeRouteTestResult = {
   origin: string; destination: string; waypoints: string[]
+  originSource: 'hotel' | 'location'
+  isRoundTrip: boolean
   durationMinutes: number; distanceKm: number
   legs: Array<{ durationMinutes: number; distanceKm: number }>
 }
+
+const sameCoords = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) =>
+  Math.abs(a.lat - b.lat) < 0.0001 && Math.abs(a.lng - b.lng) < 0.0001
 
 export async function runComputeRouteTest(formData: FormData) {
   const origin = String(formData.get('origin') ?? '').trim()
@@ -19,8 +24,10 @@ export async function runComputeRouteTest(formData: FormData) {
 
   if (!origin || !destination) redirect('/mehr/developer')
 
+  // §"Start" fungiert als Hotel/Referenzpunkt -- Places-Text-Search zuerst
+  // (bessere Trefferquote für Hotelnamen als reines Geocoding).
   const [originGeo, destGeo, waypointGeos] = await Promise.all([
-    geocodeLocation(origin),
+    resolveReferencePoint({ hotel: origin, location: origin }),
     geocodeLocation(destination),
     Promise.all(waypoints.map((w) => geocodeLocation(w))),
   ])
@@ -37,6 +44,7 @@ export async function runComputeRouteTest(formData: FormData) {
   const route = await computeRoute({
     origin: originGeo, destination: destGeo,
     waypoints: waypointGeos.map((g) => ({ lat: g!.lat, lng: g!.lng })),
+    optimizeWaypointOrder: waypointGeos.length > 1,
   })
 
   if (!route) {
@@ -44,8 +52,14 @@ export async function runComputeRouteTest(formData: FormData) {
     redirect('/mehr/developer')
   }
 
+  const orderedWaypoints = route.optimizedWaypointOrder
+    ? route.optimizedWaypointOrder.map((i) => waypoints[i])
+    : waypoints
+
   const result: ComputeRouteTestResult = {
-    origin, destination, waypoints,
+    origin: originGeo.formattedAddress, destination, waypoints: orderedWaypoints,
+    originSource: originGeo.source,
+    isRoundTrip: sameCoords(originGeo, destGeo),
     durationMinutes: Math.round(route.durationSeconds / 60),
     distanceKm: Math.round(route.distanceMeters / 100) / 10,
     legs: route.legs.map((leg) => ({ durationMinutes: Math.round(leg.durationSeconds / 60), distanceKm: Math.round(leg.distanceMeters / 100) / 10 })),

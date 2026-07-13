@@ -8,12 +8,6 @@ import { isTripPastEnd, isTripHistorical, tripCountdownDisplay } from "@/lib/tri
 import { resolveTripImage, getHighlightPhotoByTripId, type ResolvedTripImage } from "@/lib/trip-images";
 import { SignedPhoto } from "@/components/SignedPhoto";
 
-const STATUS_LABEL: Record<string, string> = {
-  planned: "Geplant",
-  active: "Aktiv",
-  completed: "Abgeschlossen",
-};
-
 type PersonRow = { id: string; name: string; initials: string; color: string };
 type TripRow = {
   id: string; slug: string; title: string; subtitle: string | null; status: string
@@ -29,7 +23,7 @@ function HeroTrip({ trip, img }: { trip: TripRow; img: ResolvedTripImage | null 
   const members = trip.trip_members.flatMap((tm) => (tm.persons ? [tm.persons] : []));
 
   return (
-    <Link href={`/trips/${trip.slug}`} className="group relative block overflow-hidden rounded-xl" style={{ height: "440px" }}>
+    <Link href={`/trips/${trip.slug}`} className="group relative block overflow-hidden rounded-xl" style={{ height: "340px" }}>
       {img && (
         <SignedPhoto
           storagePath={img.storagePath}
@@ -39,62 +33,65 @@ function HeroTrip({ trip, img }: { trip: TripRow; img: ResolvedTripImage | null 
           style={{ transformOrigin: "center center" }}
         />
       )}
+      {/* Nur dezenter Verlauf für Lesbarkeit oben/unten -- die Bildmitte bleibt frei, damit das Foto trägt. */}
       <div
         className="absolute inset-0"
-        style={{ background: "linear-gradient(to top, rgba(10,9,7,0.97) 0%, rgba(10,9,7,0.72) 42%, rgba(10,9,7,0.18) 100%)" }}
+        style={{
+          background:
+            "linear-gradient(180deg, rgba(10,9,7,0.55) 0%, rgba(10,9,7,0.08) 30%, rgba(10,9,7,0.05) 55%, rgba(10,9,7,0.8) 100%)",
+        }}
       />
 
-      <div className="absolute top-6 left-7">
-        <span className="text-xs font-medium" style={{ color: "var(--accent)", letterSpacing: "0.22em", textTransform: "uppercase" }}>
+      <div className="absolute top-5 left-5 right-5 md:top-7 md:left-8 md:right-8">
+        <span className="text-[10px] font-medium" style={{ color: "var(--accent)", letterSpacing: "0.24em", textTransform: "uppercase" }}>
           Nächste Reise
         </span>
-      </div>
-
-      <div className="absolute inset-x-0 bottom-0 px-7 md:px-9 pb-7 md:pb-9">
-        <h2 className="text-4xl md:text-5xl font-light leading-tight mb-2" style={{ color: "#F0EBE3", letterSpacing: "-0.01em" }}>
+        <h2
+          className="font-light leading-tight mt-1.5"
+          style={{ color: "#F0EBE3", letterSpacing: "-0.01em", fontSize: "clamp(1.7rem, 4.5vw, 2.7rem)" }}
+        >
           {trip.title}
         </h2>
-        <p className="text-xs mb-6" style={{ color: "#A89880", letterSpacing: "0.2em", textTransform: "uppercase" }}>
-          {trip.subtitle}
-        </p>
+        {trip.subtitle && (
+          <p className="text-[11px] md:text-xs mt-1.5" style={{ color: "#C9BFAE", letterSpacing: "0.14em", textTransform: "uppercase" }}>
+            {trip.subtitle}
+          </p>
+        )}
+      </div>
 
-        <div className="mb-5" style={{ height: "1px", background: "rgba(240,235,227,0.12)" }} />
-
-        <div className="flex items-end justify-between gap-4 flex-wrap">
-          <div className="flex gap-7">
-            {[
-              { label: "Abflug", value: trip.start_date ? formatDateDE(trip.start_date) : "—" },
-              { label: "Dauer", value: duration ? `${duration} Tage` : "—" },
-              { label: "Etappen", value: String(trip.stages.length) },
-            ].map(({ label, value }) => (
-              <div key={label}>
-                <div className="text-xs mb-1" style={{ color: "#A89880", letterSpacing: "0.14em", textTransform: "uppercase", fontSize: "0.65rem" }}>
-                  {label}
-                </div>
-                <div className="text-sm font-light" style={{ color: "#F0EBE3" }}>{value}</div>
-              </div>
-            ))}
+      <div
+        className="absolute inset-x-0 bottom-0 mx-3 mb-3 md:mx-4 md:mb-4 px-4 py-3 rounded-lg"
+        style={{ background: "rgba(10,9,7,0.55)", backdropFilter: "blur(10px)", border: "1px solid rgba(240,235,227,0.1)" }}
+      >
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="text-xs" style={{ color: "#D8CFC0", letterSpacing: "0.02em", fontSize: "0.65rem" }}>
+            {trip.start_date ? formatDateDE(trip.start_date) : "—"}
+            {" · "}
+            {duration ? `${duration} Tage` : "—"}
+            {" · "}
+            {trip.stages.length} Etappen
           </div>
 
-          <div className="flex items-center gap-5 shrink-0">
-            <div className="flex -space-x-2">
+          <div className="flex items-center gap-3 shrink-0">
+            <div className="flex -space-x-1.5">
               {members.map((m) => (
                 <div
                   key={m.id}
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium"
-                  style={{ background: "rgba(240,235,227,0.12)", color: "#F0EBE3", border: "1px solid rgba(240,235,227,0.22)", backdropFilter: "blur(6px)", fontSize: "0.62rem", letterSpacing: "0.04em" }}
+                  className="w-6 h-6 rounded-full flex items-center justify-center font-medium"
+                  style={{ background: "rgba(240,235,227,0.14)", color: "#F0EBE3", border: "1px solid rgba(240,235,227,0.22)", fontSize: "0.55rem", letterSpacing: "0.02em" }}
                 >
                   {m.initials}
                 </div>
               ))}
             </div>
-            <div className="text-right">
-              <div className="text-3xl font-light leading-none" style={{ color: "var(--accent)" }}>
-                {countdown.value}
-              </div>
-              <div className="text-xs mt-1" style={{ color: "#A89880", letterSpacing: "0.08em", fontSize: "0.65rem", textTransform: "uppercase" }}>
+            <div
+              className="flex items-center gap-1.5 rounded-full"
+              style={{ background: "rgba(196,154,90,0.14)", border: "1px solid rgba(196,154,90,0.3)", padding: "0.3rem 0.7rem" }}
+            >
+              <span className="font-medium" style={{ color: "var(--accent)", fontSize: "0.78rem" }}>{countdown.value}</span>
+              <span style={{ color: "#C9BFAE", fontSize: "0.65rem", letterSpacing: "0.04em", textTransform: "uppercase" }}>
                 {countdown.label}
-              </div>
+              </span>
             </div>
           </div>
         </div>
@@ -148,8 +145,15 @@ function TripCardElegant({ trip, img }: { trip: TripRow; img: ResolvedTripImage 
 
       <div className="absolute inset-0 p-4 flex flex-col justify-between">
         <div>
+          {/* §Bugfix "vergangene Reisen zeigen Geplant": TripCardElegant rendert
+              ausschließlich bereits datumsbasiert als historisch erkannte Reisen
+              (siehe pastTrips unten, isTripHistorical()) -- das rohe, oft
+              veraltete DB-Feld trip.status (STATUS_LABEL) darf hier nie wieder
+              zur Anzeige kommen, sonst zeigt eine nie manuell aktualisierte
+              Reise weiterhin "Geplant". Label ist deshalb fest "Erlebt",
+              konsistent mit app/(app)/trips/page.tsx. */}
           <span className="text-xs" style={{ color: "#A89880", letterSpacing: "0.16em", textTransform: "uppercase", fontSize: "0.6rem" }}>
-            {STATUS_LABEL[trip.status] ?? trip.status}
+            Erlebt
           </span>
         </div>
 

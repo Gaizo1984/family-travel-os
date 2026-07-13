@@ -29,7 +29,12 @@ export function ComputeRouteMatrixTestCard({ lastRun }: { lastRun: DevTestRun | 
       </form>
 
       {result && (
-        <table style={{ marginTop: '0.85rem', fontSize: '0.72rem', color: '#d1d5db', width: '100%', borderCollapse: 'collapse' }}>
+        <div style={{ color: '#9ca3af', fontSize: '0.65rem', marginTop: '0.85rem' }}>
+          Ausgangspunkt ({result.originSource === 'hotel' ? 'Hotel' : 'Ort'}): {result.origin}
+        </div>
+      )}
+      {result && (
+        <table style={{ marginTop: '0.4rem', fontSize: '0.72rem', color: '#d1d5db', width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ color: '#9ca3af', textAlign: 'left' }}>
               <th style={{ padding: '0.2rem 0.4rem 0.2rem 0' }}>Ziel</th>

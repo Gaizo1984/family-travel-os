@@ -21,8 +21,13 @@ export function DaytripTestCard({ lastRun }: { lastRun: DevTestRun | null }) {
 
       {result && (
         <div style={{ marginTop: '0.85rem', fontSize: '0.72rem', color: '#d1d5db' }}>
-          <div>Ausgangsort: <strong>{result.formattedAddress}</strong></div>
-          <div style={{ marginTop: '0.3rem' }}>Stopps: {result.stops.join(' → ')}</div>
+          <div style={{ color: '#9ca3af', fontSize: '0.65rem', marginBottom: '0.2rem' }}>
+            Ausgangspunkt: {result.originSource === 'hotel' ? 'Hotel' : 'Ort'}
+          </div>
+          <div>Ausgangsort: <strong>{result.origin}</strong></div>
+          <div style={{ marginTop: '0.3rem' }}>
+            Stopps: {result.stops.map((s) => `${s.name} (${s.durationMinutes} Min)`).join(' → ')}
+          </div>
           <div style={{ marginTop: '0.3rem' }}>
             Gesamte Rundroute: <strong>{result.durationMinutes} Min</strong>, <strong>{result.distanceKm} km</strong>
           </div>

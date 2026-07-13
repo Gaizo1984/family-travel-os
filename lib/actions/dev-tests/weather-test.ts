@@ -1,27 +1,45 @@
 'use server'
 
 import { redirect } from 'next/navigation'
-import { getWeatherForLocation } from '@/lib/weather'
+import { geocodeLocation } from '@/lib/providers/places-provider'
+import { getWeatherForCoordinates } from '@/lib/weather'
 import { recordTestRun } from '@/lib/dev-test-runs'
 
 export type WeatherTestResult = {
   query: string; resolvedLocationName: string
+  lat: number; lng: number
   currentTemp: number; currentCode: number
   daily: Array<{ date: string; tempMax: number; tempMin: number; code: number }>
 }
 
+/**
+ * §"Ortsnamen immer zuerst über die bestehende Geocoding-Funktion auflösen,
+ * Open-Meteo anschließend ausschließlich mit Koordinaten aufrufen": vorher
+ * ließ dieses Modul Open-Meteo den Ortsnamen selbst geokodieren (bekannt
+ * unzuverlässig für kleine Orte, z. B. "Playa Conchal") -- jetzt läuft die
+ * Geokodierung einmalig über Google (`geocodeLocation`, dieselbe Funktion
+ * wie bei allen anderen Developer-Modulen), Open-Meteo bekommt nur noch
+ * `lat`/`lon`. Nutzt weiterhin ausschließlich den bestehenden produktiven
+ * Wetter-Provider (`getWeatherForCoordinates`), keine zweite Wetterlogik.
+ */
 export async function runWeatherTest(formData: FormData) {
   const query = String(formData.get('query') ?? '').trim()
   if (!query) redirect('/mehr/developer')
 
-  const weather = await getWeatherForLocation([{ query }])
+  const geo = await geocodeLocation(query)
+  if (!geo) {
+    await recordTestRun('weather', { success: false, errorMessage: `Ort "${query}" konnte nicht geokodiert werden.` })
+    redirect('/mehr/developer')
+  }
+
+  const weather = await getWeatherForCoordinates(geo.lat, geo.lng, geo.formattedAddress)
   if (!weather) {
-    await recordTestRun('weather', { success: false, errorMessage: `Für "${query}" konnten keine Wetterdaten ermittelt werden.` })
+    await recordTestRun('weather', { success: false, errorMessage: `Für "${query}" (${geo.lat}, ${geo.lng}) konnten keine Wetterdaten ermittelt werden.` })
     redirect('/mehr/developer')
   }
 
   const result: WeatherTestResult = {
-    query, resolvedLocationName: weather.locationName,
+    query, resolvedLocationName: weather.locationName, lat: geo.lat, lng: geo.lng,
     currentTemp: weather.currentTemp, currentCode: weather.currentCode,
     daily: weather.daily.map((d) => ({ date: d.date, tempMax: d.tempMax, tempMin: d.tempMin, code: d.code })),
   }
