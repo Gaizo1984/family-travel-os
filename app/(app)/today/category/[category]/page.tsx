@@ -164,14 +164,18 @@ async function PlacesCategorySection({
   familyId: string; tripId: string; tripSlug: string; category: string; label: string
   aiButtonLabel: string; returnTo: string; todayIso: string;
 }) {
-  const context = await buildLumiContext(familyId, tripId, todayIso);
-  if (!context) {
+  const contextResult = await buildLumiContext(familyId, tripId, todayIso);
+  if (!contextResult.ok) {
+    const message = contextResult.reason === "trip_not_found"
+      ? "Reisedaten konnten nicht geladen werden."
+      : "Ausgangspunkt (Hotel/Ort) konnte nicht ermittelt werden -- bitte später erneut versuchen.";
     return (
       <Card>
-        <p style={{ color: "var(--muted)", fontSize: "0.85rem" }}>Reisedaten konnten nicht geladen werden.</p>
+        <p style={{ color: "var(--muted)", fontSize: "0.85rem" }}>{message}</p>
       </Card>
     );
   }
+  const context = contextResult.context;
   const originKey = context.origin.placeId ?? `${context.origin.lat.toFixed(3)},${context.origin.lng.toFixed(3)}`;
   const cached = await getCategoryPlaces(familyId, tripId, category, originKey);
 

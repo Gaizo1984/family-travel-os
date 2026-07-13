@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { geocodeLocation } from '@/lib/providers/places-provider'
+import { ProviderConfigError, ProviderRequestError, describeProviderError } from '@/lib/providers/provider-errors'
 import { getWeatherForCoordinates } from '@/lib/weather'
 import { recordTestRun } from '@/lib/dev-test-runs'
 
@@ -26,7 +27,14 @@ export async function runWeatherTest(formData: FormData) {
   const query = String(formData.get('query') ?? '').trim()
   if (!query) redirect('/mehr/developer')
 
-  const geo = await geocodeLocation(query)
+  let geo: Awaited<ReturnType<typeof geocodeLocation>>
+  try {
+    geo = await geocodeLocation(query)
+  } catch (e) {
+    if (!(e instanceof ProviderConfigError || e instanceof ProviderRequestError)) throw e
+    await recordTestRun('weather', { success: false, errorMessage: describeProviderError(e) })
+    redirect('/mehr/developer')
+  }
   if (!geo) {
     await recordTestRun('weather', { success: false, errorMessage: `Ort "${query}" konnte nicht geokodiert werden.` })
     redirect('/mehr/developer')

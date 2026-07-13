@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation'
 import { searchPlaces, resolveReferencePoint, distanceKm, type PlacesCategory, type PlaceResult } from '@/lib/providers/places-provider'
 import { computeRouteMatrix } from '@/lib/providers/routes-provider'
+import { ProviderConfigError, ProviderRequestError, describeProviderError } from '@/lib/providers/provider-errors'
 import { recordTestRun } from '@/lib/dev-test-runs'
 
 const CATEGORIES: PlacesCategory[] = ['restaurant', 'attraction', 'beach', 'nature']
@@ -32,21 +33,28 @@ export async function runPlacesTest(formData: FormData) {
 
   if (!location) redirect('/mehr/developer')
 
-  const origin = await resolveReferencePoint({ hotel, location })
-  if (!origin) {
+  let originOrNull: Awaited<ReturnType<typeof resolveReferencePoint>> = null
+  let searchResults: Array<PlaceResult[] | null> = []
+  let matrixResult: Awaited<ReturnType<typeof computeRouteMatrix>> = null
+  try {
+    originOrNull = await resolveReferencePoint({ hotel, location })
+    if (originOrNull) {
+      const resolvedOrigin = originOrNull
+      searchResults = await Promise.all(
+        CATEGORIES.map((category) => searchPlaces({ locationName: location, category, lat: resolvedOrigin.lat, lng: resolvedOrigin.lng })),
+      )
+    }
+  } catch (e) {
+    if (!(e instanceof ProviderConfigError || e instanceof ProviderRequestError)) throw e
+    await recordTestRun('places', { success: false, errorMessage: describeProviderError(e) })
+    redirect('/mehr/developer')
+  }
+
+  if (!originOrNull) {
     await recordTestRun('places', { success: false, errorMessage: `Weder Hotel "${hotel ?? ''}" noch Ort "${location}" konnten aufgelöst werden.` })
     redirect('/mehr/developer')
   }
-
-  const searchResults = await Promise.all(
-    CATEGORIES.map((category) => searchPlaces({ locationName: location, category, lat: origin.lat, lng: origin.lng })),
-  )
-
-  const allNull = searchResults.every((r) => r === null)
-  if (allNull) {
-    await recordTestRun('places', { success: false, errorMessage: 'Places API lieferte für keine Kategorie Ergebnisse (Key/Berechtigung prüfen).' })
-    redirect('/mehr/developer')
-  }
+  const origin = originOrNull
 
   // §Bugfix "Dedup zu aggressiv, Strände/Naturziele bleiben leer": nur noch
   // INNERHALB einer Kategorie nach Place-ID deduplizieren (Google liefert pro
@@ -71,9 +79,16 @@ export async function runPlacesTest(formData: FormData) {
   // §"Für Empfehlungen möglichst zusätzlich echte Fahrtzeiten ergänzen": EIN
   // Route-Matrix-Aufruf für den gesamten (bereits gedeckelten) Treffersatz --
   // kein Aufruf pro Einzelort, vermeidet unnötige API-Last.
-  const matrix = allShown.length > 0
-    ? await computeRouteMatrix({ origins: [{ lat: origin.lat, lng: origin.lng }], destinations: allShown.map((p) => ({ lat: p.lat, lng: p.lng })) })
-    : null
+  if (allShown.length > 0) {
+    try {
+      matrixResult = await computeRouteMatrix({ origins: [{ lat: origin.lat, lng: origin.lng }], destinations: allShown.map((p) => ({ lat: p.lat, lng: p.lng })) })
+    } catch (e) {
+      if (!(e instanceof ProviderConfigError || e instanceof ProviderRequestError)) throw e
+      await recordTestRun('places', { success: false, errorMessage: describeProviderError(e) })
+      redirect('/mehr/developer')
+    }
+  }
+  const matrix = matrixResult
 
   const categories = {} as Record<PlacesCategory, CompactPlace[]>
   let totalCount = 0

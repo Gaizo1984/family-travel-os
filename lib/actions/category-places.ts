@@ -3,9 +3,10 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { searchPlaces, distanceKm, type PlaceResult } from '@/lib/providers/places-provider'
-import { computeRouteMatrix } from '@/lib/providers/routes-provider'
+import { computeRouteMatrix, type RouteMatrixElement } from '@/lib/providers/routes-provider'
+import { ProviderConfigError } from '@/lib/providers/provider-errors'
 import { generateFiveRecommendations } from '@/lib/concierge-ai'
-import { buildLumiContext, type LumiContext } from '@/lib/lumi-context'
+import { buildLumiContext, lumiContextErrorMessage, type LumiContext } from '@/lib/lumi-context'
 import { getTodayCategoryConfig, type TodayCategoryKey } from '@/lib/today-categories'
 
 export type CategoryPlaceItem = {
@@ -60,15 +61,24 @@ export async function loadCategoryPlaces(formData: FormData) {
   const config = getTodayCategoryConfig(category)
   if (!config?.placesCategory || !familyId || !tripId) redirect(returnTo)
 
-  const context = await buildLumiContext(familyId, tripId, new Date().toISOString().slice(0, 10))
-  if (!context) redirect(`${returnTo}?error=${encodeURIComponent('Reise konnte nicht geladen werden')}`)
+  const contextResult = await buildLumiContext(familyId, tripId, new Date().toISOString().slice(0, 10))
+  if (!contextResult.ok) redirect(`${returnTo}?error=${encodeURIComponent(lumiContextErrorMessage(contextResult.reason))}`)
+  const context = contextResult.context
 
   const origin = context.origin
   const originKey = originKeyFor(origin)
 
-  const rawResults = await searchPlaces({
-    locationName: origin.formattedAddress, category: config.placesCategory, lat: origin.lat, lng: origin.lng,
-  })
+  let rawResults: PlaceResult[] | null
+  try {
+    rawResults = await searchPlaces({
+      locationName: origin.formattedAddress, category: config.placesCategory, lat: origin.lat, lng: origin.lng,
+    })
+  } catch (e) {
+    const message = e instanceof ProviderConfigError
+      ? 'LUMI ist aktuell nicht konfiguriert -- bitte Support informieren.'
+      : 'Die Suche ist gerade fehlgeschlagen -- bitte in Kürze erneut versuchen.'
+    redirect(`${returnTo}?error=${encodeURIComponent(message)}`)
+  }
 
   if (!rawResults || rawResults.length === 0) {
     redirect(`${returnTo}?error=${encodeURIComponent('Keine Treffer gefunden -- bitte später erneut versuchen.')}`)
@@ -81,10 +91,15 @@ export async function loadCategoryPlaces(formData: FormData) {
     return true
   }).slice(0, 10)
 
-  const matrix = await computeRouteMatrix({
-    origins: [{ lat: origin.lat, lng: origin.lng }],
-    destinations: deduped.map((p) => ({ lat: p.lat, lng: p.lng })),
-  })
+  let matrix: RouteMatrixElement[] | null = null
+  try {
+    matrix = await computeRouteMatrix({
+      origins: [{ lat: origin.lat, lng: origin.lng }],
+      destinations: deduped.map((p) => ({ lat: p.lat, lng: p.lng })),
+    })
+  } catch {
+    // Bereits über logProviderError() geloggt -- gefundene Places-Treffer bleiben ohne Fahrzeit-Anreicherung erhalten (Haversine-Fallback unten).
+  }
 
   const preferredMax = config.preferredMaxMinutes ?? 90
   const hardMax = config.hardMaxMinutes ?? 150
@@ -141,10 +156,11 @@ export async function loadCategoryPlaces(formData: FormData) {
   const result: Pick<CategoryPlacesResult, 'originSource' | 'items'> = { originSource: origin.source, items }
 
   const supabase = await createClient()
-  await supabase.from('category_places_cache').upsert(
+  const { error: cacheError } = await supabase.from('category_places_cache').upsert(
     { family_id: familyId, trip_id: tripId, category, origin_key: originKey, origin_label: origin.formattedAddress, results: result, updated_at: new Date().toISOString() },
     { onConflict: 'family_id,trip_id,category,origin_key' },
   )
+  if (cacheError) console.error('[category-places] cache upsert failed', { category })
 
   redirect(returnTo)
 }

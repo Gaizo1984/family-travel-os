@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation'
 import { geocodeLocation, resolveReferencePoint } from '@/lib/providers/places-provider'
 import { computeRouteMatrix } from '@/lib/providers/routes-provider'
+import { ProviderConfigError, ProviderRequestError, describeProviderError } from '@/lib/providers/provider-errors'
 import { recordTestRun } from '@/lib/dev-test-runs'
 
 export type ComputeRouteMatrixTestResult = {
@@ -18,9 +19,20 @@ export async function runComputeRouteMatrixTest(formData: FormData) {
 
   if (!origin || destinationNames.length === 0) redirect('/mehr/developer')
 
-  // §"Ursprung" fungiert als Hotel/Referenzpunkt -- Places-Text-Search zuerst.
-  const originGeo = await resolveReferencePoint({ hotel: origin, location: origin })
-  const destGeos = await Promise.all(destinationNames.map((d) => geocodeLocation(d)))
+  let originGeo: Awaited<ReturnType<typeof resolveReferencePoint>> = null
+  let destGeos: Array<Awaited<ReturnType<typeof geocodeLocation>>> = []
+  let matrix: Awaited<ReturnType<typeof computeRouteMatrix>> = null
+  try {
+    // §"Ursprung" fungiert als Hotel/Referenzpunkt -- Places-Text-Search zuerst.
+    ;[originGeo, destGeos] = await Promise.all([
+      resolveReferencePoint({ hotel: origin, location: origin }),
+      Promise.all(destinationNames.map((d) => geocodeLocation(d))),
+    ])
+  } catch (e) {
+    if (!(e instanceof ProviderConfigError || e instanceof ProviderRequestError)) throw e
+    await recordTestRun('routes_compute_route_matrix', { success: false, errorMessage: describeProviderError(e) })
+    redirect('/mehr/developer')
+  }
 
   if (!originGeo) {
     await recordTestRun('routes_compute_route_matrix', { success: false, errorMessage: `Ursprung "${origin}" konnte nicht geokodiert werden.` })
@@ -34,10 +46,16 @@ export async function runComputeRouteMatrixTest(formData: FormData) {
     redirect('/mehr/developer')
   }
 
-  const matrix = await computeRouteMatrix({
-    origins: [{ lat: originGeo.lat, lng: originGeo.lng }],
-    destinations: validDestGeos.map((g) => ({ lat: g.lat, lng: g.lng })),
-  })
+  try {
+    matrix = await computeRouteMatrix({
+      origins: [{ lat: originGeo.lat, lng: originGeo.lng }],
+      destinations: validDestGeos.map((g) => ({ lat: g.lat, lng: g.lng })),
+    })
+  } catch (e) {
+    if (!(e instanceof ProviderConfigError || e instanceof ProviderRequestError)) throw e
+    await recordTestRun('routes_compute_route_matrix', { success: false, errorMessage: describeProviderError(e) })
+    redirect('/mehr/developer')
+  }
 
   if (!matrix) {
     await recordTestRun('routes_compute_route_matrix', { success: false, errorMessage: 'Routes API (Compute Route Matrix) lieferte kein Ergebnis (Berechtigung/Aktivierung prüfen).' })

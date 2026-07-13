@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation'
 import { searchPlaces, resolveReferencePoint, distanceKm, type PlacesCategory, type PlaceResult } from '@/lib/providers/places-provider'
 import { computeRoute, computeRouteMatrix } from '@/lib/providers/routes-provider'
+import { ProviderConfigError, ProviderRequestError, describeProviderError } from '@/lib/providers/provider-errors'
 import { recordTestRun } from '@/lib/dev-test-runs'
 import { MAX_LEG_MINUTES } from '@/lib/dev-test-config'
 
@@ -32,15 +33,27 @@ export async function runDaytripTest(formData: FormData) {
   const origin = String(formData.get('origin') ?? '').trim()
   if (!origin) redirect('/mehr/developer')
 
-  const originGeo = await resolveReferencePoint({ hotel: origin, location: origin })
-  if (!originGeo) {
-    await recordTestRun('daytrip_multi_stop', { success: false, errorMessage: `Ausgangsort "${origin}" konnte nicht aufgelöst werden.` })
+  let originGeoOrNull: Awaited<ReturnType<typeof resolveReferencePoint>> = null
+  let searchResults: Array<PlaceResult[] | null> = []
+  try {
+    originGeoOrNull = await resolveReferencePoint({ hotel: origin, location: origin })
+    if (originGeoOrNull) {
+      const resolvedOrigin = originGeoOrNull
+      searchResults = await Promise.all(
+        CANDIDATE_CATEGORIES.map((category) => searchPlaces({ locationName: origin, category, lat: resolvedOrigin.lat, lng: resolvedOrigin.lng })),
+      )
+    }
+  } catch (e) {
+    if (!(e instanceof ProviderConfigError || e instanceof ProviderRequestError)) throw e
+    await recordTestRun('daytrip_multi_stop', { success: false, errorMessage: describeProviderError(e) })
     redirect('/mehr/developer')
   }
 
-  const searchResults = await Promise.all(
-    CANDIDATE_CATEGORIES.map((category) => searchPlaces({ locationName: origin, category, lat: originGeo.lat, lng: originGeo.lng })),
-  )
+  if (!originGeoOrNull) {
+    await recordTestRun('daytrip_multi_stop', { success: false, errorMessage: `Ausgangsort "${origin}" konnte nicht aufgelöst werden.` })
+    redirect('/mehr/developer')
+  }
+  const originGeo = originGeoOrNull
 
   const seenIds = new Set<string>()
   const candidates: PlaceResult[] = []
@@ -58,10 +71,17 @@ export async function runDaytripTest(formData: FormData) {
     redirect('/mehr/developer')
   }
 
-  const matrix = await computeRouteMatrix({
-    origins: [{ lat: originGeo.lat, lng: originGeo.lng }],
-    destinations: candidates.map((c) => ({ lat: c.lat, lng: c.lng })),
-  })
+  let matrix: Awaited<ReturnType<typeof computeRouteMatrix>> = null
+  try {
+    matrix = await computeRouteMatrix({
+      origins: [{ lat: originGeo.lat, lng: originGeo.lng }],
+      destinations: candidates.map((c) => ({ lat: c.lat, lng: c.lng })),
+    })
+  } catch (e) {
+    if (!(e instanceof ProviderConfigError || e instanceof ProviderRequestError)) throw e
+    await recordTestRun('daytrip_multi_stop', { success: false, errorMessage: describeProviderError(e) })
+    redirect('/mehr/developer')
+  }
 
   if (!matrix) {
     await recordTestRun('daytrip_multi_stop', { success: false, errorMessage: 'Routes API (Compute Route Matrix) lieferte kein Ergebnis für die Vorauswahl.' })
@@ -83,11 +103,18 @@ export async function runDaytripTest(formData: FormData) {
     redirect('/mehr/developer')
   }
 
-  const route = await computeRoute({
-    origin: originGeo, destination: originGeo,
-    waypoints: reachable.map((r) => ({ lat: r.place.lat, lng: r.place.lng })),
-    optimizeWaypointOrder: true,
-  })
+  let route: Awaited<ReturnType<typeof computeRoute>> = null
+  try {
+    route = await computeRoute({
+      origin: originGeo, destination: originGeo,
+      waypoints: reachable.map((r) => ({ lat: r.place.lat, lng: r.place.lng })),
+      optimizeWaypointOrder: true,
+    })
+  } catch (e) {
+    if (!(e instanceof ProviderConfigError || e instanceof ProviderRequestError)) throw e
+    await recordTestRun('daytrip_multi_stop', { success: false, errorMessage: describeProviderError(e) })
+    redirect('/mehr/developer')
+  }
 
   if (!route) {
     await recordTestRun('daytrip_multi_stop', { success: false, errorMessage: 'Routes API (Compute Routes) lieferte kein Ergebnis für die kombinierte Route.' })

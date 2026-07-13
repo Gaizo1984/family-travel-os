@@ -155,7 +155,13 @@ export type WeatherLocationCandidate = { query: string; countryCode?: string | n
 export async function getWeatherForLocation(candidates: WeatherLocationCandidate[]): Promise<WeatherResult | null> {
   for (const candidate of candidates) {
     if (!candidate.query) continue
-    const geo = await geocodeLocation(candidate.query)
+    let geo: Awaited<ReturnType<typeof geocodeLocation>>
+    try {
+      geo = await geocodeLocation(candidate.query)
+    } catch {
+      // Bereits über logProviderError() geloggt (places-provider.ts) -- Wetter bleibt eine optionale Anreicherung, nie ein Seitenabsturz.
+      continue
+    }
     if (!geo) continue
     const result = await getWeatherForCoordinates(geo.lat, geo.lng, geo.formattedAddress)
     if (result) return result

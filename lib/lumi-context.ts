@@ -1,6 +1,7 @@
 import { createClient } from './supabase/server'
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt, type FamilyDnaSummary } from './family-dna'
 import { resolveReferencePoint, type ReferencePoint } from './providers/places-provider'
+import { ProviderConfigError, ProviderRequestError } from './providers/provider-errors'
 import { getWeatherForLocation, type WeatherResult } from './weather'
 import { resolveTripAiContext } from './today-trip-context'
 import { computeTripReadiness, type ReadinessFinding } from './readiness'
@@ -31,6 +32,17 @@ export type LumiContext = {
   upcomingBookings: TimelineBooking[]
   plannedActivities: LumiJourneyItem[]
   readinessFindings: ReadinessFinding[]
+}
+
+export type LumiContextResult =
+  | { ok: true; context: LumiContext }
+  | { ok: false; reason: 'trip_not_found' | 'origin_unresolved' }
+
+/** Konsistente Übersetzung eines LumiContext-Fehlschlags in eine Nutzer-Meldung -- geteilt von allen Aufrufern von `buildLumiContext`. */
+export function lumiContextErrorMessage(reason: 'trip_not_found' | 'origin_unresolved'): string {
+  return reason === 'trip_not_found'
+    ? 'Reise konnte nicht geladen werden'
+    : 'Ausgangspunkt (Hotel/Ort) konnte nicht ermittelt werden -- bitte später erneut versuchen.'
 }
 
 type TripRow = {
@@ -75,7 +87,7 @@ function pickRelevantAccommodation(bookings: TimelineBooking[], isActive: boolea
  * `buildFamilyDnaSummary` für Familie/Kinderalter, `computeTripReadiness`
  * für offene Vorbereitungspunkte) statt sie zu duplizieren.
  */
-export async function buildLumiContext(familyId: string, tripId: string, todayIso: string): Promise<LumiContext | null> {
+export async function buildLumiContext(familyId: string, tripId: string, todayIso: string): Promise<LumiContextResult> {
   const supabase = await createClient()
 
   const [{ data: tripRow }, dna] = await Promise.all([
@@ -89,7 +101,7 @@ export async function buildLumiContext(familyId: string, tripId: string, todayIs
     buildFamilyDnaSummary(familyId),
   ])
 
-  if (!tripRow) return null
+  if (!tripRow) return { ok: false, reason: 'trip_not_found' }
   const trip = tripRow as unknown as TripRow
   const isActive = isTripCurrentlyRunning(trip, todayIso)
 
@@ -100,8 +112,17 @@ export async function buildLumiContext(familyId: string, tripId: string, todayIs
   )
 
   const relevantAccommodation = pickRelevantAccommodation(trip.bookings, isActive, todayIso)
-  const origin = await resolveReferencePoint({ hotel: relevantAccommodation?.title ?? null, location: aiContext.locationLabel })
-    ?? { placeId: null, name: aiContext.locationLabel, formattedAddress: aiContext.locationLabel, lat: 0, lng: 0, source: 'location' as const }
+  let origin: ReferencePoint
+  try {
+    const resolved = await resolveReferencePoint({ hotel: relevantAccommodation?.title ?? null, location: aiContext.locationLabel })
+    if (!resolved) return { ok: false, reason: 'origin_unresolved' }
+    origin = resolved
+  } catch (e) {
+    if (e instanceof ProviderConfigError || e instanceof ProviderRequestError) {
+      return { ok: false, reason: 'origin_unresolved' }
+    }
+    throw e
+  }
 
   const hasRentalCar = trip.bookings.some((b) => b.type === 'rental_car' && b.status !== 'cancelled')
   const todaysBookings = trip.bookings.filter((b) => b.status !== 'cancelled' && b.start_datetime?.slice(0, 10) === todayIso)
@@ -116,7 +137,7 @@ export async function buildLumiContext(familyId: string, tripId: string, todayIs
 
   const [readiness] = await Promise.all([computeTripReadiness(tripId)])
 
-  return {
+  return { ok: true, context: {
     familyId, tripId: trip.id, tripSlug: trip.slug, tripTitle: trip.title, isActive, todayIso,
     currentTripDay, tripDurationDays,
     origin, countryCode: aiContext.countryCode, weather: aiContext.weather,
@@ -124,5 +145,5 @@ export async function buildLumiContext(familyId: string, tripId: string, todayIs
     hasRentalCar, todaysBookings, upcomingBookings,
     plannedActivities: trip.journey_events,
     readinessFindings: readiness.findings,
-  }
+  } }
 }

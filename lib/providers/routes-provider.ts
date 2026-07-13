@@ -1,3 +1,5 @@
+import { ProviderConfigError, ProviderRequestError, extractGoogleErrorCode, logProviderError } from './provider-errors'
+
 const COMPUTE_ROUTES_URL = 'https://routes.googleapis.com/directions/v2:computeRoutes'
 const COMPUTE_ROUTE_MATRIX_URL = 'https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix'
 
@@ -46,7 +48,11 @@ async function googleComputeRoute(params: {
   optimizeWaypointOrder?: boolean
 }): Promise<ComputeRouteResult | null> {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY
-  if (!apiKey) return null
+  if (!apiKey) {
+    const err = new ProviderConfigError('routes', 'compute_route')
+    logProviderError(err)
+    throw err
+  }
 
   const fieldMask = [
     'routes.duration', 'routes.distanceMeters', 'routes.legs.duration', 'routes.legs.distanceMeters',
@@ -72,7 +78,11 @@ async function googleComputeRoute(params: {
       }),
       cache: 'no-store',
     })
-    if (!res.ok) return null
+    if (!res.ok) {
+      const err = new ProviderRequestError('routes', 'compute_route', res.status, await extractGoogleErrorCode(res))
+      logProviderError(err)
+      throw err
+    }
     const data = await res.json()
     const route = data?.routes?.[0]
     if (!route) return null
@@ -88,14 +98,21 @@ async function googleComputeRoute(params: {
       legs,
       optimizedWaypointOrder: Array.isArray(route.optimizedIntermediateWaypointIndex) ? route.optimizedIntermediateWaypointIndex : null,
     }
-  } catch {
-    return null
+  } catch (e) {
+    if (e instanceof ProviderConfigError || e instanceof ProviderRequestError) throw e
+    const err = new ProviderRequestError('routes', 'compute_route', 0)
+    logProviderError(err)
+    throw err
   }
 }
 
 async function googleComputeRouteMatrix(params: { origins: LatLng[]; destinations: LatLng[] }): Promise<RouteMatrixElement[] | null> {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY
-  if (!apiKey) return null
+  if (!apiKey) {
+    const err = new ProviderConfigError('routes', 'compute_route_matrix')
+    logProviderError(err)
+    throw err
+  }
 
   try {
     const res = await fetch(COMPUTE_ROUTE_MATRIX_URL, {
@@ -113,7 +130,11 @@ async function googleComputeRouteMatrix(params: { origins: LatLng[]; destination
       }),
       cache: 'no-store',
     })
-    if (!res.ok) return null
+    if (!res.ok) {
+      const err = new ProviderRequestError('routes', 'compute_route_matrix', res.status, await extractGoogleErrorCode(res))
+      logProviderError(err)
+      throw err
+    }
     const data = await res.json()
     if (!Array.isArray(data)) return null
     return data.map((el: any) => ({
@@ -123,8 +144,11 @@ async function googleComputeRouteMatrix(params: { origins: LatLng[]; destination
       distanceMeters: el.distanceMeters ?? null,
       reachable: el.condition === 'ROUTE_EXISTS',
     }))
-  } catch {
-    return null
+  } catch (e) {
+    if (e instanceof ProviderConfigError || e instanceof ProviderRequestError) throw e
+    const err = new ProviderRequestError('routes', 'compute_route_matrix', 0)
+    logProviderError(err)
+    throw err
   }
 }
 

@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation'
 import { geocodeLocation, resolveReferencePoint } from '@/lib/providers/places-provider'
 import { computeRoute } from '@/lib/providers/routes-provider'
+import { ProviderConfigError, ProviderRequestError, describeProviderError } from '@/lib/providers/provider-errors'
 import { recordTestRun } from '@/lib/dev-test-runs'
 
 export type ComputeRouteTestResult = {
@@ -24,13 +25,23 @@ export async function runComputeRouteTest(formData: FormData) {
 
   if (!origin || !destination) redirect('/mehr/developer')
 
-  // §"Start" fungiert als Hotel/Referenzpunkt -- Places-Text-Search zuerst
-  // (bessere Trefferquote für Hotelnamen als reines Geocoding).
-  const [originGeo, destGeo, waypointGeos] = await Promise.all([
-    resolveReferencePoint({ hotel: origin, location: origin }),
-    geocodeLocation(destination),
-    Promise.all(waypoints.map((w) => geocodeLocation(w))),
-  ])
+  let originGeo: Awaited<ReturnType<typeof resolveReferencePoint>> = null
+  let destGeo: Awaited<ReturnType<typeof geocodeLocation>> = null
+  let waypointGeos: Array<Awaited<ReturnType<typeof geocodeLocation>>> = []
+  let route: Awaited<ReturnType<typeof computeRoute>> = null
+  try {
+    // §"Start" fungiert als Hotel/Referenzpunkt -- Places-Text-Search zuerst
+    // (bessere Trefferquote für Hotelnamen als reines Geocoding).
+    ;[originGeo, destGeo, waypointGeos] = await Promise.all([
+      resolveReferencePoint({ hotel: origin, location: origin }),
+      geocodeLocation(destination),
+      Promise.all(waypoints.map((w) => geocodeLocation(w))),
+    ])
+  } catch (e) {
+    if (!(e instanceof ProviderConfigError || e instanceof ProviderRequestError)) throw e
+    await recordTestRun('routes_compute_route', { success: false, errorMessage: describeProviderError(e) })
+    redirect('/mehr/developer')
+  }
 
   if (!originGeo || !destGeo) {
     await recordTestRun('routes_compute_route', { success: false, errorMessage: 'Start oder Ziel konnte nicht geokodiert werden.' })
@@ -41,11 +52,17 @@ export async function runComputeRouteTest(formData: FormData) {
     redirect('/mehr/developer')
   }
 
-  const route = await computeRoute({
-    origin: originGeo, destination: destGeo,
-    waypoints: waypointGeos.map((g) => ({ lat: g!.lat, lng: g!.lng })),
-    optimizeWaypointOrder: waypointGeos.length > 1,
-  })
+  try {
+    route = await computeRoute({
+      origin: originGeo, destination: destGeo,
+      waypoints: waypointGeos.map((g) => ({ lat: g!.lat, lng: g!.lng })),
+      optimizeWaypointOrder: waypointGeos.length > 1,
+    })
+  } catch (e) {
+    if (!(e instanceof ProviderConfigError || e instanceof ProviderRequestError)) throw e
+    await recordTestRun('routes_compute_route', { success: false, errorMessage: describeProviderError(e) })
+    redirect('/mehr/developer')
+  }
 
   if (!route) {
     await recordTestRun('routes_compute_route', { success: false, errorMessage: 'Routes API (Compute Routes) lieferte kein Ergebnis (Berechtigung/Aktivierung prüfen).' })

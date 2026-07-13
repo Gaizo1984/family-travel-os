@@ -1,3 +1,5 @@
+import { ProviderConfigError, ProviderRequestError, extractGoogleErrorCode, logProviderError } from './provider-errors'
+
 const GEOCODING_URL = 'https://maps.googleapis.com/maps/api/geocode/json'
 const PLACES_SEARCH_URL = 'https://places.googleapis.com/v1/places:searchText'
 
@@ -61,11 +63,19 @@ interface PlacesProvider {
 
 async function googleGeocode(query: string): Promise<GeocodeResult | null> {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY
-  if (!apiKey) return null
+  if (!apiKey) {
+    const err = new ProviderConfigError('places', 'geocode')
+    logProviderError(err)
+    throw err
+  }
   try {
     const params = new URLSearchParams({ address: query, language: 'de', key: apiKey })
     const res = await fetch(`${GEOCODING_URL}?${params.toString()}`, { cache: 'no-store' })
-    if (!res.ok) return null
+    if (!res.ok) {
+      const err = new ProviderRequestError('places', 'geocode', res.status, await extractGoogleErrorCode(res))
+      logProviderError(err)
+      throw err
+    }
     const data = await res.json()
     const first = data?.results?.[0]
     if (!first) return null
@@ -74,14 +84,21 @@ async function googleGeocode(query: string): Promise<GeocodeResult | null> {
       lng: first.geometry.location.lng,
       formattedAddress: first.formatted_address,
     }
-  } catch {
-    return null
+  } catch (e) {
+    if (e instanceof ProviderConfigError || e instanceof ProviderRequestError) throw e
+    const err = new ProviderRequestError('places', 'geocode', 0)
+    logProviderError(err)
+    throw err
   }
 }
 
 async function googlePlacesSearch(params: PlacesSearchParams): Promise<PlaceResult[] | null> {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY
-  if (!apiKey) return null
+  if (!apiKey) {
+    const err = new ProviderConfigError('places', 'places_search')
+    logProviderError(err)
+    throw err
+  }
 
   let lat = params.lat
   let lng = params.lng
@@ -108,7 +125,11 @@ async function googlePlacesSearch(params: PlacesSearchParams): Promise<PlaceResu
       }),
       cache: 'no-store',
     })
-    if (!res.ok) return null
+    if (!res.ok) {
+      const err = new ProviderRequestError('places', 'places_search', res.status, await extractGoogleErrorCode(res))
+      logProviderError(err)
+      throw err
+    }
     const data = await res.json()
     const places: any[] = data?.places ?? []
     return places.map((p) => ({
@@ -123,8 +144,11 @@ async function googlePlacesSearch(params: PlacesSearchParams): Promise<PlaceResu
       weekdayDescriptions: p.currentOpeningHours?.weekdayDescriptions ?? null,
       photoName: p.photos?.[0]?.name ?? null,
     }))
-  } catch {
-    return null
+  } catch (e) {
+    if (e instanceof ProviderConfigError || e instanceof ProviderRequestError) throw e
+    const err = new ProviderRequestError('places', 'places_search', 0)
+    logProviderError(err)
+    throw err
   }
 }
 
@@ -156,7 +180,11 @@ type PlaceLookupResult = { placeId: string; name: string; formattedAddress: stri
  */
 async function resolvePlaceByName(name: string): Promise<PlaceLookupResult | null> {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY
-  if (!apiKey) return null
+  if (!apiKey) {
+    const err = new ProviderConfigError('places', 'place_lookup')
+    logProviderError(err)
+    throw err
+  }
   try {
     const res = await fetch(PLACES_SEARCH_URL, {
       method: 'POST',
@@ -164,7 +192,11 @@ async function resolvePlaceByName(name: string): Promise<PlaceLookupResult | nul
       body: JSON.stringify({ textQuery: name, languageCode: 'de', maxResultCount: 1 }),
       cache: 'no-store',
     })
-    if (!res.ok) return null
+    if (!res.ok) {
+      const err = new ProviderRequestError('places', 'place_lookup', res.status, await extractGoogleErrorCode(res))
+      logProviderError(err)
+      throw err
+    }
     const data = await res.json()
     const first = data?.places?.[0]
     if (!first?.location) return null
@@ -176,8 +208,11 @@ async function resolvePlaceByName(name: string): Promise<PlaceLookupResult | nul
       lng: first.location.longitude,
       types: Array.isArray(first.types) ? first.types : [],
     }
-  } catch {
-    return null
+  } catch (e) {
+    if (e instanceof ProviderConfigError || e instanceof ProviderRequestError) throw e
+    const err = new ProviderRequestError('places', 'place_lookup', 0)
+    logProviderError(err)
+    throw err
   }
 }
 

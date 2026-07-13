@@ -2,9 +2,10 @@
 
 import { redirect } from 'next/navigation'
 import { searchPlaces, distanceKm, type PlacesCategory, type PlaceResult } from '@/lib/providers/places-provider'
-import { computeRoute, computeRouteMatrix } from '@/lib/providers/routes-provider'
+import { computeRoute, computeRouteMatrix, type RouteMatrixElement } from '@/lib/providers/routes-provider'
+import { ProviderConfigError } from '@/lib/providers/provider-errors'
 import { generateFiveRecommendations } from '@/lib/concierge-ai'
-import { buildLumiContext } from '@/lib/lumi-context'
+import { buildLumiContext, lumiContextErrorMessage } from '@/lib/lumi-context'
 import { describeWeatherCode } from '@/lib/weather'
 import { MAX_LEG_MINUTES } from '@/lib/dev-test-config'
 
@@ -66,16 +67,25 @@ export async function generateDayPlan(formData: FormData) {
 
   if (!familyId || !tripId) redirect('/today')
 
-  const context = await buildLumiContext(familyId, tripId, new Date().toISOString().slice(0, 10))
-  if (!context) redirect(`${returnTo}?error=${encodeURIComponent('Reise konnte nicht geladen werden')}`)
+  const contextResult = await buildLumiContext(familyId, tripId, new Date().toISOString().slice(0, 10))
+  if (!contextResult.ok) redirect(`${returnTo}?error=${encodeURIComponent(lumiContextErrorMessage(contextResult.reason))}`)
+  const context = contextResult.context
 
   const origin = context.origin
   const categories = MODE_CATEGORIES[mode] ?? MODE_CATEGORIES.today
   const maxStops = MODE_MAX_STOPS[mode] ?? 2
 
-  const searchResults = await Promise.all(
-    categories.map((category) => searchPlaces({ locationName: origin.formattedAddress, category, lat: origin.lat, lng: origin.lng })),
-  )
+  let searchResults: Array<PlaceResult[] | null>
+  try {
+    searchResults = await Promise.all(
+      categories.map((category) => searchPlaces({ locationName: origin.formattedAddress, category, lat: origin.lat, lng: origin.lng })),
+    )
+  } catch (e) {
+    const message = e instanceof ProviderConfigError
+      ? 'LUMI ist aktuell nicht konfiguriert -- bitte Support informieren.'
+      : 'Die Suche ist gerade fehlgeschlagen -- bitte in Kürze erneut versuchen.'
+    redirect(`${returnTo}?error=${encodeURIComponent(message)}`)
+  }
 
   const seenIds = new Set<string>()
   const candidates: Array<{ place: PlaceResult; category: PlacesCategory }> = []
@@ -92,10 +102,18 @@ export async function generateDayPlan(formData: FormData) {
     redirect(`${returnTo}?error=${encodeURIComponent('Keine Kandidaten-Stopps in der Nähe gefunden.')}`)
   }
 
-  const matrix = await computeRouteMatrix({
-    origins: [{ lat: origin.lat, lng: origin.lng }],
-    destinations: candidates.map((c) => ({ lat: c.place.lat, lng: c.place.lng })),
-  })
+  let matrix: RouteMatrixElement[] | null
+  try {
+    matrix = await computeRouteMatrix({
+      origins: [{ lat: origin.lat, lng: origin.lng }],
+      destinations: candidates.map((c) => ({ lat: c.place.lat, lng: c.place.lng })),
+    })
+  } catch (e) {
+    const message = e instanceof ProviderConfigError
+      ? 'LUMI ist aktuell nicht konfiguriert -- bitte Support informieren.'
+      : 'Die Streckenberechnung ist gerade fehlgeschlagen -- bitte in Kürze erneut versuchen.'
+    redirect(`${returnTo}?error=${encodeURIComponent(message)}`)
+  }
 
   const reachable = candidates
     .map((c, i) => ({ ...c, matrixEl: matrix?.find((m) => m.destinationIndex === i) ?? null }))
@@ -125,11 +143,19 @@ export async function generateDayPlan(formData: FormData) {
   const selected = reachable.filter((r) => pickedNames.includes(r.place.name)).slice(0, maxStops)
   const finalSelection = selected.length >= 1 ? selected : reachable.slice(0, maxStops)
 
-  const route = await computeRoute({
-    origin: { lat: origin.lat, lng: origin.lng }, destination: { lat: origin.lat, lng: origin.lng },
-    waypoints: finalSelection.map((r) => ({ lat: r.place.lat, lng: r.place.lng })),
-    optimizeWaypointOrder: finalSelection.length > 1,
-  })
+  let route: Awaited<ReturnType<typeof computeRoute>>
+  try {
+    route = await computeRoute({
+      origin: { lat: origin.lat, lng: origin.lng }, destination: { lat: origin.lat, lng: origin.lng },
+      waypoints: finalSelection.map((r) => ({ lat: r.place.lat, lng: r.place.lng })),
+      optimizeWaypointOrder: finalSelection.length > 1,
+    })
+  } catch (e) {
+    const message = e instanceof ProviderConfigError
+      ? 'LUMI ist aktuell nicht konfiguriert -- bitte Support informieren.'
+      : 'Die Routenberechnung ist gerade fehlgeschlagen -- bitte in Kürze erneut versuchen.'
+    redirect(`${returnTo}?error=${encodeURIComponent(message)}`)
+  }
 
   if (!route) {
     redirect(`${returnTo}?error=${encodeURIComponent('Route konnte nicht berechnet werden.')}`)

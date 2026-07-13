@@ -36,7 +36,10 @@ export async function generateConciergeAnswer(context: {
   memberNames: string[]
   isRegenerate: boolean
 }): Promise<ConciergeAiResult | null> {
-  if (!process.env.OPENAI_API_KEY) return null
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('[provider:config-missing]', { provider: 'openai', requestType: 'concierge_answer' })
+    return null
+  }
 
   const prompt = `Du bist der persönliche Reise-Concierge dieser Familie (${context.memberNames.join(', ') || 'Familie'}) für den heutigen Tag (${context.dateLabel}) in ${context.locationLabel}.
 ${context.weatherSummary ? `Wetter heute: ${context.weatherSummary}.` : 'Wetterdaten nicht verfügbar.'}
@@ -58,7 +61,8 @@ Antworte mit GENAU EINER starken, konkreten Empfehlung — keine Liste konkurrie
 
     const parsed = JSON.parse(response.output_text)
     return { title: parsed.title, body: parsed.body, eventTitle: parsed.event_title }
-  } catch {
+  } catch (e) {
+    console.error('[provider:request-failed]', { provider: 'openai', requestType: 'concierge_answer', httpStatus: (e as { status?: number })?.status ?? 0 })
     return null
   }
 }
@@ -117,7 +121,10 @@ export async function generateFiveRecommendations(context: {
   members: RecommendationFamilyMember[]
   weatherSummary: string | null
 }): Promise<FiveRecommendationsResult | null> {
-  if (!process.env.OPENAI_API_KEY) return null
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('[provider:config-missing]', { provider: 'openai', requestType: 'five_recommendations' })
+    return null
+  }
   if (context.candidates.length === 0) return null
 
   const memberText = context.members.length > 0
@@ -160,7 +167,8 @@ Wähle genau 5 dieser Orte aus, die am besten zu dieser Familie passen. Regeln f
       kinderEignung: r.kinder_eignung, wetterEignung: r.wetter_eignung,
       tripLength: r.trip_length, besondereHinweise: r.besondere_hinweise,
     }))
-  } catch {
+  } catch (e) {
+    console.error('[provider:request-failed]', { provider: 'openai', requestType: 'five_recommendations', httpStatus: (e as { status?: number })?.status ?? 0 })
     return null
   }
 }
