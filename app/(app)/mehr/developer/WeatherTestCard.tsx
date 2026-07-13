@@ -20,7 +20,9 @@ export function WeatherTestCard({ lastRun }: { lastRun: DevTestRun | null }) {
         <button type="submit" style={buttonStyle}>Testen</button>
       </form>
 
-      {result && (
+      {/* §Absicherung gegen Alt-Cache (result.lat/lng gab es vor dem Bugfix-Sprint
+          noch nicht) -- siehe gleiche Absicherung in PlacesTestCard.tsx. */}
+      {result && result.lat != null && (
         <div style={{ marginTop: '0.85rem', fontSize: '0.72rem', color: '#d1d5db' }}>
           <div>Eingegebener Ort: <strong>{result.query}</strong></div>
           <div>Aufgelöster Ort (Google): <strong>{result.resolvedLocationName}</strong></div>

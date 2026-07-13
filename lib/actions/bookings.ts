@@ -38,6 +38,11 @@ function addDaysIso(date: string, delta: number): string {
   return d.toISOString().slice(0, 10)
 }
 
+/** Marker im `notes`-Feld automatisch erzeugter Etappen -- Grundlage für `syncAccommodationIntoStage`. */
+const AUTO_STAGE_NOTE_LAYOVER = 'Automatisch aus Zwischenstopp-Angabe im Flug erzeugt.'
+const AUTO_STAGE_NOTE_ACCOMMODATION = 'Automatisch aus Hotelbuchung erzeugt.'
+const AUTO_STAGE_NOTES: string[] = [AUTO_STAGE_NOTE_LAYOVER, AUTO_STAGE_NOTE_ACCOMMODATION]
+
 /**
  * §"Zwischenstopp als Bestandteil eines Fluges... daraus automatisch Etappe
  * erzeugen": im Gegensatz zum heuristischen `flight-stopovers.ts`-Mechanismus
@@ -81,21 +86,56 @@ async function maybeCreateLayoverStage(
     nights,
     sort_order: (last?.sort_order ?? -1) + 1,
     country_code: countryCode,
-    notes: 'Automatisch aus Zwischenstopp-Angabe im Flug erzeugt.',
+    notes: AUTO_STAGE_NOTE_LAYOVER,
   })
+}
+
+/**
+ * §"Etappe aus Zwischenstopp UND die dazugehörige Hotelbuchung am
+ * Zwischenstopp müssen als dieselbe Etappe erkannt werden" (Bsp. Costa Rica:
+ * 1 Nacht Atlanta aus dem Flug-Zwischenstopp erzeugt, plus eine separate
+ * Hotelbuchung für dieselbe Nacht): eine bereits vorhandene Etappe mit
+ * exakt demselben Start-Datum wie der Buchung gilt als dieselbe Etappe --
+ * bewusst ein exakter Start-Datum-Abgleich statt eines Datumsbereich-
+ * Enthält-Vergleichs (letzterer verursachte den Bug, dass eine Unterkunfts-
+ * Buchung, deren Check-in exakt auf den Check-out einer VORHERIGEN, ANDEREN
+ * Hotel-Etappe fiel, fälschlich dieser vorherigen Etappe zugeschlagen wurde
+ * statt eine eigene zu bekommen).
+ */
+async function findStageByExactStartDate(supabase: SupabaseClient, tripId: string, startDate: string): Promise<{ id: string; notes: string | null } | null> {
+  const { data: stages } = await supabase.from('stages').select('id, notes').eq('trip_id', tripId).eq('start_date', startDate)
+  return stages && stages.length === 1 ? stages[0] : null
+}
+
+async function syncAccommodationIntoStage(
+  supabase: SupabaseClient,
+  stageId: string,
+  title: string,
+  startDate: string,
+  endDate: string,
+): Promise<void> {
+  const nights = Math.round((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000)
+  if (nights < 0) return
+  await supabase.from('stages').update({
+    title, location: title, accommodation: title,
+    start_date: startDate, end_date: endDate, nights,
+    notes: AUTO_STAGE_NOTE_ACCOMMODATION,
+  }).eq('id', stageId)
 }
 
 /**
  * §"Hotel erzeugt/verknüpft automatisch passende Etappe": Gegenstück zu
  * `maybeCreateLayoverStage`, für Unterkunftsbuchungen. Greift nur, wenn nach
- * `suggestStageId` weiterhin keine Etappe zugeordnet ist — überschreibt nie
- * eine bereits vorhandene (manuelle oder automatische) Zuordnung. Idempotent
- * wie `maybeCreateLayoverStage`. Gibt die neue Etappen-ID zurück, damit der
- * Aufrufer die Buchung selbst damit verknüpfen kann.
+ * `suggestStageId` weiterhin keine Etappe zugeordnet ist. Prüft zuerst per
+ * exaktem Start-Datum, ob bereits eine (automatisch oder manuell erzeugte)
+ * Etappe für denselben Tag existiert -- typischerweise eine Zwischenstopp-
+ * Etappe aus dem Flug -- und verknüpft sich damit statt eine zweite Etappe
+ * für denselben Aufenthalt anzulegen. Automatisch erzeugte Treffer (Layover
+ * oder frühere Hotelbuchung) werden dabei mit den echten Hoteldaten
+ * angereichert; eine manuell angelegte Etappe wird nur verknüpft, nie
+ * überschrieben. Gibt die Etappen-ID zurück, damit der Aufrufer die Buchung
+ * selbst damit verknüpfen kann.
  */
-/** Marker im `notes`-Feld automatisch erzeugter Etappen -- Grundlage für `maybeSyncAccommodationStage`. */
-const AUTO_STAGE_NOTE = 'Automatisch aus Hotelbuchung erzeugt.'
-
 async function maybeCreateAccommodationStage(
   supabase: SupabaseClient,
   tripId: string,
@@ -114,9 +154,13 @@ async function maybeCreateAccommodationStage(
   const startDate = startDatetime.slice(0, 10)
   const endDate = endDatetime.slice(0, 10)
 
-  const { data: existing } = await supabase
-    .from('stages').select('id').eq('trip_id', tripId).eq('title', title).eq('start_date', startDate).maybeSingle()
-  if (existing) return existing.id
+  const match = await findStageByExactStartDate(supabase, tripId, startDate)
+  if (match) {
+    if (match.notes && AUTO_STAGE_NOTES.includes(match.notes)) {
+      await syncAccommodationIntoStage(supabase, match.id, title, startDate, endDate)
+    }
+    return match.id
+  }
 
   const [{ data: last }, { data: trip }] = await Promise.all([
     supabase.from('stages').select('sort_order').eq('trip_id', tripId).order('sort_order', { ascending: false }).limit(1).maybeSingle(),
@@ -136,7 +180,7 @@ async function maybeCreateAccommodationStage(
     accommodation: title,
     sort_order: (last?.sort_order ?? -1) + 1,
     country_code: countryCode,
-    notes: AUTO_STAGE_NOTE,
+    notes: AUTO_STAGE_NOTE_ACCOMMODATION,
   }).select('id').single()
 
   return created?.id ?? null
@@ -146,9 +190,9 @@ async function maybeCreateAccommodationStage(
  * §Reparaturpfad für bereits bestehende, fehlerhaft erzeugte Etappen
  * (Nächte = 0 / Enddatum = Check-in, entstanden vor diesem Fix oder durch
  * eine damals fehlende Check-out-Angabe): wird eine Unterkunftsbuchung mit
- * bereits verknüpfter, automatisch erzeugter Etappe bearbeitet, zieht die
- * Etappe die korrigierten Daten nach. Rührt manuell angelegte/bearbeitete
- * Etappen NICHT an (erkennbar am `notes`-Marker aus `maybeCreateAccommodationStage`).
+ * bereits verknüpfter, automatisch erzeugter Etappe (Layover oder frühere
+ * Hotelbuchung) bearbeitet, zieht die Etappe die korrigierten Daten nach.
+ * Rührt manuell angelegte/bearbeitete Etappen NICHT an.
  */
 async function maybeSyncAccommodationStage(
   supabase: SupabaseClient,
@@ -161,17 +205,9 @@ async function maybeSyncAccommodationStage(
   if (bookingType !== 'accommodation' || !startDatetime || !endDatetime) return
 
   const { data: stage } = await supabase.from('stages').select('notes').eq('id', stageId).maybeSingle()
-  if (stage?.notes !== AUTO_STAGE_NOTE) return
+  if (!stage?.notes || !AUTO_STAGE_NOTES.includes(stage.notes)) return
 
-  const startDate = startDatetime.slice(0, 10)
-  const endDate = endDatetime.slice(0, 10)
-  const nights = Math.round((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000)
-  if (nights < 0) return
-
-  await supabase.from('stages').update({
-    title, location: title, accommodation: title,
-    start_date: startDate, end_date: endDate, nights,
-  }).eq('id', stageId)
+  await syncAccommodationIntoStage(supabase, stageId, title, startDatetime.slice(0, 10), endDatetime.slice(0, 10))
 }
 
 function readCommonFields(formData: FormData) {
@@ -291,7 +327,16 @@ export async function createBooking(formData: FormData) {
     redirectWithDraft(newPath, 'Enddatum darf nicht vor dem Startdatum liegen', f)
 
   const supabase = await createClient()
-  let stageId = f.stageId || await suggestStageId(supabase, tripId, f.startDate)
+  // §Bugfix "Etappe wird nur für das erste von mehreren Hotels gebildet": bei
+  // Unterkünften bewusst NICHT `suggestStageId` (breite Datumsbereich-
+  // Überlappung) nutzen -- eine Unterkunftsbuchung, deren Check-in exakt auf
+  // den Check-out einer vorherigen Etappe fällt (typisch bei
+  // Hotelwechsel-am-selben-Tag), wurde dadurch fälschlich der VORHERIGEN
+  // Etappe zugeordnet, statt ihre eigene zu bekommen. Für Unterkünfte
+  // übernimmt `maybeCreateAccommodationStage` unten die (präzisere)
+  // Zuordnung per exaktem Check-in-Datum -- das erkennt u. a. auch eine
+  // bereits aus einem Flug-Zwischenstopp erzeugte Etappe als dieselbe.
+  let stageId = f.stageId || (f.type !== 'accommodation' ? await suggestStageId(supabase, tripId, f.startDate) : null)
 
   const { data: created, error } = await supabase.from('bookings').insert({
     trip_id: tripId,
@@ -359,7 +404,10 @@ export async function updateBooking(formData: FormData) {
     redirectWithDraft(editPath, 'Enddatum darf nicht vor dem Startdatum liegen', f)
 
   let stageId = existing?.stage_id ?? null
-  if (!stageId && tripId) stageId = await suggestStageId(supabase, tripId, f.startDate)
+  // §Wie in createBooking: für Unterkünfte keine breite Datumsbereich-
+  // Überlappung nutzen, um Hotelwechsel am selben Tag nicht der vorherigen
+  // Etappe zuzuschlagen.
+  if (!stageId && tripId && f.type !== 'accommodation') stageId = await suggestStageId(supabase, tripId, f.startDate)
 
   if (!stageId && tripId) {
     stageId = await maybeCreateAccommodationStage(supabase, tripId, f.type, f.title, startDatetime, endDatetime)

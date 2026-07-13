@@ -42,8 +42,11 @@ function isoMonthOffset(offsetMonths: number): string {
  * Problem bei drei unabhängigen <select>-Feldern, die immer sofort das
  * volle Jahr/Monat/Tag-Angebot zeigen).
  *
- * Reihenfolge Jahr → Monat → Tag (schnelle Jahresauswahl zuerst, wichtig für
- * weit zurückliegende Geburtsdaten wie für weit entfernte Reisedaten).
+ * §Reihenfolge Tag → Monat → Jahr (deutsches Datumsformat, zuvor Jahr →
+ * Monat → Tag). Rein visuell/DOM-Reihenfolge -- die `name`-Attribute
+ * (`${namePrefix}_day/_month/_year`) und damit `readDateGroupFromFormData`
+ * bleiben unverändert, nichts an der Formularauswertung hängt an der
+ * Anzeigereihenfolge.
  * Intern kontrolliert (eigener State) — `onChange` erlaubt umgebenden
  * Komponenten (Start-/Enddatum-Kopplung, Nächte-Berechnung) auf Änderungen
  * zu reagieren, ohne dass diese Komponente selbst kontrolliert werden muss.
@@ -87,17 +90,17 @@ export function DateSelectFields({
       <label style={LABEL_STYLE}>{label}</label>
       {/* §"Längere Monatsnamen wie September sind abgeschnitten": bei
           gleich breiten Dritteln reicht der Platz für "September"/"Dezember"
-          nicht -- Monat bekommt bewusst mehr Raum als Jahr (4 Ziffern) und
-          Tag (max. 2 Ziffern), die von Natur aus schmaler sein dürfen. */}
+          nicht -- Monat bekommt bewusst mehr Raum als Tag/Jahr, die von
+          Natur aus schmaler sein dürfen. */}
       <div className="grid gap-2" style={{ gridTemplateColumns: "0.85fr 1.3fr 0.85fr" }}>
         <select
-          name={`${namePrefix}_year`} value={parts.year}
-          onChange={(e) => update({ year: e.target.value })}
-          style={FIELD_STYLE} aria-label={`${label} – Jahr`}
+          name={`${namePrefix}_day`} value={parts.day}
+          onChange={(e) => update({ day: e.target.value })}
+          style={FIELD_STYLE} aria-label={`${label} – Tag`}
         >
-          <option value="">Jahr</option>
-          {years.map((y) => (
-            <option key={y} value={String(y)}>{y}</option>
+          <option value="">Tag</option>
+          {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+            <option key={d} value={String(d).padStart(2, "0")}>{d}</option>
           ))}
         </select>
         <select
@@ -111,13 +114,13 @@ export function DateSelectFields({
           ))}
         </select>
         <select
-          name={`${namePrefix}_day`} value={parts.day}
-          onChange={(e) => update({ day: e.target.value })}
-          style={FIELD_STYLE} aria-label={`${label} – Tag`}
+          name={`${namePrefix}_year`} value={parts.year}
+          onChange={(e) => update({ year: e.target.value })}
+          style={FIELD_STYLE} aria-label={`${label} – Jahr`}
         >
-          <option value="">Tag</option>
-          {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
-            <option key={d} value={String(d).padStart(2, "0")}>{d}</option>
+          <option value="">Jahr</option>
+          {years.map((y) => (
+            <option key={y} value={String(y)}>{y}</option>
           ))}
         </select>
       </div>

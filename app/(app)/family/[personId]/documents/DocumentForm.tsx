@@ -3,6 +3,7 @@ import { DOCUMENT_TYPE_ORDER, DOCUMENT_TYPE_CONFIG, getDateFieldRange } from "@/
 import type { DocumentType, DocumentDetails } from "@/lib/documents";
 import { DateSelectFields } from "@/components/DateSelectFields";
 import { Banner } from "@/components/Banner";
+import { ExtractSubmitButton } from "@/components/ExtractSubmitButton";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -285,20 +286,16 @@ export function DocumentForm({
             Abbrechen
           </Link>
           <div className="flex items-center gap-3 flex-wrap">
-            {canExtract && !existingStoragePath && (
-              <button
-                type="submit"
+            {canExtract && !existingStoragePath && extractAction && (
+              <ExtractSubmitButton
                 formAction={extractAction}
-                formNoValidate
                 style={{
                   background: "transparent", color: "var(--accent)", border: "1px solid rgba(184,154,94,0.4)",
                   borderRadius: "6px", padding: "10px 18px", fontSize: "0.65rem",
-                  letterSpacing: "0.14em", textTransform: "uppercase", cursor: "pointer",
+                  letterSpacing: "0.14em", textTransform: "uppercase",
                   whiteSpace: "nowrap", WebkitAppearance: "none", appearance: "none",
                 }}
-              >
-                🤖 Daten automatisch auslesen
-              </button>
+              />
             )}
             <button
               type="submit"

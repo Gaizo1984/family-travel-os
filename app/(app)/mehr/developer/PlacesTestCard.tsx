@@ -33,7 +33,12 @@ export function PlacesTestCard({ lastRun }: { lastRun: DevTestRun | null }) {
         <button type="submit" style={buttonStyle}>Testen</button>
       </form>
 
-      {result && (
+      {/* §Absicherung gegen Alt-Cache: result.origin gab es vor dem Bugfix-Sprint
+          noch nicht -- ohne diese Prüfung würde ein älterer, noch im
+          dev_test_runs-Cache liegender Testlauf beim Zugriff auf
+          result.origin.* die ganze Seite zum Absturz bringen ("This Page
+          couldn't load"). Fehlt das Feld, wird einfach kein Ergebnis gezeigt. */}
+      {result?.origin && (
         <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
           <div style={{ fontSize: '0.72rem', color: '#e5e7eb' }}>
             Ausgangspunkt ({result.origin.source === 'hotel' ? 'Hotel' : 'Ort'}): <strong>{result.origin.formattedAddress}</strong>{' '}
