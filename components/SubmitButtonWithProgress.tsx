@@ -13,10 +13,15 @@ export function SubmitButtonWithProgress({
   label,
   pendingLabel,
   style,
+  icon,
+  className,
 }: {
   label: string
   pendingLabel: string
   style?: React.CSSProperties
+  /** Optionales Icon, das im Ruhezustand statt des Spinners angezeigt wird (z.B. RefreshCw). */
+  icon?: React.ReactNode
+  className?: string
 }) {
   const { pending } = useFormStatus()
 
@@ -24,6 +29,7 @@ export function SubmitButtonWithProgress({
     <button
       type="submit"
       disabled={pending}
+      className={className}
       style={{
         background: "var(--foreground)", color: "var(--surface)", border: "none",
         borderRadius: "6px", padding: "11px 20px", fontSize: "0.65rem",
@@ -33,7 +39,7 @@ export function SubmitButtonWithProgress({
         ...style,
       }}
     >
-      {pending && <Loader2 size={13} strokeWidth={2} className="animate-spin" />}
+      {pending ? <Loader2 size={13} strokeWidth={2} className="animate-spin" /> : icon}
       {pending ? pendingLabel : label}
     </button>
   )

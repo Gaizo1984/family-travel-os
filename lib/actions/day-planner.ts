@@ -1,6 +1,7 @@
 'use server'
 
 import { redirect } from 'next/navigation'
+import { createClient } from '@/lib/supabase/server'
 import { searchPlaces, distanceKm, isPlainBeach, type PlacesCategory, type PlaceResult } from '@/lib/providers/places-provider'
 import { computeRoute, computeRouteMatrix, type RouteMatrixElement } from '@/lib/providers/routes-provider'
 import { ProviderConfigError } from '@/lib/providers/provider-errors'
@@ -45,6 +46,27 @@ export type DayPlan = {
   totalTravelMinutes: number; totalTravelDistanceKm: number
   mealBreakNote: string | null; weatherNote: string | null; kidsNote: string | null
   returnNote: string; alternativeNote: string
+}
+
+/**
+ * §Bugfix "Tagestrips löschen sich bei Menüpunktwechsel": liefert den
+ * zuletzt für diese Reise erzeugten Tagesplan (unabhängig vom Modus, der
+ * zeitlich letzte gewinnt) -- analog zu `getCategoryPlaces` in
+ * category-places.ts, damit die Seite den Plan bei jedem Aufruf aus der DB
+ * statt aus einem flüchtigen Redirect-Query-Param liest.
+ */
+export async function getLatestDayPlan(familyId: string, tripId: string): Promise<DayPlan | null> {
+  const supabase = await createClient()
+  const { data } = await supabase
+    .from('day_plan_cache')
+    .select('plan')
+    .eq('family_id', familyId).eq('trip_id', tripId)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (!data) return null
+  return data.plan as unknown as DayPlan
 }
 
 /**
@@ -194,5 +216,12 @@ export async function generateDayPlan(formData: FormData) {
     alternativeNote: 'Bei Wetterumschwung: „Schlechtwetter-Alternativen" bei Frag LUMI nutzen.',
   }
 
-  redirect(`${returnTo}?plan=${encodeURIComponent(JSON.stringify(plan))}`)
+  const supabase = await createClient()
+  const { error: cacheError } = await supabase.from('day_plan_cache').upsert(
+    { family_id: familyId, trip_id: tripId, mode, plan, updated_at: new Date().toISOString() },
+    { onConflict: 'family_id,trip_id,mode' },
+  )
+  if (cacheError) console.error('[day-planner] cache upsert failed', { mode })
+
+  redirect(returnTo)
 }

@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { BOOKING_TYPE_CONFIG, combineDateTime } from '@/lib/bookings'
+import { BOOKING_TYPE_CONFIG, combineDateTime, AUTO_STAGE_NOTE_LAYOVER } from '@/lib/bookings'
 import { suggestCountryCode } from '@/lib/geo-suggestions'
 import { readDateGroupFromFormData } from '@/lib/documents'
 import type { BookingType, BookingStatus, PaymentStatus } from '@/lib/supabase/types'
@@ -32,63 +32,8 @@ async function suggestStageId(
   return matches.length === 1 ? matches[0].id : null
 }
 
-function addDaysIso(date: string, delta: number): string {
-  const d = new Date(date + 'T00:00:00Z')
-  d.setUTCDate(d.getUTCDate() + delta)
-  return d.toISOString().slice(0, 10)
-}
-
-/** Marker im `notes`-Feld automatisch erzeugter Etappen -- Grundlage für `syncAccommodationIntoStage`. */
-const AUTO_STAGE_NOTE_LAYOVER = 'Automatisch aus Zwischenstopp-Angabe im Flug erzeugt.'
 const AUTO_STAGE_NOTE_ACCOMMODATION = 'Automatisch aus Hotelbuchung erzeugt.'
 const AUTO_STAGE_NOTES: string[] = [AUTO_STAGE_NOTE_LAYOVER, AUTO_STAGE_NOTE_ACCOMMODATION]
-
-/**
- * §"Zwischenstopp als Bestandteil eines Fluges... daraus automatisch Etappe
- * erzeugen": im Gegensatz zum heuristischen `flight-stopovers.ts`-Mechanismus
- * (der noch eine Bestätigung verlangt) ist die explizite Nutzereingabe hier
- * bereits die Bestätigung — keine Zwischenbestätigung nötig. Idempotent: legt
- * dieselbe Etappe nicht doppelt an, falls die Buchung mehrfach gespeichert wird.
- */
-async function maybeCreateLayoverStage(
-  supabase: SupabaseClient,
-  tripId: string,
-  bookingType: BookingType,
-  details: Record<string, string>,
-  endDatetime: string | null,
-): Promise<void> {
-  if (bookingType !== 'flight') return
-  const airport = details.layover_airport?.trim()
-  const nights = Number(details.layover_nights)
-  if (!airport || details.layover_overnight !== 'ja' || !Number.isFinite(nights) || nights <= 0) return
-  if (!endDatetime) return
-
-  const startDate = endDatetime.slice(0, 10)
-  const endDate = addDaysIso(startDate, nights)
-
-  const { data: existing } = await supabase
-    .from('stages').select('id').eq('trip_id', tripId).eq('title', airport).eq('start_date', startDate).maybeSingle()
-  if (existing) return
-
-  const [{ data: last }, { data: trip }] = await Promise.all([
-    supabase.from('stages').select('sort_order').eq('trip_id', tripId).order('sort_order', { ascending: false }).limit(1).maybeSingle(),
-    supabase.from('trips').select('title, subtitle').eq('id', tripId).maybeSingle(),
-  ])
-
-  const countryCode = suggestCountryCode(airport) ?? suggestCountryCode(`${trip?.title ?? ''} ${trip?.subtitle ?? ''}`)
-
-  await supabase.from('stages').insert({
-    trip_id: tripId,
-    title: airport,
-    location: airport,
-    start_date: startDate,
-    end_date: endDate,
-    nights,
-    sort_order: (last?.sort_order ?? -1) + 1,
-    country_code: countryCode,
-    notes: AUTO_STAGE_NOTE_LAYOVER,
-  })
-}
 
 /**
  * §"Etappe aus Zwischenstopp UND die dazugehörige Hotelbuchung am
@@ -139,11 +84,11 @@ async function syncAccommodationIntoStage(
 }
 
 /**
- * §"Hotel erzeugt/verknüpft automatisch passende Etappe": Gegenstück zu
- * `maybeCreateLayoverStage`, für Unterkunftsbuchungen. Greift nur, wenn nach
- * `suggestStageId` weiterhin keine Etappe zugeordnet ist. Prüft zuerst per
- * exaktem Start-Datum, ob bereits eine (automatisch oder manuell erzeugte)
- * Etappe für denselben Tag existiert -- typischerweise eine Zwischenstopp-
+ * §"Hotel erzeugt/verknüpft automatisch passende Etappe": für Unterkunfts-
+ * buchungen. Greift nur, wenn nach `suggestStageId` weiterhin keine Etappe
+ * zugeordnet ist. Prüft zuerst per exaktem Start-Datum, ob bereits eine
+ * (automatisch oder manuell erzeugte) Etappe für denselben Tag existiert --
+ * typischerweise eine per `stages/confirm-stopover` bestätigte Zwischenstopp-
  * Etappe aus dem Flug -- und verknüpft sich damit statt eine zweite Etappe
  * für denselben Aufenthalt anzulegen. Automatisch erzeugte Treffer (Layover
  * oder frühere Hotelbuchung) werden dabei mit den echten Hoteldaten
@@ -373,8 +318,6 @@ export async function createBooking(formData: FormData) {
   if (error)
     redirectWithDraft(newPath, 'Speicherfehler: ' + error.message, f)
 
-  await maybeCreateLayoverStage(supabase, tripId, f.type, f.details, endDatetime)
-
   if (!stageId) {
     const newStageId = await maybeCreateAccommodationStage(supabase, tripId, f.type, f.title, startDatetime, endDatetime)
     if (newStageId && created) {
@@ -461,8 +404,6 @@ export async function updateBooking(formData: FormData) {
 
   if (error)
     redirectWithDraft(editPath, 'Speicherfehler: ' + error.message, f)
-
-  if (tripId) await maybeCreateLayoverStage(supabase, tripId, f.type, f.details, endDatetime)
 
   redirect(`/trips/${slug}/bookings/${bookingId}`)
 }

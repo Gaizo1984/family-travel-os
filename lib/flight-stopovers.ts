@@ -85,3 +85,65 @@ export async function detectFlightStopoverSuggestions(tripId: string): Promise<F
 
   return suggestions
 }
+
+/**
+ * §Bugfix "Flug mit Zwischenstopp erzeugt automatisch eine eigene, fälschlich
+ * gleichrangige Etappe": ein als "Übernachtung: Ja" markierter Zwischenstopp
+ * IN DERSELBEN Flugbuchung (Felder `layover_airport`/`layover_overnight`/
+ * `layover_nights`, siehe lib/bookings.ts) erzeugte bisher unconditional eine
+ * eigene Etappe (lib/actions/bookings.ts, entfernt) -- das entspricht nicht
+ * "ein Termin, keine zwei unterschiedlichen Etappen". Jetzt läuft dieser Fall
+ * über denselben Bestätigungs-Mechanismus wie der Zwei-Flüge-Lücken-Fall oben
+ * (`app/(app)/trips/[id]/stages/confirm-stopover`) -- keine Etappe ohne
+ * expliziten Klick "Ja, Etappe hinzufügen".
+ *
+ * §Datumsschätzung: die Buchung kennt nur Gesamt-Abflug (`start_datetime`,
+ * vom Ursprungsflughafen) und Gesamt-Ankunft (`end_datetime`, am
+ * Zielflughafen `to`) -- keinen eigenen Zeitstempel für die Ankunft am
+ * Zwischenstopp. Der Abflugtag ist die einzige verlässliche Näherung (der
+ * vorherige Code nutzte fälschlich den GESAMT-Ankunftstag am Ziel als
+ * Zwischenstopp-Datum).
+ */
+export async function detectSingleFlightLayoverSuggestions(tripId: string): Promise<FlightStopoverSuggestion[]> {
+  const supabase = await createClient()
+
+  const [{ data: bookingsRaw }, { data: stagesRaw }] = await Promise.all([
+    supabase
+      .from('bookings')
+      .select('id, start_datetime, details')
+      .eq('trip_id', tripId)
+      .eq('type', 'flight')
+      .neq('status', 'cancelled'),
+    supabase.from('stages').select('start_date, end_date').eq('trip_id', tripId),
+  ])
+
+  const flights = (bookingsRaw ?? []) as FlightRow[]
+  const stages = (stagesRaw ?? []) as StageRow[]
+
+  const suggestions: FlightStopoverSuggestion[] = []
+
+  for (const flight of flights) {
+    const airport = flight.details?.layover_airport?.trim()
+    const nights = Number(flight.details?.layover_nights)
+    if (!airport || flight.details?.layover_overnight !== 'ja' || !Number.isFinite(nights) || nights <= 0) continue
+
+    const startDate = dateOnly(flight.start_datetime)
+    if (!startDate) continue
+    const endDate = addDaysIso(startDate, nights)
+
+    const alreadyCovered = stages.some(
+      (s) => s.start_date && s.end_date && s.start_date <= startDate && s.end_date >= endDate,
+    )
+    if (alreadyCovered) continue
+
+    suggestions.push({
+      location: airport,
+      startDate,
+      endDate,
+      incomingFlightId: flight.id,
+      outgoingFlightId: flight.id,
+    })
+  }
+
+  return suggestions
+}

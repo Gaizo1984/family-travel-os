@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { createStage } from "@/lib/actions/stages";
+import { AUTO_STAGE_NOTE_LAYOVER } from "@/lib/bookings";
 import { formatDateDE } from "@/lib/demo-data";
 import { Banner } from "@/components/Banner";
 
@@ -56,7 +57,7 @@ export default async function ConfirmStopoverPage({
           <input type="hidden" name="start_date" value={start} />
           <input type="hidden" name="end_date" value={end} />
           <input type="hidden" name="accommodation" value="" />
-          <input type="hidden" name="notes" value="Automatisch aus Flug-Zwischenstopp vorgeschlagen." />
+          <input type="hidden" name="notes" value={AUTO_STAGE_NOTE_LAYOVER} />
 
           <div className="rounded-xl p-8" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
             {error && (

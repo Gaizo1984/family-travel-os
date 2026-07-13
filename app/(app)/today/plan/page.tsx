@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { isTripCurrentlyRunning, isTripHistorical } from "@/lib/trip-status";
 import { todayIsoInFamilyTimezone } from "@/lib/time";
-import { generateDayPlan, type DayPlan, type DayPlanMode } from "@/lib/actions/day-planner";
+import { generateDayPlan, getLatestDayPlan, type DayPlan, type DayPlanMode } from "@/lib/actions/day-planner";
 import { commitDayPlanToJourney } from "@/lib/actions/lumi-journey";
 import { Banner } from "@/components/Banner";
 
@@ -31,9 +31,9 @@ function Card({ children }: { children: React.ReactNode }) {
 export default async function DayPlanPage({
   searchParams,
 }: {
-  searchParams: Promise<{ plan?: string; error?: string }>;
+  searchParams: Promise<{ error?: string; new?: string }>;
 }) {
-  const { plan: planRaw, error } = await searchParams;
+  const { error, new: startNew } = await searchParams;
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
   const todayIso = todayIsoInFamilyTimezone();
@@ -64,10 +64,12 @@ export default async function DayPlanPage({
     );
   }
 
-  let plan: DayPlan | null = null;
-  if (planRaw) {
-    try { plan = JSON.parse(planRaw); } catch { plan = null; }
-  }
+  // §Bugfix "Tagestrips löschen sich bei Menüpunktwechsel": der zuletzt
+  // erzeugte Plan kommt jetzt aus der DB (day_plan_cache) statt aus einem
+  // flüchtigen Redirect-Query-Param -- er bleibt bei Navigation bestehen,
+  // bis eine neue Ermittlung ihn überschreibt. "Neuen Plan erstellen"
+  // verlinkt auf ?new=1, um gezielt wieder die Moduswahl zu zeigen.
+  const plan: DayPlan | null = startNew ? null : await getLatestDayPlan(familyId, trip.id);
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -158,7 +160,7 @@ export default async function DayPlanPage({
                   Ins Journey übernehmen
                 </button>
               </form>
-              <Link href="/today/plan" style={{ color: "var(--muted)", fontSize: "0.72rem", letterSpacing: "0.04em" }}>
+              <Link href="/today/plan?new=1" style={{ color: "var(--muted)", fontSize: "0.72rem", letterSpacing: "0.04em" }}>
                 Neuen Plan erstellen
               </Link>
             </div>

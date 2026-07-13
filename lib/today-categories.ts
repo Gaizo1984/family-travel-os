@@ -39,25 +39,25 @@ export type TodayCategoryConfig = {
 export const TODAY_CATEGORIES: TodayCategoryConfig[] = [
   {
     key: 'activities', label: 'Aktivitäten', Icon: Compass,
-    aiButtonLabel: 'Vorschläge laden',
+    aiButtonLabel: 'Vorschläge ermitteln',
     aiQuestionTemplate: (loc) => `Welche Ausflüge und Aktivitäten empfiehlst du uns rund um ${loc}?`,
     placesCategory: 'attraction', preferredMaxMinutes: 90, hardMaxMinutes: 150,
   },
   {
     key: 'restaurants', label: 'Restaurants', Icon: UtensilsCrossed,
-    aiButtonLabel: 'Vorschläge laden',
+    aiButtonLabel: 'Vorschläge ermitteln',
     aiQuestionTemplate: (loc) => `Welche Restaurants empfiehlst du uns für unseren Aufenthalt in ${loc}?`,
     placesCategory: 'restaurant', preferredMaxMinutes: 30, hardMaxMinutes: 60,
   },
   {
     key: 'beaches', label: 'Strände', Icon: Waves,
-    aiButtonLabel: 'Vorschläge laden',
+    aiButtonLabel: 'Vorschläge ermitteln',
     aiQuestionTemplate: (loc) => `Welche Strände empfiehlst du uns in der Nähe von ${loc}?`,
     placesCategory: 'beach', preferredMaxMinutes: 60, hardMaxMinutes: 90,
   },
   {
     key: 'nature', label: 'Natur', Icon: Trees,
-    aiButtonLabel: 'Vorschläge laden',
+    aiButtonLabel: 'Vorschläge ermitteln',
     aiQuestionTemplate: (loc) => `Welche Naturerlebnisse und Landschaften empfiehlst du uns rund um ${loc}?`,
     placesCategory: 'nature', preferredMaxMinutes: 90, hardMaxMinutes: 150,
   },

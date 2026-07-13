@@ -1,6 +1,6 @@
 import { createClient } from './supabase/server'
 import type { DocumentType } from './documents'
-import { detectFlightStopoverSuggestions } from './flight-stopovers'
+import { detectFlightStopoverSuggestions, detectSingleFlightLayoverSuggestions } from './flight-stopovers'
 import { computeTripRequirements } from './travel-requirements'
 import { formatDateDE } from './demo-data'
 
@@ -91,15 +91,21 @@ export async function computeTripReadiness(tripId: string): Promise<ReadinessRes
   // §Performance: die folgenden Abfragen sind alle unabhängig voneinander
   // (keine hängt vom Ergebnis einer anderen ab, außer der Dokumente-Query, die
   // die Mitreisenden-IDs braucht) — parallel statt seriell laden.
-  const [{ data: assignedEntryDocsRaw }, { count: insuranceCount }, { data: stagesRaw }, { data: bookingsRaw }, stopoverSuggestions, tripRequirements] =
+  const [{ data: assignedEntryDocsRaw }, { count: insuranceCount }, { data: stagesRaw }, { data: bookingsRaw }, flightGapSuggestions, singleFlightLayoverSuggestions, tripRequirements] =
     await Promise.all([
       supabase.from('document_trips').select('documents ( id, person_id, doc_type, expires_at, label )').eq('trip_id', tripId),
       supabase.from('insurance_policy_trips').select('policy_id', { count: 'exact', head: true }).eq('trip_id', tripId),
       supabase.from('stages').select('id, title, start_date, end_date, nights, accommodation, sort_order').eq('trip_id', tripId),
       supabase.from('bookings').select('id, type, stage_id, status, start_datetime, end_datetime').eq('trip_id', tripId),
       detectFlightStopoverSuggestions(tripId),
+      detectSingleFlightLayoverSuggestions(tripId),
       computeTripRequirements(tripId, `/trips/${slug}/ready-to-travel`),
     ])
+  // §"ein Termin, keine zwei unterschiedlichen Etappen": beide Zwischenstopp-
+  // Quellen (Lücke zwischen zwei Flügen / Layover-Feld in einem einzelnen
+  // Flug) münden im selben Bestätigungs-Hinweis unten -- keine Etappe ohne
+  // expliziten Klick.
+  const stopoverSuggestions = [...flightGapSuggestions, ...singleFlightLayoverSuggestions]
 
   // ── Reisende & Dokumente / Einreise: zentrale Travel Requirements Engine
   // (lib/travel-requirements.ts) — dieselbe Anforderungs-/Gültigkeitslogik

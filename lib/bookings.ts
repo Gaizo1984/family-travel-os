@@ -3,6 +3,9 @@ import { Plane, BedDouble, Car, Compass, UtensilsCrossed, TrainFront, Ship, Shie
 import type { BookingType, BookingStatus, PaymentStatus } from './supabase/types'
 import { formatDateDE } from './demo-data'
 
+/** Marker im `notes`-Feld automatisch erzeugter Zwischenstopp-Etappen -- Grundlage für `syncAccommodationIntoStage` (lib/actions/bookings.ts) und von `stages/confirm-stopover` gesetzt. Kein Export aus einer 'use server'-Datei, da nur eine Konstante (keine Server Action). */
+export const AUTO_STAGE_NOTE_LAYOVER = 'Automatisch aus Zwischenstopp-Angabe im Flug erzeugt.'
+
 export type DetailField = {
   key: string
   label: string

@@ -12,6 +12,7 @@ import { loadCategoryPlaces, getCategoryPlaces } from "@/lib/actions/category-pl
 import { buildLumiContext } from "@/lib/lumi-context";
 import { commitPlaceToJourney } from "@/lib/actions/lumi-journey";
 import { Banner } from "@/components/Banner";
+import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
 import type { StageInput, TimelineBooking } from "@/lib/journey";
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
@@ -190,19 +191,19 @@ async function PlacesCategorySection({
           <input type="hidden" name="trip_id" value={tripId} />
           <input type="hidden" name="category" value={category} />
           <input type="hidden" name="return_to" value={returnTo} />
-          <button
-            type="submit"
+          <SubmitButtonWithProgress
+            label={cached ? "Aktualisieren" : aiButtonLabel}
+            pendingLabel="Lädt …"
+            icon={cached ? <RefreshCw size={11} strokeWidth={1.6} /> : undefined}
             className="flex items-center gap-1.5"
             style={{
               background: cached ? "transparent" : "var(--foreground)",
               color: cached ? "var(--accent)" : "var(--surface)",
               border: cached ? "1px solid rgba(184,154,94,0.4)" : "none",
               borderRadius: "20px", padding: "6px 14px", fontSize: "0.62rem", letterSpacing: cached ? undefined : "0.1em",
-              textTransform: cached ? undefined : "uppercase", cursor: "pointer",
+              textTransform: cached ? undefined : "uppercase",
             }}
-          >
-            {cached ? (<><RefreshCw size={11} strokeWidth={1.6} /> Aktualisieren</>) : aiButtonLabel}
-          </button>
+          />
         </form>
       </div>
 

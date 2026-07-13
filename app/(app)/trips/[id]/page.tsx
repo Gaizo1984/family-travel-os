@@ -11,7 +11,8 @@ import {
   sortStagesChronologically, buildJourneyTimeline, buildRouteChips,
   type TimelineSegment, type TimelineDay,
 } from "@/lib/journey";
-import type { JourneyEventCategory, JourneyEventStatus } from "@/lib/journey-events";
+import { JOURNEY_EVENT_CATEGORIES, type JourneyEventCategory, type JourneyEventStatus } from "@/lib/journey-events";
+import { deleteJourneyEvent } from "@/lib/actions/journey-events";
 import { computeTripReadiness } from "@/lib/readiness";
 import type { ReadinessFinding, ReadinessSeverity } from "@/lib/readiness";
 import { isTripHistorical, isTripCurrentlyRunning } from "@/lib/trip-status";
@@ -379,6 +380,8 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
   const stages    = sortStagesChronologically(trip.stages);
   const bookings  = sortBookingsChronologically(trip.bookings);
   const journeyEvents = trip.journey_events ?? [];
+  /** §"Merkliste": trip-weite Liste aller "Idee"-Termine (u.a. per LUMI "Merken" übernommene Orte), unabhängig vom Datum -- bisher gingen sie im Tages-Journey unter. */
+  const ideaEvents = journeyEvents.filter((e) => e.status === "idea").sort((a, b) => a.date.localeCompare(b.date));
 
   const totalNights = stages.reduce((sum, s) => sum + (s.nights ?? 0), 0);
   const routeChips = buildRouteChips(
@@ -704,6 +707,70 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
               >
                 <p style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
                   Sobald Reisedaten und Etappen feststehen, entsteht hier automatisch eure Reiseerzählung.
+                </p>
+              </div>
+            )}
+          </section>
+
+          <section id="merkliste">
+            <div className="flex items-center justify-between mb-5">
+              <h2
+                className="text-xs font-medium"
+                style={{ color: "var(--muted)", letterSpacing: "0.2em", textTransform: "uppercase", fontSize: "0.65rem" }}
+              >
+                Merkliste{ideaEvents.length > 0 ? ` · ${ideaEvents.length}` : ""}
+              </h2>
+            </div>
+
+            {ideaEvents.length > 0 ? (
+              <div className="space-y-2.5">
+                {ideaEvents.map((e) => {
+                  const config = JOURNEY_EVENT_CATEGORIES[e.category];
+                  const Icon = config.icon;
+                  return (
+                    <div
+                      key={e.id}
+                      className="rounded-xl p-4 flex items-center gap-3"
+                      style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+                    >
+                      <Icon size={14} strokeWidth={1.4} style={{ color: "var(--accent)", flexShrink: 0 }} />
+                      <Link
+                        href={`/trips/${trip.slug}/journey-events/${e.id}/edit`}
+                        className="flex-1 min-w-0"
+                        style={{ textDecoration: "none" }}
+                      >
+                        <div className="truncate" style={{ color: "var(--foreground)", fontSize: "0.85rem" }}>
+                          {e.title}{e.location ? ` · ${e.location}` : ""}
+                        </div>
+                        <div style={{ color: "var(--muted)", fontSize: "0.68rem" }}>{formatDateDE(e.date)}</div>
+                      </Link>
+                      <form action={deleteJourneyEvent}>
+                        <input type="hidden" name="event_id" value={e.id} />
+                        <input type="hidden" name="slug" value={trip.slug} />
+                        <input type="hidden" name="return_to" value={`/trips/${trip.slug}#merkliste`} />
+                        <button
+                          type="submit"
+                          style={{
+                            background: "transparent", color: "#B5624A", border: "1px solid rgba(181,98,74,0.35)",
+                            borderRadius: "6px", padding: "6px 12px", fontSize: "0.6rem", letterSpacing: "0.08em",
+                            textTransform: "uppercase", whiteSpace: "nowrap", cursor: "pointer", flexShrink: 0,
+                            WebkitAppearance: "none", appearance: "none",
+                          }}
+                        >
+                          Löschen
+                        </button>
+                      </form>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div
+                className="rounded-xl p-6"
+                style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+              >
+                <p style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
+                  Von LUMI gemerkte Orte und Ideen erscheinen hier, unabhängig vom Datum.
                 </p>
               </div>
             )}

@@ -544,6 +544,24 @@ export interface Database {
           { foreignKeyName: "category_places_cache_trip_id_fkey";   columns: ["trip_id"];   isOneToOne: false; referencedRelation: "trips";   referencedColumns: ["id"] }
         ]
       }
+      day_plan_cache: {
+        Row: {
+          id: string; family_id: string; trip_id: string; mode: string
+          plan: Json; updated_at: string
+        }
+        Insert: {
+          id?: string; family_id: string; trip_id: string; mode: string
+          plan: Json; updated_at?: string
+        }
+        Update: {
+          id?: string; family_id?: string; trip_id?: string; mode?: string
+          plan?: Json; updated_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "day_plan_cache_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] },
+          { foreignKeyName: "day_plan_cache_trip_id_fkey";   columns: ["trip_id"];   isOneToOne: false; referencedRelation: "trips";   referencedColumns: ["id"] }
+        ]
+      }
       content_ideas: {
         Row: {
           id: string; family_id: string; project_id: string | null; trip_id: string | null
