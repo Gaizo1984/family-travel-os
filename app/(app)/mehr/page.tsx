@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Users, BookOpenCheck, Images, Fingerprint, LogOut, ChevronRight, type LucideIcon } from "lucide-react";
+import { Users, BookOpenCheck, Images, Fingerprint, LogOut, ChevronRight, TerminalSquare, type LucideIcon } from "lucide-react";
 import { logout } from "@/lib/actions/auth";
 
 interface MoreLink {
@@ -17,6 +17,7 @@ const MORE_LINKS: MoreLink[] = [
   { href: "/buchungsportal", label: "Buchungsportal", description: "Hotels, Flüge & Restaurants im Vergleich", Icon: BookOpenCheck },
   { href: "/memories", label: "Travel Memory", description: "Eure gemeinsame Reisegalerie", Icon: Images },
   { href: "/mehr/passkeys", label: "Passkeys verwalten", description: "Anmeldung per Fingerabdruck oder Gesichtserkennung", Icon: Fingerprint },
+  { href: "/mehr/developer", label: "Developer", description: "Serverseitige Testmodule für neue Integrationen", Icon: TerminalSquare },
 ];
 
 export default function MehrPage() {

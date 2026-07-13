@@ -62,3 +62,65 @@ Antworte mit GENAU EINER starken, konkreten Empfehlung — keine Liste konkurrie
     return null
   }
 }
+
+export type FiveRecommendationsResult = { title: string; reason: string }[]
+
+const FIVE_RECOMMENDATIONS_SCHEMA = {
+  type: 'object',
+  properties: {
+    recommendations: {
+      type: 'array',
+      minItems: 5,
+      maxItems: 5,
+      items: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Name des empfohlenen Orts, exakt wie in der Liste der Places-Treffer.' },
+          reason: { type: 'string', description: 'Kurze Begründung (max. 30 Wörter), warum das für diese Familie passt.' },
+        },
+        required: ['title', 'reason'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['recommendations'],
+  additionalProperties: false,
+}
+
+/**
+ * §Developer-Bereich, Testmodul "OpenAI-Empfehlungen": nimmt eine bereits
+ * vorhandene Liste von Places-Treffern (kein neuer Places-Aufruf) und lässt
+ * daraus genau 5 familienpassende Empfehlungen auswählen/begründen -- eigene
+ * Schema-Form (Array statt Einzelantwort), sonst gleicher Aufrufstil wie
+ * `generateConciergeAnswer`. Nur auf ausdrücklichen Klick, nie automatisch.
+ */
+export async function generateFiveRecommendations(context: {
+  locationLabel: string
+  placeNames: string[]
+  familyDnaText: string
+}): Promise<FiveRecommendationsResult | null> {
+  if (!process.env.OPENAI_API_KEY) return null
+  if (context.placeNames.length === 0) return null
+
+  const prompt = `Du bist der persönliche Reise-Concierge dieser Familie für ${context.locationLabel}.
+${context.familyDnaText || 'Keine besonderen Präferenzen bekannt.'}
+
+Hier ist eine Liste tatsächlich vor Ort verfügbarer Orte (Restaurants, Sehenswürdigkeiten, Strände, Naturziele):
+${context.placeNames.map((n) => `- ${n}`).join('\n')}
+
+Wähle genau 5 dieser Orte aus der Liste aus, die am besten zu dieser Familie passen, und begründe jede Wahl kurz. Erfinde keine neuen Orte, wähle ausschließlich aus der gegebenen Liste.`
+
+  try {
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+    const response = await openai.responses.create({
+      model: OPENAI_MODEL,
+      input: [{ role: 'user', content: [{ type: 'input_text', text: prompt }] }],
+      text: { format: { type: 'json_schema', name: 'five_recommendations', schema: FIVE_RECOMMENDATIONS_SCHEMA, strict: true } },
+    })
+
+    const parsed = JSON.parse(response.output_text)
+    return parsed.recommendations
+  } catch {
+    return null
+  }
+}

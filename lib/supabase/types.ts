@@ -511,6 +511,21 @@ export interface Database {
           { foreignKeyName: "concierge_category_suggestions_trip_id_fkey";   columns: ["trip_id"];   isOneToOne: false; referencedRelation: "trips";   referencedColumns: ["id"] }
         ]
       }
+      dev_test_runs: {
+        Row: {
+          id: string; module_key: string; success: boolean
+          summary: string | null; error_message: string | null; result: Json | null; ran_at: string
+        }
+        Insert: {
+          id?: string; module_key: string; success: boolean
+          summary?: string | null; error_message?: string | null; result?: Json | null; ran_at?: string
+        }
+        Update: {
+          id?: string; module_key?: string; success?: boolean
+          summary?: string | null; error_message?: string | null; result?: Json | null; ran_at?: string
+        }
+        Relationships: []
+      }
       content_ideas: {
         Row: {
           id: string; family_id: string; project_id: string | null; trip_id: string | null
