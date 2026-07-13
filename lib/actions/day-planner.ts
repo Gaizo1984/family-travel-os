@@ -1,7 +1,7 @@
 'use server'
 
 import { redirect } from 'next/navigation'
-import { searchPlaces, distanceKm, type PlacesCategory, type PlaceResult } from '@/lib/providers/places-provider'
+import { searchPlaces, distanceKm, isPlainBeach, type PlacesCategory, type PlaceResult } from '@/lib/providers/places-provider'
 import { computeRoute, computeRouteMatrix, type RouteMatrixElement } from '@/lib/providers/routes-provider'
 import { ProviderConfigError } from '@/lib/providers/provider-errors'
 import { generateFiveRecommendations } from '@/lib/concierge-ai'
@@ -92,6 +92,10 @@ export async function generateDayPlan(formData: FormData) {
   categories.forEach((category, i) => {
     for (const p of searchResults[i] ?? []) {
       if (seenIds.has(p.id)) continue
+      // §Bugfix "Aktivitäten enthalten zu viele Strände": ein reiner Strand aus
+      // der "attraction"-Suche gehört nur unter "beach", sonst würde er hier
+      // fälschlich als Aktivitäten-Stopp gezählt (siehe `isPlainBeach`).
+      if (category === 'attraction' && isPlainBeach(p.types)) continue
       seenIds.add(p.id)
       if (distanceKm(origin, { lat: p.lat, lng: p.lng }) * 1000 < NEAR_ORIGIN_METERS) continue
       candidates.push({ place: p, category })

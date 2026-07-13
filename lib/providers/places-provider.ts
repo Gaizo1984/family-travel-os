@@ -18,6 +18,7 @@ export type PlaceResult = {
   openNow: boolean | null
   weekdayDescriptions: string[] | null
   photoName: string | null
+  types: string[]
 }
 
 export type PlacesSearchParams = { locationName: string; category: PlacesCategory; lat?: number; lng?: number }
@@ -32,12 +33,32 @@ const CATEGORY_QUERY: Record<PlacesCategory, (location: string) => string> = {
 /**
  * §"Strände nur im sinnvollen Umkreis, Naturziele nur wenn realistisch
  * erreichbar": Restaurants/Sehenswürdigkeiten bleiben lokal eng (25 km),
- * Strände/Naturziele dürfen den vollen Tagesausflugs-Radius nutzen (70 km) --
+ * Strände/Naturziele dürfen einen größeren Tagesausflugs-Radius nutzen --
  * die tatsächliche Erreichbarkeit prüft am Ende ohnehin die echte Fahrzeit
  * (Route Matrix), dieser Radius ist nur eine grobe Vorfilterung.
+ *
+ * §Bugfix "Strände/Natur liefern immer 'Suche fehlgeschlagen'": Google
+ * Places API (New) erlaubt für `locationBias.circle.radius` laut Doku
+ * ausschließlich Werte zwischen 0.0 und 50000.0 -- der vorherige Wert von
+ * 70000 wurde von Google zuverlässig mit 400 INVALID_ARGUMENT abgelehnt.
+ * 50000 ist der größtmögliche noch gültige Wert.
  */
 const CATEGORY_RADIUS_METERS: Record<PlacesCategory, number> = {
-  restaurant: 25000, attraction: 25000, beach: 70000, nature: 70000,
+  restaurant: 25000, attraction: 25000, beach: 50000, nature: 50000,
+}
+
+/** Google Places API (New) erlaubt maximal 20 Treffer pro Suchanfrage (maxResultCount/pageSize). */
+const MAX_GOOGLE_RESULT_COUNT = 20
+
+/**
+ * §Bugfix "Aktivitäten enthalten zu viele Strände": eine reine
+ * Sehenswürdigkeiten-Suche liefert von Google oft auch Strände als Treffer.
+ * Um trotz des nachträglichen Herausfilterns (siehe `isPlainBeach` unten)
+ * noch genug Aktivitäten-Treffer übrig zu behalten, wird für diese Kategorie
+ * direkt das Google-Maximum abgefragt statt der sonst üblichen 8.
+ */
+const RESULT_COUNT_PER_CATEGORY: Record<PlacesCategory, number> = {
+  restaurant: 8, attraction: MAX_GOOGLE_RESULT_COUNT, beach: 8, nature: 8,
 }
 
 const PLACES_FIELD_MASK = [
@@ -49,7 +70,22 @@ const PLACES_FIELD_MASK = [
   'places.userRatingCount',
   'places.currentOpeningHours',
   'places.photos',
+  'places.types',
 ].join(',')
+
+const BEACH_TYPE = 'beach'
+/** Google-Place-Typen, die auf eine tatsächlich buchbare Aktivität am Strand hindeuten (nicht nur den Strand selbst). */
+const BEACH_ACTIVITY_TYPES = new Set(['water_park', 'amusement_park', 'marina', 'fishing_charter', 'fishing_pier'])
+
+/**
+ * §Bugfix "Aktivitäten enthalten zu viele Strände": ein Treffer gilt als
+ * "reiner Strand" (gehört ausschließlich unter "Strände", nicht unter
+ * "Aktivitäten"), wenn er den Google-Typ `beach` trägt, aber keinen der
+ * Typen, die auf eine eigenständig buchbare Aktivität dort hindeuten.
+ */
+export function isPlainBeach(types: string[]): boolean {
+  return types.includes(BEACH_TYPE) && !types.some((t) => BEACH_ACTIVITY_TYPES.has(t))
+}
 
 /**
  * Provider-Abstraktion nach dem `WeatherProvider`-Muster (lib/weather.ts):
@@ -120,7 +156,7 @@ async function googlePlacesSearch(params: PlacesSearchParams): Promise<PlaceResu
       body: JSON.stringify({
         textQuery: CATEGORY_QUERY[params.category](params.locationName),
         languageCode: 'de',
-        maxResultCount: 8,
+        maxResultCount: RESULT_COUNT_PER_CATEGORY[params.category],
         locationBias: { circle: { center: { latitude: lat, longitude: lng }, radius: CATEGORY_RADIUS_METERS[params.category] } },
       }),
       cache: 'no-store',
@@ -143,6 +179,7 @@ async function googlePlacesSearch(params: PlacesSearchParams): Promise<PlaceResu
       openNow: p.currentOpeningHours?.openNow ?? null,
       weekdayDescriptions: p.currentOpeningHours?.weekdayDescriptions ?? null,
       photoName: p.photos?.[0]?.name ?? null,
+      types: Array.isArray(p.types) ? p.types : [],
     }))
   } catch (e) {
     if (e instanceof ProviderConfigError || e instanceof ProviderRequestError) throw e

@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { searchPlaces, distanceKm, type PlaceResult } from '@/lib/providers/places-provider'
+import { searchPlaces, distanceKm, isPlainBeach, type PlaceResult } from '@/lib/providers/places-provider'
 import { computeRouteMatrix, type RouteMatrixElement } from '@/lib/providers/routes-provider'
 import { ProviderConfigError } from '@/lib/providers/provider-errors'
 import { generateFiveRecommendations } from '@/lib/concierge-ai'
@@ -84,8 +84,20 @@ export async function loadCategoryPlaces(formData: FormData) {
     redirect(`${returnTo}?error=${encodeURIComponent('Keine Treffer gefunden -- bitte später erneut versuchen.')}`)
   }
 
+  // §Bugfix "Aktivitäten enthalten zu viele Strände": eine Sehenswürdigkeiten-
+  // Suche liefert von Google oft auch reine Strände als Treffer -- die
+  // gehören ausschließlich unter "Strände", außer sie bieten nachweislich
+  // eine eigenständig buchbare Aktivität (siehe `isPlainBeach`).
+  const filteredResults = config.placesCategory === 'attraction'
+    ? rawResults.filter((p) => !isPlainBeach(p.types))
+    : rawResults
+
+  if (filteredResults.length === 0) {
+    redirect(`${returnTo}?error=${encodeURIComponent('Keine Treffer gefunden -- bitte später erneut versuchen.')}`)
+  }
+
   const seenIds = new Set<string>()
-  const deduped = rawResults.filter((p) => {
+  const deduped = filteredResults.filter((p) => {
     if (seenIds.has(p.id)) return false
     seenIds.add(p.id)
     return true
