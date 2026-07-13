@@ -41,8 +41,14 @@ export function PlacesTestCard({ lastRun }: { lastRun: DevTestRun | null }) {
       {result?.origin && (
         <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
           <div style={{ fontSize: '0.72rem', color: '#e5e7eb' }}>
-            Ausgangspunkt ({result.origin.source === 'hotel' ? 'Hotel' : 'Ort'}): <strong>{result.origin.formattedAddress}</strong>{' '}
-            ({result.origin.lat.toFixed(4)}, {result.origin.lng.toFixed(4)})
+            <div>
+              Ausgangspunkt ({result.origin.source === 'hotel' ? 'Hotel' : 'Urlaubsort'}): <strong>{result.origin.name}</strong>
+            </div>
+            <div style={{ color: '#9ca3af', marginTop: '0.15rem' }}>{result.origin.formattedAddress}</div>
+            <div style={{ color: '#6b7280', fontSize: '0.65rem', marginTop: '0.15rem' }}>
+              {result.origin.placeId && <>Place ID: {result.origin.placeId} · </>}
+              {result.origin.lat.toFixed(5)}, {result.origin.lng.toFixed(5)}
+            </div>
           </div>
           {CATEGORIES.map((category) => {
             const items = result.categories?.[category] ?? []

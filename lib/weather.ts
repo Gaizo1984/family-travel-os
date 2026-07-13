@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react'
 import { Sun, CloudSun, Cloud, CloudFog, CloudDrizzle, CloudRain, CloudSnow, CloudLightning } from 'lucide-react'
+import { geocodeLocation } from './providers/places-provider'
 
 type WmoInfo = { label: string; icon: LucideIcon }
 
@@ -58,59 +59,30 @@ export type WeatherResult = {
   rainStartsAt: string | null
 }
 
-type GeoResult = { lat: number; lon: number; name: string }
 type ForecastResult = Omit<WeatherResult, 'locationName'>
 
 /**
  * Provider-Abstraktion: der Rest der App kennt nur `getWeatherForLocation`/
- * `WeatherResult` — welcher Anbieter dahinter tatsächlich Koordinaten und
- * Vorhersagen liefert, ist über dieses Interface gekapselt. Ein Wechsel zu
- * WeatherAPI/Tomorrow.io (z. B. bei Bedarf für stündliche Präzision oder
- * einen anderen Kostenrahmen) bedeutet später nur eine neue Implementierung
- * dieses Interfaces plus einen einzigen Zuweisungspunkt (`activeProvider`),
- * keinen Umbau der aufrufenden Seiten.
+ * `WeatherResult` — welcher Anbieter dahinter tatsächlich Vorhersagen
+ * liefert, ist über dieses Interface gekapselt. Ein Wechsel zu WeatherAPI/
+ * Tomorrow.io (z. B. bei Bedarf für stündliche Präzision oder einen anderen
+ * Kostenrahmen) bedeutet später nur eine neue Implementierung dieses
+ * Interfaces plus einen einzigen Zuweisungspunkt (`activeProvider`), keinen
+ * Umbau der aufrufenden Seiten. §Geokodierung ist bewusst NICHT mehr Teil
+ * dieses Interfaces (siehe `getWeatherForLocation`) -- Open-Meteos eigene
+ * Geokodierung war für kleine/regionale Orte (z. B. "Guanacaste", "Playa
+ * Conchal") unzuverlässig und lieferte gar keine oder falsche Treffer,
+ * wodurch die Fallback-Kette auf eine andere, zufällig noch geokodierbare
+ * Etappe derselben Reise auswich (z. B. den Atlanta-Zwischenstopp statt des
+ * eigentlichen Reiseziels). Google Geocoding (`geocodeLocation`, dieselbe
+ * Funktion wie im Developer-Bereich) übernimmt die Geokodierung jetzt für
+ * ALLE Aufrufer einheitlich -- keine zweite Wetterlogik.
  */
 interface WeatherProvider {
-  geocode(query: string, countryCode?: string | null): Promise<GeoResult | null>
   forecast(lat: number, lon: number): Promise<ForecastResult | null>
 }
 
-const GEOCODING_URL = 'https://geocoding-api.open-meteo.com/v1/search'
 const FORECAST_URL = 'https://api.open-meteo.com/v1/forecast'
-
-/**
- * Wichtiger Fund beim Debuggen unplausibler Temperaturen: Open-Meteos
- * Geocoding-Endpunkt besitzt KEINEN funktionierenden Land-Filter-Parameter
- * (weder `countryCode` noch `country_code` schränken die Trefferliste
- * tatsächlich ein — beide wurden live gegen die API verifiziert). Die
- * vorige Implementierung übergab `countryCode` und erhielt dadurch bei
- * jeder Anfrage mit diesem Parameter STETS ein leeres Ergebnis zurück,
- * wodurch die Etappen-/Hotel-Geokodierung faktisch nie griff und praktisch
- * immer auf die grobe Landes-Koordinate zurückgefallen wurde — bei Costa
- * Rica ein Punkt im gebirgigen Landesinneren (~1400 m, San-José-Region)
- * statt der tatsächlichen Küstenregion, daher die zu kühlen/unplausiblen
- * Werte. Fix: mehrere Treffer abfragen und das erwartete Land selbst im
- * Code aus den zurückgegebenen `country_code`-Feldern auswählen.
- */
-async function openMeteoGeocode(query: string, countryCode?: string | null): Promise<GeoResult | null> {
-  try {
-    const params = new URLSearchParams({ name: query, count: '8', language: 'de', format: 'json' })
-    const res = await fetch(`${GEOCODING_URL}?${params.toString()}`, { cache: 'no-store' })
-    if (!res.ok) return null
-    const data = await res.json()
-    const results: Array<{ latitude: number; longitude: number; name: string; country_code?: string }> = data?.results ?? []
-    if (results.length === 0) return null
-
-    const match = countryCode
-      ? results.find((r) => r.country_code === countryCode) ?? null
-      : results[0]
-    if (!match) return null
-
-    return { lat: match.latitude, lon: match.longitude, name: match.name }
-  } catch {
-    return null
-  }
-}
 
 async function openMeteoForecast(lat: number, lon: number): Promise<ForecastResult | null> {
   try {
@@ -164,7 +136,7 @@ async function openMeteoForecast(lat: number, lon: number): Promise<ForecastResu
   }
 }
 
-const openMeteoProvider: WeatherProvider = { geocode: openMeteoGeocode, forecast: openMeteoForecast }
+const openMeteoProvider: WeatherProvider = { forecast: openMeteoForecast }
 
 /** Einziger Zuweisungspunkt für den aktiven Wetteranbieter — siehe WeatherProvider-Kommentar oben. */
 const activeProvider: WeatherProvider = openMeteoProvider
@@ -175,30 +147,27 @@ export type WeatherLocationCandidate = { query: string; countryCode?: string | n
  * Fallback-Kette Hotel → Etappe → Reiseziel: probiert die übergebenen
  * Kandidaten der Reihe nach (üblicherweise Unterkunftsname, Etappenort,
  * andere Etappen derselben Reise, Landesname als letzte Instanz) und nimmt
- * den ersten, der sich geokodieren lässt. Gibt bei komplettem Fehlschlag
- * `null` zurück, statt die Seite mit einer fehlenden Wetter-Sektion
- * abstürzen zu lassen.
+ * den ersten, der sich geokodieren lässt. Geokodiert über Google
+ * (`geocodeLocation`) statt Open-Meteos eigener Geokodierung -- siehe
+ * WeatherProvider-Kommentar. Gibt bei komplettem Fehlschlag `null` zurück,
+ * statt die Seite mit einer fehlenden Wetter-Sektion abstürzen zu lassen.
  */
 export async function getWeatherForLocation(candidates: WeatherLocationCandidate[]): Promise<WeatherResult | null> {
   for (const candidate of candidates) {
     if (!candidate.query) continue
-    const geo = await activeProvider.geocode(candidate.query, candidate.countryCode ?? undefined)
+    const geo = await geocodeLocation(candidate.query)
     if (!geo) continue
-    const forecast = await activeProvider.forecast(geo.lat, geo.lon)
-    if (!forecast) continue
-    return { locationName: geo.name, ...forecast }
+    const result = await getWeatherForCoordinates(geo.lat, geo.lng, geo.formattedAddress)
+    if (result) return result
   }
   return null
 }
 
 /**
- * §"Open-Meteo darf nicht erneut versuchen, den Ortsnamen selbst
- * aufzulösen": rein additive Variante für Aufrufer, die die Koordinaten
- * bereits über eine zuverlässigere Geokodierung (z. B. Google Geocoding im
- * Developer-Bereich) ermittelt haben -- überspringt Open-Meteos eigene,
- * für kleine Orte unzuverlässige Geokodierung komplett und ruft nur noch
- * den Forecast ab. Nutzt denselben `activeProvider` wie `getWeatherForLocation`,
- * keine zweite Wetterlogik.
+ * Ruft nur noch den Forecast für bereits bekannte Koordinaten ab -- von
+ * `getWeatherForLocation` selbst genutzt (nach Google-Geokodierung) sowie
+ * vom Wetter-Testmodul im Developer-Bereich, das ohnehin schon eigene
+ * Koordinaten vorliegen hat. Eine Implementierung, kein Sonderpfad.
  */
 export async function getWeatherForCoordinates(lat: number, lon: number, label?: string): Promise<WeatherResult | null> {
   const forecast = await activeProvider.forecast(lat, lon)

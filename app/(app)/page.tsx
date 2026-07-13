@@ -38,7 +38,7 @@ function HeroTrip({ trip, img }: { trip: TripRow; img: ResolvedTripImage | null 
         className="absolute inset-0"
         style={{
           background:
-            "linear-gradient(180deg, rgba(10,9,7,0.55) 0%, rgba(10,9,7,0.08) 30%, rgba(10,9,7,0.05) 55%, rgba(10,9,7,0.8) 100%)",
+            "linear-gradient(180deg, rgba(10,9,7,0.55) 0%, rgba(10,9,7,0.08) 30%, rgba(10,9,7,0.05) 50%, rgba(10,9,7,0.88) 100%)",
         }}
       />
 
@@ -59,10 +59,7 @@ function HeroTrip({ trip, img }: { trip: TripRow; img: ResolvedTripImage | null 
         )}
       </div>
 
-      <div
-        className="absolute inset-x-0 bottom-0 mx-3 mb-3 md:mx-4 md:mb-4 px-4 py-3 rounded-lg"
-        style={{ background: "rgba(10,9,7,0.55)", backdropFilter: "blur(10px)", border: "1px solid rgba(240,235,227,0.1)" }}
-      >
+      <div className="absolute inset-x-0 bottom-0 px-5 pb-5 md:px-8 md:pb-7">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="text-xs" style={{ color: "#D8CFC0", letterSpacing: "0.02em", fontSize: "0.65rem" }}>
             {trip.start_date ? formatDateDE(trip.start_date) : "—"}

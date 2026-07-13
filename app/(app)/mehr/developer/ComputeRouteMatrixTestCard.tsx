@@ -30,7 +30,7 @@ export function ComputeRouteMatrixTestCard({ lastRun }: { lastRun: DevTestRun | 
 
       {result && (
         <div style={{ color: '#9ca3af', fontSize: '0.65rem', marginTop: '0.85rem' }}>
-          Ausgangspunkt ({result.originSource === 'hotel' ? 'Hotel' : 'Ort'}): {result.origin}
+          Ausgangspunkt ({result.originSource === 'hotel' ? 'Hotel' : 'Urlaubsort'}): {result.origin}
         </div>
       )}
       {result && (

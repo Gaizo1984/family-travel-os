@@ -15,7 +15,7 @@ export type CompactPlace = {
 }
 
 export type PlacesTestResult = {
-  origin: { name: string; formattedAddress: string; lat: number; lng: number; source: 'hotel' | 'location' }
+  origin: { placeId: string | null; name: string; formattedAddress: string; lat: number; lng: number; source: 'hotel' | 'location' }
   categories: Record<PlacesCategory, CompactPlace[]>
 }
 
@@ -48,12 +48,16 @@ export async function runPlacesTest(formData: FormData) {
     redirect('/mehr/developer')
   }
 
-  // §"Gleiche Places nicht mehrfach in unterschiedlichen Kategorien anzeigen":
-  // global über alle Kategorien nach Place-ID deduplizieren, die erste
-  // Kategorie in Durchlaufreihenfolge behält den Treffer.
-  const seenIds = new Set<string>()
+  // §Bugfix "Dedup zu aggressiv, Strände/Naturziele bleiben leer": nur noch
+  // INNERHALB einer Kategorie nach Place-ID deduplizieren (Google liefert pro
+  // Aufruf ohnehin normalerweise keine echten Duplikate, dies ist eine reine
+  // Absicherung) -- ein Ort, der fachlich zu mehreren Kategorien passt (z. B.
+  // eine Sehenswürdigkeit, die auch als Naturziel gilt), darf in JEDER
+  // passenden Kategorie erscheinen, statt nach der ersten Kategorie aus allen
+  // anderen zu verschwinden.
   const byCategory: Partial<Record<PlacesCategory, PlaceResult[]>> = {}
   CATEGORIES.forEach((category, i) => {
+    const seenIds = new Set<string>()
     const deduped = (searchResults[i] ?? []).filter((p) => {
       if (seenIds.has(p.id)) return false
       seenIds.add(p.id)
@@ -90,13 +94,13 @@ export async function runPlacesTest(formData: FormData) {
   })
 
   const result: PlacesTestResult = {
-    origin: { name: origin.name, formattedAddress: origin.formattedAddress, lat: origin.lat, lng: origin.lng, source: origin.source },
+    origin: { placeId: origin.placeId, name: origin.name, formattedAddress: origin.formattedAddress, lat: origin.lat, lng: origin.lng, source: origin.source },
     categories,
   }
 
   await recordTestRun('places', {
     success: true,
-    summary: `${totalCount} Treffer in ${CATEGORIES.length} Kategorien ab ${origin.source === 'hotel' ? 'Hotel' : 'Ort'} "${origin.formattedAddress}"`,
+    summary: `${totalCount} Treffer in ${CATEGORIES.length} Kategorien ab ${origin.source === 'hotel' ? 'Hotel' : 'Urlaubsort'} "${origin.formattedAddress}"`,
     result,
   })
   redirect('/mehr/developer')

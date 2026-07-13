@@ -484,7 +484,7 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
           className="absolute inset-0"
           style={{
             background:
-              "linear-gradient(180deg, rgba(10,9,7,0.55) 0%, rgba(10,9,7,0.1) 30%, rgba(10,9,7,0.05) 55%, rgba(10,9,7,0.82) 100%)",
+              "linear-gradient(180deg, rgba(10,9,7,0.55) 0%, rgba(10,9,7,0.1) 30%, rgba(10,9,7,0.05) 50%, rgba(10,9,7,0.88) 100%)",
           }}
         />
 
@@ -590,8 +590,8 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
           </details>
         </div>
 
-        <div className="absolute inset-x-0 bottom-0 px-4 md:px-6 pb-3 md:pb-4 flex flex-col gap-2.5">
-          <div className="px-3 md:px-4">
+        <div className="absolute inset-x-0 bottom-0 px-5 pb-5 md:px-8 md:pb-7 flex flex-col gap-2.5">
+          <div>
             <div style={{ color: "#C8A96E", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "6px" }}>
               Eure Reise
             </div>
@@ -603,10 +603,7 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
             </h1>
           </div>
 
-          <div
-            className="px-4 py-3 rounded-lg flex flex-col gap-2"
-            style={{ background: "rgba(10,9,7,0.55)", backdropFilter: "blur(10px)", border: `1px solid ${H_BORDER}` }}
-          >
+          <div className="flex flex-col gap-2">
             {routeChips.length > 0 && <RouteChips chips={routeChips} />}
 
             <div className="flex items-center justify-between gap-3 flex-wrap">

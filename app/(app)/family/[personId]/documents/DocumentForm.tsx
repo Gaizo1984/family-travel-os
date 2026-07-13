@@ -4,6 +4,7 @@ import type { DocumentType, DocumentDetails } from "@/lib/documents";
 import { DateSelectFields } from "@/components/DateSelectFields";
 import { Banner } from "@/components/Banner";
 import { ExtractSubmitButton } from "@/components/ExtractSubmitButton";
+import { SaveSubmitButton } from "@/components/SaveSubmitButton";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -297,17 +298,16 @@ export function DocumentForm({
                 }}
               />
             )}
-            <button
-              type="submit"
+            <SaveSubmitButton
+              action={action}
+              label={submitLabel}
               style={{
                 background: "var(--foreground)", color: "var(--surface)", border: "none",
                 borderRadius: "6px", padding: "11px 20px", fontSize: "0.65rem",
-                letterSpacing: "0.16em", textTransform: "uppercase", cursor: "pointer",
+                letterSpacing: "0.16em", textTransform: "uppercase",
                 whiteSpace: "nowrap", WebkitAppearance: "none", appearance: "none",
               }}
-            >
-              {submitLabel}
-            </button>
+            />
           </div>
         </div>
       </div>

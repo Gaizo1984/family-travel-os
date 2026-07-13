@@ -141,14 +141,20 @@ export async function searchPlaces(params: PlacesSearchParams): Promise<PlaceRes
   return activePlacesProvider.search(params)
 }
 
-const PLACE_LOOKUP_FIELD_MASK = 'places.id,places.displayName,places.formattedAddress,places.location'
+const PLACE_LOOKUP_FIELD_MASK = 'places.id,places.displayName,places.formattedAddress,places.location,places.types'
+/** Google-Places-Typ für Unterkünfte -- einziges verlässliches Signal, dass ein Text-Search-Treffer tatsächlich ein Hotel ist (nicht nur irgendein Ort/Adresse mit ähnlichem Namen). */
+const LODGING_TYPE = 'lodging'
+
+type PlaceLookupResult = { placeId: string; name: string; formattedAddress: string; lat: number; lng: number; types: string[] }
 
 /**
  * Ein präziser Treffer per Places Text Search (kein Kategorie-/Umkreis-Bias)
  * -- Hotels/POIs sind mit reinem Geocoding oft schlechter auflösbar als mit
- * einer Namenssuche. Genutzt von `resolveReferencePoint` unten.
+ * einer Namenssuche. Gibt den erkannten Namen, Place ID und `types` zurück,
+ * damit `resolveReferencePoint` echte Hoteltreffer von bloßen Orts-/Adress-
+ * treffern unterscheiden kann. Genutzt von `resolveReferencePoint` unten.
  */
-async function resolvePlaceByName(name: string): Promise<GeocodeResult | null> {
+async function resolvePlaceByName(name: string): Promise<PlaceLookupResult | null> {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY
   if (!apiKey) return null
   try {
@@ -162,34 +168,53 @@ async function resolvePlaceByName(name: string): Promise<GeocodeResult | null> {
     const data = await res.json()
     const first = data?.places?.[0]
     if (!first?.location) return null
-    return { lat: first.location.latitude, lng: first.location.longitude, formattedAddress: first.formattedAddress ?? first.displayName?.text ?? name }
+    return {
+      placeId: first.id ?? '',
+      name: first.displayName?.text ?? name,
+      formattedAddress: first.formattedAddress ?? '',
+      lat: first.location.latitude,
+      lng: first.location.longitude,
+      types: Array.isArray(first.types) ? first.types : [],
+    }
   } catch {
     return null
   }
 }
 
-export type ReferencePoint = GeocodeResult & { name: string; source: 'hotel' | 'location' }
+export type ReferencePoint = {
+  placeId: string | null
+  name: string
+  formattedAddress: string
+  lat: number
+  lng: number
+  source: 'hotel' | 'location'
+}
 
 /**
  * §"Hotel als echter Referenzpunkt": einziger Auflösungsweg für alle
  * Developer-Testmodule, die einen Ausgangspunkt brauchen (Places, Compute
  * Routes, Route Matrix, Tagestrip) -- vermeidet vier unabhängige
- * Implementierungen derselben Hotel-zuerst-Logik. Ist ein Hotel angegeben,
- * wird es per Places Text Search (präziser für POIs/Hotelnamen) und
- * hilfsweise per Geocoding aufgelöst; nur wenn kein Hotel vorhanden/
- * auffindbar ist, fällt die Funktion auf den Haupturlaubsort zurück.
+ * Implementierungen derselben Hotel-zuerst-Logik.
+ *
+ * §Bugfix "Hotel-Referenzpunkt wird nicht eindeutig als Hotel aufgelöst":
+ * vorher zählte JEDER Places-Text-Search-Treffer (auch ein reiner Orts-/
+ * Adresstreffer wie "Playa Conchal" ohne echten Hotel-POI) als "Hotel" --
+ * jetzt nur noch, wenn der Treffer tatsächlich vom Typ `lodging` ist. Ohne
+ * einen solchen echten Hoteltreffer fällt die Funktion direkt auf den
+ * Haupturlaubsort zurück (kein unsicherer Geocoding-Versuch des Hoteltexts
+ * mehr, der fälschlich weiterhin als "Hotel" beschriftet würde).
  */
 export async function resolveReferencePoint(params: { hotel?: string | null; location: string }): Promise<ReferencePoint | null> {
   const hotel = params.hotel?.trim()
   if (hotel) {
     const viaPlaces = await resolvePlaceByName(hotel)
-    if (viaPlaces) return { ...viaPlaces, name: hotel, source: 'hotel' }
-    const viaGeocode = await geocodeLocation(hotel)
-    if (viaGeocode) return { ...viaGeocode, name: hotel, source: 'hotel' }
+    if (viaPlaces && viaPlaces.types.includes(LODGING_TYPE)) {
+      return { placeId: viaPlaces.placeId, name: viaPlaces.name, formattedAddress: viaPlaces.formattedAddress, lat: viaPlaces.lat, lng: viaPlaces.lng, source: 'hotel' }
+    }
   }
   const viaLocation = await geocodeLocation(params.location)
   if (!viaLocation) return null
-  return { ...viaLocation, name: params.location, source: 'location' }
+  return { placeId: null, name: params.location, formattedAddress: viaLocation.formattedAddress, lat: viaLocation.lat, lng: viaLocation.lng, source: 'location' }
 }
 
 const EARTH_RADIUS_KM = 6371

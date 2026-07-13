@@ -9,6 +9,12 @@ import { useFormStatus } from 'react-dom';
  * Komponenten. Zeigt während der Auslesung Text + deaktivierten Button statt
  * stillschweigend zu warten. Von beiden KI-Auslese-Formularen geteilt
  * (Buchungen + Dokumente), keine zweite Implementierung.
+ *
+ * §"'Wird ausgelesen' darf nur hier erscheinen, nicht beim normalen
+ * Speichern": dasselbe Formular hat einen zweiten Submit-Button
+ * (`SaveSubmitButton`) -- `status.action === formAction` prüft, ob GENAU
+ * diese Aktion (die KI-Auslesung) gerade läuft, nicht irgendeine beliebige
+ * Formular-Aktion.
  */
 export function ExtractSubmitButton({
   formAction,
@@ -17,17 +23,18 @@ export function ExtractSubmitButton({
   formAction: (formData: FormData) => void | Promise<void>;
   style?: React.CSSProperties;
 }) {
-  const { pending } = useFormStatus();
+  const status = useFormStatus();
+  const isExtracting = status.pending && status.action === formAction;
 
   return (
     <button
       type="submit"
       formAction={formAction}
       formNoValidate
-      disabled={pending}
-      style={{ ...style, opacity: pending ? 0.6 : 1, cursor: pending ? "default" : "pointer" }}
+      disabled={status.pending}
+      style={{ ...style, opacity: status.pending ? 0.6 : 1, cursor: status.pending ? "default" : "pointer" }}
     >
-      {pending ? "Wird ausgelesen …" : "🤖 Dokument auslesen"}
+      {isExtracting ? "Wird ausgelesen …" : "🤖 Dokument auslesen"}
     </button>
   );
 }

@@ -22,7 +22,7 @@ export function DaytripTestCard({ lastRun }: { lastRun: DevTestRun | null }) {
       {result && (
         <div style={{ marginTop: '0.85rem', fontSize: '0.72rem', color: '#d1d5db' }}>
           <div style={{ color: '#9ca3af', fontSize: '0.65rem', marginBottom: '0.2rem' }}>
-            Ausgangspunkt: {result.originSource === 'hotel' ? 'Hotel' : 'Ort'}
+            Ausgangspunkt: {result.originSource === 'hotel' ? 'Hotel' : 'Urlaubsort'}
           </div>
           <div>Ausgangsort: <strong>{result.origin}</strong></div>
           <div style={{ marginTop: '0.3rem' }}>
