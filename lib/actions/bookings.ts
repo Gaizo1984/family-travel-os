@@ -107,6 +107,21 @@ async function findStageByExactStartDate(supabase: SupabaseClient, tripId: strin
   return stages && stages.length === 1 ? stages[0] : null
 }
 
+/**
+ * §Reparaturpfad-Lücke: eine bereits gesetzte `stage_id` wurde bisher
+ * ungeprüft übernommen (nur ihre Felder synchronisiert) -- bei Altdaten aus
+ * der Zeit vor diesem Fix kann diese `stage_id` aber fälschlich mit einer
+ * ANDEREN Unterkunftsbuchung geteilt sein (der Mauritius-Bug: zwei Hotels,
+ * eine Etappe). In diesem Fall darf nicht synchronisiert werden (das würde
+ * nur die falschen Daten der anderen Buchung überschreiben) -- stattdessen
+ * muss die Buchung eine eigene, korrekte Etappe bekommen.
+ */
+async function isStageSharedWithOtherAccommodation(supabase: SupabaseClient, stageId: string, excludeBookingId: string): Promise<boolean> {
+  const { data } = await supabase
+    .from('bookings').select('id').eq('stage_id', stageId).eq('type', 'accommodation').neq('id', excludeBookingId).limit(1)
+  return (data?.length ?? 0) > 0
+}
+
 async function syncAccommodationIntoStage(
   supabase: SupabaseClient,
   stageId: string,
@@ -408,6 +423,15 @@ export async function updateBooking(formData: FormData) {
   // Überlappung nutzen, um Hotelwechsel am selben Tag nicht der vorherigen
   // Etappe zuzuschlagen.
   if (!stageId && tripId && f.type !== 'accommodation') stageId = await suggestStageId(supabase, tripId, f.startDate)
+
+  // §Altdaten-Reparatur (Mauritius-Bug): eine gesetzte stage_id, die sich
+  // eine ANDERE Unterkunftsbuchung teilt, ist eine Fehlzuordnung aus der Zeit
+  // vor diesem Fix -- statt sie zu synchronisieren (und damit die andere
+  // Buchung zu überschreiben), wird sie verworfen und `maybeCreateAccommodationStage`
+  // sucht/erzeugt die richtige, eigene Etappe.
+  if (stageId && f.type === 'accommodation' && await isStageSharedWithOtherAccommodation(supabase, stageId, bookingId)) {
+    stageId = null
+  }
 
   if (!stageId && tripId) {
     stageId = await maybeCreateAccommodationStage(supabase, tripId, f.type, f.title, startDatetime, endDatetime)
