@@ -112,7 +112,7 @@ export function BookingDateFields({
           )}
           <DateSelectFields
             key={endKey}
-            label={endLabel} namePrefix="end_date" defaultIso={endIso}
+            label={showNightsHelper ? `${endLabel} *` : endLabel} namePrefix="end_date" defaultIso={endIso}
             range={RANGE} quickActions
           />
           <label htmlFor="bk-end-time" style={LABEL_STYLE}>Uhrzeit</label>

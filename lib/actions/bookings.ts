@@ -93,6 +93,9 @@ async function maybeCreateLayoverStage(
  * wie `maybeCreateLayoverStage`. Gibt die neue Etappen-ID zurück, damit der
  * Aufrufer die Buchung selbst damit verknüpfen kann.
  */
+/** Marker im `notes`-Feld automatisch erzeugter Etappen -- Grundlage für `maybeSyncAccommodationStage`. */
+const AUTO_STAGE_NOTE = 'Automatisch aus Hotelbuchung erzeugt.'
+
 async function maybeCreateAccommodationStage(
   supabase: SupabaseClient,
   tripId: string,
@@ -102,10 +105,14 @@ async function maybeCreateAccommodationStage(
   endDatetime: string | null,
 ): Promise<string | null> {
   if (bookingType !== 'accommodation') return null
-  if (!startDatetime) return null
+  // §Bugfix "Nächte = 0 / Enddatum = Check-in": ohne Check-out lässt sich keine
+  // sinnvolle Etappe ableiten -- früher fiel endDate hier still auf startDate
+  // zurück (Check-out ist serverseitig inzwischen aber ohnehin Pflichtfeld,
+  // siehe createBooking/updateBooking; dieser Guard bleibt als Absicherung).
+  if (!startDatetime || !endDatetime) return null
 
   const startDate = startDatetime.slice(0, 10)
-  const endDate = endDatetime ? endDatetime.slice(0, 10) : startDate
+  const endDate = endDatetime.slice(0, 10)
 
   const { data: existing } = await supabase
     .from('stages').select('id').eq('trip_id', tripId).eq('title', title).eq('start_date', startDate).maybeSingle()
@@ -129,10 +136,42 @@ async function maybeCreateAccommodationStage(
     accommodation: title,
     sort_order: (last?.sort_order ?? -1) + 1,
     country_code: countryCode,
-    notes: 'Automatisch aus Hotelbuchung erzeugt.',
+    notes: AUTO_STAGE_NOTE,
   }).select('id').single()
 
   return created?.id ?? null
+}
+
+/**
+ * §Reparaturpfad für bereits bestehende, fehlerhaft erzeugte Etappen
+ * (Nächte = 0 / Enddatum = Check-in, entstanden vor diesem Fix oder durch
+ * eine damals fehlende Check-out-Angabe): wird eine Unterkunftsbuchung mit
+ * bereits verknüpfter, automatisch erzeugter Etappe bearbeitet, zieht die
+ * Etappe die korrigierten Daten nach. Rührt manuell angelegte/bearbeitete
+ * Etappen NICHT an (erkennbar am `notes`-Marker aus `maybeCreateAccommodationStage`).
+ */
+async function maybeSyncAccommodationStage(
+  supabase: SupabaseClient,
+  stageId: string,
+  bookingType: BookingType,
+  title: string,
+  startDatetime: string | null,
+  endDatetime: string | null,
+): Promise<void> {
+  if (bookingType !== 'accommodation' || !startDatetime || !endDatetime) return
+
+  const { data: stage } = await supabase.from('stages').select('notes').eq('id', stageId).maybeSingle()
+  if (stage?.notes !== AUTO_STAGE_NOTE) return
+
+  const startDate = startDatetime.slice(0, 10)
+  const endDate = endDatetime.slice(0, 10)
+  const nights = Math.round((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000)
+  if (nights < 0) return
+
+  await supabase.from('stages').update({
+    title, location: title, accommodation: title,
+    start_date: startDate, end_date: endDate, nights,
+  }).eq('id', stageId)
 }
 
 function readCommonFields(formData: FormData) {
@@ -238,6 +277,12 @@ export async function createBooking(formData: FormData) {
     redirectWithDraft(newPath, `${f.config.titleLabel}: mindestens 2 Zeichen erforderlich`, f)
   if (!f.startDate)
     redirectWithDraft(newPath, `${f.config.startLabel}: Datum ist erforderlich`, f)
+  // §Bugfix "Nächte = 0 / Enddatum = Check-in in der automatisch erzeugten
+  // Etappe": Check-out war bisher optional und fiel beim Fehlen still auf
+  // Check-in zurück. Für Unterkünfte (einzige Buchungsart, die eine Etappe
+  // erzeugt) ist Check-out jetzt Pflicht, analog zu Check-in.
+  if (f.type === 'accommodation' && !f.endDate)
+    redirectWithDraft(newPath, `${f.config.endLabel}: Datum ist erforderlich`, f)
 
   const startDatetime = combineDateTime(f.startDate, f.startTime)
   const endDatetime = f.config.showEnd ? combineDateTime(f.endDate, f.endTime) : null
@@ -295,6 +340,8 @@ export async function updateBooking(formData: FormData) {
     redirectWithDraft(editPath, `${f.config.titleLabel}: mindestens 2 Zeichen erforderlich`, f)
   if (!f.startDate)
     redirectWithDraft(editPath, `${f.config.startLabel}: Datum ist erforderlich`, f)
+  if (f.type === 'accommodation' && !f.endDate)
+    redirectWithDraft(editPath, `${f.config.endLabel}: Datum ist erforderlich`, f)
 
   const supabase = await createClient()
 
@@ -316,6 +363,10 @@ export async function updateBooking(formData: FormData) {
 
   if (!stageId && tripId) {
     stageId = await maybeCreateAccommodationStage(supabase, tripId, f.type, f.title, startDatetime, endDatetime)
+  } else if (stageId) {
+    // §Reparaturpfad: eine bereits verknüpfte, automatisch erzeugte Etappe
+    // zieht korrigierte Check-in/-out-Daten nach (siehe maybeSyncAccommodationStage).
+    await maybeSyncAccommodationStage(supabase, stageId, f.type, f.title, startDatetime, endDatetime)
   }
 
   const { error } = await supabase
