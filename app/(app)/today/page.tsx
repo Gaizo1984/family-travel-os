@@ -9,6 +9,7 @@ import { Banner } from "@/components/Banner";
 import { getFamily } from "@/lib/family";
 import { isTripCurrentlyRunning, isTripHistorical, tripCountdownDisplay } from "@/lib/trip-status";
 import { getTripDuration } from "@/lib/demo-data";
+import { deriveTripDateRange } from "@/lib/trip-dates";
 import { sortStagesChronologically, buildJourneyTimeline } from "@/lib/journey";
 import type { StageInput, TimelineBooking, TimelineEvent, TimelineDay } from "@/lib/journey";
 import { sortBookingsChronologically } from "@/lib/bookings";
@@ -341,7 +342,16 @@ export default async function TodayPage({
   // Default von isTripCurrentlyRunning zu vertrauen — sonst könnte die "aktive
   // Reise"-Erkennung im selben ~2-Stunden-Fenster wie der Aktivitäten-Bug (s. u.)
   // von einem anderen Kalendertag ausgehen als der Rest dieser Seite.
-  const allTrips = (trips ?? []) as unknown as TripRow[];
+  // §"Reisezeitraum automatisch ableiten": start_date/end_date werden HIER
+  // einmalig zentral (lib/trip-dates.ts) auf den abgeleiteten Zeitraum
+  // (Buchungen/Etappen-Fallback) normalisiert -- alle nachfolgenden Stellen
+  // dieser Seite (aktive Reise, nächste Reise, Dauer/Countdown, Journey-
+  // Timeline) nutzen dadurch automatisch dieselbe Ableitung, ohne sie erneut
+  // zu bauen.
+  const allTrips = ((trips ?? []) as unknown as TripRow[]).map((t) => {
+    const range = deriveTripDateRange(t, t.bookings, t.stages);
+    return { ...t, start_date: range.startDate, end_date: range.endDate };
+  });
   const activeTrip = allTrips.find((t) => isTripCurrentlyRunning(t, todayIso));
   const flightToday = await findTodaysFlightWithBoardingPasses(allTrips, todayIso);
 

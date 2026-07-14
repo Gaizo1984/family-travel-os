@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Map as MapIcon, Globe, CalendarDays } from "lucide-react";
-import { formatDateDE, getTripDuration } from "@/lib/demo-data";
+import { formatDateDE } from "@/lib/demo-data";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { restoreTrip } from "@/lib/actions/trips";
@@ -8,6 +8,7 @@ import { tripCountdownDisplay } from "@/lib/trip-status";
 import { resolveTripImage, getHighlightPhotoByTripId, type ResolvedTripImage } from "@/lib/trip-images";
 import { buildTravelWorld } from "@/lib/travel-world";
 import { isTripHistorical, isTripCurrentlyRunning } from "@/lib/trip-status";
+import { deriveTripDateRange, tripDurationDays, TRIP_DATE_RANGE_OPEN_LABEL } from "@/lib/trip-dates";
 import { SignedPhoto } from "@/components/SignedPhoto";
 
 const H_FG    = "#F0EBE3";
@@ -36,7 +37,8 @@ type TripRow = {
   gradient_via: string | null
   gradient_to: string | null
   trip_members: Array<{ persons: PersonRow | null }>
-  stages: Array<{ id: string }>
+  stages: Array<{ id: string; start_date: string | null; end_date: string | null }>
+  bookings: Array<{ type: string; status: string; start_datetime: string | null; end_datetime: string | null }>
 }
 
 /**
@@ -45,10 +47,19 @@ type TripRow = {
  * status verlassen, sondern dieselbe datumsbasierte Einordnung wie
  * Dashboard/Familienseite/Reisegeschichte nutzen (lib/trip-status.ts) --
  * eine Reise mit vergangenem Enddatum gilt als erlebt, auch wenn ihr Status
- * nie manuell auf "completed" gesetzt wurde.
+ * nie manuell auf "completed" gesetzt wurde. Der Status wird jetzt IMMER auf
+ * dem zentral abgeleiteten Zeitraum (lib/trip-dates.ts) berechnet, nicht auf
+ * den ggf. leeren trips.start_date/end_date direkt -- eine Reise ganz ohne
+ * manuelles Datum, aber mit Buchungen/Etappen, gilt so trotzdem korrekt als
+ * laufend/vergangen.
  */
+function tripWithDerivedDates(trip: TripRow): TripRow {
+  const range = deriveTripDateRange(trip, trip.bookings, trip.stages);
+  return { ...trip, start_date: range.startDate, end_date: range.endDate };
+}
+
 function applyFilter(trips: TripRow[], f: string): { planned: TripRow[]; past: TripRow[] } {
-  const nonArchived = trips.filter((t) => t.status !== "archived");
+  const nonArchived = trips.filter((t) => t.status !== "archived").map(tripWithDerivedDates);
   const past     = nonArchived.filter((t) => isTripHistorical(t));
   const running  = nonArchived.filter((t) => !isTripHistorical(t) && isTripCurrentlyRunning(t));
   const upcoming = nonArchived.filter((t) => !isTripHistorical(t) && !isTripCurrentlyRunning(t));
@@ -60,9 +71,9 @@ function applyFilter(trips: TripRow[], f: string): { planned: TripRow[]; past: T
 }
 
 function PlannedCard({ trip, img }: { trip: TripRow; img: ResolvedTripImage | null }) {
-  const duration = trip.start_date && trip.end_date
-    ? getTripDuration(trip.start_date, trip.end_date) : 0;
-  const countdown = tripCountdownDisplay(trip, duration);
+  const range = deriveTripDateRange(trip, trip.bookings, trip.stages);
+  const duration = tripDurationDays(range);
+  const countdown = tripCountdownDisplay({ ...trip, start_date: range.startDate, end_date: range.endDate }, duration);
   const members = trip.trip_members.flatMap(tm => tm.persons ? [tm.persons] : []);
   const stageCount = trip.stages.length;
 
@@ -98,7 +109,7 @@ function PlannedCard({ trip, img }: { trip: TripRow; img: ResolvedTripImage | nu
 
       <div className="absolute top-6 left-7">
         <span style={{ color: "#C8A96E", fontSize: "0.6rem", letterSpacing: "0.22em", textTransform: "uppercase" }}>
-          {isTripCurrentlyRunning(trip) ? "Aktive Reise" : "In Planung"}
+          {isTripCurrentlyRunning({ ...trip, start_date: range.startDate, end_date: range.endDate }) ? "Aktive Reise" : "In Planung"}
         </span>
       </div>
 
@@ -118,7 +129,7 @@ function PlannedCard({ trip, img }: { trip: TripRow; img: ResolvedTripImage | nu
         <div className="flex items-end justify-between gap-4 flex-wrap">
           <div className="flex gap-7">
             {[
-              { label: "Abflug",   value: trip.start_date ? formatDateDE(trip.start_date) : "—" },
+              { label: "Abflug",   value: range.startDate ? formatDateDE(range.startDate) : TRIP_DATE_RANGE_OPEN_LABEL },
               { label: "Dauer",    value: duration ? `${duration} Tage` : "—" },
               { label: "Etappen",  value: stageCount > 0 ? String(stageCount) : "—" },
             ].map(({ label, value }) => (
@@ -166,8 +177,8 @@ function PlannedCard({ trip, img }: { trip: TripRow; img: ResolvedTripImage | nu
 }
 
 function PastCard({ trip, img }: { trip: TripRow; img: ResolvedTripImage | null }) {
-  const duration = trip.start_date && trip.end_date
-    ? getTripDuration(trip.start_date, trip.end_date) : 0;
+  const range = deriveTripDateRange(trip, trip.bookings, trip.stages);
+  const duration = tripDurationDays(range);
   const members = trip.trip_members.flatMap(tm => tm.persons ? [tm.persons] : []);
 
   return (
@@ -223,7 +234,7 @@ function PastCard({ trip, img }: { trip: TripRow; img: ResolvedTripImage | null 
                 Zeitraum
               </div>
               <div style={{ color: H_FG, fontSize: "0.75rem", fontWeight: 300 }}>
-                {trip.start_date ? formatDateDE(trip.start_date) : "—"}
+                {range.startDate ? formatDateDE(range.startDate) : TRIP_DATE_RANGE_OPEN_LABEL}
               </div>
             </div>
             <div>
@@ -358,7 +369,8 @@ export default async function TripsPage({
         start_date, end_date, cover_emoji,
         gradient_from, gradient_via, gradient_to,
         trip_members ( persons ( id, name, initials, color ) ),
-        stages ( id )
+        stages ( id, start_date, end_date ),
+        bookings ( type, status, start_datetime, end_datetime )
       `)
       .order("start_date", { ascending: true, nullsFirst: false }),
     getHighlightPhotoByTripId(supabase, familyId),

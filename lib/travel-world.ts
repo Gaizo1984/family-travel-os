@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
-import { getTripDuration } from '@/lib/demo-data'
 import { isTripHistorical, isTripCurrentlyRunning } from '@/lib/trip-status'
+import { deriveTripDateRange, tripDurationDays } from '@/lib/trip-dates'
 
 export type TravelWorldTimelineEntry = {
   key: string
@@ -27,7 +27,8 @@ type TripJoin = {
   id: string; slug: string; title: string
   start_date: string | null; end_date: string | null; status: string
   trip_members: { person_id: string }[]
-  stages: { country_code: string | null; is_transit: boolean }[]
+  stages: { country_code: string | null; is_transit: boolean; start_date: string | null; end_date: string | null }[]
+  bookings: { type: string; status: string; start_datetime: string | null; end_datetime: string | null }[]
 }
 type PastTripRow = {
   id: string; country_or_region: string; country_code: string | null
@@ -60,7 +61,8 @@ export async function buildTravelWorld(params: {
     supabase.from('trips').select(`
       id, slug, title, start_date, end_date, status,
       trip_members ( person_id ),
-      stages ( country_code, is_transit )
+      stages ( country_code, is_transit, start_date, end_date ),
+      bookings ( type, status, start_datetime, end_datetime )
     `).eq('family_id', params.familyId),
     supabase.from('past_trips').select('id, country_or_region, country_code, year, places, duration_days').eq('family_id', params.familyId),
     supabase.from('past_trip_travelers').select('past_trip_id, person_id'),
@@ -74,8 +76,18 @@ export async function buildTravelWorld(params: {
   })
 
   let trips = (tripsRaw ?? []) as unknown as TripJoin[]
+  // §"Reisezeitraum automatisch ableiten": Status/Statistik nutzen denselben
+  // zentral abgeleiteten Zeitraum (lib/trip-dates.ts) wie Reiseübersicht und
+  // Trip-Detail -- eine Reise ohne manuelles Datum, aber mit Buchungen/
+  // Etappen, zählt so trotzdem korrekt als laufend/erlebt.
+  const rangeByTripId = new Map(trips.map((t) => [t.id, deriveTripDateRange(t, t.bookings, t.stages)]))
+  const tripStatusInput = (t: TripJoin) => {
+    const range = rangeByTripId.get(t.id)!
+    return { status: t.status, start_date: range.startDate, end_date: range.endDate }
+  }
+
   if (statusFilter === 'historical') {
-    trips = trips.filter((t) => isTripHistorical(t) || isTripCurrentlyRunning(t))
+    trips = trips.filter((t) => isTripHistorical(tripStatusInput(t)) || isTripCurrentlyRunning(tripStatusInput(t)))
   } else {
     trips = trips.filter((t) => t.status !== 'archived')
   }
@@ -93,22 +105,25 @@ export async function buildTravelWorld(params: {
   pastTrips.forEach((p) => { if (p.country_code) countryCodes.add(p.country_code) })
 
   const travelDays =
-    trips.reduce((sum, t) => sum + (t.start_date && t.end_date ? getTripDuration(t.start_date, t.end_date) : 0), 0) +
+    trips.reduce((sum, t) => sum + tripDurationDays(rangeByTripId.get(t.id)!), 0) +
     pastTrips.reduce((sum, p) => sum + (p.duration_days ?? 0), 0)
 
   const timeline: TravelWorldTimelineEntry[] = [
-    ...trips.map((t) => ({
-      key: `trip-${t.id}`,
-      kind: 'trip' as const,
-      year: t.start_date ? new Date(t.start_date).getFullYear() : null,
-      title: t.title,
-      subtitle: isTripCurrentlyRunning(t) ? 'Aktuelle Reise' : isTripHistorical(t) ? 'Erlebt' : 'In LUMI geplant',
-      travelerIds: t.trip_members.map((m) => m.person_id),
-      countryCodes: Array.from(new Set(t.stages.filter((s) => !s.is_transit).map((s) => s.country_code).filter((c): c is string => Boolean(c)))),
-      isCurrent: isTripCurrentlyRunning(t),
-      editHref: null,
-      tripHref: `/trips/${t.slug}`,
-    })),
+    ...trips.map((t) => {
+      const range = rangeByTripId.get(t.id)!
+      return {
+        key: `trip-${t.id}`,
+        kind: 'trip' as const,
+        year: range.startDate ? new Date(range.startDate).getFullYear() : null,
+        title: t.title,
+        subtitle: isTripCurrentlyRunning(tripStatusInput(t)) ? 'Aktuelle Reise' : isTripHistorical(tripStatusInput(t)) ? 'Erlebt' : 'In LUMI geplant',
+        travelerIds: t.trip_members.map((m) => m.person_id),
+        countryCodes: Array.from(new Set(t.stages.filter((s) => !s.is_transit).map((s) => s.country_code).filter((c): c is string => Boolean(c)))),
+        isCurrent: isTripCurrentlyRunning(tripStatusInput(t)),
+        editHref: null,
+        tripHref: `/trips/${t.slug}`,
+      }
+    }),
     ...pastTrips.map((p) => ({
       key: `past-${p.id}`,
       kind: 'past_trip' as const,

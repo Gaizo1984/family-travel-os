@@ -1,15 +1,26 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { createTrip } from "@/lib/actions/trips";
+import { createTrip, createTripCoverUploadSlots } from "@/lib/actions/trips";
 import { Banner } from "@/components/Banner";
 import { DateSelectFields } from "@/components/DateSelectFields";
 import { getDateFieldRange } from "@/lib/documents";
+import { DirectPhotoUploadForm } from "@/components/DirectPhotoUploadForm";
 
 const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "planned",   label: "Geplant" },
   { value: "active",    label: "Aktiv / schon gebucht" },
   { value: "completed", label: "Abgeschlossen" },
 ];
+
+const LABEL_STYLE: React.CSSProperties = {
+  display: "block", color: "var(--muted)", fontSize: "0.55rem",
+  letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px",
+};
+const FIELD_STYLE: React.CSSProperties = {
+  width: "100%", padding: "12px 16px", background: "var(--background)",
+  border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)",
+  fontSize: "0.9rem", fontWeight: 300, outline: "none",
+};
 
 export default async function NewTripPage({
   searchParams,
@@ -41,13 +52,18 @@ export default async function NewTripPage({
           Reise selbst anlegen
         </div>
         <h1
-          className="font-light mb-8"
+          className="font-light mb-2"
           style={{ color: "var(--foreground)", fontSize: "1.6rem", letterSpacing: "0.01em" }}
         >
           Für bereits gebuchte oder konkret geplante Reisen.
         </h1>
+        <p className="mb-8" style={{ color: "var(--muted)", fontSize: "0.78rem", lineHeight: 1.5 }}>
+          Reiseziel und Reisende reichen zum Start -- Titel, Titelbild und der genaue Zeitraum lassen sich
+          jederzeit später ergänzen. Sobald Flüge, Hotels oder Etappen hinterlegt sind, wird der Zeitraum
+          automatisch daraus abgeleitet.
+        </p>
 
-        <form action={createTrip}>
+        <DirectPhotoUploadForm action={createTrip} createSlots={createTripCoverUploadSlots} fileInputName="cover_photo_file">
           <input type="hidden" name="_referer" value="/trips/new" />
 
           <div
@@ -61,47 +77,58 @@ export default async function NewTripPage({
             )}
 
             <div className="mb-5">
-              <label
-                htmlFor="new-title"
-                style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px" }}
-              >
-                Reisetitel *
-              </label>
-              <input
-                id="new-title"
-                name="title"
-                type="text"
-                required
-                placeholder="z. B. Oman 2027"
-                style={{ width: "100%", padding: "12px 16px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)", fontSize: "0.9rem", fontWeight: 300, outline: "none" }}
-              />
-            </div>
-
-            <div className="mb-5">
-              <label
-                htmlFor="new-subtitle"
-                style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px" }}
-              >
-                Ziel / Region
+              <label htmlFor="new-subtitle" style={LABEL_STYLE}>
+                Reiseziel / Ort *
               </label>
               <input
                 id="new-subtitle"
                 name="subtitle"
                 type="text"
+                required
                 placeholder="z. B. Muscat · Wahiba Sands · Salalah"
-                style={{ width: "100%", padding: "12px 16px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)", fontSize: "0.9rem", fontWeight: 300, outline: "none" }}
+                style={FIELD_STYLE}
               />
             </div>
 
+            <div className="mb-5">
+              <label htmlFor="new-title" style={LABEL_STYLE}>
+                Reisetitel (optional)
+              </label>
+              <input
+                id="new-title"
+                name="title"
+                type="text"
+                placeholder="z. B. Oman 2027 -- ohne Angabe wird das Reiseziel zum Titel"
+                style={FIELD_STYLE}
+              />
+            </div>
+
+            <div className="mb-8">
+              <label htmlFor="new-cover-photo" style={LABEL_STYLE}>
+                Titelbild (optional)
+              </label>
+              <input
+                id="new-cover-photo"
+                name="cover_photo_file"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                style={FIELD_STYLE}
+              />
+            </div>
+
+            <div className="mb-3" style={{ color: "var(--muted)", fontSize: "0.68rem", lineHeight: 1.5 }}>
+              Start- und Enddatum (optional) -- ohne Angabe zeigt die Reise „Zeitraum noch offen", bis Buchungen
+              oder Etappen hinterlegt sind.
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <DateSelectFields label="Von *" namePrefix="start_date" range={getDateFieldRange("travel")} quickActions />
-              <DateSelectFields label="Bis *" namePrefix="end_date" range={getDateFieldRange("travel")} quickActions />
+              <DateSelectFields label="Von (optional)" namePrefix="start_date" range={getDateFieldRange("travel")} quickActions />
+              <DateSelectFields label="Bis (optional)" namePrefix="end_date" range={getDateFieldRange("travel")} quickActions />
             </div>
 
             <div className="mb-8">
               <label
                 htmlFor="new-status"
-                style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px" }}
+                style={LABEL_STYLE}
               >
                 Status
               </label>
@@ -109,7 +136,7 @@ export default async function NewTripPage({
                 id="new-status"
                 name="status"
                 defaultValue="planned"
-                style={{ width: "100%", padding: "12px 16px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)", fontSize: "0.88rem", outline: "none" }}
+                style={{ ...FIELD_STYLE, fontSize: "0.88rem" }}
               >
                 {STATUS_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -118,9 +145,7 @@ export default async function NewTripPage({
             </div>
 
             <div className="mb-8">
-              <div
-                style={{ color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "12px" }}
-              >
+              <div style={LABEL_STYLE}>
                 Wer reist mit *
               </div>
               <div className="flex flex-wrap gap-3">
@@ -159,7 +184,7 @@ export default async function NewTripPage({
               </button>
             </div>
           </div>
-        </form>
+        </DirectPhotoUploadForm>
 
       </div>
     </div>

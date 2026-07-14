@@ -4,6 +4,7 @@ import { ChevronLeft, RefreshCw, Sparkles } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { isTripCurrentlyRunning, isTripHistorical } from "@/lib/trip-status";
+import { deriveTripDateRange } from "@/lib/trip-dates";
 import { todayIsoInFamilyTimezone } from "@/lib/time";
 import { getTodayCategoryConfig } from "@/lib/today-categories";
 import { resolveTripAiContext } from "@/lib/today-trip-context";
@@ -70,7 +71,12 @@ export default async function TodayCategoryPage({
     `)
     .eq("family_id", familyId);
 
-  const allTrips = (trips ?? []) as unknown as TripRow[];
+  // §"Reisezeitraum automatisch ableiten": ohne manuelles Datum, aber mit
+  // Buchungen/Etappen, gilt die Reise trotzdem korrekt als laufend (lib/trip-dates.ts).
+  const allTrips = ((trips ?? []) as unknown as TripRow[]).map((t) => {
+    const range = deriveTripDateRange(t, t.bookings, t.stages);
+    return { ...t, start_date: range.startDate, end_date: range.endDate };
+  });
   const activeTrip = allTrips.find((t) => isTripCurrentlyRunning(t, todayIso));
   const nextTrip = !activeTrip
     ? allTrips

@@ -6,6 +6,7 @@ import { getWeatherForLocation, type WeatherResult } from './weather'
 import { resolveTripAiContext } from './today-trip-context'
 import { computeTripReadiness, type ReadinessFinding } from './readiness'
 import { isTripCurrentlyRunning } from './trip-status'
+import { deriveTripDateRange } from './trip-dates'
 import type { StageInput, TimelineBooking } from './journey'
 
 export type LumiJourneyItem = { id: string; date: string; title: string; category: string }
@@ -102,7 +103,11 @@ export async function buildLumiContext(familyId: string, tripId: string, todayIs
   ])
 
   if (!tripRow) return { ok: false, reason: 'trip_not_found' }
-  const trip = tripRow as unknown as TripRow
+  const rawTrip = tripRow as unknown as TripRow
+  // §"Reisezeitraum automatisch ableiten": ohne manuelles Datum, aber mit
+  // Buchungen/Etappen, gilt die Reise trotzdem korrekt als laufend (lib/trip-dates.ts).
+  const tripDateRange = deriveTripDateRange(rawTrip, rawTrip.bookings, rawTrip.stages)
+  const trip = { ...rawTrip, start_date: tripDateRange.startDate, end_date: tripDateRange.endDate }
   const isActive = isTripCurrentlyRunning(trip, todayIso)
 
   const aiContext = await resolveTripAiContext(

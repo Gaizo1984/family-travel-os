@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Plane, BedDouble, Compass, FileText, MoreHorizontal, ChevronLeft, ChevronRight, Wallet, Route, Pencil } from "lucide-react";
-import { formatDateDE, getTripDuration } from "@/lib/demo-data";
+import { formatDateDE } from "@/lib/demo-data";
+import { deriveTripDateRange, tripDurationDays, formatTripDateRangeLabel } from "@/lib/trip-dates";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { sortBookingsChronologically, BOOKING_CATEGORIES, BOOKING_CATEGORY_ORDER } from "@/lib/bookings";
@@ -388,8 +389,14 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
     stages,
     bookings.filter((b) => b.type === "flight"),
   );
+  // §"Reisezeitraum automatisch ableiten": EINZIGE Ableitungslogik
+  // (lib/trip-dates.ts) -- ohne sie würde die Journey-Timeline bei einer
+  // Reise ohne manuelles Datum leer bleiben, selbst wenn bereits datierte
+  // Flug-/Hotelbuchungen existieren (buildJourneyTimeline spannt den
+  // Tagesbereich sonst nur über trip.start_date/end_date + Etappen auf).
+  const tripDateRange = deriveTripDateRange(trip, bookings, stages);
   const journeyTimeline = buildJourneyTimeline(
-    { start_date: trip.start_date, end_date: trip.end_date },
+    { start_date: tripDateRange.startDate, end_date: tripDateRange.endDate },
     stages,
     bookings,
     journeyEvents,
@@ -405,14 +412,14 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
     ? `/trips/${trip.slug}/bookings/category/more`
     : `/trips/${trip.slug}/bookings/new?category=more`;
 
-  const duration  = trip.start_date && trip.end_date
-    ? getTripDuration(trip.start_date, trip.end_date) : 0;
+  const duration  = tripDurationDays(tripDateRange);
 
   // §"Vergangene Reisen: keine Boardingpass-/Dokumenten-/Konflikthinweise mehr":
   // Readiness ist eine reine Vorbereitungs-Checkliste — für abgeschlossene
   // Reisen gibt es nichts mehr vorzubereiten, daher wird sie gar nicht erst
   // berechnet, sondern durch eine Erinnerungs-/Statistik-Ansicht ersetzt.
-  const historical = isTripHistorical(trip);
+  const tripStatusInput = { status: trip.status, start_date: tripDateRange.startDate, end_date: tripDateRange.endDate };
+  const historical = isTripHistorical(tripStatusInput);
   // §Performance-Audit: alle drei unabhängig voneinander (Etappenbilder
   // brauchen nur stages, Highlight-Foto nur familyId/trip.id, Readiness nur
   // trip.id) — resolveStageImages lief bisher separat davor statt in
@@ -431,7 +438,7 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
   // ist (auch wenn der Status nie manuell auf "completed" gesetzt wurde), gelten
   // als "Erlebt" statt fälschlich als bevorstehend.
   const statusLabel = historical ? "Erlebt"
-    : isTripCurrentlyRunning(trip) ? "Aktive Reise"
+    : isTripCurrentlyRunning(tripStatusInput) ? "Aktive Reise"
     : "Bevorstehende Reise";
 
   const bookingCategorySummaries = BOOKING_CATEGORY_ORDER.map((cat) => {
@@ -611,8 +618,7 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
 
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div style={{ color: "#D8CFC0", letterSpacing: "0.02em", fontSize: "0.65rem" }}>
-                {trip.start_date ? formatDateDE(trip.start_date) : "—"}
-                {trip.end_date ? ` – ${formatDateDE(trip.end_date)}` : ""}
+                {formatTripDateRangeLabel(tripDateRange)}
                 {duration ? ` · ${duration} Tage` : ""}
                 {heroMetaParts ? ` · ${heroMetaParts}` : ""}
               </div>

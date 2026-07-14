@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { computeTripReadiness, READINESS_THEME_LABELS } from "@/lib/readiness";
 import type { ReadinessTheme } from "@/lib/readiness";
 import { isTripHistorical } from "@/lib/trip-status";
+import { deriveTripDateRange } from "@/lib/trip-dates";
 
 const THEME_ORDER: ReadinessTheme[] = ["documents", "entry", "insurance", "itinerary", "bookings"];
 
@@ -22,13 +23,18 @@ export default async function ReadyToTravelPage({
   const { id } = await params;
 
   const supabase = await createClient();
-  const { data: trip } = await supabase
+  const { data: tripRaw } = await supabase
     .from("trips")
-    .select("id, slug, title, status, start_date, end_date")
+    .select("id, slug, title, status, start_date, end_date, stages ( start_date, end_date ), bookings ( type, status, start_datetime, end_datetime )")
     .eq("slug", id)
     .maybeSingle();
 
-  if (!trip) notFound();
+  if (!tripRaw) notFound();
+
+  // §"Reisezeitraum automatisch ableiten": ohne manuelles Datum, aber mit
+  // Buchungen/Etappen, gilt die Reise trotzdem korrekt als "erlebt" (lib/trip-dates.ts).
+  const tripDateRange = deriveTripDateRange(tripRaw, tripRaw.bookings, tripRaw.stages);
+  const trip = { ...tripRaw, start_date: tripDateRange.startDate, end_date: tripDateRange.endDate };
 
   if (isTripHistorical(trip)) {
     return (

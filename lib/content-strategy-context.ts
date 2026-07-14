@@ -1,5 +1,6 @@
 import { createClient } from './supabase/server'
 import { isTripCurrentlyRunning } from './trip-status'
+import { deriveTripDateRange } from './trip-dates'
 import { sortStagesChronologically, buildJourneyTimeline } from './journey'
 import type { StageInput, TimelineBooking, TimelineEvent, TimelineDay } from './journey'
 import { sortBookingsChronologically } from './bookings'
@@ -68,7 +69,8 @@ export async function buildContentStrategyContext(familyId: string): Promise<Con
     `)
     .eq('family_id', familyId)
 
-  const activeTrip = ((trips ?? []) as unknown as TripRow[]).find((t) => isTripCurrentlyRunning(t, todayIso))
+  const tripsWithDerivedDates = ((trips ?? []) as unknown as TripRow[]).map((t) => { const range = deriveTripDateRange(t, t.bookings, t.stages); return { ...t, start_date: range.startDate, end_date: range.endDate } })
+  const activeTrip = tripsWithDerivedDates.find((t) => isTripCurrentlyRunning(t, todayIso))
   if (!activeTrip) return null
 
   const stages = sortStagesChronologically(activeTrip.stages) as StageInput[]
@@ -159,7 +161,8 @@ export async function buildContentPostingPlanContext(familyId: string): Promise<
     `)
     .eq('family_id', familyId)
 
-  const activeTrip = ((trips ?? []) as unknown as TripRow[]).find((t) => isTripCurrentlyRunning(t, todayIso))
+  const tripsWithDerivedDates = ((trips ?? []) as unknown as TripRow[]).map((t) => { const range = deriveTripDateRange(t, t.bookings, t.stages); return { ...t, start_date: range.startDate, end_date: range.endDate } })
+  const activeTrip = tripsWithDerivedDates.find((t) => isTripCurrentlyRunning(t, todayIso))
   if (!activeTrip) return null
 
   const stages = sortStagesChronologically(activeTrip.stages) as StageInput[]

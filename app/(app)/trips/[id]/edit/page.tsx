@@ -6,6 +6,7 @@ import { updateTrip } from "@/lib/actions/trips";
 import { Banner } from "@/components/Banner";
 import { DateSelectFields } from "@/components/DateSelectFields";
 import { getTripDateFieldRange } from "@/lib/documents";
+import { deriveTripDateRange, formatTripDateRangeLabel } from "@/lib/trip-dates";
 
 const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "planned",   label: "Geplant" },
@@ -40,13 +41,19 @@ export default async function EditTripPage({
     .from("trips")
     .select(`
       id, slug, title, subtitle, status, start_date, end_date,
-      trip_members ( person_id )
+      trip_members ( person_id ),
+      stages ( start_date, end_date ),
+      bookings ( type, status, start_datetime, end_datetime )
     `)
     .eq("slug", id)
     .maybeSingle();
 
   if (!data) notFound();
-  const trip = data as unknown as TripRow;
+  const trip = data as unknown as TripRow & {
+    stages: Array<{ start_date: string | null; end_date: string | null }>
+    bookings: Array<{ type: string; status: string; start_datetime: string | null; end_datetime: string | null }>
+  };
+  const derivedRange = deriveTripDateRange(trip, trip.bookings, trip.stages);
 
   const { data: persons } = await supabase
     .from("persons")
@@ -137,14 +144,19 @@ export default async function EditTripPage({
               />
             </div>
 
-            {/* Daten */}
+            {/* Daten -- optional: nur eine Korrektur der automatischen Ableitung (Buchungen/Etappen) */}
+            <p className="mb-3" style={{ color: "var(--muted)", fontSize: "0.7rem", lineHeight: 1.5 }}>
+              {trip.start_date && trip.end_date
+                ? "Manuell festgelegter Zeitraum. Beide Felder leeren, um wieder automatisch aus Buchungen/Etappen abzuleiten."
+                : `Aktuell automatisch abgeleitet: ${formatTripDateRangeLabel(derivedRange)}. Nur ausfüllen, um den Zeitraum manuell zu korrigieren.`}
+            </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <DateSelectFields
-                label="Von *" namePrefix="start_date" defaultIso={trip.start_date}
+                label="Von (optional)" namePrefix="start_date" defaultIso={trip.start_date}
                 range={getTripDateFieldRange(trip.start_date, trip.end_date)} quickActions
               />
               <DateSelectFields
-                label="Bis *" namePrefix="end_date" defaultIso={trip.end_date}
+                label="Bis (optional)" namePrefix="end_date" defaultIso={trip.end_date}
                 range={getTripDateFieldRange(trip.start_date, trip.end_date)} quickActions
               />
             </div>

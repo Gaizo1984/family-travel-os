@@ -3,6 +3,16 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { readDateGroupFromFormData } from '@/lib/documents'
+import { getFamily } from '@/lib/family'
+import { createUploadSlots, downloadAndClearStagedUpload, type UploadSlot } from '@/lib/actions/photo-staging'
+import { parseStagedPaths } from '@/lib/staged-paths'
+import { compressImageForStorage } from '@/lib/image-compression'
+
+/** §"Optionales Titelbild bei der Reiseanlage": dünner Wrapper wie bei Content-Session/-Ideen -- Signed-Upload-URL statt Rohdaten im Server-Action-Body (Vercel-4,5-MB-Limit). */
+export async function createTripCoverUploadSlots(count: number): Promise<UploadSlot[]> {
+  const { id: familyId } = await getFamily()
+  return createUploadSlots(familyId, count)
+}
 
 function slugify(text: string): string {
   return text
@@ -15,11 +25,19 @@ function slugify(text: string): string {
     .slice(0, 80)
 }
 
+/**
+ * §"Reiseanlage vereinfachen": Pflicht sind nur noch Reiseziel/Ort und
+ * Reisende -- Titel, Titelbild und Start-/Enddatum sind optional. Ohne
+ * Titel wird das Reiseziel selbst zum Titel. Das Reiseziel legt zusätzlich
+ * sofort eine erste Etappe (stages, ohne Datum) an -- Grundlage für die
+ * spätere automatische Zeitraum-Ableitung aus Etappen (lib/trip-dates.ts),
+ * bevor überhaupt Buchungen existieren.
+ */
 export async function createTrip(formData: FormData) {
-  const title     = String(formData.get('title') ?? '').trim()
-  const subtitle  = String(formData.get('subtitle') ?? '').trim()
-  const statusRaw = String(formData.get('status') ?? '').trim()
-  const status    = (['planned', 'active', 'completed'] as const).includes(statusRaw as 'planned' | 'active' | 'completed')
+  const title       = String(formData.get('title') ?? '').trim()
+  const destination = String(formData.get('subtitle') ?? '').trim()
+  const statusRaw   = String(formData.get('status') ?? '').trim()
+  const status      = (['planned', 'active', 'completed'] as const).includes(statusRaw as 'planned' | 'active' | 'completed')
     ? (statusRaw as 'planned' | 'active' | 'completed')
     : 'planned'
   const memberIds = formData.getAll('members').map(String)
@@ -39,16 +57,14 @@ export async function createTrip(formData: FormData) {
     redirect(`${referer}?error=${encodeURIComponent(e instanceof Error ? e.message : 'Ungültiges Datum')}`)
   }
 
-  if (title.length < 2)
-    redirect(`${referer}?error=${encodeURIComponent('Reisenname: mindestens 2 Zeichen erforderlich')}`)
-  if (!startDate)
-    redirect(`${referer}?error=${encodeURIComponent('Startdatum ist erforderlich')}`)
-  if (!endDate)
-    redirect(`${referer}?error=${encodeURIComponent('Enddatum ist erforderlich')}`)
+  if (!destination)
+    redirect(`${referer}?error=${encodeURIComponent('Reiseziel / Ort ist erforderlich')}`)
   if (startDate && endDate && new Date(endDate) <= new Date(startDate))
     redirect(`${referer}?error=${encodeURIComponent('Enddatum muss nach dem Startdatum liegen')}`)
   if (memberIds.length === 0)
     redirect(`${referer}?error=${encodeURIComponent('Mindestens eine Person muss ausgewählt sein')}`)
+
+  const finalTitle = title || destination
 
   const supabase = await createClient()
 
@@ -59,7 +75,7 @@ export async function createTrip(formData: FormData) {
     redirect(`${referer}?error=${encodeURIComponent('Familiendaten nicht gefunden')}`)
 
   // Eindeutigen Slug sicherstellen
-  const baseSlug = slugify(title) || 'reise'
+  const baseSlug = slugify(finalTitle) || 'reise'
   let slug = baseSlug
   for (let i = 1; i <= 99; i++) {
     const { data: existing } = await supabase
@@ -73,8 +89,8 @@ export async function createTrip(formData: FormData) {
     .insert({
       slug,
       family_id: family.id,
-      title,
-      subtitle: subtitle || null,
+      title: finalTitle,
+      subtitle: destination,
       status,
       start_date: startDate,
       end_date:   endDate,
@@ -88,6 +104,37 @@ export async function createTrip(formData: FormData) {
   await supabase.from('trip_members').insert(
     memberIds.map(person_id => ({ trip_id: trip.id, person_id }))
   )
+
+  // §"Vorhandene Etappen als Fallback": eine erste, undatierte Etappe mit dem
+  // angegebenen Reiseziel gibt der Zeitraum-Ableitung (und der Wetter-/
+  // Standort-Auflösung) von Anfang an eine Grundlage, auch ganz ohne Buchungen.
+  await supabase.from('stages').insert({
+    trip_id: trip.id, title: destination, location: destination,
+    start_date: startDate, end_date: endDate, sort_order: 0,
+  })
+
+  // Optionales Titelbild: nur wenn tatsächlich eines hochgeladen wurde
+  // (DirectPhotoUploadForm liefert `uploaded_paths` nur bei Dateiauswahl).
+  const stagedPaths = parseStagedPaths(formData.get('uploaded_paths'))
+  if (stagedPaths.length > 0) {
+    try {
+      const staged = await downloadAndClearStagedUpload(stagedPaths[0])
+      if (staged?.mimeType.startsWith('image/')) {
+        const compressed = await compressImageForStorage(staged.buffer)
+        const coverPath = `memories/${family!.id}/${crypto.randomUUID()}.webp`
+        const { error: uploadError } = await supabase.storage.from('documents')
+          .upload(coverPath, new Blob([new Uint8Array(compressed)], { type: 'image/webp' }), { contentType: 'image/webp' })
+        if (!uploadError) {
+          const { data: coverPhoto } = await supabase.from('memory_photos').insert({
+            family_id: family!.id, trip_id: trip.id, storage_path: coverPath, is_selected: true,
+          }).select('id').single()
+          if (coverPhoto) await supabase.from('trips').update({ cover_photo_id: coverPhoto.id }).eq('id', trip.id)
+        }
+      }
+    } catch {
+      // Titelbild ist rein optional -- ein Fehlschlag darf die Reiseanlage selbst nicht verhindern.
+    }
+  }
 
   // Reiseidee → echte Reise: nur Nachverfolgung (converted_trip_id), keine
   // Doppelanlage und keine Änderung an der neu angelegten Reise selbst.
@@ -129,10 +176,10 @@ export async function updateTrip(formData: FormData) {
 
   if (title.length < 2)
     redirect(`${editPath}?error=${encodeURIComponent('Reisenname: mindestens 2 Zeichen erforderlich')}`)
-  if (!startDate)
-    redirect(`${editPath}?error=${encodeURIComponent('Startdatum ist erforderlich')}`)
-  if (!endDate)
-    redirect(`${editPath}?error=${encodeURIComponent('Enddatum ist erforderlich')}`)
+  // §"Start-/Enddatum bleiben eine optionale Korrektur, keine Pflicht": anders
+  // als bei der Erstanlage kann hier auch bewusst wieder auf "automatisch
+  // ableiten" zurückgesetzt werden (beide Felder leeren) -- nur eine
+  // widersprüchliche Kombination (Ende vor/gleich Start) wird abgelehnt.
   if (startDate && endDate && new Date(endDate) <= new Date(startDate))
     redirect(`${editPath}?error=${encodeURIComponent('Enddatum muss nach dem Startdatum liegen')}`)
   // 'archived' ist bewusst kein wählbarer Wert hier — Archivieren läuft nur über

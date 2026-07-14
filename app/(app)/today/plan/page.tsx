@@ -3,12 +3,17 @@ import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { isTripCurrentlyRunning, isTripHistorical } from "@/lib/trip-status";
+import { deriveTripDateRange } from "@/lib/trip-dates";
 import { todayIsoInFamilyTimezone } from "@/lib/time";
 import { generateDayPlan, getLatestDayPlan, type DayPlan, type DayPlanMode } from "@/lib/actions/day-planner";
 import { commitDayPlanToJourney } from "@/lib/actions/lumi-journey";
 import { Banner } from "@/components/Banner";
 
-type TripRow = { id: string; slug: string; status: string; start_date: string | null; end_date: string | null };
+type TripRow = {
+  id: string; slug: string; status: string; start_date: string | null; end_date: string | null
+  stages: Array<{ start_date: string | null; end_date: string | null }>
+  bookings: Array<{ type: string; status: string; start_datetime: string | null; end_datetime: string | null }>
+};
 
 const MODE_OPTIONS: Array<{ value: DayPlanMode; label: string }> = [
   { value: "today", label: "Heute planen" },
@@ -38,8 +43,16 @@ export default async function DayPlanPage({
   const { id: familyId } = await getFamily();
   const todayIso = todayIsoInFamilyTimezone();
 
-  const { data: trips } = await supabase.from("trips").select("id, slug, status, start_date, end_date").eq("family_id", familyId);
-  const allTrips = (trips ?? []) as TripRow[];
+  const { data: trips } = await supabase
+    .from("trips")
+    .select("id, slug, status, start_date, end_date, stages ( start_date, end_date ), bookings ( type, status, start_datetime, end_datetime )")
+    .eq("family_id", familyId);
+  // §"Reisezeitraum automatisch ableiten": ohne manuelles Datum, aber mit
+  // Buchungen/Etappen, gilt die Reise trotzdem korrekt als laufend (lib/trip-dates.ts).
+  const allTrips = ((trips ?? []) as unknown as TripRow[]).map((t) => {
+    const range = deriveTripDateRange(t, t.bookings, t.stages);
+    return { ...t, start_date: range.startDate, end_date: range.endDate };
+  });
   const activeTrip = allTrips.find((t) => isTripCurrentlyRunning(t, todayIso));
   const nextTrip = !activeTrip
     ? allTrips.filter((t) => t.status !== "archived" && !isTripHistorical(t, todayIso)).sort((a, b) => (a.start_date ?? "").localeCompare(b.start_date ?? ""))[0] ?? null
