@@ -16,7 +16,7 @@ import { JOURNEY_EVENT_CATEGORIES, type JourneyEventCategory, type JourneyEventS
 import { deleteJourneyEvent } from "@/lib/actions/journey-events";
 import { computeTripReadiness } from "@/lib/readiness";
 import type { ReadinessFinding, ReadinessSeverity } from "@/lib/readiness";
-import { isTripHistorical, isTripCurrentlyRunning } from "@/lib/trip-status";
+import { isTripHistorical, isTripCurrentlyRunning, isTripPastEnd } from "@/lib/trip-status";
 import { resolveStageImages, FALLBACK_STAGE_IMAGE, type ResolvedStageImage } from "@/lib/stage-images";
 import { resolveTripImage, getHighlightPhotoByTripId } from "@/lib/trip-images";
 import { SignedPhoto } from "@/components/SignedPhoto";
@@ -93,7 +93,24 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-function StageCard({ stage, idx, slug, img }: { stage: StageRow; idx: number; slug: string; img: ResolvedStageImage }) {
+/**
+ * §Bugfix "Etappen zeigen fälschlich 'In Planung'": das Label war bisher ein
+ * fest verdrahteter Text, unabhängig vom tatsächlichen Status -- weder eine
+ * bereits abgeschlossene Reise noch eine gerade laufende Etappe wurden
+ * berücksichtigt. Jetzt datumsbasiert wie überall sonst (lib/trip-status.ts):
+ * eine historische Reise (Status/Enddatum in der Vergangenheit) zeigt IMMER
+ * "Abgeschlossen", unabhängig vom eigenen Etappendatum; sonst entscheidet das
+ * Etappendatum selbst zwischen "Läuft" und "In Planung".
+ */
+function stageStatusLabel(stage: { start_date: string | null; end_date: string | null }, tripHistorical: boolean): string {
+  if (tripHistorical || isTripPastEnd({ status: '', start_date: stage.start_date, end_date: stage.end_date }))
+    return "Abgeschlossen";
+  if (isTripCurrentlyRunning({ status: '', start_date: stage.start_date, end_date: stage.end_date }))
+    return "Läuft";
+  return "In Planung";
+}
+
+function StageCard({ stage, idx, slug, img, tripHistorical }: { stage: StageRow; idx: number; slug: string; img: ResolvedStageImage; tripHistorical: boolean }) {
   const dateRange = stage.start_date
     ? stage.end_date && stage.end_date !== stage.start_date
       ? `${formatDateDE(stage.start_date)} – ${formatDateDE(stage.end_date)}`
@@ -122,7 +139,7 @@ function StageCard({ stage, idx, slug, img }: { stage: StageRow; idx: number; sl
         </div>
         <div className="absolute top-3 right-3">
           <span style={{ display: "inline-block", fontSize: "0.56rem", letterSpacing: "0.12em", textTransform: "uppercase", color: "#C8A96E", background: "rgba(10,9,7,0.55)", padding: "3px 8px", borderRadius: "20px", backdropFilter: "blur(4px)" }}>
-            In Planung
+            {stageStatusLabel(stage, tripHistorical)}
           </span>
         </div>
         <div className="absolute inset-x-0 bottom-0 p-4">
@@ -806,6 +823,7 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
                     <StageCard
                       key={stage.id} stage={stage} idx={idx} slug={trip.slug}
                       img={stageImages.get(stage.id) ?? { url: FALLBACK_STAGE_IMAGE, storagePath: null }}
+                      tripHistorical={historical}
                     />
                   ))}
                 </div>

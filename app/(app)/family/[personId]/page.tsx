@@ -12,8 +12,6 @@ import { buildTravelWorld } from "@/lib/travel-world";
 import { getFamily } from "@/lib/family";
 import { WorldMap } from "@/components/WorldMap";
 import { Map as MapIcon, Globe } from "lucide-react";
-import { toggleMemoryHighlight } from "@/lib/actions/memories";
-import { Star } from "lucide-react";
 
 const TRAVEL_NEED_LABELS: Record<string, string> = Object.fromEntries(
   TRAVEL_NEED_OPTIONS.map((o) => [o.key, o.label]),
@@ -88,7 +86,7 @@ export default async function PersonDetailPage({
       : Promise.resolve({ data: null }),
     supabase.from("documents").select("id, doc_type, label, expires_at, details").eq("person_id", person.id).order("created_at", { ascending: true }),
     buildTravelWorld({ familyId, personId: person.id }),
-    supabase.from("memory_photos").select("id, storage_path, caption, is_highlight, taken_at, created_at").eq("uploaded_by_person_id", person.id).order("taken_at", { ascending: false, nullsFirst: false }).limit(12),
+    supabase.from("memory_photos").select("id, storage_path, caption, taken_at, created_at").eq("uploaded_by_person_id", person.id).order("taken_at", { ascending: false, nullsFirst: false }).limit(12),
   ]);
   const photoUrl = signedPhoto.data?.signedUrl ?? null;
   const docs = (documents ?? []) as unknown as DocumentRow[];
@@ -217,14 +215,6 @@ export default async function PersonDetailPage({
                 <div key={p.id} className="relative rounded-lg overflow-hidden" style={{ aspectRatio: "1/1" }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={p.url} alt={p.caption ?? ""} className="absolute inset-0 w-full h-full object-cover" />
-                  <form action={toggleMemoryHighlight} className="absolute top-1 right-1">
-                    <input type="hidden" name="photo_id" value={p.id} />
-                    <input type="hidden" name="next_value" value={(!p.is_highlight).toString()} />
-                    <input type="hidden" name="return_to" value={`/family/${person.id}`} />
-                    <button type="submit" aria-label="Highlight" style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: "2px" }}>
-                      <Star size={13} strokeWidth={1.8} fill={p.is_highlight ? "#F0EBE3" : "none"} style={{ color: "#F0EBE3" }} />
-                    </button>
-                  </form>
                 </div>
               ))}
             </div>

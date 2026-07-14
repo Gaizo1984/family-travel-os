@@ -5,8 +5,6 @@ import { isTripPastEnd } from "@/lib/trip-status";
 import { DESTINATIONS } from "@/lib/data/destination-knowledge";
 import { searchHotels } from "@/lib/providers/hotel-provider";
 import { searchFlights } from "@/lib/providers/flight-provider";
-import { searchRestaurants } from "@/lib/providers/restaurant-provider";
-import { searchExcursions } from "@/lib/providers/excursion-provider";
 import { saveToWishlist, removeFromWishlist } from "@/lib/actions/buchungsportal";
 import { JOURNEY_EVENT_CATEGORIES, type JourneyEventCategory } from "@/lib/journey-events";
 import { Banner } from "@/components/Banner";
@@ -111,11 +109,14 @@ export default async function BuchungsportalPage({
   const wishlist = (wishlistRaw ?? []) as { id: string; title: string; category: JourneyEventCategory; date: string }[];
   const wishlistIdByTitle = new Map(wishlist.map((w) => [w.title, w.id]));
 
-  const [hotels, flights, restaurants, excursions] = await Promise.all([
+  // §"Fokus auf die Hauptkostenblöcke Flug und Hotel": Restaurant-/Ausflugs-
+  // Vergleich bewusst aus diesem Portal entfernt (Provider-Dateien bleiben
+  // unangetastet, falls sie später wieder gebraucht werden) -- keine
+  // Doppelarbeit, nur eine gezielte Reduktion auf die beiden größten
+  // Kostenblöcke einer Reise.
+  const [hotels, flights] = await Promise.all([
     searchHotels({ destinationName: destinationMatch?.name }),
     searchFlights({ destinationId: destinationMatch?.id }),
-    searchRestaurants({ destinationName: destinationMatch?.name }),
-    searchExcursions({ destinationName: destinationMatch?.name }),
   ]);
 
   return (
@@ -126,7 +127,7 @@ export default async function BuchungsportalPage({
           Buchungsportal
         </div>
         <h1 className="font-light mb-2" style={{ color: "var(--foreground)", fontSize: "1.6rem", letterSpacing: "-0.01em" }}>
-          Hotels, Flüge & Restaurants im Vergleich
+          Flug- und Hotelvergleich
         </h1>
         <p className="mb-8" style={{ color: "var(--muted)", fontSize: "0.78rem", lineHeight: 1.5 }}>
           {destinationMatch
@@ -233,75 +234,6 @@ export default async function BuchungsportalPage({
             {(flights ?? []).length === 0 && (
               <p style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
                 Für diese Reise liegt noch keine kuratierte Flugroute vor.
-              </p>
-            )}
-          </div>
-        </section>
-
-        {/* ── Restaurants ── */}
-        <section className="mb-8">
-          <SectionLabel>Restaurantempfehlungen</SectionLabel>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {(restaurants ?? []).map((r) => (
-              <div key={r.id} className="rounded-xl overflow-hidden" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-                <div className="relative" style={{ height: 120 }}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={r.photo} alt={r.name} loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
-                  <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(10,9,7,0.9) 0%, transparent 60%)" }} />
-                  <div className="absolute inset-x-0 bottom-0 p-4 flex items-end justify-between gap-2">
-                    <div>
-                      <div style={{ color: "#C9A96E", fontSize: "0.55rem", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: "4px" }}>{r.destination}</div>
-                      <div style={{ color: "#F0EBE3", fontSize: "0.9rem", fontWeight: 300 }}>{r.name}</div>
-                    </div>
-                    <PriceBadge value={r.priceIndicator} />
-                  </div>
-                </div>
-                <div className="p-4">
-                  <p className="mb-3" style={{ color: "var(--muted)", fontSize: "0.72rem", fontStyle: "italic" }}>{r.cuisine} · {r.mood}</p>
-                  {activeTrip && (
-                    <WishlistButton tripId={activeTrip.id} date={wishlistDate} title={r.name} category="restaurant" wishlistItemId={wishlistIdByTitle.get(r.name) ?? null} />
-                  )}
-                </div>
-              </div>
-            ))}
-            {(restaurants ?? []).length === 0 && (
-              <p style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
-                Für diese Reise liegt noch keine kuratierte Restaurantempfehlung vor.
-              </p>
-            )}
-          </div>
-        </section>
-
-        {/* ── Aktivitäten & Ausflüge ── */}
-        <section className="mb-8">
-          <SectionLabel>Aktivitäten & Ausflüge</SectionLabel>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {(excursions ?? []).map((e) => (
-              <div key={e.id} className="rounded-xl overflow-hidden" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-                <div className="relative" style={{ height: 120 }}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={e.photo} alt={e.title} loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
-                  <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(10,9,7,0.9) 0%, transparent 60%)" }} />
-                  <div className="absolute inset-x-0 bottom-0 p-4 flex items-end justify-between gap-2">
-                    <div>
-                      <div style={{ color: "#C9A96E", fontSize: "0.55rem", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: "4px" }}>{e.destination}</div>
-                      <div style={{ color: "#F0EBE3", fontSize: "0.9rem", fontWeight: 300 }}>{e.title}</div>
-                    </div>
-                    <PriceBadge value={e.priceIndicator} />
-                  </div>
-                </div>
-                <div className="p-4">
-                  <p className="mb-3" style={{ color: "var(--muted)", fontSize: "0.72rem", lineHeight: 1.5 }}>{e.description}</p>
-                  <p className="mb-3" style={{ color: "var(--muted)", fontSize: "0.68rem", fontStyle: "italic" }}>{e.mood}</p>
-                  {activeTrip && (
-                    <WishlistButton tripId={activeTrip.id} date={wishlistDate} title={`Ausflug-Idee: ${e.title}`} category="activity" wishlistItemId={wishlistIdByTitle.get(`Ausflug-Idee: ${e.title}`) ?? null} />
-                  )}
-                </div>
-              </div>
-            ))}
-            {(excursions ?? []).length === 0 && (
-              <p style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
-                Für diese Reise liegt noch keine kuratierte Aktivität vor.
               </p>
             )}
           </div>

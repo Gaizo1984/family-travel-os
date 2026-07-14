@@ -10,6 +10,7 @@ import { buildTravelWorld } from "@/lib/travel-world";
 import { isTripHistorical, isTripCurrentlyRunning } from "@/lib/trip-status";
 import { deriveTripDateRange, tripDurationDays, TRIP_DATE_RANGE_OPEN_LABEL } from "@/lib/trip-dates";
 import { SignedPhoto } from "@/components/SignedPhoto";
+import { YearFilterSelect } from "@/components/YearFilterSelect";
 
 const H_FG    = "#F0EBE3";
 const H_MUTED = "#A89880";
@@ -58,11 +59,26 @@ function tripWithDerivedDates(trip: TripRow): TripRow {
   return { ...trip, start_date: range.startDate, end_date: range.endDate };
 }
 
+/** Reisen ohne ableitbares Datum ("Zeitraum noch offen") sortieren zuletzt statt das Ergebnis zufällig je nach DB-Reihenfolge zu belassen. */
+function byDateAscending(a: TripRow, b: TripRow): number {
+  if (!a.start_date && !b.start_date) return 0;
+  if (!a.start_date) return 1;
+  if (!b.start_date) return -1;
+  return a.start_date.localeCompare(b.start_date);
+}
+
+/**
+ * §Bugfix "Reisen ohne System geordnet -- bitte von jüngster zu ältester
+ * Reise anordnen": Bevorstehende Reisen bleiben soonest-first (die nächste
+ * anstehende Reise zuerst), erlebte Reisen werden explizit nach dem
+ * abgeleiteten Zeitraum (lib/trip-dates.ts) neuste-zuerst sortiert -- vorher
+ * übernahm hier stillschweigend die DB-Abfragereihenfolge (älteste zuerst).
+ */
 function applyFilter(trips: TripRow[], f: string): { planned: TripRow[]; past: TripRow[] } {
   const nonArchived = trips.filter((t) => t.status !== "archived").map(tripWithDerivedDates);
-  const past     = nonArchived.filter((t) => isTripHistorical(t));
-  const running  = nonArchived.filter((t) => !isTripHistorical(t) && isTripCurrentlyRunning(t));
-  const upcoming = nonArchived.filter((t) => !isTripHistorical(t) && !isTripCurrentlyRunning(t));
+  const past     = nonArchived.filter((t) => isTripHistorical(t)).sort((a, b) => byDateAscending(b, a));
+  const running  = nonArchived.filter((t) => !isTripHistorical(t) && isTripCurrentlyRunning(t)).sort(byDateAscending);
+  const upcoming = nonArchived.filter((t) => !isTripHistorical(t) && !isTripCurrentlyRunning(t)).sort(byDateAscending);
   if (f === "aktiv")      return { planned: running, past: [] };
   if (f === "geplant")    return { planned: [...running, ...upcoming], past: [] };
   if (f === "vergangen")  return { planned: [], past };
@@ -354,9 +370,10 @@ function LegacyPastCard({ entry, url, members }: { entry: LegacyPastTripRow; url
 export default async function TripsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ f?: string }>;
+  searchParams: Promise<{ f?: string; year?: string }>;
 }) {
-  const { f = "alle" } = await searchParams;
+  const { f = "alle", year: yearParam } = await searchParams;
+  const selectedYear = yearParam ? Number(yearParam) : null;
 
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
@@ -387,14 +404,31 @@ export default async function TripsPage({
 
   const trips = (data ?? []) as unknown as TripRow[];
   const tripImageById = new Map(trips.map((t) => [t.id, resolveTripImage(t, highlightPhotoByTripId.get(t.id) ?? null)]));
-  const { planned, past } = applyFilter(trips, f);
+  const { planned, past: pastAllYears } = applyFilter(trips, f);
 
   const archivedTrips = trips.filter((t) => t.status === "archived");
 
   // §Punkt 6 "Reisehistorie-Konsistenz": manuell erfasste vergangene Reisen
   // (past_trips) erscheinen hier wie überall sonst (Timeline, Unsere Welt),
   // statt nur in trips zu suchen.
-  const pastTrips = (pastTripsRaw ?? []) as LegacyPastTripRow[];
+  const pastTripsAllYears = (pastTripsRaw ?? []) as LegacyPastTripRow[];
+
+  // §"Dropdown-Menü nach Jahreszahl": verfügbare Jahre aus BEIDEN
+  // Vergangenheits-Quellen (echte Reisen + manuell erfasste past_trips)
+  // sammeln, damit die Auswahl vollständig ist -- Filterung selbst passiert
+  // erst danach, rein auf Basis des bereits abgeleiteten Zeitraums.
+  const availableYears = [...new Set([
+    ...pastAllYears.map((t) => (t.start_date ? new Date(t.start_date).getFullYear() : null)).filter((y): y is number => y !== null),
+    ...pastTripsAllYears.map((p) => p.year),
+  ])].sort((a, b) => b - a);
+
+  const past = selectedYear
+    ? pastAllYears.filter((t) => t.start_date && new Date(t.start_date).getFullYear() === selectedYear)
+    : pastAllYears;
+  const pastTrips = selectedYear
+    ? pastTripsAllYears.filter((p) => p.year === selectedYear)
+    : pastTripsAllYears;
+
   const travelersByPastTrip = new Map<string, PersonRow[]>();
   (pastTravelersRaw ?? []).forEach((row) => {
     const person = row.persons as unknown as PersonRow | null;
@@ -470,11 +504,19 @@ export default async function TripsPage({
           </section>
         )}
 
-        {(past.length > 0 || (pastTrips.length > 0 && (f === "alle" || f === "vergangen"))) && (
+        {(pastAllYears.length > 0 || (pastTripsAllYears.length > 0 && (f === "alle" || f === "vergangen"))) && (
           <section className="mb-14">
-            <div className="mb-5" style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.24em", textTransform: "uppercase" }}>
-              Erlebt
+            <div className="flex items-center justify-between flex-wrap gap-3 mb-5">
+              <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.24em", textTransform: "uppercase" }}>
+                Erlebt
+              </div>
+              {availableYears.length > 1 && (
+                <YearFilterSelect years={availableYears} currentYear={selectedYear} basePath={`/trips?f=${f}`} />
+              )}
             </div>
+            {past.length === 0 && pastTrips.length === 0 ? (
+              <p style={{ color: "var(--muted)", fontSize: "0.78rem" }}>Keine Reisen in {selectedYear}.</p>
+            ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {past.map((trip) => (
                 <PastCard key={trip.id} trip={trip} img={tripImageById.get(trip.id) ?? null} />
@@ -488,6 +530,7 @@ export default async function TripsPage({
                 />
               ))}
             </div>
+            )}
           </section>
         )}
 

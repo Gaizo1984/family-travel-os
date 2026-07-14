@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { BOOKING_TYPE_CONFIG, splitDateTime } from "@/lib/bookings";
+import type { BookingType } from "@/lib/supabase/types";
 import {
   JOURNEY_EVENT_CATEGORIES, JOURNEY_EVENT_STATUS_COLORS, JOURNEY_EVENT_STATUS_LABELS,
   formatEventTime,
@@ -7,8 +8,26 @@ import {
 import type { TimelineDay } from "@/lib/journey";
 import { formatDateDE } from "@/lib/demo-data";
 
+/**
+ * §Bugfix "Flug erscheint teilweise nach dem Hotel am selben Tag": Check-in-/
+ * Check-out-Zeitpunkte von Unterkünften sind selten exakt erfasst (meist nur
+ * ein Datum, keine echte Uhrzeit) und sortierten dadurch nach reiner
+ * Uhrzeit teils vor einer An-/Abreise, die tatsächlich zuerst bzw. danach
+ * stattfindet. Klassische Regel statt unzuverlässiger Uhrzeit: Flug immer
+ * vor Hotel-Check-in, außer am Rückreisetag -- dort schließt der
+ * Hotel-Check-out (End-Vorkommnis) den Aufenthalt ab, bevor der Rückflug
+ * losgeht. Gilt nur für die Flug/Unterkunft-Paarung, alle anderen Einträge
+ * behalten ihre normale Uhrzeit-Sortierung.
+ */
+function compareDayItems(a: Item, b: Item): number {
+  if (a.type === "flight" && b.type === "accommodation") return b.isEnd ? -1 : 1;
+  if (a.type === "accommodation" && b.type === "flight") return a.isEnd ? 1 : -1;
+  return a.sortKey.localeCompare(b.sortKey);
+}
+
+type Item = { sortKey: string; type?: BookingType; isEnd?: boolean; node: React.ReactNode };
+
 function renderDayItems(day: TimelineDay, slug: string): React.ReactNode[] {
-  type Item = { sortKey: string; node: React.ReactNode };
   const items: Item[] = [];
 
   for (const b of day.bookings) {
@@ -18,6 +37,8 @@ function renderDayItems(day: TimelineDay, slug: string): React.ReactNode[] {
     const Icon = config.icon;
     items.push({
       sortKey: b.start_datetime ?? "",
+      type: b.type,
+      isEnd: b.isEndOccurrence ?? false,
       node: (
         <Link key={`b-${b.id}`} href={`/trips/${slug}/bookings/${b.id}`} className="flex items-center gap-3 py-2" style={{ textDecoration: "none" }}>
           <Icon size={13} strokeWidth={1.4} style={{ color: "var(--accent)", flexShrink: 0 }} />
@@ -51,7 +72,7 @@ function renderDayItems(day: TimelineDay, slug: string): React.ReactNode[] {
     });
   }
 
-  return items.sort((a, b) => a.sortKey.localeCompare(b.sortKey)).map((i) => i.node);
+  return items.sort(compareDayItems).map((i) => i.node);
 }
 
 export function DayRow({ day, slug, dayHref }: { day: TimelineDay; slug: string; dayHref?: string }) {

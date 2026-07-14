@@ -62,6 +62,8 @@ export type TimelineBooking = {
   /** Optional, da nicht jede Aufrufstelle die Spalte selektiert. */
   details?: Record<string, string> | null
   stage_id?: string | null
+  /** true, wenn dieser Eintrag der synthetische End-Vorkommnis (Landung/Check-out/...) ist -- siehe expandBookingOccurrences. */
+  isEndOccurrence?: boolean
 }
 
 /**
@@ -83,7 +85,7 @@ function expandBookingOccurrences(bookings: TimelineBooking[]): Array<{ date: st
     if (config?.showEnd && endDate && endDate !== startDate) {
       occurrences.push({
         date: endDate,
-        booking: { ...b, title: `${b.title} · ${config.endLabel}`, start_datetime: b.end_datetime },
+        booking: { ...b, title: `${b.title} · ${config.endLabel}`, start_datetime: b.end_datetime, isEndOccurrence: true },
       })
     }
   }

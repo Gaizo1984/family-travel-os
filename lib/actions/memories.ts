@@ -392,17 +392,6 @@ export async function deleteMemoryPhoto(formData: FormData) {
   redirect(returnTo)
 }
 
-export async function toggleMemoryHighlight(formData: FormData) {
-  const photoId = String(formData.get('photo_id') ?? '')
-  const nextValue = formData.get('next_value') === 'true'
-  const returnTo = String(formData.get('return_to') ?? '').trim() || '/memories'
-
-  const supabase = await createClient()
-  await supabase.from('memory_photos').update({ is_highlight: nextValue }).eq('id', photoId)
-
-  redirect(returnTo)
-}
-
 /**
  * §"Titelbild der Reise selbst auswählen": bewusst getrennt vom bestehenden
  * Highlight-Stern (mehrere gleichzeitig möglich, eigene Galerie-Sektion) —

@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, Star, Trash2, Image as ImageIcon, ArrowUp, ArrowDown, Pencil } from "lucide-react";
+import { ChevronLeft, Trash2, Image as ImageIcon, ArrowUp, ArrowDown, Pencil } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import {
-  uploadMemoryPhotos, createMemoryUploadSlots, deleteMemoryPhoto, toggleMemoryHighlight,
+  uploadMemoryPhotos, createMemoryUploadSlots, deleteMemoryPhoto,
   setCoverPhoto, reorderMemoryPhoto,
 } from "@/lib/actions/memories";
 import { MAX_SELECTED_PHOTOS_PER_TRIP } from "@/lib/memory-limits";
@@ -30,7 +30,7 @@ const ICON_BUTTON_STYLE: React.CSSProperties = {
 
 type PhotoRow = {
   id: string; storage_path: string; caption: string | null; taken_at: string | null
-  is_highlight: boolean; stage_id: string | null; uploaded_by_person_id: string | null
+  stage_id: string | null; uploaded_by_person_id: string | null
 };
 
 export default async function TripGalleryPage({
@@ -57,7 +57,7 @@ export default async function TripGalleryPage({
   const [{ data: photosRaw }, { count: hiddenCount }, { data: stagesRaw }, { data: personsRaw }] = await Promise.all([
     supabase
       .from("memory_photos")
-      .select("id, storage_path, caption, taken_at, is_highlight, stage_id, uploaded_by_person_id")
+      .select("id, storage_path, caption, taken_at, stage_id, uploaded_by_person_id")
       .eq("trip_id", trip.id)
       .eq("is_selected", true)
       .order("sort_order", { ascending: true })
@@ -177,14 +177,6 @@ export default async function TripGalleryPage({
                           <ImageIcon size={13} strokeWidth={1.8} fill="#F0EBE3" style={{ color: "#F0EBE3" }} />
                         </span>
                       )}
-                      <form action={toggleMemoryHighlight}>
-                        <input type="hidden" name="photo_id" value={photo.id} />
-                        <input type="hidden" name="next_value" value={(!photo.is_highlight).toString()} />
-                        <input type="hidden" name="return_to" value={returnTo} />
-                        <button type="submit" aria-label="Highlight" style={ICON_BUTTON_STYLE}>
-                          <Star size={13} strokeWidth={1.8} fill={photo.is_highlight ? "#F0EBE3" : "none"} style={{ color: "#F0EBE3" }} />
-                        </button>
-                      </form>
                       <Link href={`/trips/${trip.slug}/gallery/${photo.id}/edit`} aria-label="Bearbeiten" style={ICON_BUTTON_STYLE}>
                         <Pencil size={13} strokeWidth={1.8} style={{ color: "#F0EBE3" }} />
                       </Link>

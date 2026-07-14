@@ -511,18 +511,26 @@ export async function analyzeContentSession(formData: FormData) {
     .map((a) => `Foto-ID ${a.id}: Qualität ${a.qualityScore}/10${a.isBestMotif ? ', bestes Motiv' : ''}. ${a.description}`)
     .join('\n')
 
-  // §"Bild-Text-Passungsprüfung": nur wenn ein Fokus gewählt wurde (ohne
-  // Fokus gibt es nichts, wogegen geprüft werden könnte) und nicht bereits
-  // per "Mit vorhandenem Material erstellen" bewusst übersteuert wurde.
-  // Schlägt der Check selbst technisch fehl, wird nicht blockiert (fail-open).
+  // §Root-Cause-Fix "Content erstellen liefert keine Ergebnisse": `redirect()`
+  // (Next.js) funktioniert über einen internen Throw (NEXT_REDIRECT), den die
+  // Routing-Schicht darüber abfängt. Der Redirect stand bisher INNERHALB des
+  // try-Blocks, dessen catch{} eigentlich nur Fehler von `checkContentFit`
+  // auffangen sollte -- er hat aber jeden Throw abgefangen, auch den des
+  // Redirects selbst. Bei "schwacher" Passung (bei echten Urlaubsfotos keine
+  // Seltenheit) wurde der Redirect dadurch lautlos verschluckt: die Analyse
+  // lief im Hintergrund einfach weiter (erneutes Foto-Update = "Doppelt-
+  // erfassung"), ohne dass beim Nutzer je ein sichtbares Ergebnis ankam. Fix:
+  // `checkContentFit` läuft in einem ISOLIERTEN try/catch, der Redirect selbst
+  // steht danach außerhalb -- sein Throw kann jetzt ungehindert durchreichen.
   if (focusLabel && !forceCreate) {
+    let fit: Awaited<ReturnType<typeof checkContentFit>> | null = null
     try {
-      const fit = await checkContentFit(openai, tripDigest, manifestText, formatLabel, focusLabel, moodLabels, hintText ?? '')
-      if (fit.fit === 'weak') {
-        redirect(`${returnPath}?fit=weak&reason=${encodeURIComponent(fit.reason)}&missing=${encodeURIComponent(fit.missingMotifs.join('; '))}&altfocus=${encodeURIComponent(fit.suggestedFocus)}`)
-      }
+      fit = await checkContentFit(openai, tripDigest, manifestText, formatLabel, focusLabel, moodLabels, hintText ?? '')
     } catch {
-      // Passungsprüfung nicht verfügbar -- Generierung läuft trotzdem weiter.
+      // Passungsprüfung selbst nicht verfügbar -- Generierung läuft trotzdem weiter (fail-open).
+    }
+    if (fit?.fit === 'weak') {
+      redirect(`${returnPath}?fit=weak&reason=${encodeURIComponent(fit.reason)}&missing=${encodeURIComponent(fit.missingMotifs.join('; '))}&altfocus=${encodeURIComponent(fit.suggestedFocus)}`)
     }
   }
 

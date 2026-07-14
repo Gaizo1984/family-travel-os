@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { ChevronLeft, Star, Trash2, Users, Image as ImageIcon } from "lucide-react";
+import { ChevronLeft, Trash2, Users, Image as ImageIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
-import { deleteMemoryPhoto, toggleMemoryHighlight, setCoverPhoto } from "@/lib/actions/memories";
+import { deleteMemoryPhoto, setCoverPhoto } from "@/lib/actions/memories";
 import { deriveTripDateRange } from "@/lib/trip-dates";
 import { Banner } from "@/components/Banner";
 import { SignedPhoto } from "@/components/SignedPhoto";
@@ -11,7 +11,7 @@ import { PhotoLightbox } from "@/components/PhotoLightbox";
 type PhotoRow = {
   id: string; trip_id: string | null; uploaded_by_person_id: string | null
   storage_path: string; taken_at: string | null; caption: string | null
-  is_highlight: boolean; created_at: string; sort_order: number
+  created_at: string; sort_order: number
   is_selected: boolean; is_duplicate_of: string | null; quality_score: number | null
 };
 
@@ -83,14 +83,6 @@ function PhotoCard({ photo, url, personName, returnTo, isCover }: { photo: Photo
               <ImageIcon size={14} strokeWidth={1.8} fill="#F0EBE3" style={{ color: "#F0EBE3" }} />
             </span>
           )}
-          <form action={toggleMemoryHighlight}>
-            <input type="hidden" name="photo_id" value={photo.id} />
-            <input type="hidden" name="next_value" value={(!photo.is_highlight).toString()} />
-            <input type="hidden" name="return_to" value={returnTo} />
-            <button type="submit" aria-label="Highlight" style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: "10px", margin: "-6px" }}>
-              <Star size={14} strokeWidth={1.8} fill={photo.is_highlight ? "#F0EBE3" : "none"} style={{ color: "#F0EBE3" }} />
-            </button>
-          </form>
           <form action={deleteMemoryPhoto}>
             <input type="hidden" name="photo_id" value={photo.id} />
             <input type="hidden" name="return_to" value={returnTo} />
@@ -131,7 +123,7 @@ export default async function MemoriesPage({
   const [{ data: photosRaw }, { data: personsRaw }, { data: tripsRaw }, { data: pastTripsRaw }] = await Promise.all([
     supabase
       .from("memory_photos")
-      .select("id, trip_id, uploaded_by_person_id, storage_path, taken_at, caption, is_highlight, created_at, sort_order, is_selected, is_duplicate_of, quality_score")
+      .select("id, trip_id, uploaded_by_person_id, storage_path, taken_at, caption, created_at, sort_order, is_selected, is_duplicate_of, quality_score")
       .eq("family_id", familyId)
       .order("taken_at", { ascending: false, nullsFirst: false }),
     supabase.from("persons").select("id, name").eq("family_id", familyId),
@@ -165,22 +157,6 @@ export default async function MemoriesPage({
       return { photo: p, url: signed?.signedUrl ?? null };
     }),
   );
-
-  // Highlights: manuell markierte Fotos + je Reise das chronologisch erste und letzte Foto —
-  // deterministisch berechnet, kein KI-Aufruf (Leitlinie "KI nur bei echtem Mehrwert").
-  const highlightIds = new Set(photos.filter((p) => p.is_highlight).map((p) => p.id));
-  const byTrip = new Map<string, PhotoRow[]>();
-  for (const p of photos) {
-    if (!p.trip_id || !p.taken_at) continue;
-    if (!byTrip.has(p.trip_id)) byTrip.set(p.trip_id, []);
-    byTrip.get(p.trip_id)!.push(p);
-  }
-  for (const tripPhotos of byTrip.values()) {
-    const sorted = [...tripPhotos].sort((a, b) => (a.taken_at ?? "").localeCompare(b.taken_at ?? ""));
-    if (sorted[0]) highlightIds.add(sorted[0].id);
-    if (sorted[sorted.length - 1]) highlightIds.add(sorted[sorted.length - 1].id);
-  }
-  const highlightPhotos = photosWithUrls.filter((p) => highlightIds.has(p.photo.id));
 
   // §"Neueste Bilder oben, mit einem Cut je Reise (z.B. 03/2025 Mauritius,
   // 07/2025 Malediven)": Fotos werden zuerst je Reise gruppiert (nicht mehr
@@ -264,20 +240,6 @@ export default async function MemoriesPage({
         </header>
 
         {error && <Banner variant="error">{error}</Banner>}
-
-        {/* ── Highlights ── */}
-        {highlightPhotos.length > 0 && (
-          <section className="mb-12">
-            <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: "12px" }}>
-              Highlights
-            </div>
-            <div className="columns-2 sm:columns-3 gap-4">
-              {highlightPhotos.map(({ photo, url }) => (
-                <PhotoCard key={photo.id} photo={photo} url={url} personName={photo.uploaded_by_person_id ? personNameById.get(photo.uploaded_by_person_id) ?? null : null} returnTo={returnTo} isCover={coverPhotoIds.has(photo.id)} />
-              ))}
-            </div>
-          </section>
-        )}
 
         {/* ── Neueste zuerst, je Jahr in Reise-Abschnitte ("Cuts") unterteilt ── */}
         {years.length > 0 ? (
