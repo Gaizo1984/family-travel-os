@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Map as MapIcon, Globe, Users } from "lucide-react";
+import { Map as MapIcon, Globe, Users, CalendarDays } from "lucide-react";
 import { formatDateDE } from "@/lib/demo-data";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
@@ -62,7 +62,7 @@ function HeroTrip({ trip, img, readiness }: { trip: TripRow; img: ResolvedTripIm
         }}
       />
 
-      <div className="absolute top-7 left-5 right-5 md:top-9 md:left-8 md:right-8" style={{ paddingRight: todo ? "130px" : undefined }}>
+      <div className="absolute top-7 left-4 right-4 md:top-9 md:left-6 md:right-6" style={{ paddingRight: todo ? "130px" : undefined }}>
         <span className="text-[10px] font-medium" style={{ color: "var(--accent)", letterSpacing: "0.24em", textTransform: "uppercase" }}>
           Nächste Reise
         </span>
@@ -79,8 +79,8 @@ function HeroTrip({ trip, img, readiness }: { trip: TripRow; img: ResolvedTripIm
         )}
       </div>
 
-      <div className="absolute inset-x-0 bottom-0 px-5 pb-4 md:px-8 md:pb-6">
-        <div className="flex items-center justify-between gap-2" style={{ flexWrap: "nowrap" }}>
+      <div className="absolute inset-x-0 bottom-0 px-4 pb-4 md:px-6 md:pb-6">
+        <div className="flex items-center justify-between gap-1.5" style={{ flexWrap: "nowrap" }}>
           <div
             className="min-w-0 flex-1"
             style={{ color: "#D8CFC0", letterSpacing: "0.01em", fontSize: "0.6rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
@@ -92,7 +92,7 @@ function HeroTrip({ trip, img, readiness }: { trip: TripRow; img: ResolvedTripIm
             {trip.stages.length} Etappen
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
             <div className="flex -space-x-1">
               {members.map((m) => (
                 <div
@@ -106,7 +106,7 @@ function HeroTrip({ trip, img, readiness }: { trip: TripRow; img: ResolvedTripIm
             </div>
             <div
               className="flex items-center gap-1 rounded-full shrink-0"
-              style={{ background: "rgba(196,154,90,0.14)", border: "1px solid rgba(196,154,90,0.3)", padding: "0.26rem 0.55rem", whiteSpace: "nowrap" }}
+              style={{ background: "rgba(196,154,90,0.14)", border: "1px solid rgba(196,154,90,0.3)", padding: "0.24rem 0.5rem", whiteSpace: "nowrap" }}
             >
               <span className="font-medium" style={{ color: "var(--accent)", fontSize: "0.7rem" }}>{countdown.value}</span>
               <span style={{ color: "#C9BFAE", fontSize: "0.58rem", letterSpacing: "0.02em", textTransform: "uppercase" }}>
@@ -138,6 +138,12 @@ function HeroTrip({ trip, img, readiness }: { trip: TripRow; img: ResolvedTripIm
   );
 }
 
+/**
+ * §"4 Felder statt untereinander, optisch schöner": kompaktes vertikales
+ * Kachel-Format (Icon → Wert → Label) statt der breiten Einzeiler-Reihe --
+ * gleiches Muster wie die Statistik-Kacheln auf /family/world, damit ein
+ * 2×2-Raster (mobil) / 4er-Reihe (Desktop) sauber aufgeht.
+ */
 function StatTile({
   value, label, Icon, href,
 }: {
@@ -146,15 +152,13 @@ function StatTile({
 }) {
   const content = (
     <>
-      <Icon size={15} strokeWidth={1.4} style={{ color: "var(--accent)", flexShrink: 0 }} />
-      <div>
-        <div className="text-2xl font-light leading-none mb-0.5" style={{ color: "var(--foreground)" }}>{value}</div>
-        <div className="text-xs" style={{ color: "var(--muted)", letterSpacing: "0.04em", fontSize: "0.68rem" }}>{label}</div>
-      </div>
+      <Icon size={13} strokeWidth={1.4} style={{ color: "var(--accent)", marginBottom: "8px" }} />
+      <div className="text-xl font-light leading-none mb-1 truncate" style={{ color: "var(--foreground)" }}>{value}</div>
+      <div className="truncate" style={{ color: "var(--muted)", fontSize: "0.58rem", letterSpacing: "0.1em", textTransform: "uppercase" }}>{label}</div>
     </>
   );
-  const className = "flex items-center gap-4 px-5 py-4";
-  const style: React.CSSProperties = { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "8px", textDecoration: "none" };
+  const className = "block rounded-xl p-4";
+  const style: React.CSSProperties = { background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" };
   // §"Weltkarte liegt jetzt direkt darunter": das "Länder besucht"-Tile
   // braucht keinen Link mehr auf /family/world -- die volle Erfahrung
   // (Karte + Reisegeschichte) ist bereits Teil dieses Dashboards.
@@ -308,9 +312,10 @@ export default async function Dashboard() {
       <div className="flex-1 px-5 md:px-8 pb-10 space-y-7">
         <HeroTrip trip={nextTrip} img={tripImageById.get(nextTrip.id) ?? null} readiness={nextTripReadiness} />
 
-        <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <StatTile value={worldStats.tripsCount} label="Reisen gesamt" Icon={MapIcon} href="/trips" />
           <StatTile value={worldStats.countryCodes.size} label="Länder besucht" Icon={Globe} />
+          <StatTile value={worldStats.travelDays} label="Urlaubstage" Icon={CalendarDays} />
           <StatTile value={persons.length} label="Familienmitglieder" Icon={Users} href="/family" />
         </section>
 

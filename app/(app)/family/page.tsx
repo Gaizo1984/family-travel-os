@@ -158,7 +158,7 @@ export default async function FamilyPage() {
                 href="/concierge"
                 style={{ display: "inline-flex", alignItems: "center", gap: "7px", color: "var(--muted)", fontSize: "0.65rem", letterSpacing: "0.12em", textTransform: "uppercase", textDecoration: "none", borderBottom: "1px solid var(--border)", paddingBottom: "2px" }}
               >
-                Reiseentscheidungen mit LUMI klären
+                Aktuelle Reise mit LUMI klären
                 <ArrowRight size={10} strokeWidth={1.5} />
               </Link>
             </div>

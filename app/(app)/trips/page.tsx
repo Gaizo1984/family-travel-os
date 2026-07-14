@@ -243,41 +243,41 @@ function PastCard({ trip, img }: { trip: TripRow; img: ResolvedTripImage | null 
         className="absolute inset-0"
         style={{
           background:
-            "linear-gradient(to top, rgba(10,9,7,0.96) 0%, rgba(10,9,7,0.48) 55%, rgba(10,9,7,0.06) 100%)",
+            "linear-gradient(to top, rgba(10,9,7,0.9) 0%, rgba(10,9,7,0.5) 32%, rgba(10,9,7,0.04) 58%, transparent 100%)",
         }}
       />
 
-      <div className="absolute top-5 left-6">
-        <span style={{ color: H_MUTED, fontSize: "0.58rem", letterSpacing: "0.2em", textTransform: "uppercase" }}>
+      <div className="absolute top-4 left-5">
+        <span style={{ color: H_MUTED, fontSize: "0.56rem", letterSpacing: "0.2em", textTransform: "uppercase" }}>
           Erlebt
         </span>
       </div>
 
-      <div className="absolute inset-x-0 bottom-0 p-6">
-        <h3 className="text-2xl font-light mb-1" style={{ color: H_FG, letterSpacing: "0.01em" }}>
+      <div className="absolute inset-x-0 bottom-0 p-5">
+        <h3 className="text-xl font-light mb-1" style={{ color: H_FG, letterSpacing: "0.01em" }}>
           {trip.title}
         </h3>
-        <p className="text-xs mb-5" style={{ color: H_MUTED, letterSpacing: "0.14em", textTransform: "uppercase", fontSize: "0.62rem" }}>
+        <p className="text-xs mb-3" style={{ color: H_MUTED, letterSpacing: "0.12em", textTransform: "uppercase", fontSize: "0.58rem" }}>
           {trip.subtitle}
         </p>
 
-        <div style={{ height: "1px", background: H_BORDER, marginBottom: "14px" }} />
+        <div style={{ height: "1px", background: H_BORDER, marginBottom: "11px" }} />
 
         <div className="flex items-end justify-between">
-          <div className="flex gap-6">
+          <div className="flex gap-5">
             <div>
-              <div style={{ color: H_MUTED, fontSize: "0.58rem", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "3px" }}>
+              <div style={{ color: H_MUTED, fontSize: "0.55rem", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "3px" }}>
                 Zeitraum
               </div>
-              <div style={{ color: H_FG, fontSize: "0.75rem", fontWeight: 300 }}>
+              <div style={{ color: H_FG, fontSize: "0.72rem", fontWeight: 300 }}>
                 {range.startDate ? formatDateDE(range.startDate) : TRIP_DATE_RANGE_OPEN_LABEL}
               </div>
             </div>
             <div>
-              <div style={{ color: H_MUTED, fontSize: "0.58rem", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "3px" }}>
+              <div style={{ color: H_MUTED, fontSize: "0.55rem", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "3px" }}>
                 Dauer
               </div>
-              <div style={{ color: H_FG, fontSize: "0.75rem", fontWeight: 300 }}>
+              <div style={{ color: H_FG, fontSize: "0.72rem", fontWeight: 300 }}>
                 {duration ? `${duration} Tage` : "—"}
               </div>
             </div>
@@ -286,7 +286,7 @@ function PastCard({ trip, img }: { trip: TripRow; img: ResolvedTripImage | null 
             {members.map((m) => (
               <div
                 key={m.id}
-                className="w-7 h-7 rounded-full flex items-center justify-center"
+                className="w-6 h-6 rounded-full flex items-center justify-center"
                 style={{
                   background: "rgba(240,235,227,0.09)",
                   color: H_FG,
