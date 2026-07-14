@@ -716,14 +716,17 @@ export interface Database {
       trip_idea_sessions: {
         Row: {
           id: string; family_id: string; input_text: string; clarifying_answers: Json | null
+          traveler_ids: string[] | null
           status: string; created_at: string; updated_at: string
         }
         Insert: {
           id?: string; family_id: string; input_text: string; clarifying_answers?: Json | null
+          traveler_ids?: string[] | null
           status?: string; created_at?: string; updated_at?: string
         }
         Update: {
           id?: string; family_id?: string; input_text?: string; clarifying_answers?: Json | null
+          traveler_ids?: string[] | null
           status?: string; created_at?: string; updated_at?: string
         }
         Relationships: [
@@ -737,7 +740,10 @@ export interface Database {
           duration_days_min: number | null; duration_days_max: number | null; reasoning: string | null
           budget_range_min: number | null; budget_range_max: number | null; budget_currency: string
           includes_flights: boolean | null; is_chosen: boolean; converted_trip_id: string | null
-          development_notes: string | null; created_at: string; updated_at: string
+          development_notes: string | null
+          hotel_shortlist: Json | null; hotel_shortlist_updated_at: string | null
+          budget_breakdown: Json | null; budget_breakdown_updated_at: string | null
+          created_at: string; updated_at: string
         }
         Insert: {
           id?: string; session_id?: string | null; family_id: string; origin?: string
@@ -745,7 +751,10 @@ export interface Database {
           duration_days_min?: number | null; duration_days_max?: number | null; reasoning?: string | null
           budget_range_min?: number | null; budget_range_max?: number | null; budget_currency?: string
           includes_flights?: boolean | null; is_chosen?: boolean; converted_trip_id?: string | null
-          development_notes?: string | null; created_at?: string; updated_at?: string
+          development_notes?: string | null
+          hotel_shortlist?: Json | null; hotel_shortlist_updated_at?: string | null
+          budget_breakdown?: Json | null; budget_breakdown_updated_at?: string | null
+          created_at?: string; updated_at?: string
         }
         Update: {
           id?: string; session_id?: string | null; family_id?: string; origin?: string
@@ -753,7 +762,10 @@ export interface Database {
           duration_days_min?: number | null; duration_days_max?: number | null; reasoning?: string | null
           budget_range_min?: number | null; budget_range_max?: number | null; budget_currency?: string
           includes_flights?: boolean | null; is_chosen?: boolean; converted_trip_id?: string | null
-          development_notes?: string | null; created_at?: string; updated_at?: string
+          development_notes?: string | null
+          hotel_shortlist?: Json | null; hotel_shortlist_updated_at?: string | null
+          budget_breakdown?: Json | null; budget_breakdown_updated_at?: string | null
+          created_at?: string; updated_at?: string
         }
         Relationships: [
           { foreignKeyName: "trip_ideas_session_id_fkey";        columns: ["session_id"];        isOneToOne: false; referencedRelation: "trip_idea_sessions"; referencedColumns: ["id"] },

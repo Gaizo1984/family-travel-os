@@ -1,5 +1,5 @@
 type ProviderName = 'places' | 'routes'
-type RequestType = 'geocode' | 'places_search' | 'place_lookup' | 'compute_route' | 'compute_route_matrix'
+type RequestType = 'geocode' | 'places_search' | 'place_lookup' | 'lodging_search' | 'compute_route' | 'compute_route_matrix'
 
 export class ProviderConfigError extends Error {
   constructor(public provider: ProviderName, public requestType: RequestType) {

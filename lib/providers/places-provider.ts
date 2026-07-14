@@ -206,6 +206,91 @@ const PLACE_LOOKUP_FIELD_MASK = 'places.id,places.displayName,places.formattedAd
 /** Google-Places-Typ für Unterkünfte -- einziges verlässliches Signal, dass ein Text-Search-Treffer tatsächlich ein Hotel ist (nicht nur irgendein Ort/Adresse mit ähnlichem Namen). */
 const LODGING_TYPE = 'lodging'
 
+export type LodgingResult = PlaceResult & { priceLevel: string | null; websiteUri: string | null }
+
+/**
+ * §"Reiseideen 2.0, Hotel-Shortlist": eigene Suchfunktion statt Erweiterung
+ * von `searchPlaces`/`PlacesCategory` -- Hotels brauchen einen größeren
+ * Umkreis/Trefferzahl als die 4 bestehenden Kategorien und zwei zusätzliche
+ * Felder (`priceLevel`, `websiteUri`), die für Restaurant/Attraktion/Strand/
+ * Natur nicht angefragt werden sollen (zusätzliche Kosten pro Aufruf, siehe
+ * Google-Places-SKU-Tiers). So bleibt das bestehende Today/Concierge-
+ * Verhalten unverändert, kein Risiko einer Regression dort.
+ *
+ * §"Nur Treffer mit eindeutigem Hotel-/Lodging-Bezug verwenden": ein
+ * Text-Search-Treffer ohne den Google-Typ `lodging` (z. B. eine bloße
+ * Adresse, ein Ort, ein Restaurant im selben Resort) wird verworfen, bevor
+ * er überhaupt als Kandidat zählt -- gleiches Prinzip wie `resolveReferencePoint`.
+ */
+const LODGING_FIELD_MASK = `${PLACES_FIELD_MASK},places.priceLevel,places.websiteUri`
+const LODGING_RADIUS_METERS = 50000
+const LODGING_MAX_RESULT_COUNT = MAX_GOOGLE_RESULT_COUNT
+
+export async function searchLodging(params: { locationName: string; lat?: number; lng?: number }): Promise<LodgingResult[] | null> {
+  const apiKey = process.env.GOOGLE_PLACES_API_KEY
+  if (!apiKey) {
+    const err = new ProviderConfigError('places', 'lodging_search')
+    logProviderError(err)
+    throw err
+  }
+
+  let lat = params.lat
+  let lng = params.lng
+  if (lat === undefined || lng === undefined) {
+    const geo = await googleGeocode(params.locationName)
+    if (!geo) return null
+    lat = geo.lat
+    lng = geo.lng
+  }
+
+  try {
+    const res = await fetch(PLACES_SEARCH_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': LODGING_FIELD_MASK,
+      },
+      body: JSON.stringify({
+        textQuery: `Hotels und Resorts in ${params.locationName}`,
+        languageCode: 'de',
+        maxResultCount: LODGING_MAX_RESULT_COUNT,
+        locationBias: { circle: { center: { latitude: lat, longitude: lng }, radius: LODGING_RADIUS_METERS } },
+      }),
+      cache: 'no-store',
+    })
+    if (!res.ok) {
+      const err = new ProviderRequestError('places', 'lodging_search', res.status, await extractGoogleErrorCode(res))
+      logProviderError(err)
+      throw err
+    }
+    const data = await res.json()
+    const places: any[] = data?.places ?? []
+    return places
+      .map((p) => ({
+        id: p.id,
+        name: p.displayName?.text ?? '',
+        formattedAddress: p.formattedAddress ?? '',
+        lat: p.location?.latitude ?? 0,
+        lng: p.location?.longitude ?? 0,
+        rating: p.rating ?? null,
+        userRatingCount: p.userRatingCount ?? null,
+        openNow: p.currentOpeningHours?.openNow ?? null,
+        weekdayDescriptions: p.currentOpeningHours?.weekdayDescriptions ?? null,
+        photoName: p.photos?.[0]?.name ?? null,
+        types: Array.isArray(p.types) ? p.types : [],
+        priceLevel: p.priceLevel ?? null,
+        websiteUri: p.websiteUri ?? null,
+      }))
+      .filter((p) => p.types.includes(LODGING_TYPE))
+  } catch (e) {
+    if (e instanceof ProviderConfigError || e instanceof ProviderRequestError) throw e
+    const err = new ProviderRequestError('places', 'lodging_search', 0)
+    logProviderError(err)
+    throw err
+  }
+}
+
 type PlaceLookupResult = { placeId: string; name: string; formattedAddress: string; lat: number; lng: number; types: string[] }
 
 /**

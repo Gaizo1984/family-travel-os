@@ -157,6 +157,10 @@ export async function generateTripIdeas(formData: FormData) {
       budget_currency: budgetCurrency,
       includes_flights: includesFlights,
     },
+    // §"Reiseideen 2.0": Teilnehmerauswahl bisher nur transient für den
+    // Prompt genutzt, nie gespeichert -- wird für die spätere, alters-
+    // bewusste Budget-Schätzung (lib/actions/trip-idea-advisor.ts) gebraucht.
+    traveler_ids: selectedTravelers.map((p) => p.id),
     status: 'suggested',
   }).select('id').single()
 
