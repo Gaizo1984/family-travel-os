@@ -62,6 +62,7 @@ export async function createStage(formData: FormData) {
   const accommodation = String(formData.get('accommodation') ?? '').trim()
   const notes         = String(formData.get('notes') ?? '').trim()
   const isTransit      = String(formData.get('is_transit') ?? '') === 'true'
+  const manualCountryCode = String(formData.get('country_code') ?? '').trim() || null
 
   const newPath = `/trips/${slug}/stages/new`
 
@@ -96,7 +97,12 @@ export async function createStage(formData: FormData) {
   // liegt das Zwischenstopp-Land oft NICHT im Reisetitel -- der Trip-Titel-
   // Fallback entfällt hier bewusst, lieber `null` (nutzereditierbar) als ein
   // falsches Land.
-  const countryCode = suggestCountryCode(`${title} ${accommodation}`)
+  // §"Mexiko fehlt auf der Karte": Text-Erkennung bleibt nur ein Vorschlag --
+  // eine explizite Dropdown-Auswahl im Formular (country_code) hat immer
+  // Vorrang, z. B. wenn Ziel/Unterkunft/Reisetitel kein Schlüsselwort treffen
+  // (Resortname statt Ländername) und die Etappe sonst dauerhaft ohne Land bliebe.
+  const countryCode = manualCountryCode
+    ?? suggestCountryCode(`${title} ${accommodation}`)
     ?? (isTransit ? null : suggestCountryCode(`${trip?.title ?? ''} ${trip?.subtitle ?? ''}`, { includeWeak: false }))
 
   const { data: created, error } = await supabase
@@ -133,6 +139,7 @@ export async function updateStage(formData: FormData) {
   const accommodation = String(formData.get('accommodation') ?? '').trim()
   const notes         = String(formData.get('notes') ?? '').trim()
   const isTransit      = String(formData.get('is_transit') ?? '') === 'true'
+  const manualCountryCode = String(formData.get('country_code') ?? '').trim() || null
 
   const editPath = `/trips/${slug}/stages/${stageId}/edit`
 
@@ -156,7 +163,8 @@ export async function updateStage(formData: FormData) {
   const { data: trip } = stage
     ? await supabase.from('trips').select('title, subtitle').eq('id', stage.trip_id).maybeSingle()
     : { data: null }
-  const countryCode = suggestCountryCode(`${title} ${accommodation}`)
+  const countryCode = manualCountryCode
+    ?? suggestCountryCode(`${title} ${accommodation}`)
     ?? (isTransit ? null : suggestCountryCode(`${trip?.title ?? ''} ${trip?.subtitle ?? ''}`, { includeWeak: false }))
 
   const { error } = await supabase

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ChevronLeft, ImageIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { updateStage, deleteStage, setStageCoverPhoto, clearStageCoverPhoto } from "@/lib/actions/stages";
+import { COUNTRY_OPTIONS } from "@/lib/geo-suggestions";
 import { StageDateFields } from "../../StageDateFields";
 import { Banner } from "@/components/Banner";
 import { SignedPhoto } from "@/components/SignedPhoto";
@@ -18,6 +19,7 @@ type StageRow = {
   notes: string | null
   cover_photo_id: string | null
   is_transit: boolean
+  country_code: string | null
 }
 
 export default async function EditStagePage({
@@ -42,7 +44,7 @@ export default async function EditStagePage({
 
   const { data: stage } = await supabase
     .from("stages")
-    .select("id, title, location, start_date, end_date, nights, accommodation, notes, cover_photo_id, is_transit")
+    .select("id, title, location, start_date, end_date, nights, accommodation, notes, cover_photo_id, is_transit, country_code")
     .eq("id", stageId)
     .eq("trip_id", trip.id)
     .maybeSingle();
@@ -143,6 +145,29 @@ export default async function EditStagePage({
                 defaultValue={s.accommodation ?? ""}
                 style={{ width: "100%", padding: "12px 16px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)", fontSize: "0.9rem", fontWeight: 300, outline: "none" }}
               />
+            </div>
+
+            <div className="mb-5">
+              <label
+                htmlFor="stage-country"
+                style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px" }}
+              >
+                Land
+              </label>
+              <select
+                id="stage-country"
+                name="country_code"
+                defaultValue={s.country_code ?? ""}
+                style={{ width: "100%", padding: "12px 16px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)", fontSize: "0.9rem", fontWeight: 300, outline: "none" }}
+              >
+                <option value="">— automatisch erkennen —</option>
+                {COUNTRY_OPTIONS.map((c) => (
+                  <option key={c.code} value={c.code}>{c.name}</option>
+                ))}
+              </select>
+              <p className="mt-2" style={{ color: "var(--muted)", fontSize: "0.68rem" }}>
+                Wird sonst aus Ziel/Unterkunft erkannt -- hier manuell korrigierbar, falls das nicht klappt (z. B. bei Resortnamen ohne Ländernamen).
+              </p>
             </div>
 
             <div className="mb-8">

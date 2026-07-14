@@ -47,8 +47,11 @@ const AUTO_STAGE_NOTES: string[] = [AUTO_STAGE_NOTE_LAYOVER, AUTO_STAGE_NOTE_ACC
  * Hotel-Etappe fiel, fälschlich dieser vorherigen Etappe zugeschlagen wurde
  * statt eine eigene zu bekommen).
  */
-async function findStageByExactStartDate(supabase: SupabaseClient, tripId: string, startDate: string): Promise<{ id: string; notes: string | null } | null> {
-  const { data: stages } = await supabase.from('stages').select('id, notes').eq('trip_id', tripId).eq('start_date', startDate)
+async function findStageByExactStartDate(
+  supabase: SupabaseClient, tripId: string, startDate: string,
+): Promise<{ id: string; notes: string | null; country_code: string | null; is_transit: boolean } | null> {
+  const { data: stages } = await supabase
+    .from('stages').select('id, notes, country_code, is_transit').eq('trip_id', tripId).eq('start_date', startDate)
   return stages && stages.length === 1 ? stages[0] : null
 }
 
@@ -67,12 +70,28 @@ async function isStageSharedWithOtherAccommodation(supabase: SupabaseClient, sta
   return (data?.length ?? 0) > 0
 }
 
+/**
+ * §Bugfix "Mexiko fehlt auf der Karte" (Verdacht: hängt mit Hinreise +
+ * Übernachtung in Kanada zusammen): eine per Flug-Zwischenstopp erzeugte
+ * Etappe hat oft `country_code = null` (Flughafencode/IATA im Titel trifft
+ * kein Schlüsselwort) und `is_transit = true`. Verschmilzt eine ECHTE
+ * Hotelbuchung später mit dieser Etappe (gleicher Tag, siehe
+ * findStageByExactStartDate), zählte sie bisher unverändert weiter als
+ * Zwischenstopp OHNE Land -- selbst wenn die Hotelbuchung eindeutig einem
+ * Land zuzuordnen ist. Eine bestätigte Unterkunftsbuchung ist die
+ * verlässlichere Quelle als der ursprüngliche Zwischenstopp-Vorschlag, füllt
+ * also eine fehlende Länder-Zuordnung nach und hebt eine reine
+ * Transit-Markierung auf -- überschreibt aber NIE ein bereits gesetztes
+ * (ggf. manuell korrigiertes) Land.
+ */
 async function syncAccommodationIntoStage(
   supabase: SupabaseClient,
   stageId: string,
   title: string,
   startDate: string,
   endDate: string,
+  currentCountryCode: string | null,
+  currentIsTransit: boolean,
 ): Promise<void> {
   const nights = Math.round((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000)
   if (nights < 0) return
@@ -80,6 +99,8 @@ async function syncAccommodationIntoStage(
     title, location: title, accommodation: title,
     start_date: startDate, end_date: endDate, nights,
     notes: AUTO_STAGE_NOTE_ACCOMMODATION,
+    ...(currentCountryCode ? {} : { country_code: suggestCountryCode(title) }),
+    ...(currentIsTransit ? { is_transit: false } : {}),
   }).eq('id', stageId)
 }
 
@@ -117,7 +138,7 @@ async function maybeCreateAccommodationStage(
   const match = await findStageByExactStartDate(supabase, tripId, startDate)
   if (match) {
     if (match.notes && AUTO_STAGE_NOTES.includes(match.notes)) {
-      await syncAccommodationIntoStage(supabase, match.id, title, startDate, endDate)
+      await syncAccommodationIntoStage(supabase, match.id, title, startDate, endDate, match.country_code, match.is_transit)
     }
     return match.id
   }
@@ -164,10 +185,10 @@ async function maybeSyncAccommodationStage(
 ): Promise<void> {
   if (bookingType !== 'accommodation' || !startDatetime || !endDatetime) return
 
-  const { data: stage } = await supabase.from('stages').select('notes').eq('id', stageId).maybeSingle()
+  const { data: stage } = await supabase.from('stages').select('notes, country_code, is_transit').eq('id', stageId).maybeSingle()
   if (!stage?.notes || !AUTO_STAGE_NOTES.includes(stage.notes)) return
 
-  await syncAccommodationIntoStage(supabase, stageId, title, startDatetime.slice(0, 10), endDatetime.slice(0, 10))
+  await syncAccommodationIntoStage(supabase, stageId, title, startDatetime.slice(0, 10), endDatetime.slice(0, 10), stage.country_code, stage.is_transit)
 }
 
 function readCommonFields(formData: FormData) {

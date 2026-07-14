@@ -82,3 +82,15 @@ export const COUNTRY_NAMES: Record<string, string> = {
   MV: 'Malediven', VN: 'Vietnam', NZ: 'Neuseeland', EG: 'Ägypten', MA: 'Marokko',
   TR: 'Türkei', KE: 'Kenia', TZ: 'Tansania', ME: 'Montenegro', MU: 'Mauritius',
 }
+
+/**
+ * §"Etappen-Land manuell korrigierbar machen": die Text-Erkennung
+ * (suggestCountryCode) bleibt nur ein Vorschlag -- passt der Etappen-/
+ * Hotelname zu keinem Schlüsselwort (z. B. Resortname statt Ländername),
+ * blieb country_code bisher stillschweigend `null` und ließ sich nirgends
+ * korrigieren. Für ein Dropdown im Etappen-Formular alphabetisch nach
+ * deutschem Namen sortiert.
+ */
+export const COUNTRY_OPTIONS: Array<{ code: string; name: string }> = Object.entries(COUNTRY_NAMES)
+  .map(([code, name]) => ({ code, name }))
+  .sort((a, b) => a.name.localeCompare(b.name, 'de'))
