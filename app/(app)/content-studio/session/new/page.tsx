@@ -3,6 +3,8 @@ import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { startContentSession } from "@/lib/actions/content-sessions";
+import { isTripCurrentlyRunning, isTripPastEnd } from "@/lib/trip-status";
+import { deriveTripDateRange } from "@/lib/trip-dates";
 import { Banner } from "@/components/Banner";
 
 const LABEL_STYLE: React.CSSProperties = {
@@ -30,12 +32,33 @@ export default async function NewContentSessionPage({
 
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
-  const { data: trips } = await supabase
+  const { data: tripsRaw } = await supabase
     .from("trips")
-    .select("id, title")
+    .select(`
+      id, title, start_date, end_date,
+      stages ( start_date, end_date ),
+      bookings ( type, status, start_datetime, end_datetime )
+    `)
     .eq("family_id", familyId)
     .in("status", ["planned", "active", "completed"])
     .order("start_date", { ascending: false });
+
+  const trips = tripsRaw ?? [];
+  // §"Aktuelle/nächste Reise voreingestellt": läuft eine Reise gerade, wird
+  // sie vorausgewählt -- sonst die nächste noch bevorstehende. Bleibt über
+  // das bestehende Dropdown jederzeit änderbar (kein Zwang).
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const tripsWithRange = trips.map((t) => {
+    const range = deriveTripDateRange(t, t.bookings, t.stages);
+    return { id: t.id, start_date: range.startDate, end_date: range.endDate };
+  });
+  const defaultTrip =
+    tripsWithRange.find((t) => isTripCurrentlyRunning({ status: "", start_date: t.start_date, end_date: t.end_date }, todayIso))
+    ?? tripsWithRange
+      .filter((t) => !isTripPastEnd({ status: "", start_date: t.start_date, end_date: t.end_date }, todayIso))
+      .sort((a, b) => (a.start_date ?? "9999").localeCompare(b.start_date ?? "9999"))[0]
+    ?? null;
+  const defaultTripId = defaultTrip?.id ?? "";
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -65,19 +88,14 @@ export default async function NewContentSessionPage({
           <div className="rounded-xl p-8" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
             {error && <Banner variant="error">{error}</Banner>}
 
-            <div className="mb-5">
+            <div className="mb-8">
               <label htmlFor="cs-trip" style={LABEL_STYLE}>Reise *</label>
-              <select id="cs-trip" name="trip_id" required style={FIELD_STYLE}>
+              <select id="cs-trip" name="trip_id" required defaultValue={defaultTripId} style={FIELD_STYLE}>
                 <option value="">— auswählen —</option>
-                {(trips ?? []).map((t) => (
+                {trips.map((t) => (
                   <option key={t.id} value={t.id}>{t.title}</option>
                 ))}
               </select>
-            </div>
-
-            <div className="mb-8">
-              <label htmlFor="cs-date" style={LABEL_STYLE}>Reisetag (optional)</label>
-              <input id="cs-date" name="content_date" type="date" style={FIELD_STYLE} />
             </div>
 
             <div className="flex items-center justify-between flex-wrap gap-3" style={{ borderTop: "1px solid var(--border)", paddingTop: "24px" }}>

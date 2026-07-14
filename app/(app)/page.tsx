@@ -4,10 +4,12 @@ import { formatDateDE } from "@/lib/demo-data";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { buildTravelWorld } from "@/lib/travel-world";
-import { isTripPastEnd, isTripHistorical, tripCountdownDisplay } from "@/lib/trip-status";
+import { isTripPastEnd, tripCountdownDisplay } from "@/lib/trip-status";
 import { deriveTripDateRange, tripDurationDays, TRIP_DATE_RANGE_OPEN_LABEL } from "@/lib/trip-dates";
 import { resolveTripImage, getHighlightPhotoByTripId, type ResolvedTripImage } from "@/lib/trip-images";
 import { SignedPhoto } from "@/components/SignedPhoto";
+import { WorldMap } from "@/components/WorldMap";
+import { WorldMapCarousel, type WorldMapPanel } from "@/components/WorldMapCarousel";
 
 type PersonRow = { id: string; name: string; initials: string; color: string };
 type TripRow = {
@@ -121,67 +123,13 @@ function StatTile({
   );
 }
 
-function TripCardElegant({ trip, img }: { trip: TripRow; img: ResolvedTripImage | null }) {
-  const range = deriveTripDateRange(trip, trip.bookings, trip.stages);
-  const duration = tripDurationDays(range);
-
-  return (
-    <Link href={`/trips/${trip.slug}`} className="group relative block overflow-hidden rounded-xl" style={{ height: "190px" }}>
-      {img ? (
-        <SignedPhoto
-          storagePath={img.storagePath}
-          initialUrl={img.url}
-          alt={trip.title}
-          className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
-          style={{ transformOrigin: "center center" }}
-        />
-      ) : (
-        <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${trip.gradient_from ?? "#1a1a1a"}, ${trip.gradient_to ?? "#333"})` }} />
-      )}
-
-      <div
-        className="absolute inset-0"
-        style={{ background: "linear-gradient(to top, rgba(10,9,7,0.96) 0%, rgba(10,9,7,0.5) 55%, rgba(10,9,7,0.08) 100%)" }}
-      />
-
-      <div className="absolute inset-0 p-4 flex flex-col justify-between">
-        <div>
-          {/* §Bugfix "vergangene Reisen zeigen Geplant": TripCardElegant rendert
-              ausschließlich bereits datumsbasiert als historisch erkannte Reisen
-              (siehe pastTrips unten, isTripHistorical()) -- das rohe, oft
-              veraltete DB-Feld trip.status (STATUS_LABEL) darf hier nie wieder
-              zur Anzeige kommen, sonst zeigt eine nie manuell aktualisierte
-              Reise weiterhin "Geplant". Label ist deshalb fest "Erlebt",
-              konsistent mit app/(app)/trips/page.tsx. */}
-          <span className="text-xs" style={{ color: "#A89880", letterSpacing: "0.16em", textTransform: "uppercase", fontSize: "0.6rem" }}>
-            Erlebt
-          </span>
-        </div>
-
-        <div>
-          <div className="text-base font-light mb-0.5" style={{ color: "#F0EBE3" }}>{trip.title}</div>
-          <div className="mb-2" style={{ color: "#A89880", letterSpacing: "0.08em", textTransform: "uppercase", fontSize: "0.58rem" }}>
-            {trip.subtitle}
-          </div>
-          <div
-            className="pt-2"
-            style={{ color: "#A89880", borderTop: "1px solid rgba(240,235,227,0.12)", fontSize: "0.64rem", letterSpacing: "0.02em" }}
-          >
-            {range.startDate ? formatDateDE(range.startDate) : TRIP_DATE_RANGE_OPEN_LABEL} · {duration} Tage · {trip.stages.length} Etappen
-          </div>
-        </div>
-      </div>
-    </Link>
-  );
-}
-
 export default async function Dashboard() {
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
 
   // Highlightfoto-Query braucht nur familyId (keine Trip-IDs übergeben), hängt
   // also nicht von den Trips ab — direkt mit in dieselbe parallele Ladung.
-  const [{ data: tripsRaw }, { count: personsCount }, worldStats, highlightPhotoByTripId] = await Promise.all([
+  const [{ data: tripsRaw }, { data: personsRaw }, worldStats, highlightPhotoByTripId] = await Promise.all([
     supabase
       .from("trips")
       .select(`
@@ -192,12 +140,13 @@ export default async function Dashboard() {
       `)
       .eq("family_id", familyId)
       .order("start_date", { ascending: true, nullsFirst: false }),
-    supabase.from("persons").select("id", { count: "exact", head: true }).eq("family_id", familyId),
+    supabase.from("persons").select("id, name, initials, color").eq("family_id", familyId).order("name"),
     buildTravelWorld({ familyId }),
     getHighlightPhotoByTripId(supabase, familyId),
   ]);
 
   const trips = (tripsRaw ?? []) as unknown as TripRow[];
+  const persons = personsRaw ?? [];
   // §"Reisezeitraum automatisch ableiten": Status/Sortierung nutzen den
   // zentral abgeleiteten Zeitraum (lib/trip-dates.ts), nicht die ggf. leeren
   // trips.start_date/end_date direkt -- sonst würde eine Reise ganz ohne
@@ -211,7 +160,6 @@ export default async function Dashboard() {
   // selbst wenn sie nie manuell auf "completed" gesetzt wurde.
   const upcoming = trips.filter((t) => (t.status === "active" || t.status === "planned") && !isTripPastEnd(tripStatusInput(t)));
   const nextTrip = upcoming[0] ?? trips[0];
-  const pastTrips = trips.filter((t) => isTripHistorical(tripStatusInput(t)));
 
   // Highlightfoto je Reise (falls die Familie eines markiert hat) — erste Stufe der Bildauflösung.
   const tripImageById = new Map(trips.map((t) => [t.id, resolveTripImage(t, highlightPhotoByTripId.get(t.id) ?? null)]));
@@ -229,6 +177,31 @@ export default async function Dashboard() {
       </div>
     );
   }
+
+  // §"Weltkarte von Familie aufs Hauptdashboard": erst Gesamtkarte, danach
+  // per Swipe/Dots eine Karte je Familienmitglied -- alle aus derselben
+  // buildTravelWorld-Quelle wie /family/world, keine eigene Aggregation.
+  const perPersonWorlds = await Promise.all(
+    persons.map((p) => buildTravelWorld({ familyId, personId: p.id })),
+  );
+  const mapPanels: WorldMapPanel[] = [
+    {
+      key: "family",
+      label: "Familie gesamt",
+      initials: "Alle",
+      color: null,
+      href: "/family/world",
+      node: <WorldMap visitedCodes={worldStats.countryCodes} />,
+    },
+    ...persons.map((p, i) => ({
+      key: p.id,
+      label: p.name,
+      initials: p.initials,
+      color: p.color,
+      href: `/family/world?person=${p.id}`,
+      node: <WorldMap visitedCodes={perPersonWorlds[i].countryCodes} />,
+    })),
+  ];
 
   return (
     <div className="flex-1 flex flex-col">
@@ -250,26 +223,15 @@ export default async function Dashboard() {
         <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <StatTile value={worldStats.tripsCount} label="Reisen gesamt" Icon={MapIcon} href="/trips" />
           <StatTile value={worldStats.countryCodes.size} label="Länder besucht" Icon={Globe} href="/family/world" />
-          <StatTile value={personsCount ?? 0} label="Familienmitglieder" Icon={Users} href="/family" />
+          <StatTile value={persons.length} label="Familienmitglieder" Icon={Users} href="/family" />
         </section>
 
-        {pastTrips.length > 0 && (
-          <section>
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-xs font-medium" style={{ color: "var(--muted)", letterSpacing: "0.2em", textTransform: "uppercase", fontSize: "0.65rem" }}>
-                Vergangene Reisen
-              </h2>
-              <Link href="/trips" className="text-xs" style={{ color: "var(--accent)", letterSpacing: "0.06em", fontSize: "0.72rem" }}>
-                Alle anzeigen →
-              </Link>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {pastTrips.map((trip) => (
-                <TripCardElegant key={trip.id} trip={trip} img={tripImageById.get(trip.id) ?? null} />
-              ))}
-            </div>
-          </section>
-        )}
+        <section>
+          <h2 className="text-xs font-medium mb-5" style={{ color: "var(--muted)", letterSpacing: "0.2em", textTransform: "uppercase", fontSize: "0.65rem" }}>
+            Unsere Welt
+          </h2>
+          <WorldMapCarousel panels={mapPanels} />
+        </section>
       </div>
     </div>
   );

@@ -97,7 +97,7 @@ export async function createStage(formData: FormData) {
   // Fallback entfällt hier bewusst, lieber `null` (nutzereditierbar) als ein
   // falsches Land.
   const countryCode = suggestCountryCode(`${title} ${accommodation}`)
-    ?? (isTransit ? null : suggestCountryCode(`${trip?.title ?? ''} ${trip?.subtitle ?? ''}`))
+    ?? (isTransit ? null : suggestCountryCode(`${trip?.title ?? ''} ${trip?.subtitle ?? ''}`, { includeWeak: false }))
 
   const { data: created, error } = await supabase
     .from('stages')
@@ -157,7 +157,7 @@ export async function updateStage(formData: FormData) {
     ? await supabase.from('trips').select('title, subtitle').eq('id', stage.trip_id).maybeSingle()
     : { data: null }
   const countryCode = suggestCountryCode(`${title} ${accommodation}`)
-    ?? (isTransit ? null : suggestCountryCode(`${trip?.title ?? ''} ${trip?.subtitle ?? ''}`))
+    ?? (isTransit ? null : suggestCountryCode(`${trip?.title ?? ''} ${trip?.subtitle ?? ''}`, { includeWeak: false }))
 
   const { error } = await supabase
     .from('stages')

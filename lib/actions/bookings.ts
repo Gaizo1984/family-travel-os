@@ -127,7 +127,7 @@ async function maybeCreateAccommodationStage(
     supabase.from('trips').select('title, subtitle').eq('id', tripId).maybeSingle(),
   ])
 
-  const countryCode = suggestCountryCode(title) ?? suggestCountryCode(`${trip?.title ?? ''} ${trip?.subtitle ?? ''}`)
+  const countryCode = suggestCountryCode(title) ?? suggestCountryCode(`${trip?.title ?? ''} ${trip?.subtitle ?? ''}`, { includeWeak: false })
   const nights = Math.round((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000)
 
   const { data: created } = await supabase.from('stages').insert({

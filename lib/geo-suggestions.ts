@@ -5,11 +5,20 @@
  * Textfragmente, die in Reise-/Etappen-/Reisegeschichtetexten gesucht
  * werden. Ergebnis ist immer nur ein Vorschlag, nie automatisch gesetzt.
  */
-const COUNTRY_CODE_MAP: Array<{ keywords: string[]; code: string }> = [
+/**
+ * `weakKeywords` sind Zwischenstopp-/Flughafen-Städtenamen (z. B. "Atlanta"
+ * für einen USA-Layover), die ein Land nur dann anzeigen sollen, wenn sie in
+ * der eigenen Etappe stehen -- nicht, wenn sie zufällig irgendwo im
+ * Reisetitel auftauchen. Sonst überschreibt ein im Titel erwähnter
+ * Zwischenstopp (z. B. "Mexiko über Atlanta") das eigentliche Zielland der
+ * Etappe, weil `usa` im Array vor `mexiko` steht (§Bugfix "Mexiko fehlt auf
+ * der Karte").
+ */
+const COUNTRY_CODE_MAP: Array<{ keywords: string[]; weakKeywords?: string[]; code: string }> = [
   { keywords: ['costa rica'], code: 'CR' },
   { keywords: ['oman'], code: 'OM' },
   { keywords: ['brasilien', 'brazil'], code: 'BR' },
-  { keywords: ['usa', 'vereinigte staaten', 'united states', 'atlanta'], code: 'US' },
+  { keywords: ['usa', 'vereinigte staaten', 'united states'], weakKeywords: ['atlanta'], code: 'US' },
   { keywords: ['schweiz', 'switzerland'], code: 'CH' },
   { keywords: ['vereinigtes königreich', 'united kingdom', 'großbritannien', 'england'], code: 'GB' },
   { keywords: ['indonesien', 'indonesia', 'bali', 'sumba'], code: 'ID' },
@@ -19,7 +28,7 @@ const COUNTRY_CODE_MAP: Array<{ keywords: string[]; code: string }> = [
   { keywords: ['sri lanka'], code: 'LK' },
   { keywords: ['seychellen', 'seychelles'], code: 'SC' },
   { keywords: ['mexiko', 'mexico'], code: 'MX' },
-  { keywords: ['kanada', 'canada', 'toronto'], code: 'CA' },
+  { keywords: ['kanada', 'canada'], weakKeywords: ['toronto'], code: 'CA' },
   { keywords: ['südafrika', 'south africa'], code: 'ZA' },
   { keywords: ['australien', 'australia'], code: 'AU' },
   { keywords: ['sardinien', 'sardinia', 'italien', 'italy'], code: 'IT' },
@@ -34,7 +43,7 @@ const COUNTRY_CODE_MAP: Array<{ keywords: string[]; code: string }> = [
   { keywords: ['neuseeland', 'new zealand'], code: 'NZ' },
   { keywords: ['ägypten', 'egypt'], code: 'EG' },
   { keywords: ['marokko', 'morocco'], code: 'MA' },
-  { keywords: ['türkei', 'turkey', 'türkiye', 'istanbul'], code: 'TR' },
+  { keywords: ['türkei', 'turkey', 'türkiye'], weakKeywords: ['istanbul'], code: 'TR' },
   { keywords: ['kenia', 'kenya'], code: 'KE' },
   { keywords: ['tansania', 'tanzania', 'sansibar', 'zanzibar'], code: 'TZ' },
   { keywords: ['montenegro'], code: 'ME' },
@@ -45,12 +54,20 @@ const COUNTRY_CODE_MAP: Array<{ keywords: string[]; code: string }> = [
  * Sucht in einem beliebigen Text (Reisetitel, Etappe, Reisegeschichte-Notiz)
  * nach dem ersten passenden Länder-Schlüsselwort und gibt dessen ISO-Code
  * zurück. Reines Textmatching, kein Raten — Ergebnis bleibt immer editierbar.
+ *
+ * `includeWeak` (Default: true) steuert, ob `weakKeywords` (Zwischenstopp-
+ * Städtenamen) mitzählen. Beim direkten Text der eigenen Etappe/Buchung soll
+ * das gelten (eine Etappe, die wörtlich "Atlanta" heißt, ist ein USA-Layover);
+ * beim Reisetitel-Fallback für eine ANDERE, eigentlich unbeschriftete Etappe
+ * bewusst nicht -- siehe COUNTRY_CODE_MAP-Kommentar.
  */
-export function suggestCountryCode(text: string | null | undefined): string | null {
+export function suggestCountryCode(text: string | null | undefined, options?: { includeWeak?: boolean }): string | null {
   if (!text) return null
+  const includeWeak = options?.includeWeak ?? true
   const lower = text.toLowerCase()
   for (const entry of COUNTRY_CODE_MAP) {
-    if (entry.keywords.some((kw) => lower.includes(kw))) return entry.code
+    const pool = includeWeak && entry.weakKeywords ? [...entry.keywords, ...entry.weakKeywords] : entry.keywords
+    if (pool.some((kw) => lower.includes(kw))) return entry.code
   }
   return null
 }

@@ -10,7 +10,7 @@ import { buildTravelWorld } from "@/lib/travel-world";
 import { isTripHistorical, isTripCurrentlyRunning } from "@/lib/trip-status";
 import { deriveTripDateRange, tripDurationDays, TRIP_DATE_RANGE_OPEN_LABEL } from "@/lib/trip-dates";
 import { SignedPhoto } from "@/components/SignedPhoto";
-import { YearFilterSelect } from "@/components/YearFilterSelect";
+import { PastTripsAccordion, type PastYearGroup } from "@/components/PastTripsAccordion";
 
 const H_FG    = "#F0EBE3";
 const H_MUTED = "#A89880";
@@ -84,6 +84,26 @@ function applyFilter(trips: TripRow[], f: string): { planned: TripRow[]; past: T
   if (f === "vergangen")  return { planned: [], past };
   if (f === "archiviert") return { planned: [], past: [] };
   return { planned: [...running, ...upcoming], past };
+}
+
+/** Gruppiert erlebte Reisen (echte Trips + manuell erfasste past_trips) je Jahr für das Akkordeon, neuestes Jahr zuerst. */
+function groupPastTripsByYear(trips: TripRow[], legacy: LegacyPastTripRow[]): { year: number | null; trips: TripRow[]; legacy: LegacyPastTripRow[] }[] {
+  const map = new Map<number | null, { year: number | null; trips: TripRow[]; legacy: LegacyPastTripRow[] }>();
+  const ensure = (year: number | null) => {
+    let g = map.get(year);
+    if (!g) { g = { year, trips: [], legacy: [] }; map.set(year, g); }
+    return g;
+  };
+  trips.forEach((t) => {
+    const year = t.start_date ? new Date(t.start_date).getFullYear() : null;
+    ensure(year).trips.push(t);
+  });
+  legacy.forEach((p) => ensure(p.year).legacy.push(p));
+  return [...map.values()].sort((a, b) => {
+    if (a.year === null) return 1;
+    if (b.year === null) return -1;
+    return b.year - a.year;
+  });
 }
 
 function PlannedCard({ trip, img }: { trip: TripRow; img: ResolvedTripImage | null }) {
@@ -370,10 +390,9 @@ function LegacyPastCard({ entry, url, members }: { entry: LegacyPastTripRow; url
 export default async function TripsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ f?: string; year?: string }>;
+  searchParams: Promise<{ f?: string }>;
 }) {
-  const { f = "alle", year: yearParam } = await searchParams;
-  const selectedYear = yearParam ? Number(yearParam) : null;
+  const { f = "alle" } = await searchParams;
 
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
@@ -412,22 +431,8 @@ export default async function TripsPage({
   // (past_trips) erscheinen hier wie überall sonst (Timeline, Unsere Welt),
   // statt nur in trips zu suchen.
   const pastTripsAllYears = (pastTripsRaw ?? []) as LegacyPastTripRow[];
-
-  // §"Dropdown-Menü nach Jahreszahl": verfügbare Jahre aus BEIDEN
-  // Vergangenheits-Quellen (echte Reisen + manuell erfasste past_trips)
-  // sammeln, damit die Auswahl vollständig ist -- Filterung selbst passiert
-  // erst danach, rein auf Basis des bereits abgeleiteten Zeitraums.
-  const availableYears = [...new Set([
-    ...pastAllYears.map((t) => (t.start_date ? new Date(t.start_date).getFullYear() : null)).filter((y): y is number => y !== null),
-    ...pastTripsAllYears.map((p) => p.year),
-  ])].sort((a, b) => b - a);
-
-  const past = selectedYear
-    ? pastAllYears.filter((t) => t.start_date && new Date(t.start_date).getFullYear() === selectedYear)
-    : pastAllYears;
-  const pastTrips = selectedYear
-    ? pastTripsAllYears.filter((p) => p.year === selectedYear)
-    : pastTripsAllYears;
+  // Legacy-Einträge nur bei "alle"/"vergangen" mit anzeigen (wie zuvor).
+  const legacyForDisplay = (f === "alle" || f === "vergangen") ? pastTripsAllYears : [];
 
   const travelersByPastTrip = new Map<string, PersonRow[]>();
   (pastTravelersRaw ?? []).forEach((row) => {
@@ -438,10 +443,30 @@ export default async function TripsPage({
     travelersByPastTrip.set(row.past_trip_id, list);
   });
   const pastTripPhotoUrlById = new Map<string, string>();
-  await Promise.all(pastTrips.map(async (p) => {
+  await Promise.all(legacyForDisplay.map(async (p) => {
     if (!p.photo_storage_path) return;
     const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.photo_storage_path, 3600);
     if (signed?.signedUrl) pastTripPhotoUrlById.set(p.id, signed.signedUrl);
+  }));
+
+  const pastYearGroups: PastYearGroup[] = groupPastTripsByYear(pastAllYears, legacyForDisplay).map((g) => ({
+    year: g.year,
+    count: g.trips.length + g.legacy.length,
+    node: (
+      <>
+        {g.trips.map((trip) => (
+          <PastCard key={trip.id} trip={trip} img={tripImageById.get(trip.id) ?? null} />
+        ))}
+        {g.legacy.map((entry) => (
+          <LegacyPastCard
+            key={entry.id}
+            entry={entry}
+            url={pastTripPhotoUrlById.get(entry.id) ?? null}
+            members={travelersByPastTrip.get(entry.id) ?? []}
+          />
+        ))}
+      </>
+    ),
   }));
 
   return (
@@ -504,33 +529,12 @@ export default async function TripsPage({
           </section>
         )}
 
-        {(pastAllYears.length > 0 || (pastTripsAllYears.length > 0 && (f === "alle" || f === "vergangen"))) && (
+        {pastYearGroups.length > 0 && (
           <section className="mb-14">
-            <div className="flex items-center justify-between flex-wrap gap-3 mb-5">
-              <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.24em", textTransform: "uppercase" }}>
-                Erlebt
-              </div>
-              {availableYears.length > 1 && (
-                <YearFilterSelect years={availableYears} currentYear={selectedYear} basePath={`/trips?f=${f}`} />
-              )}
+            <div className="mb-5" style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.24em", textTransform: "uppercase" }}>
+              Erlebt
             </div>
-            {past.length === 0 && pastTrips.length === 0 ? (
-              <p style={{ color: "var(--muted)", fontSize: "0.78rem" }}>Keine Reisen in {selectedYear}.</p>
-            ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {past.map((trip) => (
-                <PastCard key={trip.id} trip={trip} img={tripImageById.get(trip.id) ?? null} />
-              ))}
-              {(f === "alle" || f === "vergangen") && pastTrips.map((entry) => (
-                <LegacyPastCard
-                  key={entry.id}
-                  entry={entry}
-                  url={pastTripPhotoUrlById.get(entry.id) ?? null}
-                  members={travelersByPastTrip.get(entry.id) ?? []}
-                />
-              ))}
-            </div>
-            )}
+            <PastTripsAccordion groups={pastYearGroups} />
           </section>
         )}
 

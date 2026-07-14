@@ -288,7 +288,7 @@ export default async function ContentDraftPage({
   ].filter(Boolean).join("\n\n");
 
   return (
-    <div className="flex-1" style={{ background: "var(--background)" }}>
+    <div className="flex-1" style={{ background: "var(--background)", overflowX: "hidden" }}>
       <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-9">
 
         <Link
@@ -410,7 +410,7 @@ export default async function ContentDraftPage({
               <div key={`${item.photo_id}-${i}`} className="flex items-center gap-2 mb-2">
                 <span style={{ color: "var(--muted)", fontSize: "0.65rem", width: "16px" }}>{i + 1}.</span>
                 <input type="hidden" name="item_photo_id" value={item.photo_id} />
-                <input name="item_text" type="text" defaultValue={item.text} style={{ ...FIELD_STYLE, flex: 1 }} />
+                <input name="item_text" type="text" defaultValue={item.text} style={{ ...FIELD_STYLE, flex: 1, minWidth: 0 }} />
               </div>
             ))}
 

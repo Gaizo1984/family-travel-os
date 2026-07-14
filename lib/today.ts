@@ -149,7 +149,7 @@ export function resolveCurrentLocation(
     return { label: currentStage.location || currentStage.title, countryCode: currentStage.country_code ?? null, stageId: currentStage.id, source: 'stage' }
   }
 
-  const countryCode = suggestCountryCode(`${trip.title} ${trip.subtitle ?? ''}`)
+  const countryCode = suggestCountryCode(`${trip.title} ${trip.subtitle ?? ''}`, { includeWeak: false })
     ?? stages.find((s) => s.country_code)?.country_code
     ?? null
   const label = countryCode ? COUNTRY_NAMES[countryCode] ?? trip.title : trip.title

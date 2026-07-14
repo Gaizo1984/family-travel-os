@@ -38,7 +38,6 @@ const TEMP_IMAGE_TTL_HOURS = 24
 export async function startContentSession(formData: FormData) {
   const tripId = String(formData.get('trip_id') ?? '')
   const stageId = String(formData.get('stage_id') ?? '').trim() || null
-  const contentDate = String(formData.get('content_date') ?? '').trim() || null
   const newPath = '/content-studio/session/new'
 
   if (!tripId) redirect(`${newPath}?error=${encodeURIComponent('Bitte eine Reise auswählen.')}`)
@@ -53,7 +52,6 @@ export async function startContentSession(formData: FormData) {
     title: trip?.title ?? 'Content-Session',
     status: 'uploading',
     project_type: 'session',
-    content_date: contentDate,
     stage_id: stageId,
   }).select('id').single()
 
@@ -252,7 +250,7 @@ const CONTENT_FORMAT_SCHEMAS: Record<string, Record<string, unknown>> = {
       ...BASE_CONTENT_PROPS,
       slides: {
         type: 'array', minItems: 1, maxItems: 4,
-        description: 'Entweder EIN starkes Bild oder eine Storyline aus 2-4 Slides -- kurze, spontane Texte, deutlich kürzer als ein Beitrags-Caption.',
+        description: 'Wähle NUR Fotos, die für eine Story wirklich tragen -- ignoriere schwächere/redundante Fotos aus der Liste bewusst, auch wenn mehr Fotos vorhanden sind. Entweder EIN starkes Bild oder eine Storyline aus 2-4 Slides -- kurze, spontane Texte, deutlich kürzer als ein Beitrags-Caption.',
         items: {
           type: 'object',
           properties: { photo_id: { type: 'string' }, text: { type: 'string' } },
@@ -568,9 +566,17 @@ export async function analyzeContentSession(formData: FormData) {
     redirect(`${returnPath}?package=${createdCount}`)
   }
 
+  // §"KI soll Bilder sinnvoll auswählen, nicht jedes abnicken": bei Story
+  // dieselbe Selektions-Anweisung wie im Content-Paket-Pfad -- ohne sie sah
+  // die KI nur die generische Prompt-Basis und schrieb reflexhaft zu jedem
+  // hochgeladenen Foto etwas, statt schwächere Fotos wegzulassen.
+  const extraInstruction = outputFormat === 'story'
+    ? 'Erzeuge 2 bis 4 Story-Slides (oder genau 1, wenn nur ein Bild wirklich trägt). Lass Fotos bewusst weg, die nicht zur Story passen.'
+    : undefined
+
   let contentResult: Record<string, unknown>
   try {
-    contentResult = await generateFormatContent(openai, outputFormat, tripDigest, manifestText, tonality, language, guidedContext)
+    contentResult = await generateFormatContent(openai, outputFormat, tripDigest, manifestText, tonality, language, guidedContext, extraInstruction)
   } catch {
     redirect(`${returnPath}?error=${encodeURIComponent('Die Inhalte-Generierung ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.')}`)
   }
