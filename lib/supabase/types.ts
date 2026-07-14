@@ -413,18 +413,22 @@ export interface Database {
         Row: {
           id: string; family_id: string; trip_id: string | null; title: string
           status: string; project_type: string; created_at: string; updated_at: string
+          content_date: string | null; stage_id: string | null; language: string | null; tonality: string | null
         }
         Insert: {
           id?: string; family_id: string; trip_id?: string | null; title: string
           status?: string; project_type?: string; created_at?: string; updated_at?: string
+          content_date?: string | null; stage_id?: string | null; language?: string | null; tonality?: string | null
         }
         Update: {
           id?: string; family_id?: string; trip_id?: string | null; title?: string
           status?: string; project_type?: string; created_at?: string; updated_at?: string
+          content_date?: string | null; stage_id?: string | null; language?: string | null; tonality?: string | null
         }
         Relationships: [
           { foreignKeyName: "content_projects_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] },
-          { foreignKeyName: "content_projects_trip_id_fkey";   columns: ["trip_id"];   isOneToOne: false; referencedRelation: "trips";   referencedColumns: ["id"] }
+          { foreignKeyName: "content_projects_trip_id_fkey";   columns: ["trip_id"];   isOneToOne: false; referencedRelation: "trips";   referencedColumns: ["id"] },
+          { foreignKeyName: "content_projects_stage_id_fkey";  columns: ["stage_id"];  isOneToOne: false; referencedRelation: "stages"; referencedColumns: ["id"] }
         ]
       }
       today_recommendations: {
@@ -649,22 +653,26 @@ export interface Database {
           quality_score: number | null; is_duplicate_of: string | null; is_selected: boolean
           analyzed_at: string | null; created_at: string
           categories: string[]; reasoning: string | null; recommendation: string | null
+          temporary: boolean; expires_at: string | null; retained_as_memory: boolean; memory_photo_id: string | null
         }
         Insert: {
           id?: string; project_id: string; storage_path: string; phash?: string | null
           quality_score?: number | null; is_duplicate_of?: string | null; is_selected?: boolean
           analyzed_at?: string | null; created_at?: string
           categories?: string[]; reasoning?: string | null; recommendation?: string | null
+          temporary?: boolean; expires_at?: string | null; retained_as_memory?: boolean; memory_photo_id?: string | null
         }
         Update: {
           id?: string; project_id?: string; storage_path?: string; phash?: string | null
           quality_score?: number | null; is_duplicate_of?: string | null; is_selected?: boolean
           analyzed_at?: string | null; created_at?: string
           categories?: string[]; reasoning?: string | null; recommendation?: string | null
+          temporary?: boolean; expires_at?: string | null; retained_as_memory?: boolean; memory_photo_id?: string | null
         }
         Relationships: [
           { foreignKeyName: "content_project_photos_project_id_fkey";      columns: ["project_id"];      isOneToOne: false; referencedRelation: "content_projects";       referencedColumns: ["id"] },
-          { foreignKeyName: "content_project_photos_is_duplicate_of_fkey"; columns: ["is_duplicate_of"]; isOneToOne: false; referencedRelation: "content_project_photos"; referencedColumns: ["id"] }
+          { foreignKeyName: "content_project_photos_is_duplicate_of_fkey"; columns: ["is_duplicate_of"]; isOneToOne: false; referencedRelation: "content_project_photos"; referencedColumns: ["id"] },
+          { foreignKeyName: "content_project_photos_memory_photo_id_fkey"; columns: ["memory_photo_id"]; isOneToOne: false; referencedRelation: "memory_photos"; referencedColumns: ["id"] }
         ]
       }
       content_photo_analyses: {

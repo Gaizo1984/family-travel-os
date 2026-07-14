@@ -39,16 +39,25 @@ export async function createContentDraftFromIdea(formData: FormData) {
   if (!suggestion)
     redirect(`/content-studio/ideas/${ideaId}?error=${encodeURIComponent('Vorschlag nicht gefunden')}`)
 
+  // §Bugfix "story-Format landet fälschlich auf reel_plan": es gibt inzwischen
+  // einen eigenen `story_plan`-Draft-Typ (siehe content-sessions.ts) --
+  // story-Vorschläge bekommen jetzt dieselbe slides-Struktur wie Carousel
+  // statt versehentlich als Reel-Plan behandelt zu werden.
   const structure = suggestion.format === 'reel'
     ? { scenes: [{ text: suggestion.hook }], outro: '', caption: suggestion.caption_draft, hashtags: suggestion.hashtags }
-    : suggestion.format === 'carousel'
+    : suggestion.format === 'carousel' || suggestion.format === 'story'
       ? { slides: [{ text: suggestion.hook }], caption: suggestion.caption_draft, hashtags: suggestion.hashtags }
       : { text: suggestion.caption_draft, hashtags: suggestion.hashtags }
+
+  const draftType = suggestion.format === 'reel' ? 'reel_plan'
+    : suggestion.format === 'carousel' ? 'carousel_plan'
+    : suggestion.format === 'story' ? 'story_plan'
+    : 'caption'
 
   const { data: draft, error } = await supabase.from('content_drafts').insert({
     idea_id: ideaId,
     project_id: idea.project_id,
-    draft_type: suggestion.format === 'reel' ? 'reel_plan' : suggestion.format === 'carousel' ? 'carousel_plan' : suggestion.format === 'story' ? 'reel_plan' : 'caption',
+    draft_type: draftType,
     structure,
     notes: `${suggestion.title} — ${suggestion.angle}`,
   }).select('id').single()
@@ -126,7 +135,7 @@ export async function updateContentDraft(formData: FormData) {
   if (draftType === 'reel_plan') {
     const sceneTexts = formData.getAll('scene_text').map(String)
     structure = { scenes: sceneTexts.filter(Boolean).map((text) => ({ text })), outro: String(formData.get('outro') ?? '') }
-  } else if (draftType === 'carousel_plan') {
+  } else if (draftType === 'carousel_plan' || draftType === 'story_plan') {
     const slideTexts = formData.getAll('slide_text').map(String)
     structure = { slides: slideTexts.filter(Boolean).map((text) => ({ text })) }
   } else {

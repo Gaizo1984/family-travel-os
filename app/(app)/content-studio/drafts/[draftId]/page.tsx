@@ -20,7 +20,7 @@ type CarouselStructure = { slides: { text: string }[]; hashtags?: string[] };
 type CaptionStructure = { text: string; hashtags?: string[] };
 
 const DRAFT_TYPE_LABELS: Record<string, string> = {
-  reel_plan: "Reel-Plan", carousel_plan: "Carousel-Plan", caption: "Caption", journal_review: "Reisejournal",
+  reel_plan: "Reel-Plan", carousel_plan: "Carousel-Plan", story_plan: "Story-Plan", caption: "Caption", journal_review: "Reisejournal",
 };
 
 export default async function ContentDraftPage({
@@ -84,7 +84,7 @@ export default async function ContentDraftPage({
               </>
             )}
 
-            {draft.draft_type === "carousel_plan" && (
+            {(draft.draft_type === "carousel_plan" || draft.draft_type === "story_plan") && (
               <>
                 <label style={LABEL_STYLE}>Slides</label>
                 {(draft.structure as CarouselStructure).slides?.map((s, i) => (

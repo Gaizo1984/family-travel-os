@@ -5,6 +5,9 @@ import { createClient } from '@/lib/supabase/client'
 
 type UploadSlot = { path: string; token: string }
 
+/** `createUploadSlots` (lib/actions/photo-staging.ts) lehnt count>20 pro Aufruf ab -- größere Auswahlen werden clientseitig in Batches dieser Größe aufgeteilt, ein einziges finales Formular-Submit trägt alle gesammelten Pfade. */
+const SLOT_BATCH_SIZE = 20
+
 /**
  * Lädt ausgewählte Fotos DIREKT vom Browser zu Supabase Storage hoch (Signed
  * Upload URL) statt über den Server-Action-Request-Body — Vercel begrenzt
@@ -13,7 +16,10 @@ type UploadSlot = { path: string; token: string }
  * Direkt-Upload wird das eigentliche Formular ganz normal nativ abgeschickt,
  * jetzt nur noch mit den Speicherpfaden statt Roh-Bytes (winziger Payload) —
  * Redirect/useFormStatus (SubmitButtonWithProgress) funktionieren dadurch
- * unverändert weiter.
+ * unverändert weiter. Größere Auswahlen (z.B. 30-50+ Content-Session-Fotos)
+ * werden in Batches von je maximal 20 Slots hochgeladen, aber als EIN
+ * gesammeltes Submit abgeschickt -- der Server-Action-Aufrufer entscheidet
+ * selbst, ob/wie er die Gesamtmenge begrenzt.
  */
 export function DirectPhotoUploadForm({
   action,
@@ -43,15 +49,18 @@ export function DirectPhotoUploadForm({
     setProgress({ done: 0, total: files.length })
 
     try {
-      const slots = await createSlots(files.length)
       const supabase = createClient()
       const paths: string[] = []
-      for (let i = 0; i < files.length; i++) {
-        const { error } = await supabase.storage.from('documents')
-          .uploadToSignedUrl(slots[i].path, slots[i].token, files[i], { contentType: files[i].type })
-        if (error) throw error
-        paths.push(slots[i].path)
-        setProgress({ done: i + 1, total: files.length })
+      for (let start = 0; start < files.length; start += SLOT_BATCH_SIZE) {
+        const batch = files.slice(start, start + SLOT_BATCH_SIZE)
+        const slots = await createSlots(batch.length)
+        for (let i = 0; i < batch.length; i++) {
+          const { error } = await supabase.storage.from('documents')
+            .uploadToSignedUrl(slots[i].path, slots[i].token, batch[i], { contentType: batch[i].type })
+          if (error) throw error
+          paths.push(slots[i].path)
+          setProgress({ done: paths.length, total: files.length })
+        }
       }
 
       if (fileInput) fileInput.value = ''

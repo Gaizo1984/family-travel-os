@@ -1,11 +1,13 @@
 import Link from "next/link";
-import { ArrowRight, Sparkles, Settings, MapPin, Camera, Wand2, Clapperboard, Clock, Gauge } from "lucide-react";
+import { after } from "next/server";
+import { ArrowRight, Sparkles, ImagePlus, Settings, MapPin, Camera, Wand2, Clapperboard, Clock, Gauge } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { WhatCanAI } from "./WhatCanAI";
 import { buildContentStrategyContext } from "@/lib/content-strategy-context";
 import { getCachedContentStrategy, generateAndCacheContentStrategy } from "@/lib/content-strategy";
 import { regenerateContentStrategy } from "@/lib/actions/content-strategy-actions";
+import { cleanupExpiredContentSessionPhotos } from "@/lib/content-session-cleanup";
 
 const STEPS = [
   { Icon: MapPin, label: "Reise wählen" },
@@ -16,6 +18,18 @@ const STEPS = [
 export default async function ContentStudioPage() {
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
+
+  // §"Kontrollierter Cleanup beim Öffnen des Content Studios" -- zusätzliche
+  // Absicherung neben dem Vercel-Cron (app/api/cron/cleanup-content-sessions),
+  // kein Ersatz dafür. Läuft nach dem Response im Hintergrund, damit niemand
+  // auf die Bereinigung warten muss.
+  after(async () => {
+    try {
+      await cleanupExpiredContentSessionPhotos();
+    } catch {
+      // bewusst verschluckt -- der Cron-Job übernimmt beim nächsten Lauf ohnehin
+    }
+  });
 
   // §"Vom Ideengenerator zum Content Director": alle drei hängen nur von
   // familyId ab, nicht voneinander — parallel statt seriell laden.
@@ -193,15 +207,30 @@ export default async function ContentStudioPage() {
         </div>
 
         <Link
-          href="/content-studio/new"
-          className="block rounded-xl p-7 mb-8"
+          href="/content-studio/session/new"
+          className="block rounded-xl p-7 mb-4"
           style={{ background: "var(--foreground)", textDecoration: "none" }}
         >
           <div className="flex items-center gap-3 mb-2">
-            <Sparkles size={16} strokeWidth={1.5} style={{ color: "var(--surface)" }} />
-            <span style={{ color: "var(--surface)", fontSize: "1rem", fontWeight: 400 }}>Content-Idee erstellen</span>
+            <ImagePlus size={16} strokeWidth={1.5} style={{ color: "var(--surface)" }} />
+            <span style={{ color: "var(--surface)", fontSize: "1rem", fontWeight: 400 }}>Neue Content-Session starten</span>
           </div>
           <p style={{ color: "var(--surface)", opacity: 0.7, fontSize: "0.76rem" }}>
+            Beliebig viele Tagesbilder hochladen (automatische Löschung nach 24h) -- Caption, Carousel, Story
+            oder Reel erstellen, ausgewählte Bilder optional dauerhaft behalten.
+          </p>
+        </Link>
+
+        <Link
+          href="/content-studio/new"
+          className="block rounded-xl p-6 mb-8"
+          style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}
+        >
+          <div className="flex items-center gap-3 mb-2">
+            <Sparkles size={16} strokeWidth={1.5} style={{ color: "var(--accent)" }} />
+            <span style={{ color: "var(--foreground)", fontSize: "0.9rem", fontWeight: 400 }}>Content-Idee erstellen</span>
+          </div>
+          <p style={{ color: "var(--muted)", fontSize: "0.74rem" }}>
             Reise auswählen, optional ein Foto — die KI entwickelt bis zu 4 hochwertige Vorschläge.
           </p>
         </Link>
