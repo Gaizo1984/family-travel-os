@@ -866,6 +866,36 @@ export async function deleteContentSessionDraft(formData: FormData) {
 }
 
 /**
+ * §"Aktive Content-Projekte müssen löschbar sein": bisher gab es keinerlei
+ * Weg, eine Content-Session komplett zu entfernen -- alte/verwaiste
+ * Sessions blieben für immer bestehen (startContentSession legt bei jedem
+ * Aufruf eine NEUE Zeile an, nie ein Ersetzen). `content_project_photos` und
+ * `content_drafts` haben `ON DELETE CASCADE` auf `content_projects` -- die
+ * DB-Zeilen räumen sich beim Löschen des Projekts selbst auf, nur die
+ * Storage-Dateien müssen vorher explizit entfernt werden (Cascade betrifft
+ * nur Datenbank-Zeilen, nie Supabase-Storage-Objekte). Storage-Fehler
+ * blockieren das Löschen nicht -- sonst bliebe ein Projekt trotz des
+ * expliziten Löschwunsches erneut unlöschbar hängen.
+ */
+export async function deleteContentSessionProject(formData: FormData) {
+  const projectId = String(formData.get('project_id') ?? '')
+  const returnPath = String(formData.get('return_to') ?? '/content-studio')
+  if (!projectId) redirect('/content-studio')
+
+  const supabase = await createClient()
+  const { data: photos } = await supabase.from('content_project_photos').select('storage_path').eq('project_id', projectId)
+  if (photos && photos.length > 0) {
+    const { error: storageError } = await supabase.storage.from('documents').remove(photos.map((p) => p.storage_path))
+    if (storageError) console.error('[content-sessions] Storage-Bereinigung beim Projekt-Löschen teilweise fehlgeschlagen', storageError.message)
+  }
+
+  const { error } = await supabase.from('content_projects').delete().eq('id', projectId)
+  if (error) redirect(`${returnPath}?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)
+
+  redirect(returnPath)
+}
+
+/**
  * §"Temporäre Bilder jetzt löschen": gehärtetes Muster wie deleteMemoryPhoto
  * -- Storage zuerst, DB-Zeile nur bei Erfolg. Löscht ausschließlich
  * `temporary=true, retained_as_memory=false`-Fotos -- bereits als Erinnerung

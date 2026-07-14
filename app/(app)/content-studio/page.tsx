@@ -1,19 +1,26 @@
 import Link from "next/link";
 import { after } from "next/server";
-import { ArrowRight, Sparkles, ImagePlus, Settings, MapPin, Camera, Wand2, Clapperboard, Clock, Gauge } from "lucide-react";
+import { ArrowRight, ImagePlus, Settings, MapPin, Wand2, Clapperboard, Clock, Gauge, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { WhatCanAI } from "./WhatCanAI";
 import { buildContentStrategyContext } from "@/lib/content-strategy-context";
 import { getCachedContentStrategy, generateAndCacheContentStrategy } from "@/lib/content-strategy";
 import { regenerateContentStrategy } from "@/lib/actions/content-strategy-actions";
+import { deleteContentSessionProject } from "@/lib/actions/content-sessions";
+import { CONTENT_FORMAT_LABELS } from "@/lib/content-session-limits";
 import { cleanupExpiredContentSessionPhotos } from "@/lib/content-session-cleanup";
 
 const STEPS = [
-  { Icon: MapPin, label: "Reise wählen" },
-  { Icon: Camera, label: "Foto (optional)" },
-  { Icon: Wand2, label: "KI entwickelt Ideen" },
+  { Icon: MapPin, label: "Reise & Format wählen" },
+  { Icon: ImagePlus, label: "Bilder hochladen" },
+  { Icon: Wand2, label: "KI erstellt Entwurf" },
 ];
+
+const SESSION_STATUS_LABELS: Record<string, string> = {
+  uploading: "Fotos werden hochgeladen", ready_for_analysis: "Bereit zur Analyse",
+  analyzing: "Wird analysiert", draft_created: "Entwurf erstellt", images_deleted: "Bilder gelöscht",
+};
 
 export default async function ContentStudioPage() {
   const supabase = await createClient();
@@ -31,17 +38,19 @@ export default async function ContentStudioPage() {
     }
   });
 
-  // §"Vom Ideengenerator zum Content Director": alle drei hängen nur von
-  // familyId ab, nicht voneinander — parallel statt seriell laden.
-  const [{ data: activeProject }, { data: recentIdeas }, strategyContext] = await Promise.all([
+  // §"Nur noch EIN Einstieg 'Content erstellen'": statt eines separaten
+  // "aktives Projekt"-Blocks (früher an die jetzt entfernte "Content-Idee
+  // erstellen" gekoppelt) zeigt der Hub jetzt offene Content-Sessions als
+  // "Entwürfe fortsetzen" -- alle drei Abfragen hängen nur von familyId ab,
+  // parallel statt seriell geladen.
+  const [{ data: openSessions }, { data: recentIdeas }, strategyContext] = await Promise.all([
     supabase
       .from("content_projects")
-      .select("id, title, trip_id, trips(title)")
+      .select("id, title, trip_id, output_format, status, updated_at, trips(title)")
       .eq("family_id", familyId)
-      .eq("status", "active")
+      .eq("project_type", "session")
       .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
+      .limit(6),
     supabase
       .from("content_ideas")
       .select("id, content_goal, status, trip_id, trips(title)")
@@ -50,17 +59,6 @@ export default async function ContentStudioPage() {
       .limit(3),
     buildContentStrategyContext(familyId),
   ]);
-
-  let ideaCount = 0;
-  let draftCount = 0;
-  if (activeProject) {
-    const [{ count: ic }, { count: dc }] = await Promise.all([
-      supabase.from("content_ideas").select("id", { count: "exact", head: true }).eq("project_id", activeProject.id),
-      supabase.from("content_drafts").select("id", { count: "exact", head: true }).eq("project_id", activeProject.id),
-    ]);
-    ideaCount = ic ?? 0;
-    draftCount = dc ?? 0;
-  }
 
   // §"Vom Ideengenerator zum Content Director": nur EINE "Today's Content
   // Strategy" gleichzeitig, einmal pro Tag generiert und zwischengespeichert
@@ -100,7 +98,7 @@ export default async function ContentStudioPage() {
 
         <div className="flex items-center gap-6 mb-8" style={{ borderBottom: "1px solid var(--border)", paddingBottom: "14px" }}>
           <span style={{ fontSize: "0.72rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--foreground)", borderBottom: "1px solid var(--accent)", paddingBottom: "14px", marginBottom: "-15px" }}>
-            Content-Ideen
+            Content erstellen
           </span>
           <Link href="/content-studio/posting-plan" style={{ fontSize: "0.72rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--muted)", textDecoration: "none" }}>
             Content-Fahrplan
@@ -171,24 +169,6 @@ export default async function ContentStudioPage() {
           </div>
         )}
 
-        {activeProject && (
-          <Link
-            href={`/content-studio/projects/${activeProject.id}`}
-            className="block rounded-xl p-6 mb-6"
-            style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}
-          >
-            <div style={{ color: "var(--muted)", fontSize: "0.58rem", letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: "6px" }}>
-              Aktives Projekt
-            </div>
-            <div className="font-light mb-2" style={{ color: "var(--foreground)", fontSize: "1.05rem" }}>
-              {(activeProject.trips as unknown as { title: string } | null)?.title ?? activeProject.title}
-            </div>
-            <p style={{ color: "var(--muted)", fontSize: "0.75rem" }}>
-              {ideaCount} {ideaCount === 1 ? "Idee" : "Ideen"} · {draftCount} {draftCount === 1 ? "Draft" : "Drafts"}
-            </p>
-          </Link>
-        )}
-
         <div className="flex items-center justify-center gap-3 mb-6" style={{ color: "var(--muted)" }}>
           {STEPS.map(({ Icon, label }, i) => (
             <div key={label} className="flex items-center gap-3">
@@ -208,36 +188,65 @@ export default async function ContentStudioPage() {
 
         <Link
           href="/content-studio/session/new"
-          className="block rounded-xl p-7 mb-4"
+          className="block rounded-xl p-7 mb-8"
           style={{ background: "var(--foreground)", textDecoration: "none" }}
         >
           <div className="flex items-center gap-3 mb-2">
             <ImagePlus size={16} strokeWidth={1.5} style={{ color: "var(--surface)" }} />
-            <span style={{ color: "var(--surface)", fontSize: "1rem", fontWeight: 400 }}>Neue Content-Session starten</span>
+            <span style={{ color: "var(--surface)", fontSize: "1rem", fontWeight: 400 }}>Content erstellen</span>
           </div>
           <p style={{ color: "var(--surface)", opacity: 0.7, fontSize: "0.76rem" }}>
-            Beliebig viele Tagesbilder hochladen (automatische Löschung nach 24h) -- Caption, Carousel, Story
-            oder Reel erstellen, ausgewählte Bilder optional dauerhaft behalten.
+            Reise und Format wählen, Content-Fokus und Stimmung angeben, Bilder hochladen (automatische Löschung
+            nach 24h) -- LUMI erstellt daraus Beitrag, Story oder Reel inkl. Hook, Caption und Hashtags. Ausgewählte
+            Bilder lassen sich optional dauerhaft behalten.
           </p>
         </Link>
 
-        <Link
-          href="/content-studio/new"
-          className="block rounded-xl p-6 mb-8"
-          style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}
-        >
-          <div className="flex items-center gap-3 mb-2">
-            <Sparkles size={16} strokeWidth={1.5} style={{ color: "var(--accent)" }} />
-            <span style={{ color: "var(--foreground)", fontSize: "0.9rem", fontWeight: 400 }}>Content-Idee erstellen</span>
+        {(openSessions ?? []).length > 0 && (
+          <div className="mb-8">
+            <h2 className="mb-4" style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase" }}>
+              Entwürfe fortsetzen
+            </h2>
+            <div className="grid grid-cols-1 gap-2">
+              {(openSessions ?? []).map((session) => (
+                <div
+                  key={session.id}
+                  className="flex items-center justify-between p-4 rounded-xl gap-3"
+                  style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+                >
+                  <Link
+                    href={`/content-studio/session/${session.id}`}
+                    className="flex-1 min-w-0"
+                    style={{ textDecoration: "none" }}
+                  >
+                    <div style={{ color: "var(--foreground)", fontSize: "0.82rem" }}>
+                      {(session.trips as unknown as { title: string } | null)?.title ?? session.title}
+                      {session.output_format && ` · ${CONTENT_FORMAT_LABELS[session.output_format] ?? session.output_format}`}
+                    </div>
+                    <span style={{ color: "var(--muted)", fontSize: "0.68rem" }}>
+                      {SESSION_STATUS_LABELS[session.status] ?? session.status}
+                    </span>
+                  </Link>
+                  <form action={deleteContentSessionProject}>
+                    <input type="hidden" name="project_id" value={session.id} />
+                    <input type="hidden" name="return_to" value="/content-studio" />
+                    <button
+                      type="submit"
+                      aria-label="Entwurf löschen"
+                      style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: "10px", margin: "-6px", color: "#B5624A" }}
+                    >
+                      <Trash2 size={14} strokeWidth={1.6} />
+                    </button>
+                  </form>
+                </div>
+              ))}
+            </div>
           </div>
-          <p style={{ color: "var(--muted)", fontSize: "0.74rem" }}>
-            Reise auswählen, optional ein Foto — die KI entwickelt bis zu 4 hochwertige Vorschläge.
-          </p>
-        </Link>
+        )}
 
         <div className="flex items-center justify-between mb-4">
           <h2 style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase" }}>
-            Zuletzt entwickelt
+            Frühere Ideen (Archiv)
           </h2>
           <Link href="/content-studio/ideas" style={{ color: "var(--accent)", fontSize: "0.65rem", letterSpacing: "0.08em", textDecoration: "none" }}>
             Alle Ideen ansehen →

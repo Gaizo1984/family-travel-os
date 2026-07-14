@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import {
   createContentSessionUploadSlots, uploadContentSessionPhotos, analyzeContentSession,
   deleteContentSessionPhotosNow, retainContentSessionPhotoAsMemory, chooseContentSessionFormat,
+  deleteContentSessionProject,
 } from "@/lib/actions/content-sessions";
 import { MAX_RETAINED_MEMORIES_PER_TRIP, MAX_PHOTOS_BY_FORMAT, CONTENT_FORMAT_LABELS } from "@/lib/content-session-limits";
 import { CONTENT_TONALITY_OPTIONS, CONTENT_FOCUS_OPTIONS, CONTENT_MOOD_OPTIONS } from "@/lib/ai-style-guidelines";
@@ -120,17 +121,33 @@ export default async function ContentSessionPage({
     <div className="flex-1" style={{ background: "var(--background)" }}>
       <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-9">
 
-        <Link
-          href="/content-studio"
-          className="flex items-center gap-2 mb-8 transition-opacity hover:opacity-70"
-          style={{ color: "var(--muted)", fontSize: "0.78rem", letterSpacing: "0.04em", textDecoration: "none", width: "fit-content" }}
-        >
-          <ChevronLeft size={13} strokeWidth={1.5} />
-          Content Studio
-        </Link>
+        <div className="flex items-center justify-between mb-8 flex-wrap gap-2">
+          <Link
+            href="/content-studio"
+            className="flex items-center gap-2 transition-opacity hover:opacity-70"
+            style={{ color: "var(--muted)", fontSize: "0.78rem", letterSpacing: "0.04em", textDecoration: "none", width: "fit-content" }}
+          >
+            <ChevronLeft size={13} strokeWidth={1.5} />
+            Content Studio
+          </Link>
+          <form action={deleteContentSessionProject}>
+            <input type="hidden" name="project_id" value={projectId} />
+            <input type="hidden" name="return_to" value="/content-studio" />
+            <button
+              type="submit"
+              style={{
+                background: "transparent", color: "#B5624A", border: "1px solid rgba(181,98,74,0.35)",
+                borderRadius: "6px", padding: "6px 12px", fontSize: "0.6rem", letterSpacing: "0.08em",
+                textTransform: "uppercase", cursor: "pointer", WebkitAppearance: "none", appearance: "none",
+              }}
+            >
+              Projekt löschen
+            </button>
+          </form>
+        </div>
 
         <div style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "12px" }}>
-          Content-Session
+          Content erstellen
         </div>
         <h1 className="font-light mb-8" style={{ color: "var(--foreground)", fontSize: "1.4rem", letterSpacing: "0.01em" }}>
           {tripTitle}
