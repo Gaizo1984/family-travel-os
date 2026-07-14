@@ -1,36 +1,17 @@
 import Link from "next/link";
-import { Star, Trash2, Users, Image as ImageIcon } from "lucide-react";
+import { ChevronLeft, Star, Trash2, Users, Image as ImageIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
-import { uploadMemoryPhotos, deleteMemoryPhoto, toggleMemoryHighlight, setCoverPhoto, createMemoryUploadSlots } from "@/lib/actions/memories";
-import { MAX_SELECTED_PHOTOS_PER_TRIP } from "@/lib/memory-limits";
-import { MultiPhotoFilePreview } from "@/components/MultiPhotoFilePreview";
-import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
-import { DirectPhotoUploadForm } from "@/components/DirectPhotoUploadForm";
+import { deleteMemoryPhoto, toggleMemoryHighlight, setCoverPhoto } from "@/lib/actions/memories";
+import { deriveTripDateRange } from "@/lib/trip-dates";
 import { Banner } from "@/components/Banner";
 import { SignedPhoto } from "@/components/SignedPhoto";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
-import { DateSelectFields } from "@/components/DateSelectFields";
-import { getDateFieldRange } from "@/lib/documents";
-
-// §Der Upload selbst ist jetzt schnell (Analyse läuft per after() im
-// Hintergrund) — großzügigeres Timeout als zusätzliches Sicherheitsnetz.
-export const maxDuration = 60;
-
-const LABEL_STYLE: React.CSSProperties = {
-  display: "block", color: "var(--muted)", fontSize: "0.55rem",
-  letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px",
-};
-const FIELD_STYLE: React.CSSProperties = {
-  width: "100%", padding: "12px 16px", background: "var(--background)",
-  border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)",
-  fontSize: "0.9rem", fontWeight: 300, outline: "none",
-};
 
 type PhotoRow = {
   id: string; trip_id: string | null; uploaded_by_person_id: string | null
   storage_path: string; taken_at: string | null; caption: string | null
-  is_highlight: boolean; created_at: string
+  is_highlight: boolean; created_at: string; sort_order: number
   is_selected: boolean; is_duplicate_of: string | null; quality_score: number | null
 };
 
@@ -50,7 +31,7 @@ function LegacyPastTripTile({ entry, url }: { entry: LegacyPastTripPhoto; url: s
   return (
     <Link
       href={`/family/history/${entry.id}/edit`}
-      className="relative block rounded-lg overflow-hidden"
+      className="relative block rounded-lg overflow-hidden mb-4 break-inside-avoid"
       style={{ aspectRatio: "1/1" }}
     >
       <SignedPhoto storagePath={null} initialUrl={url} alt={entry.country_or_region} loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
@@ -67,12 +48,20 @@ function LegacyPastTripTile({ entry, url }: { entry: LegacyPastTripPhoto; url: s
   );
 }
 
+/**
+ * §"Nichts wird abgeschnitten oder verdreht (hoch, quer, 9:16, 4:3 etc.)":
+ * die Kachel erzwingt KEIN festes Seitenverhältnis mehr (kein `aspectRatio` +
+ * `object-fit: cover`) -- das Bild fließt in seiner echten Größe (`w-full
+ * h-auto`), das Seitenverhältnis bleibt dadurch exakt erhalten. Das
+ * umschließende Grid nutzt CSS-Columns (Masonry-Technik) statt eines
+ * gleichmäßigen Rasters, da unterschiedlich hohe Kacheln sonst Lücken reißen.
+ */
 function PhotoCard({ photo, url, personName, returnTo, isCover }: { photo: PhotoRow; url: string | null; personName: string | null; returnTo: string; isCover: boolean }) {
   if (!url) return null;
   return (
-    <div className="relative rounded-lg overflow-hidden group" style={{ aspectRatio: "1/1" }}>
+    <div className="relative rounded-lg overflow-hidden group mb-4 break-inside-avoid">
       <PhotoLightbox url={url} alt={photo.caption ?? ""}>
-        <SignedPhoto storagePath={photo.storage_path} initialUrl={url} alt={photo.caption ?? ""} loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
+        <SignedPhoto storagePath={photo.storage_path} initialUrl={url} alt={photo.caption ?? ""} loading="lazy" className="block w-full h-auto" />
       </PhotoLightbox>
       <div
         className="absolute inset-0 flex flex-col justify-between p-2"
@@ -121,43 +110,54 @@ function PhotoCard({ photo, url, personName, returnTo, isCover }: { photo: Photo
   );
 }
 
+function monthYearLabel(iso: string): string {
+  const d = new Date(iso + "T00:00:00Z");
+  return `${String(d.getUTCMonth() + 1).padStart(2, "0")}/${d.getUTCFullYear()}`;
+}
+
+type CutEntry = { photo: PhotoRow; url: string | null };
+type Cut = { key: string; year: number; sortKey: string; label: string; entries: CutEntry[] };
+
 export default async function MemoriesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; uploaded?: string; trip?: string }>;
+  searchParams: Promise<{ error?: string }>;
 }) {
-  const { error, uploaded, trip: tripFilter } = await searchParams;
+  const { error } = await searchParams;
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
-  const returnTo = tripFilter ? `/memories?trip=${tripFilter}` : "/memories";
+  const returnTo = "/memories";
 
   const [{ data: photosRaw }, { data: personsRaw }, { data: tripsRaw }, { data: pastTripsRaw }] = await Promise.all([
-    (() => {
-      let query = supabase
-        .from("memory_photos")
-        .select("id, trip_id, uploaded_by_person_id, storage_path, taken_at, caption, is_highlight, created_at, is_selected, is_duplicate_of, quality_score")
-        .eq("family_id", familyId)
-        .order("taken_at", { ascending: false, nullsFirst: false });
-      if (tripFilter) query = query.eq("trip_id", tripFilter);
-      return query;
-    })(),
+    supabase
+      .from("memory_photos")
+      .select("id, trip_id, uploaded_by_person_id, storage_path, taken_at, caption, is_highlight, created_at, sort_order, is_selected, is_duplicate_of, quality_score")
+      .eq("family_id", familyId)
+      .order("taken_at", { ascending: false, nullsFirst: false }),
     supabase.from("persons").select("id, name").eq("family_id", familyId),
-    supabase.from("trips").select("id, title, cover_photo_id").eq("family_id", familyId).order("start_date", { ascending: false }),
+    supabase
+      .from("trips")
+      .select(`
+        id, title, cover_photo_id, start_date, end_date,
+        stages ( start_date, end_date ),
+        bookings ( type, status, start_datetime, end_datetime )
+      `)
+      .eq("family_id", familyId),
     supabase.from("past_trips").select("id, country_or_region, year, places, photo_storage_path").eq("family_id", familyId).not("photo_storage_path", "is", null),
   ]);
 
-  const coverPhotoIds = new Set((tripsRaw ?? []).flatMap((t) => (t.cover_photo_id ? [t.cover_photo_id] : [])));
+  const trips = tripsRaw ?? [];
+  const tripById = new Map(trips.map((t) => [t.id, t]));
+  const tripRangeById = new Map(trips.map((t) => [t.id, deriveTripDateRange(t, t.bookings, t.stages)]));
+  const coverPhotoIds = new Set(trips.flatMap((t) => (t.cover_photo_id ? [t.cover_photo_id] : [])));
 
   const allPhotos = (photosRaw ?? []) as PhotoRow[];
-  // §"Maximal 30 Erinnerungsbilder je Reise": nicht ausgewählte Fotos (Dubletten
-  // oder außerhalb der KI-Top-30) werden in der Hauptgalerie ausgeblendet, aber
-  // nie gelöscht — keine stille Datenlöschung.
+  // §"Maximal 25 Erinnerungsbilder je Reise": nicht ausgewählte Fotos (Dubletten
+  // oder außerhalb der KI-Auswahl) werden hier ausgeblendet, aber nie gelöscht.
   const photos = allPhotos.filter((p) => p.is_selected);
   const hiddenCount = allPhotos.length - photos.length;
   const persons = personsRaw ?? [];
-  const trips = tripsRaw ?? [];
   const personNameById = new Map(persons.map((p) => [p.id, p.name]));
-  const filteredTripTitle = tripFilter ? trips.find((t) => t.id === tripFilter)?.title ?? null : null;
 
   const photosWithUrls = await Promise.all(
     photos.map(async (p) => {
@@ -182,95 +182,88 @@ export default async function MemoriesPage({
   }
   const highlightPhotos = photosWithUrls.filter((p) => highlightIds.has(p.photo.id));
 
-  // Nach Jahr gruppieren (taken_at bevorzugt, sonst Upload-Datum).
-  const byYear = new Map<number, typeof photosWithUrls>();
+  // §"Neueste Bilder oben, mit einem Cut je Reise (z.B. 03/2025 Mauritius,
+  // 07/2025 Malediven)": Fotos werden zuerst je Reise gruppiert (nicht mehr
+  // nur nach Kalenderjahr) -- jede Reise wird ein eigener, mit Monat/Jahr und
+  // Reisetitel beschrifteter Abschnitt. Die Sortierung nutzt denselben
+  // abgeleiteten Reisezeitraum wie überall sonst (lib/trip-dates.ts). Fotos
+  // ohne Reise-Zuordnung bekommen einen eigenen "Nicht zugeordnet"-Cut je Jahr.
+  const cuts = new Map<string, Cut>();
   for (const entry of photosWithUrls) {
-    const year = new Date(entry.photo.taken_at ?? entry.photo.created_at).getFullYear();
-    if (!byYear.has(year)) byYear.set(year, []);
-    byYear.get(year)!.push(entry);
-  }
-
-  // §Punkt 6: past_trips gehören zu keiner Reise (kein trip_id) -- bei aktivem
-  // Reise-Filter deshalb nicht mit einmischen, sonst würden sie fälschlich in
-  // jeder gefilterten Ansicht erscheinen.
-  const legacyByYear = new Map<number, { entry: LegacyPastTripPhoto; url: string | null }[]>();
-  if (!tripFilter) {
-    const legacyWithUrls = await Promise.all(
-      (pastTripsRaw ?? [])
-        .filter((p): p is typeof p & { photo_storage_path: string } => Boolean(p.photo_storage_path))
-        .map(async (p) => {
-          const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.photo_storage_path, 3600);
-          return { year: p.year, entry: { id: p.id, country_or_region: p.country_or_region, places: p.places }, url: signed?.signedUrl ?? null };
-        }),
-    );
-    for (const { year, entry, url } of legacyWithUrls) {
-      if (!legacyByYear.has(year)) legacyByYear.set(year, []);
-      legacyByYear.get(year)!.push({ entry, url });
+    const p = entry.photo;
+    const fallbackDate = (p.taken_at ?? p.created_at).slice(0, 10);
+    if (p.trip_id) {
+      const key = `trip-${p.trip_id}`;
+      if (!cuts.has(key)) {
+        const range = tripRangeById.get(p.trip_id);
+        const sortKey = range?.startDate ?? fallbackDate;
+        const trip = tripById.get(p.trip_id);
+        cuts.set(key, {
+          key, year: new Date(sortKey + "T00:00:00Z").getUTCFullYear(), sortKey,
+          label: `${monthYearLabel(sortKey)} · ${trip?.title ?? "Reise"}`,
+          entries: [],
+        });
+      }
+      cuts.get(key)!.entries.push(entry);
+    } else {
+      const year = new Date(fallbackDate).getUTCFullYear();
+      const key = `unassigned-${year}`;
+      if (!cuts.has(key)) cuts.set(key, { key, year, sortKey: `${year}-01-01`, label: "Nicht zugeordnet", entries: [] });
+      cuts.get(key)!.entries.push(entry);
     }
   }
+  for (const cut of cuts.values()) {
+    cut.entries.sort((a, b) => {
+      if (a.photo.sort_order !== b.photo.sort_order) return a.photo.sort_order - b.photo.sort_order;
+      return (b.photo.taken_at ?? b.photo.created_at).localeCompare(a.photo.taken_at ?? a.photo.created_at);
+    });
+  }
 
-  const years = [...new Set([...byYear.keys(), ...legacyByYear.keys()])].sort((a, b) => b - a);
+  const legacyByYear = new Map<number, { entry: LegacyPastTripPhoto; url: string | null }[]>();
+  const legacyWithUrls = await Promise.all(
+    (pastTripsRaw ?? [])
+      .filter((p): p is typeof p & { photo_storage_path: string } => Boolean(p.photo_storage_path))
+      .map(async (p) => {
+        const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.photo_storage_path, 3600);
+        return { year: p.year, entry: { id: p.id, country_or_region: p.country_or_region, places: p.places }, url: signed?.signedUrl ?? null };
+      }),
+  );
+  for (const { year, entry, url } of legacyWithUrls) {
+    if (!legacyByYear.has(year)) legacyByYear.set(year, []);
+    legacyByYear.get(year)!.push({ entry, url });
+  }
+
+  const years = [...new Set([...cuts.values()].map((c) => c.year).concat([...legacyByYear.keys()]))].sort((a, b) => b - a);
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
       <div className="max-w-5xl w-full mx-auto px-5 md:px-8 pb-24 pt-9">
+
+        <Link
+          href="/"
+          className="flex items-center gap-2 mb-6 transition-opacity hover:opacity-70"
+          style={{ color: "var(--muted)", fontSize: "0.78rem", letterSpacing: "0.04em", textDecoration: "none", width: "fit-content" }}
+        >
+          <ChevronLeft size={13} strokeWidth={1.5} />
+          Übersicht
+        </Link>
 
         <header className="mb-8">
           <div style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "12px" }}>
             Travel Memory
           </div>
           <h1 className="font-light" style={{ color: "var(--foreground)", fontSize: "1.6rem", letterSpacing: "-0.01em" }}>
-            {filteredTripTitle ? `Erinnerungen: ${filteredTripTitle}` : "Eure gemeinsame Reisegalerie"}
+            Eure gemeinsame Reisegalerie
           </h1>
-          {tripFilter && (
-            <Link href="/memories" style={{ color: "var(--accent)", fontSize: "0.72rem", textDecoration: "none" }}>
-              Alle Erinnerungen ansehen →
-            </Link>
-          )}
-          {!tripFilter && (
-            <Link href="/memories/unzugeordnet" style={{ color: "var(--accent)", fontSize: "0.72rem", textDecoration: "none" }}>
-              Nicht zugeordnete Erinnerungen →
-            </Link>
-          )}
+          <p className="mt-2 mb-2" style={{ color: "var(--muted)", fontSize: "0.76rem", lineHeight: 1.5 }}>
+            Fotos hochladen, bearbeiten oder als Titelbild markieren geht direkt über die Galerie der jeweiligen Reise.
+          </p>
+          <Link href="/memories/unzugeordnet" style={{ color: "var(--accent)", fontSize: "0.72rem", textDecoration: "none" }}>
+            Nicht zugeordnete Erinnerungen →
+          </Link>
         </header>
 
-        {uploaded && <Banner variant="success">{uploaded} Foto(s) gespeichert.</Banner>}
         {error && <Banner variant="error">{error}</Banner>}
-
-        {/* ── Upload ── */}
-        <section className="mb-12">
-          <DirectPhotoUploadForm action={uploadMemoryPhotos} createSlots={createMemoryUploadSlots} fileInputName="files">
-            <input type="hidden" name="family_id" value={familyId} />
-            <div className="rounded-xl p-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-                <div>
-                  <label htmlFor="mem-trip" style={LABEL_STYLE}>Reise (optional)</label>
-                  <select id="mem-trip" name="trip_id" style={FIELD_STYLE}>
-                    <option value="">— keine Zuordnung —</option>
-                    {trips.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label htmlFor="mem-person" style={LABEL_STYLE}>Hochgeladen von</label>
-                  <select id="mem-person" name="uploaded_by_person_id" style={FIELD_STYLE}>
-                    <option value="">— egal —</option>
-                    {persons.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
-                </div>
-                <DateSelectFields label="Aufnahmedatum" namePrefix="taken_at" range={getDateFieldRange("issue")} />
-                <div>
-                  <label htmlFor="mem-caption" style={LABEL_STYLE}>Bildunterschrift</label>
-                  <input id="mem-caption" name="caption" type="text" style={FIELD_STYLE} />
-                </div>
-              </div>
-              <div className="mb-5">
-                <label htmlFor="mem-files" style={LABEL_STYLE}>Fotos</label>
-                <MultiPhotoFilePreview inputId="mem-files" inputName="files" fieldStyle={FIELD_STYLE} />
-              </div>
-              <SubmitButtonWithProgress label="Fotos speichern" pendingLabel="Fotos werden gespeichert …" />
-            </div>
-          </DirectPhotoUploadForm>
-        </section>
 
         {/* ── Highlights ── */}
         {highlightPhotos.length > 0 && (
@@ -278,7 +271,7 @@ export default async function MemoriesPage({
             <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: "12px" }}>
               Highlights
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            <div className="columns-2 sm:columns-3 gap-4">
               {highlightPhotos.map(({ photo, url }) => (
                 <PhotoCard key={photo.id} photo={photo} url={url} personName={photo.uploaded_by_person_id ? personNameById.get(photo.uploaded_by_person_id) ?? null : null} returnTo={returnTo} isCover={coverPhotoIds.has(photo.id)} />
               ))}
@@ -286,33 +279,47 @@ export default async function MemoriesPage({
           </section>
         )}
 
-        {/* ── Timeline nach Jahr ── */}
+        {/* ── Neueste zuerst, je Jahr in Reise-Abschnitte ("Cuts") unterteilt ── */}
         {years.length > 0 ? (
           years.map((year) => {
-            const yearPhotos = byYear.get(year) ?? [];
+            const cutsInYear = [...cuts.values()].filter((c) => c.year === year).sort((a, b) => b.sortKey.localeCompare(a.sortKey));
             const yearLegacy = legacyByYear.get(year) ?? [];
+            const yearPhotoCount = cutsInYear.reduce((sum, c) => sum + c.entries.length, 0);
             return (
               <section key={year} className="mb-12">
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center justify-between mb-5">
                   <Link href={`/memories/yearbook/${year}`} className="text-lg font-light" style={{ color: "var(--foreground)", textDecoration: "none" }}>
                     {year}
                   </Link>
-                  <span style={{ color: "var(--muted)", fontSize: "0.68rem" }}>{yearPhotos.length} Fotos</span>
+                  <span style={{ color: "var(--muted)", fontSize: "0.68rem" }}>{yearPhotoCount} Fotos</span>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                  {yearPhotos.map(({ photo, url }) => (
-                    <PhotoCard key={photo.id} photo={photo} url={url} personName={photo.uploaded_by_person_id ? personNameById.get(photo.uploaded_by_person_id) ?? null : null} returnTo={returnTo} isCover={coverPhotoIds.has(photo.id)} />
-                  ))}
-                  {yearLegacy.map(({ entry, url }) => (
-                    <LegacyPastTripTile key={entry.id} entry={entry} url={url} />
-                  ))}
-                </div>
+
+                {cutsInYear.map((cut) => (
+                  <div key={cut.key} className="mb-8">
+                    <div className="mb-3" style={{ color: "var(--muted)", fontSize: "0.66rem", letterSpacing: "0.06em" }}>
+                      {cut.label}
+                    </div>
+                    <div className="columns-2 sm:columns-3 gap-4">
+                      {cut.entries.map(({ photo, url }) => (
+                        <PhotoCard key={photo.id} photo={photo} url={url} personName={photo.uploaded_by_person_id ? personNameById.get(photo.uploaded_by_person_id) ?? null : null} returnTo={returnTo} isCover={coverPhotoIds.has(photo.id)} />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+
+                {yearLegacy.length > 0 && (
+                  <div className="columns-2 sm:columns-3 gap-4">
+                    {yearLegacy.map(({ entry, url }) => (
+                      <LegacyPastTripTile key={entry.id} entry={entry} url={url} />
+                    ))}
+                  </div>
+                )}
               </section>
             );
           })
         ) : (
           <p style={{ color: "var(--muted)", fontSize: "0.82rem" }}>
-            Noch keine Erinnerungsfotos hochgeladen — legt oben eure ersten Fotos an.
+            Noch keine Erinnerungsfotos vorhanden — Fotos lassen sich direkt über die Galerie der jeweiligen Reise hinzufügen.
           </p>
         )}
 
@@ -326,7 +333,7 @@ export default async function MemoriesPage({
 
         {hiddenCount > 0 && (
           <p className="mt-2" style={{ color: "var(--muted)", fontSize: "0.68rem", fontStyle: "italic" }}>
-            {hiddenCount} weitere hochgeladene {hiddenCount === 1 ? "Foto ist" : "Fotos sind"} (Dubletten oder außerhalb der besten {MAX_SELECTED_PHOTOS_PER_TRIP} je Reise) hier ausgeblendet, aber nicht gelöscht.
+            {hiddenCount} weitere hochgeladene {hiddenCount === 1 ? "Foto ist" : "Fotos sind"} (Dubletten oder außerhalb der besten Auswahl je Reise) hier ausgeblendet, aber nicht gelöscht.
           </p>
         )}
       </div>

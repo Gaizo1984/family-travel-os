@@ -14,8 +14,6 @@ import { DirectPhotoUploadForm } from "@/components/DirectPhotoUploadForm";
 import { Banner } from "@/components/Banner";
 import { SignedPhoto } from "@/components/SignedPhoto";
 import { PhotoLightbox, type LightboxPhoto } from "@/components/PhotoLightbox";
-import { DateSelectFields } from "@/components/DateSelectFields";
-import { getDateFieldRange } from "@/lib/documents";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -129,7 +127,6 @@ export default async function TripGalleryPage({
                     </select>
                   </div>
                 )}
-                <DateSelectFields label="Reisetag (optional)" namePrefix="taken_at" range={getDateFieldRange("issue")} />
                 <div className="sm:col-span-2">
                   <label htmlFor="gal-caption" style={LABEL_STYLE}>Notiz (optional)</label>
                   <input id="gal-caption" name="caption" type="text" style={FIELD_STYLE} />

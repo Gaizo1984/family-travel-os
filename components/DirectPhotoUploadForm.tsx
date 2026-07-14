@@ -30,11 +30,25 @@ const SLOT_BATCH_SIZE = 20
  * Upload-Lauf derselben Dateien aus -- scheiterte einer der beiden Läufe an
  * einem transienten Fehler, zeigte dessen Catch-Block "fehlgeschlagen",
  * obwohl der andere Lauf die Bilder bereits erfolgreich gespeichert hatte.
- * Fix: `<fieldset disabled>` sperrt alle Formularelemente (inkl. Submit-
- * Button) synchron während der Upload-Phase, zusätzlich ein Ref-Schutz gegen
- * Reentrancy. Außerdem: ein einzelnes fehlgeschlagenes Foto bricht nicht mehr
- * den gesamten Upload ab -- bereits hochgeladene Pfade werden trotzdem
- * abgeschickt, nur die Anzahl der fehlgeschlagenen wird zusätzlich gemeldet.
+ * Zusätzlich ein Ref-Schutz gegen Reentrancy. Außerdem: ein einzelnes
+ * fehlgeschlagenes Foto bricht nicht mehr den gesamten Upload ab -- bereits
+ * hochgeladene Pfade werden trotzdem abgeschickt, nur die Anzahl der
+ * fehlgeschlagenen wird zusätzlich gemeldet.
+ *
+ * §Root-Cause-Fix "Familie nicht gefunden" (und andere still fehlende
+ * Zuordnungen wie trip_id/project_id): die Sperre lief bisher über
+ * `<fieldset disabled={isUploading}>` um `children`. Nach HTML-Spezifikation
+ * werden ALLE Nachfahren eines disabled-fieldset -- inklusive `<input
+ * type="hidden">` -- beim Abschicken aus der FormData ausgeschlossen, nicht
+ * nur sichtbare/interaktive Felder. Jede von einer aufrufenden Seite als
+ * `children` übergebene Hidden-Feld (family_id, trip_id, project_id, ...)
+ * verschwand dadurch lautlos, sobald `form.requestSubmit()` lief (der
+ * State-Wechsel zurück auf `isUploading=false` passiert erst danach im
+ * `finally`-Block, das Fieldset ist zum Submit-Zeitpunkt also noch disabled).
+ * Nur das separat direkt an `form` (nicht an das Fieldset) angehängte
+ * `uploaded_paths`-Feld blieb verschont. Fix: Sperre läuft jetzt über
+ * `pointer-events`/Optik statt über das native `disabled` -- das schließt
+ * keine Formularfelder mehr von der Übermittlung aus.
  */
 export function DirectPhotoUploadForm({
   action,
@@ -125,9 +139,12 @@ export function DirectPhotoUploadForm({
 
   return (
     <form ref={formRef} action={action} onSubmit={handleSubmit}>
-      <fieldset disabled={isUploading} style={{ border: 'none', padding: 0, margin: 0 }}>
+      <div
+        aria-disabled={isUploading}
+        style={{ pointerEvents: isUploading ? 'none' : undefined, opacity: isUploading ? 0.6 : 1 }}
+      >
         {children}
-      </fieldset>
+      </div>
       {progress && (
         <p style={{ color: 'var(--muted)', fontSize: '0.7rem', marginTop: '8px' }}>
           Fotos werden hochgeladen … {progress.done}/{progress.total}

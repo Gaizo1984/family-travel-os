@@ -136,6 +136,29 @@ export async function uploadMemoryPhotos(formData: FormData) {
   const supabase = await createClient()
   const tripId = String(formData.get('trip_id') ?? '').trim() || await suggestTripId(supabase, familyId, takenAt)
 
+  // §"Kein Datum mehr abfragen -- automatisch Reisebeginn verwenden": der
+  // Galerie-Upload fragt kein Aufnahmedatum mehr ab (taken_at kommt hier also
+  // praktisch immer als null an). Für eine sinnvolle chronologische
+  // Einordnung in Travel Memory wird ersatzweise der zentral abgeleitete
+  // Reisezeitraum-Start verwendet (lib/trip-dates.ts, dieselbe Ableitung wie
+  // Reiseübersicht/Status) -- bleibt der Zeitraum offen, bleibt auch
+  // taken_at null, statt ein Datum zu erfinden.
+  if (!takenAt && tripId) {
+    const { data: tripForDate } = await supabase
+      .from('trips')
+      .select(`
+        start_date, end_date,
+        stages ( start_date, end_date ),
+        bookings ( type, status, start_datetime, end_datetime )
+      `)
+      .eq('id', tripId)
+      .maybeSingle()
+    if (tripForDate) {
+      const range = deriveTripDateRange(tripForDate, tripForDate.bookings, tripForDate.stages)
+      takenAt = range.startDate
+    }
+  }
+
   // §Robustere Fehlerbehandlung: ein Fehler bei Foto N darf die bereits
   // erfolgreich verarbeiteten Fotos 1..N-1 nicht als verwirrenden
   // "Totalfehler" melden — stattdessen weiterverarbeiten und am Ende exakt
