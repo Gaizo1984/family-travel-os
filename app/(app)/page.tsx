@@ -83,13 +83,11 @@ function HeroTrip({ trip, img, readiness }: { trip: TripRow; img: ResolvedTripIm
         <div className="flex items-center justify-between gap-1.5" style={{ flexWrap: "nowrap" }}>
           <div
             className="min-w-0 flex-1"
-            style={{ color: "#D8CFC0", letterSpacing: "0.01em", fontSize: "0.6rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+            style={{ color: "#D8CFC0", letterSpacing: "0.01em", fontSize: "0.6rem", whiteSpace: "nowrap", overflow: "hidden" }}
           >
             {range.startDate ? formatDateDE(range.startDate) : TRIP_DATE_RANGE_OPEN_LABEL}
             {" · "}
             {duration ? `${duration} Tage` : "—"}
-            {" · "}
-            {trip.stages.length} Etappen
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
