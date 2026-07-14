@@ -149,59 +149,59 @@ function PlannedCard({ trip, img }: { trip: TripRow; img: ResolvedTripImage | nu
         </span>
       </div>
 
-      <div className="absolute inset-x-0 bottom-0 px-7 md:px-9 pb-7 md:pb-9">
+      <div className="absolute inset-x-0 bottom-0 px-7 md:px-9 pb-6 md:pb-8">
         <h3
-          className="text-4xl md:text-5xl font-light leading-tight mb-2"
+          className="text-3xl md:text-4xl font-light leading-tight mb-2"
           style={{ color: H_FG, letterSpacing: "-0.01em" }}
         >
           {trip.title}
         </h3>
-        <p className="text-xs mb-6" style={{ color: H_MUTED, letterSpacing: "0.2em", textTransform: "uppercase" }}>
+        <p className="text-xs mb-5" style={{ color: H_MUTED, letterSpacing: "0.2em", textTransform: "uppercase" }}>
           {trip.subtitle}
         </p>
 
-        <div className="mb-5" style={{ height: "1px", background: H_BORDER }} />
+        <div className="mb-4" style={{ height: "1px", background: H_BORDER }} />
 
-        <div className="flex items-end justify-between gap-4 flex-wrap">
-          <div className="flex gap-7">
+        <div className="flex items-end justify-between gap-3" style={{ flexWrap: "nowrap" }}>
+          <div className="flex gap-4 min-w-0" style={{ overflow: "hidden" }}>
             {[
               { label: "Abflug",   value: range.startDate ? formatDateDE(range.startDate) : TRIP_DATE_RANGE_OPEN_LABEL },
               { label: "Dauer",    value: duration ? `${duration} Tage` : "—" },
               { label: "Etappen",  value: stageCount > 0 ? String(stageCount) : "—" },
             ].map(({ label, value }) => (
-              <div key={label}>
-                <div style={{ color: H_MUTED, fontSize: "0.62rem", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: "4px" }}>
+              <div key={label} style={{ whiteSpace: "nowrap" }}>
+                <div style={{ color: H_MUTED, fontSize: "0.58rem", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "4px" }}>
                   {label}
                 </div>
-                <div className="text-sm font-light" style={{ color: H_FG }}>{value}</div>
+                <div className="text-sm font-light" style={{ color: H_FG, fontSize: "0.82rem" }}>{value}</div>
               </div>
             ))}
           </div>
 
-          <div className="flex items-center gap-5 shrink-0">
-            <div className="flex -space-x-2">
+          <div className="flex items-center gap-3 shrink-0">
+            <div className="flex -space-x-1.5">
               {members.map((m) => (
                 <div
                   key={m.id}
-                  className="w-8 h-8 rounded-full flex items-center justify-center"
+                  className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
                   style={{
                     background: "rgba(240,235,227,0.1)",
                     color: H_FG,
                     border: "1px solid rgba(240,235,227,0.2)",
                     backdropFilter: "blur(6px)",
-                    fontSize: "0.6rem",
-                    letterSpacing: "0.04em",
+                    fontSize: "0.54rem",
+                    letterSpacing: "0.02em",
                   }}
                 >
                   {m.initials}
                 </div>
               ))}
             </div>
-            <div className="text-right">
-              <div className="text-3xl font-light leading-none" style={{ color: "#C8A96E" }}>
+            <div className="text-right shrink-0">
+              <div className="text-2xl font-light leading-none" style={{ color: "#C8A96E" }}>
                 {countdown.value}
               </div>
-              <div style={{ color: H_MUTED, fontSize: "0.62rem", letterSpacing: "0.08em", textTransform: "uppercase", marginTop: "3px" }}>
+              <div style={{ color: H_MUTED, fontSize: "0.58rem", letterSpacing: "0.06em", textTransform: "uppercase", marginTop: "3px", whiteSpace: "nowrap" }}>
                 {countdown.label}
               </div>
             </div>

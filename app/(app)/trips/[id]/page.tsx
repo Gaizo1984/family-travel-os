@@ -478,16 +478,17 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
     totalNights > 0 ? `${totalNights} ${totalNights === 1 ? "Nacht" : "Nächte"}` : null,
     stages.length > 0 ? `${stages.length} ${stages.length === 1 ? "Aufenthalt" : "Aufenthalte"}` : null,
   ].filter(Boolean).join(" · ");
-  // Konflikte und Hinweise nicht mehr vermischen/verschweigen: Sind beide Arten
-  // vorhanden, zeigt die Hero-Pille beide Zahlen statt nur die eine Kategorie —
-  // sonst könnte "5 Konflikte" stehen, während unten zusätzlich Hinweise (z. B.
+  // §"Konflikte" -> "ToDos" umbenannt (nutzerseitige Bitte): ToDos und
+  // Hinweise nicht mehr vermischen/verschweigen: Sind beide Arten vorhanden,
+  // zeigt die Hero-Pille beide Zahlen statt nur die eine Kategorie — sonst
+  // könnte "5 ToDos" stehen, während unten zusätzlich Hinweise (z. B.
   // fehlende Flugbuchung) existieren, ohne dass die Zahl das widerspiegelt.
   const readinessLabel = !readiness ? "" : readiness.status === "ready"
     ? "Reisebereit"
     : readiness.conflictCount > 0 && readiness.hintCount > 0
-      ? `${readiness.conflictCount} ${readiness.conflictCount === 1 ? "Konflikt" : "Konflikte"} · ${readiness.hintCount} ${readiness.hintCount === 1 ? "Hinweis" : "Hinweise"}`
+      ? `${readiness.conflictCount} ${readiness.conflictCount === 1 ? "ToDo" : "ToDos"} · ${readiness.hintCount} ${readiness.hintCount === 1 ? "Hinweis" : "Hinweise"}`
       : readiness.conflictCount > 0
-        ? `${readiness.conflictCount} ${readiness.conflictCount === 1 ? "Konflikt" : "Konflikte"}`
+        ? `${readiness.conflictCount} ${readiness.conflictCount === 1 ? "ToDo" : "ToDos"}`
         : `${readiness.hintCount} ${readiness.hintCount === 1 ? "Hinweis" : "Hinweise"}`;
   const readinessColor = !readiness ? "#4C7A5D" : readiness.status === "ready" ? "#4C7A5D" : readiness.status === "conflicts" ? "#B5624A" : "#B89A5E";
 

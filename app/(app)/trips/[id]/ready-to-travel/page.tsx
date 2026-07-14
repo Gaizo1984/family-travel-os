@@ -64,7 +64,7 @@ export default async function ReadyToTravelPage({
   const statusLabel = result.status === "ready"
     ? "Reisebereit"
     : result.status === "conflicts"
-      ? `${result.conflictCount} ${result.conflictCount === 1 ? "Konflikt" : "Konflikte"}`
+      ? `${result.conflictCount} ${result.conflictCount === 1 ? "ToDo" : "ToDos"}`
       : `${result.hintCount} ${result.hintCount === 1 ? "Punkt" : "Punkte"} prüfen`;
   const statusColor = result.status === "ready" ? "#4C7A5D" : result.status === "conflicts" ? "#B5624A" : "#B89A5E";
 
@@ -102,7 +102,7 @@ export default async function ReadyToTravelPage({
           <div className="rounded-xl p-6 flex items-center gap-4" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
             <CircleCheck size={18} strokeWidth={1.4} style={{ color: "#4C7A5D", flexShrink: 0 }} />
             <p style={{ color: "var(--muted)", fontSize: "0.82rem" }}>
-              Keine offensichtlichen Lücken oder Konflikte in den vorhandenen Daten gefunden.
+              Keine offensichtlichen Lücken oder ToDos in den vorhandenen Daten gefunden.
             </p>
           </div>
         )}

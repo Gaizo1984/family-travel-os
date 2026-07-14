@@ -7,6 +7,7 @@ import { buildTravelWorld } from "@/lib/travel-world";
 import { isTripPastEnd, tripCountdownDisplay } from "@/lib/trip-status";
 import { deriveTripDateRange, tripDurationDays, TRIP_DATE_RANGE_OPEN_LABEL } from "@/lib/trip-dates";
 import { resolveTripImage, getHighlightPhotoByTripId, type ResolvedTripImage } from "@/lib/trip-images";
+import { computeTripReadiness, type ReadinessResult } from "@/lib/readiness";
 import { SignedPhoto } from "@/components/SignedPhoto";
 import { WorldMap } from "@/components/WorldMap";
 import { WorldMapCarousel, type WorldMapPanel } from "@/components/WorldMapCarousel";
@@ -21,14 +22,28 @@ type TripRow = {
   bookings: Array<{ type: string; status: string; start_datetime: string | null; end_datetime: string | null }>
 };
 
-function HeroTrip({ trip, img }: { trip: TripRow; img: ResolvedTripImage | null }) {
+/** §"ToDos analog Reisedashboard": gleiche Label-/Farblogik wie die Hero-Pille auf der Reise-Detailseite (app/(app)/trips/[id]/page.tsx). */
+function readinessPill(readiness: ReadinessResult): { label: string; color: string } {
+  if (readiness.status === "ready") return { label: "Reisebereit", color: "#4C7A5D" };
+  const label = readiness.conflictCount > 0 && readiness.hintCount > 0
+    ? `${readiness.conflictCount} ${readiness.conflictCount === 1 ? "ToDo" : "ToDos"} · ${readiness.hintCount} ${readiness.hintCount === 1 ? "Hinweis" : "Hinweise"}`
+    : readiness.conflictCount > 0
+      ? `${readiness.conflictCount} ${readiness.conflictCount === 1 ? "ToDo" : "ToDos"}`
+      : `${readiness.hintCount} ${readiness.hintCount === 1 ? "Hinweis" : "Hinweise"}`;
+  const color = readiness.status === "conflicts" ? "#B5624A" : "#B89A5E";
+  return { label, color };
+}
+
+function HeroTrip({ trip, img, readiness }: { trip: TripRow; img: ResolvedTripImage | null; readiness: ReadinessResult | null }) {
   const range = deriveTripDateRange(trip, trip.bookings, trip.stages);
   const duration = tripDurationDays(range);
   const countdown = tripCountdownDisplay({ ...trip, start_date: range.startDate, end_date: range.endDate }, duration);
   const members = trip.trip_members.flatMap((tm) => (tm.persons ? [tm.persons] : []));
+  const todo = readiness && readiness.status !== "ready" ? readinessPill(readiness) : null;
 
   return (
-    <Link href={`/trips/${trip.slug}`} className="group relative block overflow-hidden rounded-xl" style={{ height: "340px" }}>
+    <div className="group relative overflow-hidden rounded-xl" style={{ height: "340px" }}>
+    <Link href={`/trips/${trip.slug}`} className="absolute inset-0 block">
       {img && (
         <SignedPhoto
           storagePath={img.storagePath}
@@ -47,13 +62,13 @@ function HeroTrip({ trip, img }: { trip: TripRow; img: ResolvedTripImage | null 
         }}
       />
 
-      <div className="absolute top-5 left-5 right-5 md:top-7 md:left-8 md:right-8">
+      <div className="absolute top-7 left-5 right-5 md:top-9 md:left-8 md:right-8" style={{ paddingRight: todo ? "130px" : undefined }}>
         <span className="text-[10px] font-medium" style={{ color: "var(--accent)", letterSpacing: "0.24em", textTransform: "uppercase" }}>
           Nächste Reise
         </span>
         <h2
           className="font-light leading-tight mt-1.5"
-          style={{ color: "#F0EBE3", letterSpacing: "-0.01em", fontSize: "clamp(1.7rem, 4.5vw, 2.7rem)" }}
+          style={{ color: "#F0EBE3", letterSpacing: "-0.01em", fontSize: "clamp(1.5rem, 3.8vw, 2.3rem)" }}
         >
           {trip.title}
         </h2>
@@ -64,9 +79,12 @@ function HeroTrip({ trip, img }: { trip: TripRow; img: ResolvedTripImage | null 
         )}
       </div>
 
-      <div className="absolute inset-x-0 bottom-0 px-5 pb-5 md:px-8 md:pb-7">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="text-xs" style={{ color: "#D8CFC0", letterSpacing: "0.02em", fontSize: "0.65rem" }}>
+      <div className="absolute inset-x-0 bottom-0 px-5 pb-4 md:px-8 md:pb-6">
+        <div className="flex items-center justify-between gap-2" style={{ flexWrap: "nowrap" }}>
+          <div
+            className="min-w-0 flex-1"
+            style={{ color: "#D8CFC0", letterSpacing: "0.01em", fontSize: "0.6rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+          >
             {range.startDate ? formatDateDE(range.startDate) : TRIP_DATE_RANGE_OPEN_LABEL}
             {" · "}
             {duration ? `${duration} Tage` : "—"}
@@ -74,24 +92,24 @@ function HeroTrip({ trip, img }: { trip: TripRow; img: ResolvedTripImage | null 
             {trip.stages.length} Etappen
           </div>
 
-          <div className="flex items-center gap-3 shrink-0">
-            <div className="flex -space-x-1.5">
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="flex -space-x-1">
               {members.map((m) => (
                 <div
                   key={m.id}
-                  className="w-6 h-6 rounded-full flex items-center justify-center font-medium"
-                  style={{ background: "rgba(240,235,227,0.14)", color: "#F0EBE3", border: "1px solid rgba(240,235,227,0.22)", fontSize: "0.55rem", letterSpacing: "0.02em" }}
+                  className="w-5 h-5 rounded-full flex items-center justify-center font-medium shrink-0"
+                  style={{ background: "rgba(240,235,227,0.14)", color: "#F0EBE3", border: "1px solid rgba(240,235,227,0.22)", fontSize: "0.48rem", letterSpacing: "0.01em" }}
                 >
                   {m.initials}
                 </div>
               ))}
             </div>
             <div
-              className="flex items-center gap-1.5 rounded-full"
-              style={{ background: "rgba(196,154,90,0.14)", border: "1px solid rgba(196,154,90,0.3)", padding: "0.3rem 0.7rem" }}
+              className="flex items-center gap-1 rounded-full shrink-0"
+              style={{ background: "rgba(196,154,90,0.14)", border: "1px solid rgba(196,154,90,0.3)", padding: "0.26rem 0.55rem", whiteSpace: "nowrap" }}
             >
-              <span className="font-medium" style={{ color: "var(--accent)", fontSize: "0.78rem" }}>{countdown.value}</span>
-              <span style={{ color: "#C9BFAE", fontSize: "0.65rem", letterSpacing: "0.04em", textTransform: "uppercase" }}>
+              <span className="font-medium" style={{ color: "var(--accent)", fontSize: "0.7rem" }}>{countdown.value}</span>
+              <span style={{ color: "#C9BFAE", fontSize: "0.58rem", letterSpacing: "0.02em", textTransform: "uppercase" }}>
                 {countdown.label}
               </span>
             </div>
@@ -99,27 +117,90 @@ function HeroTrip({ trip, img }: { trip: TripRow; img: ResolvedTripImage | null 
         </div>
       </div>
     </Link>
+
+    {todo && (
+      <Link
+        href={`/trips/${trip.slug}/ready-to-travel`}
+        className="absolute flex items-center gap-2 transition-opacity hover:opacity-80"
+        style={{
+          top: "20px", right: "20px", zIndex: 2,
+          background: "rgba(10,9,7,0.82)", border: `1px solid ${todo.color}55`,
+          padding: "5px 12px", borderRadius: "20px", textDecoration: "none",
+        }}
+      >
+        <span className="rounded-full shrink-0" style={{ width: 6, height: 6, background: todo.color }} />
+        <span style={{ fontSize: "0.64rem", letterSpacing: "0.04em", fontWeight: 500, color: "#F0EBE3" }}>
+          {todo.label}
+        </span>
+      </Link>
+    )}
+    </div>
   );
 }
 
 function StatTile({
   value, label, Icon, href,
 }: {
-  value: string | number; label: string; href: string
+  value: string | number; label: string; href?: string
   Icon: React.ComponentType<{ size?: number; strokeWidth?: number; style?: React.CSSProperties }>;
 }) {
-  return (
-    <Link
-      href={href}
-      className="flex items-center gap-4 px-5 py-4 transition-opacity hover:opacity-80"
-      style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "8px", textDecoration: "none" }}
-    >
+  const content = (
+    <>
       <Icon size={15} strokeWidth={1.4} style={{ color: "var(--accent)", flexShrink: 0 }} />
       <div>
         <div className="text-2xl font-light leading-none mb-0.5" style={{ color: "var(--foreground)" }}>{value}</div>
         <div className="text-xs" style={{ color: "var(--muted)", letterSpacing: "0.04em", fontSize: "0.68rem" }}>{label}</div>
       </div>
+    </>
+  );
+  const className = "flex items-center gap-4 px-5 py-4";
+  const style: React.CSSProperties = { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "8px", textDecoration: "none" };
+  // §"Weltkarte liegt jetzt direkt darunter": das "Länder besucht"-Tile
+  // braucht keinen Link mehr auf /family/world -- die volle Erfahrung
+  // (Karte + Reisegeschichte) ist bereits Teil dieses Dashboards.
+  if (!href) return <div className={className} style={style}>{content}</div>;
+  return (
+    <Link href={href} className={`${className} transition-opacity hover:opacity-80`} style={style}>
+      {content}
     </Link>
+  );
+}
+
+/** Gleiche Reisegeschichte-Timeline wie zuvor auf der Familienseite, jetzt hier -- einzige Datenquelle bleibt buildTravelWorld (lib/travel-world.ts). */
+function TravelHistoryTimeline({ entries }: { entries: Array<{ key: string; year: number; label: string; isNext: boolean }> }) {
+  if (entries.length === 0) {
+    return (
+      <div className="rounded-xl p-6 text-center" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+        <p style={{ color: "var(--muted)", fontSize: "0.78rem" }}>Noch keine Reisegeschichte erfasst.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-xl p-6 overflow-x-auto scroll-hide" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+      <div className="flex items-start" style={{ width: "max-content", minWidth: "100%" }}>
+        {entries.flatMap((h, idx) => [
+          <div key={h.key} className="flex flex-col items-center" style={{ minWidth: "80px" }}>
+            <div
+              className="w-2.5 h-2.5 rounded-full mb-3"
+              style={{
+                background: h.isNext ? "var(--accent)" : "transparent",
+                border: `1.5px solid ${h.isNext ? "var(--accent)" : "var(--muted)"}`,
+                boxShadow: h.isNext ? "0 0 0 4px rgba(184,154,94,0.12)" : "none",
+              }}
+            />
+            <div className="text-sm font-light text-center" style={{ color: h.isNext ? "var(--foreground)" : "var(--muted)" }}>
+              {h.label}
+            </div>
+            <div className="text-center mt-1" style={{ color: h.isNext ? "var(--accent)" : "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.08em" }}>
+              {h.isNext ? `${h.year} · Aktuelle Reise` : h.year}
+            </div>
+          </div>,
+          idx < entries.length - 1 ? (
+            <div key={`sep-${idx}`} className="flex-1" style={{ height: "1px", background: "var(--border)", marginTop: "5px", minWidth: "24px" }} />
+          ) : null,
+        ])}
+      </div>
+    </div>
   );
 }
 
@@ -181,9 +262,10 @@ export default async function Dashboard() {
   // §"Weltkarte von Familie aufs Hauptdashboard": erst Gesamtkarte, danach
   // per Swipe/Dots eine Karte je Familienmitglied -- alle aus derselben
   // buildTravelWorld-Quelle wie /family/world, keine eigene Aggregation.
-  const perPersonWorlds = await Promise.all(
-    persons.map((p) => buildTravelWorld({ familyId, personId: p.id })),
-  );
+  const [perPersonWorlds, nextTripReadiness] = await Promise.all([
+    Promise.all(persons.map((p) => buildTravelWorld({ familyId, personId: p.id }))),
+    computeTripReadiness(nextTrip.id),
+  ]);
   const mapPanels: WorldMapPanel[] = [
     {
       key: "family",
@@ -203,6 +285,12 @@ export default async function Dashboard() {
     })),
   ];
 
+  // §"Unsere Reisegeschichte von Familie mit aufs Dashboard": gleiche
+  // Ableitung wie zuvor auf der Familienseite (letzte 5 Timeline-Einträge).
+  const timelineEntries = worldStats.timeline
+    .map((e) => ({ key: e.key, year: e.year ?? 0, label: e.title, isNext: e.isCurrent }))
+    .slice(-5);
+
   return (
     <div className="flex-1 flex flex-col">
       <header className="flex items-start justify-between gap-4 px-7 md:px-10 pt-9 pb-7">
@@ -218,11 +306,11 @@ export default async function Dashboard() {
       </header>
 
       <div className="flex-1 px-5 md:px-8 pb-10 space-y-7">
-        <HeroTrip trip={nextTrip} img={tripImageById.get(nextTrip.id) ?? null} />
+        <HeroTrip trip={nextTrip} img={tripImageById.get(nextTrip.id) ?? null} readiness={nextTripReadiness} />
 
         <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <StatTile value={worldStats.tripsCount} label="Reisen gesamt" Icon={MapIcon} href="/trips" />
-          <StatTile value={worldStats.countryCodes.size} label="Länder besucht" Icon={Globe} href="/family/world" />
+          <StatTile value={worldStats.countryCodes.size} label="Länder besucht" Icon={Globe} />
           <StatTile value={persons.length} label="Familienmitglieder" Icon={Users} href="/family" />
         </section>
 
@@ -231,6 +319,18 @@ export default async function Dashboard() {
             Unsere Welt
           </h2>
           <WorldMapCarousel panels={mapPanels} />
+        </section>
+
+        <section>
+          <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+            <h2 className="text-xs font-medium" style={{ color: "var(--muted)", letterSpacing: "0.2em", textTransform: "uppercase", fontSize: "0.65rem" }}>
+              Unsere Reisegeschichte
+            </h2>
+            <Link href="/family/history" style={{ color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.08em", textDecoration: "none" }}>
+              Alle ansehen →
+            </Link>
+          </div>
+          <TravelHistoryTimeline entries={timelineEntries} />
         </section>
       </div>
     </div>

@@ -1,9 +1,8 @@
 import Link from "next/link";
-import { Map as MapIcon, Globe, CalendarDays, ArrowRight } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { COMPASS_CATEGORY_ORDER, COMPASS_CATEGORY_LABELS } from "@/lib/family-dna";
-import { buildTravelWorld } from "@/lib/travel-world";
 
 type PersonRow = {
   id: string; name: string; initials: string; is_minor: boolean
@@ -52,10 +51,9 @@ export default async function FamilyPage() {
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
 
-  const [{ data: personsRaw }, { data: preferences }, worldStats] = await Promise.all([
+  const [{ data: personsRaw }, { data: preferences }] = await Promise.all([
     supabase.from("persons").select("id, name, initials, is_minor, role_label, description, interest_tags, travel_needs, photo_storage_path").eq("family_id", familyId).order("is_minor"),
     supabase.from("family_preference_categories").select("category_key, weight, note").eq("family_id", familyId),
-    buildTravelWorld({ familyId }),
   ]);
 
   const persons = (personsRaw ?? []) as PersonRow[];
@@ -71,12 +69,6 @@ export default async function FamilyPage() {
   );
 
   const prefByKey = new Map((preferences ?? []).map((p) => [p.category_key, p]));
-
-  const { tripsCount, countryCodes, travelDays } = worldStats;
-
-  const timelineEntries = worldStats.timeline
-    .map((e) => ({ key: e.key, year: e.year ?? 0, label: e.title, isNext: e.isCurrent }))
-    .slice(-5);
 
   return (
     <div className="flex-1 flex flex-col">
@@ -150,84 +142,6 @@ export default async function FamilyPage() {
               );
             })}
           </div>
-        </section>
-
-        {/* ── 3. Unsere Welt (Vorschau -- volle Ansicht: /family/world) ── */}
-        <section id="unsere-welt" className="mb-14" style={{ scrollMarginTop: "16px" }}>
-          <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
-            <h2 className="text-xl font-light" style={{ color: "var(--foreground)", letterSpacing: "0.01em" }}>
-              Unsere Welt
-            </h2>
-            <Link href="/family/world" style={{ color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.08em", textDecoration: "none" }}>
-              Ansehen →
-            </Link>
-          </div>
-
-          <Link
-            href="/family/world"
-            className="block rounded-xl p-6"
-            style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}
-          >
-            <div className="grid grid-cols-3 gap-3 md:gap-8">
-              {[
-                { Icon: MapIcon, value: tripsCount, label: "Reisen" },
-                { Icon: Globe, value: countryCodes.size, label: "Länder" },
-                { Icon: CalendarDays, value: travelDays, label: "Reisetage" },
-              ].map(({ Icon, value, label }) => (
-                <div key={label} className="flex items-center gap-2 md:gap-4 min-w-0">
-                  <Icon size={13} strokeWidth={1.4} style={{ color: "var(--accent)", flexShrink: 0 }} />
-                  <div className="min-w-0">
-                    <div className="text-2xl md:text-3xl font-light leading-none mb-1 truncate" style={{ color: "var(--foreground)" }}>{value}</div>
-                    <div className="truncate" style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.14em", textTransform: "uppercase" }}>{label}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Link>
-        </section>
-
-        {/* ── 4. Unsere Reisegeschichte ── */}
-        <section className="mb-14">
-          <div className="flex items-center justify-between mb-7 flex-wrap gap-3">
-            <h2 className="text-xl font-light" style={{ color: "var(--foreground)", letterSpacing: "0.01em" }}>
-              Unsere Reisegeschichte
-            </h2>
-            <Link href="/family/history" style={{ color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.08em", textDecoration: "none" }}>
-              Alle ansehen →
-            </Link>
-          </div>
-
-          {timelineEntries.length > 0 ? (
-            <div className="rounded-xl p-6 overflow-x-auto scroll-hide" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-              <div className="flex items-start" style={{ width: "max-content", minWidth: "100%" }}>
-                {timelineEntries.flatMap((h, idx) => [
-                  <div key={h.key} className="flex flex-col items-center" style={{ minWidth: "80px" }}>
-                    <div
-                      className="w-2.5 h-2.5 rounded-full mb-3"
-                      style={{
-                        background: h.isNext ? "var(--accent)" : "transparent",
-                        border: `1.5px solid ${h.isNext ? "var(--accent)" : "var(--muted)"}`,
-                        boxShadow: h.isNext ? "0 0 0 4px rgba(184,154,94,0.12)" : "none",
-                      }}
-                    />
-                    <div className="text-sm font-light text-center" style={{ color: h.isNext ? "var(--foreground)" : "var(--muted)" }}>
-                      {h.label}
-                    </div>
-                    <div className="text-center mt-1" style={{ color: h.isNext ? "var(--accent)" : "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.08em" }}>
-                      {h.isNext ? `${h.year} · Aktuelle Reise` : h.year}
-                    </div>
-                  </div>,
-                  idx < timelineEntries.length - 1 ? (
-                    <div key={`sep-${idx}`} className="flex-1" style={{ height: "1px", background: "var(--border)", marginTop: "5px", minWidth: "24px" }} />
-                  ) : null,
-                ])}
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-xl p-6 text-center" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-              <p style={{ color: "var(--muted)", fontSize: "0.78rem" }}>Noch keine Reisegeschichte erfasst.</p>
-            </div>
-          )}
         </section>
 
         {/* ── Persönliche Notiz ── */}
