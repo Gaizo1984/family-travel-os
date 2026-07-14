@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
-import { buildWorldStats } from "@/lib/world-stats";
+import { buildTravelWorld } from "@/lib/travel-world";
 import { SignedPhoto } from "@/components/SignedPhoto";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
 
@@ -18,7 +18,7 @@ export default async function YearbookPage({
   const { id: familyId } = await getFamily();
 
   const [worldStats, { data: photosRaw }] = await Promise.all([
-    buildWorldStats(familyId),
+    buildTravelWorld({ familyId }),
     supabase
       .from("memory_photos")
       .select("id, storage_path, caption, taken_at, created_at")
@@ -35,8 +35,8 @@ export default async function YearbookPage({
     }),
   );
 
-  const tripsOfYear = worldStats.trips.filter((t) => t.start_date && new Date(t.start_date).getFullYear() === year);
-  const pastTripsOfYear = worldStats.pastTrips.filter((p) => p.year === year);
+  const tripsOfYear = worldStats.timeline.filter((e) => e.kind === "trip" && e.year === year);
+  const pastTripsOfYear = worldStats.timeline.filter((e) => e.kind === "past_trip" && e.year === year);
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -61,13 +61,13 @@ export default async function YearbookPage({
         {(tripsOfYear.length > 0 || pastTripsOfYear.length > 0) && (
           <div className="flex flex-wrap gap-2 mb-8">
             {tripsOfYear.map((t) => (
-              <span key={t.id} style={{ color: "var(--accent)", fontSize: "0.68rem", background: "rgba(184,154,94,0.1)", border: "1px solid rgba(184,154,94,0.25)", padding: "4px 12px", borderRadius: "20px" }}>
+              <span key={t.key} style={{ color: "var(--accent)", fontSize: "0.68rem", background: "rgba(184,154,94,0.1)", border: "1px solid rgba(184,154,94,0.25)", padding: "4px 12px", borderRadius: "20px" }}>
                 {t.title}
               </span>
             ))}
             {pastTripsOfYear.map((p) => (
-              <span key={p.id} style={{ color: "var(--muted)", fontSize: "0.68rem", background: "var(--surface)", border: "1px solid var(--border)", padding: "4px 12px", borderRadius: "20px" }}>
-                {p.country_or_region}
+              <span key={p.key} style={{ color: "var(--muted)", fontSize: "0.68rem", background: "var(--surface)", border: "1px solid var(--border)", padding: "4px 12px", borderRadius: "20px" }}>
+                {p.title}
               </span>
             ))}
           </div>

@@ -3,9 +3,7 @@ import { Map as MapIcon, Globe, CalendarDays, ArrowRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { COMPASS_CATEGORY_ORDER, COMPASS_CATEGORY_LABELS } from "@/lib/family-dna";
-import { buildWorldStats } from "@/lib/world-stats";
-import { isTripHistorical, isTripCurrentlyRunning } from "@/lib/trip-status";
-import { WorldMap } from "@/components/WorldMap";
+import { buildTravelWorld } from "@/lib/travel-world";
 
 type PersonRow = {
   id: string; name: string; initials: string; is_minor: boolean
@@ -13,45 +11,36 @@ type PersonRow = {
   interest_tags: string[]; travel_needs: string[]; photo_storage_path: string | null
 };
 
-function Tag({ label }: { label: string }) {
-  return (
-    <span style={{ fontSize: "0.6rem", letterSpacing: "0.07em", color: "var(--muted)", background: "var(--background)", padding: "3px 10px", borderRadius: "20px", border: "1px solid var(--border)", whiteSpace: "nowrap" }}>
-      {label}
-    </span>
-  );
-}
-
-function PersonCard({ person, photoUrl, compact }: { person: PersonRow; photoUrl: string | null; compact: boolean }) {
+/**
+ * §Bugfix "wirkt wie fünf Magazinseiten, extrem viel Scrollen auf Mobile":
+ * vorher zwei getrennte Grids (Erwachsene 2-spaltig, Kinder 3-spaltig), beide
+ * mit `sm:`-Gate -- auf Mobile (unterhalb `sm`) dadurch faktisch einspaltig.
+ * Jetzt EIN gemeinsames, mobile-first 2-spaltiges Raster mit kompakten
+ * Karten (nur Foto + Name + optional 1 Zeile); Details bleiben auf der
+ * unveränderten Profil-Detailseite (/family/[personId]).
+ */
+function PersonCard({ person, photoUrl }: { person: PersonRow; photoUrl: string | null }) {
+  const summaryLine = person.interest_tags.slice(0, 3).join(" · ") || person.role_label;
   return (
     <Link href={`/family/${person.id}`} className="block overflow-hidden rounded-xl" style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}>
-      <div className="relative overflow-hidden" style={{ height: compact ? 150 : 200 }}>
+      <div className="relative overflow-hidden" style={{ height: 175 }}>
         {photoUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={photoUrl} alt={person.name} className="w-full h-full object-cover" />
+          <img src={photoUrl} alt={person.name} className="w-full h-full object-cover" loading="lazy" />
         ) : (
           <div className="w-full h-full flex items-center justify-center" style={{ background: "var(--accent-subtle)" }}>
-            <span style={{ color: "var(--accent)", fontSize: "1.8rem", letterSpacing: "0.04em" }}>{person.initials}</span>
+            <span style={{ color: "var(--accent)", fontSize: "1.6rem", letterSpacing: "0.04em" }}>{person.initials}</span>
           </div>
         )}
         <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom, transparent 55%, rgba(243,239,232,0.35) 100%)" }} />
       </div>
-      <div className={compact ? "p-5" : "p-6"}>
-        <h3 className={compact ? "text-base font-light" : "text-lg font-light"} style={{ color: "var(--foreground)", letterSpacing: "0.01em" }}>
+      <div className="p-4">
+        <h3 className="text-base font-light truncate" style={{ color: "var(--foreground)", letterSpacing: "0.01em" }}>
           {person.name}
         </h3>
-        {person.role_label && (
-          <div className="mt-0.5 mb-3" style={{ color: "var(--accent)", fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase" }}>
-            {person.role_label}
-          </div>
-        )}
-        {person.description && (
-          <p className="leading-relaxed mb-4" style={{ color: "var(--muted)", fontSize: compact ? "0.74rem" : "0.78rem" }}>
-            {person.description}
-          </p>
-        )}
-        {person.interest_tags.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {person.interest_tags.map((t) => <Tag key={t} label={t} />)}
+        {summaryLine && (
+          <div className="mt-0.5 truncate" style={{ color: "var(--muted)", fontSize: "0.68rem" }}>
+            {summaryLine}
           </div>
         )}
       </div>
@@ -66,12 +55,10 @@ export default async function FamilyPage() {
   const [{ data: personsRaw }, { data: preferences }, worldStats] = await Promise.all([
     supabase.from("persons").select("id, name, initials, is_minor, role_label, description, interest_tags, travel_needs, photo_storage_path").eq("family_id", familyId).order("is_minor"),
     supabase.from("family_preference_categories").select("category_key, weight, note").eq("family_id", familyId),
-    buildWorldStats(familyId),
+    buildTravelWorld({ familyId }),
   ]);
 
   const persons = (personsRaw ?? []) as PersonRow[];
-  const adults = persons.filter((p) => !p.is_minor);
-  const kids = persons.filter((p) => p.is_minor);
 
   const photoUrlByPersonId = new Map<string, string>();
   await Promise.all(
@@ -85,14 +72,11 @@ export default async function FamilyPage() {
 
   const prefByKey = new Map((preferences ?? []).map((p) => [p.category_key, p]));
 
-  const { trips: activeTrips, pastTrips, tripsCount, countryCodes, travelDays } = worldStats;
+  const { tripsCount, countryCodes, travelDays } = worldStats;
 
-  const timelineEntries = [
-    ...activeTrips
-      .filter((t) => isTripHistorical(t) || isTripCurrentlyRunning(t))
-      .map((t) => ({ key: `trip-${t.id}`, year: t.start_date ? new Date(t.start_date).getFullYear() : 0, label: t.title, isNext: isTripCurrentlyRunning(t) })),
-    ...pastTrips.map((p) => ({ key: `past-${p.id}`, year: p.year, label: p.country_or_region, isNext: false })),
-  ].sort((a, b) => a.year - b.year).slice(-5);
+  const timelineEntries = worldStats.timeline
+    .map((e) => ({ key: e.key, year: e.year ?? 0, label: e.title, isNext: e.isCurrent }))
+    .slice(-5);
 
   return (
     <div className="flex-1 flex flex-col">
@@ -122,21 +106,16 @@ export default async function FamilyPage() {
             Unsere Familie
           </div>
 
-          {adults.length > 0 && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-              {adults.map((p) => (
-                <PersonCard key={p.id} person={p} photoUrl={photoUrlByPersonId.get(p.id) ?? null} compact={false} />
-              ))}
-            </div>
-          )}
-
-          {kids.length > 0 && (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {kids.map((p) => (
-                <PersonCard key={p.id} person={p} photoUrl={photoUrlByPersonId.get(p.id) ?? null} compact={true} />
-              ))}
-            </div>
-          )}
+          <div className="grid grid-cols-2 gap-3">
+            {persons.map((p, i) => {
+              const isLastOdd = persons.length % 2 === 1 && i === persons.length - 1;
+              return (
+                <div key={p.id} className={isLastOdd ? "col-span-2" : undefined}>
+                  <PersonCard person={p} photoUrl={photoUrlByPersonId.get(p.id) ?? null} />
+                </div>
+              );
+            })}
+          </div>
         </section>
 
         {/* ── 2. Unser Reisekompass ── */}
@@ -173,31 +152,38 @@ export default async function FamilyPage() {
           </div>
         </section>
 
-        {/* ── 3. Unsere Welt ── */}
+        {/* ── 3. Unsere Welt (Vorschau -- volle Ansicht: /family/world) ── */}
         <section id="unsere-welt" className="mb-14" style={{ scrollMarginTop: "16px" }}>
-          <h2 className="text-xl font-light mb-7" style={{ color: "var(--foreground)", letterSpacing: "0.01em" }}>
-            Unsere Welt
-          </h2>
+          <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+            <h2 className="text-xl font-light" style={{ color: "var(--foreground)", letterSpacing: "0.01em" }}>
+              Unsere Welt
+            </h2>
+            <Link href="/family/world" style={{ color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.08em", textDecoration: "none" }}>
+              Ansehen →
+            </Link>
+          </div>
 
-          <div className="grid grid-cols-3 gap-3 md:gap-8 mb-8">
-            {[
-              { Icon: MapIcon, value: tripsCount, label: "Reisen" },
-              { Icon: Globe, value: countryCodes.size, label: "Länder" },
-              { Icon: CalendarDays, value: travelDays, label: "Reisetage" },
-            ].map(({ Icon, value, label }) => (
-              <div key={label} className="flex items-center gap-2 md:gap-4 min-w-0">
-                <Icon size={13} strokeWidth={1.4} style={{ color: "var(--accent)", flexShrink: 0 }} />
-                <div className="min-w-0">
-                  <div className="text-3xl md:text-4xl font-light leading-none mb-1 truncate" style={{ color: "var(--foreground)" }}>{value}</div>
-                  <div className="truncate" style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.14em", textTransform: "uppercase" }}>{label}</div>
+          <Link
+            href="/family/world"
+            className="block rounded-xl p-6"
+            style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}
+          >
+            <div className="grid grid-cols-3 gap-3 md:gap-8">
+              {[
+                { Icon: MapIcon, value: tripsCount, label: "Reisen" },
+                { Icon: Globe, value: countryCodes.size, label: "Länder" },
+                { Icon: CalendarDays, value: travelDays, label: "Reisetage" },
+              ].map(({ Icon, value, label }) => (
+                <div key={label} className="flex items-center gap-2 md:gap-4 min-w-0">
+                  <Icon size={13} strokeWidth={1.4} style={{ color: "var(--accent)", flexShrink: 0 }} />
+                  <div className="min-w-0">
+                    <div className="text-2xl md:text-3xl font-light leading-none mb-1 truncate" style={{ color: "var(--foreground)" }}>{value}</div>
+                    <div className="truncate" style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.14em", textTransform: "uppercase" }}>{label}</div>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="rounded-xl p-4" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-            <WorldMap visitedCodes={countryCodes} />
-          </div>
+              ))}
+            </div>
+          </Link>
         </section>
 
         {/* ── 4. Unsere Reisegeschichte ── */}

@@ -17,6 +17,7 @@ type StageRow = {
   accommodation: string | null
   notes: string | null
   cover_photo_id: string | null
+  is_transit: boolean
 }
 
 export default async function EditStagePage({
@@ -41,7 +42,7 @@ export default async function EditStagePage({
 
   const { data: stage } = await supabase
     .from("stages")
-    .select("id, title, location, start_date, end_date, nights, accommodation, notes, cover_photo_id")
+    .select("id, title, location, start_date, end_date, nights, accommodation, notes, cover_photo_id, is_transit")
     .eq("id", stageId)
     .eq("trip_id", trip.id)
     .maybeSingle();
@@ -159,6 +160,13 @@ export default async function EditStagePage({
                 style={{ width: "100%", padding: "12px 16px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)", fontSize: "0.85rem", fontWeight: 300, outline: "none", resize: "none" }}
               />
             </div>
+
+            <label className="flex items-start gap-2.5 mb-8" style={{ cursor: "pointer" }}>
+              <input type="checkbox" name="is_transit" value="true" defaultChecked={s.is_transit} style={{ marginTop: "3px" }} />
+              <span style={{ color: "var(--muted)", fontSize: "0.78rem", lineHeight: 1.5 }}>
+                Nur Zwischenstopp -- zählt nicht als besuchtes Land in "Unsere Welt"
+              </span>
+            </label>
 
             <div className="flex items-center justify-between flex-wrap gap-3" style={{ borderTop: "1px solid var(--border)", paddingTop: "24px" }}>
               <Link

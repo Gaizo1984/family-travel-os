@@ -3,7 +3,7 @@ import { Map as MapIcon, Globe, Users } from "lucide-react";
 import { formatDateDE, getTripDuration } from "@/lib/demo-data";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
-import { buildWorldStats } from "@/lib/world-stats";
+import { buildTravelWorld } from "@/lib/travel-world";
 import { isTripPastEnd, isTripHistorical, tripCountdownDisplay } from "@/lib/trip-status";
 import { resolveTripImage, getHighlightPhotoByTripId, type ResolvedTripImage } from "@/lib/trip-images";
 import { SignedPhoto } from "@/components/SignedPhoto";
@@ -188,7 +188,7 @@ export default async function Dashboard() {
       .eq("family_id", familyId)
       .order("start_date", { ascending: true, nullsFirst: false }),
     supabase.from("persons").select("id", { count: "exact", head: true }).eq("family_id", familyId),
-    buildWorldStats(familyId),
+    buildTravelWorld({ familyId }),
     getHighlightPhotoByTripId(supabase, familyId),
   ]);
 
@@ -236,7 +236,7 @@ export default async function Dashboard() {
 
         <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <StatTile value={worldStats.tripsCount} label="Reisen gesamt" Icon={MapIcon} href="/trips" />
-          <StatTile value={worldStats.countryCodes.size} label="Länder besucht" Icon={Globe} href="/family#unsere-welt" />
+          <StatTile value={worldStats.countryCodes.size} label="Länder besucht" Icon={Globe} href="/family/world" />
           <StatTile value={personsCount ?? 0} label="Familienmitglieder" Icon={Users} href="/family" />
         </section>
 

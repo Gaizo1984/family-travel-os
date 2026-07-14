@@ -6,7 +6,7 @@ import { getFamily } from "@/lib/family";
 import { restoreTrip } from "@/lib/actions/trips";
 import { tripCountdownDisplay } from "@/lib/trip-status";
 import { resolveTripImage, getHighlightPhotoByTripId, type ResolvedTripImage } from "@/lib/trip-images";
-import { buildWorldStats } from "@/lib/world-stats";
+import { buildTravelWorld } from "@/lib/travel-world";
 import { isTripHistorical, isTripCurrentlyRunning } from "@/lib/trip-status";
 import { SignedPhoto } from "@/components/SignedPhoto";
 
@@ -270,7 +270,7 @@ type LegacyPastTripRow = {
 /**
  * §Punkt 6 "Reisehistorie-Konsistenz": manuell erfasste vergangene Reisen
  * (past_trips) müssen hier genauso auftauchen wie in Unsere Welt/Timeline
- * (lib/world-stats.ts, family/history/page.tsx) -- gleiche Kartenoptik wie
+ * (lib/travel-world.ts, family/history/page.tsx) -- gleiche Kartenoptik wie
  * PastCard, aber auf die schlankere past_trips-Datenform zugeschnitten
  * (kein Slug/keine Etappen, Link führt auf die Bearbeiten-Seite statt auf
  * eine Reisedetailseite, die für diese Einträge nicht existiert).
@@ -362,9 +362,9 @@ export default async function TripsPage({
       `)
       .order("start_date", { ascending: true, nullsFirst: false }),
     getHighlightPhotoByTripId(supabase, familyId),
-    // §Punkt 6: dieselbe Reisebilanz-Quelle wie die Familienseite ("Unsere
-    // Welt") statt einer eigenen, hier abweichenden Berechnung.
-    buildWorldStats(familyId),
+    // §Punkt 6: dieselbe Reisebilanz-Quelle wie "Unsere Welt" (/family/world)
+    // statt einer eigenen, hier abweichenden Berechnung.
+    buildTravelWorld({ familyId }),
     supabase
       .from("past_trips")
       .select("id, country_or_region, year, places, duration_days, photo_storage_path")

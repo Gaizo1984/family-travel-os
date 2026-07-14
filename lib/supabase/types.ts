@@ -100,19 +100,19 @@ export interface Database {
           id: string; trip_id: string; title: string; location: string | null
           start_date: string | null; end_date: string | null; nights: number | null
           accommodation: string | null; notes: string | null; sort_order: number; created_at: string
-          country_code: string | null; cover_photo_id: string | null
+          country_code: string | null; cover_photo_id: string | null; is_transit: boolean
         }
         Insert: {
           id?: string; trip_id: string; title: string; location?: string | null
           start_date?: string | null; end_date?: string | null; nights?: number | null
           accommodation?: string | null; notes?: string | null; sort_order?: number; created_at?: string
-          country_code?: string | null; cover_photo_id?: string | null
+          country_code?: string | null; cover_photo_id?: string | null; is_transit?: boolean
         }
         Update: {
           id?: string; trip_id?: string; title?: string; location?: string | null
           start_date?: string | null; end_date?: string | null; nights?: number | null
           accommodation?: string | null; notes?: string | null; sort_order?: number; created_at?: string
-          country_code?: string | null; cover_photo_id?: string | null
+          country_code?: string | null; cover_photo_id?: string | null; is_transit?: boolean
         }
         Relationships: [
           { foreignKeyName: "stages_trip_id_fkey"; columns: ["trip_id"]; isOneToOne: false; referencedRelation: "trips"; referencedColumns: ["id"] },

@@ -58,6 +58,7 @@ export default async function ConfirmStopoverPage({
           <input type="hidden" name="end_date" value={end} />
           <input type="hidden" name="accommodation" value="" />
           <input type="hidden" name="notes" value={AUTO_STAGE_NOTE_LAYOVER} />
+          <input type="hidden" name="is_transit" value="true" />
 
           <div className="rounded-xl p-8" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
             {error && (

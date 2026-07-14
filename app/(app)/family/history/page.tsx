@@ -2,18 +2,7 @@ import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
-import { isTripHistorical, isTripCurrentlyRunning } from "@/lib/trip-status";
-
-type TimelineEntry = {
-  key: string;
-  year: number | null;
-  title: string;
-  subtitle: string;
-  isPast: boolean;
-  editHref: string | null;
-  travelerIds: string[];
-  countryCodes: string[];
-};
+import { buildTravelWorld } from "@/lib/travel-world";
 
 export default async function FamilyHistoryPage({
   searchParams,
@@ -25,54 +14,13 @@ export default async function FamilyHistoryPage({
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
 
-  const [{ data: persons }, { data: trips }, { data: pastTrips }, { data: pastTravelers }] = await Promise.all([
+  const [{ data: persons }, travelWorld] = await Promise.all([
     supabase.from("persons").select("id, name").eq("family_id", familyId).order("name"),
-    supabase
-      .from("trips")
-      .select("id, slug, title, start_date, end_date, status, trip_members(person_id), stages(country_code)")
-      .eq("family_id", familyId)
-      .order("start_date"),
-    supabase.from("past_trips").select("id, country_or_region, country_code, year, places, duration_days, note").eq("family_id", familyId).order("year"),
-    supabase.from("past_trip_travelers").select("past_trip_id, person_id"),
+    buildTravelWorld({ familyId, personId: personFilter || undefined }),
   ]);
 
-  const travelersByPastTrip = new Map<string, string[]>();
-  (pastTravelers ?? []).forEach((t) => {
-    const list = travelersByPastTrip.get(t.past_trip_id) ?? [];
-    list.push(t.person_id);
-    travelersByPastTrip.set(t.past_trip_id, list);
-  });
-
-  let entries: TimelineEntry[] = [
-    ...(trips ?? [])
-      .filter((t) => isTripHistorical(t) || isTripCurrentlyRunning(t))
-      .map((t) => ({
-        key: `trip-${t.id}`,
-        year: t.start_date ? new Date(t.start_date).getFullYear() : null,
-        title: t.title,
-        subtitle: isTripCurrentlyRunning(t) ? "Aktuelle Reise" : isTripHistorical(t) ? "Erlebt" : "In Family Travel OS geplant",
-        isPast: false,
-        editHref: null,
-        travelerIds: (t.trip_members ?? []).map((m) => m.person_id),
-        countryCodes: Array.from(new Set((t.stages ?? []).map((s) => s.country_code).filter((c): c is string => Boolean(c)))),
-      })),
-    ...(pastTrips ?? []).map((p) => ({
-      key: `past-${p.id}`,
-      year: p.year,
-      title: p.country_or_region,
-      subtitle: [p.places, p.duration_days ? `${p.duration_days} Tage` : null].filter(Boolean).join(" · ") || "Manuell erfasst",
-      isPast: true,
-      editHref: `/family/history/${p.id}/edit`,
-      travelerIds: travelersByPastTrip.get(p.id) ?? [],
-      countryCodes: p.country_code ? [p.country_code] : [],
-    })),
-  ].sort((a, b) => (a.year ?? 0) - (b.year ?? 0));
-
-  if (personFilter) {
-    entries = entries.filter((e) => e.travelerIds.includes(personFilter));
-  }
-
-  const filteredCountryCount = new Set(entries.flatMap((e) => e.countryCodes)).size;
+  const entries = travelWorld.timeline;
+  const filteredCountryCount = travelWorld.countryCodes.size;
   const selectedPersonName = (persons ?? []).find((p) => p.id === personFilter)?.name;
 
   return (

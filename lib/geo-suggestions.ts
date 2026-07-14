@@ -9,7 +9,7 @@ const COUNTRY_CODE_MAP: Array<{ keywords: string[]; code: string }> = [
   { keywords: ['costa rica'], code: 'CR' },
   { keywords: ['oman'], code: 'OM' },
   { keywords: ['brasilien', 'brazil'], code: 'BR' },
-  { keywords: ['usa', 'vereinigte staaten', 'united states'], code: 'US' },
+  { keywords: ['usa', 'vereinigte staaten', 'united states', 'atlanta'], code: 'US' },
   { keywords: ['schweiz', 'switzerland'], code: 'CH' },
   { keywords: ['vereinigtes königreich', 'united kingdom', 'großbritannien', 'england'], code: 'GB' },
   { keywords: ['indonesien', 'indonesia', 'bali', 'sumba'], code: 'ID' },
@@ -19,7 +19,7 @@ const COUNTRY_CODE_MAP: Array<{ keywords: string[]; code: string }> = [
   { keywords: ['sri lanka'], code: 'LK' },
   { keywords: ['seychellen', 'seychelles'], code: 'SC' },
   { keywords: ['mexiko', 'mexico'], code: 'MX' },
-  { keywords: ['kanada', 'canada'], code: 'CA' },
+  { keywords: ['kanada', 'canada', 'toronto'], code: 'CA' },
   { keywords: ['südafrika', 'south africa'], code: 'ZA' },
   { keywords: ['australien', 'australia'], code: 'AU' },
   { keywords: ['sardinien', 'sardinia', 'italien', 'italy'], code: 'IT' },
@@ -34,10 +34,11 @@ const COUNTRY_CODE_MAP: Array<{ keywords: string[]; code: string }> = [
   { keywords: ['neuseeland', 'new zealand'], code: 'NZ' },
   { keywords: ['ägypten', 'egypt'], code: 'EG' },
   { keywords: ['marokko', 'morocco'], code: 'MA' },
-  { keywords: ['türkei', 'turkey', 'türkiye'], code: 'TR' },
+  { keywords: ['türkei', 'turkey', 'türkiye', 'istanbul'], code: 'TR' },
   { keywords: ['kenia', 'kenya'], code: 'KE' },
   { keywords: ['tansania', 'tanzania', 'sansibar', 'zanzibar'], code: 'TZ' },
   { keywords: ['montenegro'], code: 'ME' },
+  { keywords: ['mauritius'], code: 'MU' },
 ]
 
 /**
@@ -62,5 +63,5 @@ export const COUNTRY_NAMES: Record<string, string> = {
   CA: 'Kanada', ZA: 'Südafrika', AU: 'Australien', IT: 'Italien', GR: 'Griechenland',
   ES: 'Spanien', PT: 'Portugal', FR: 'Frankreich', DE: 'Deutschland', AT: 'Österreich',
   MV: 'Malediven', VN: 'Vietnam', NZ: 'Neuseeland', EG: 'Ägypten', MA: 'Marokko',
-  TR: 'Türkei', KE: 'Kenia', TZ: 'Tansania', ME: 'Montenegro',
+  TR: 'Türkei', KE: 'Kenia', TZ: 'Tansania', ME: 'Montenegro', MU: 'Mauritius',
 }

@@ -61,6 +61,7 @@ export async function createStage(formData: FormData) {
   const title         = String(formData.get('title') ?? '').trim()
   const accommodation = String(formData.get('accommodation') ?? '').trim()
   const notes         = String(formData.get('notes') ?? '').trim()
+  const isTransit      = String(formData.get('is_transit') ?? '') === 'true'
 
   const newPath = `/trips/${slug}/stages/new`
 
@@ -89,8 +90,14 @@ export async function createStage(formData: FormData) {
   // bei einer Mehrländer-Reise), erst wenn die Etappe keinen Ländertreffer
   // enthält (z. B. "Guanacaste") auf den Reisetitel zurückfallen — sonst würde
   // bei Mehrländer-Reisen der Reisetitel jede Etappe auf ein Land ziehen.
+  // §Bugfix "Zwischenstopp erbt fälschlich das Reiseland" (z. B. Atlanta-
+  // Layover einer Costa-Rica-Reise → CR statt US): bei einer über
+  // `stages/confirm-stopover` bestätigten Zwischenstopp-Etappe (is_transit)
+  // liegt das Zwischenstopp-Land oft NICHT im Reisetitel -- der Trip-Titel-
+  // Fallback entfällt hier bewusst, lieber `null` (nutzereditierbar) als ein
+  // falsches Land.
   const countryCode = suggestCountryCode(`${title} ${accommodation}`)
-    ?? suggestCountryCode(`${trip?.title ?? ''} ${trip?.subtitle ?? ''}`)
+    ?? (isTransit ? null : suggestCountryCode(`${trip?.title ?? ''} ${trip?.subtitle ?? ''}`))
 
   const { data: created, error } = await supabase
     .from('stages')
@@ -105,6 +112,7 @@ export async function createStage(formData: FormData) {
       notes: notes || null,
       sort_order: (last?.sort_order ?? -1) + 1,
       country_code: countryCode,
+      is_transit: isTransit,
     })
     .select('id')
     .single()
@@ -124,6 +132,7 @@ export async function updateStage(formData: FormData) {
   const title         = String(formData.get('title') ?? '').trim()
   const accommodation = String(formData.get('accommodation') ?? '').trim()
   const notes         = String(formData.get('notes') ?? '').trim()
+  const isTransit      = String(formData.get('is_transit') ?? '') === 'true'
 
   const editPath = `/trips/${slug}/stages/${stageId}/edit`
 
@@ -148,7 +157,7 @@ export async function updateStage(formData: FormData) {
     ? await supabase.from('trips').select('title, subtitle').eq('id', stage.trip_id).maybeSingle()
     : { data: null }
   const countryCode = suggestCountryCode(`${title} ${accommodation}`)
-    ?? suggestCountryCode(`${trip?.title ?? ''} ${trip?.subtitle ?? ''}`)
+    ?? (isTransit ? null : suggestCountryCode(`${trip?.title ?? ''} ${trip?.subtitle ?? ''}`))
 
   const { error } = await supabase
     .from('stages')
@@ -161,6 +170,7 @@ export async function updateStage(formData: FormData) {
       accommodation: accommodation || null,
       notes: notes || null,
       country_code: countryCode,
+      is_transit: isTransit,
     })
     .eq('id', stageId)
 

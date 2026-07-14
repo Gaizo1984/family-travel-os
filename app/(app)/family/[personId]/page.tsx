@@ -8,7 +8,8 @@ import {
 } from "@/lib/documents";
 import type { DocumentType, DocumentDetails } from "@/lib/documents";
 import { TRAVEL_NEED_OPTIONS } from "@/lib/family-dna";
-import { buildPersonWorldStats } from "@/lib/world-stats";
+import { buildTravelWorld } from "@/lib/travel-world";
+import { getFamily } from "@/lib/family";
 import { WorldMap } from "@/components/WorldMap";
 import { Map as MapIcon, Globe } from "lucide-react";
 import { toggleMemoryHighlight } from "@/lib/actions/memories";
@@ -77,6 +78,8 @@ export default async function PersonDetailPage({
 
   if (!person) notFound();
 
+  const { id: familyId } = await getFamily();
+
   // §Performance-Audit: vier voneinander unabhängige Ladevorgänge (alle
   // brauchen nur person.id/photo_storage_path) liefen bisher seriell.
   const [signedPhoto, { data: documents }, personWorldStats, { data: memoryPhotosRaw }] = await Promise.all([
@@ -84,7 +87,7 @@ export default async function PersonDetailPage({
       ? supabase.storage.from("documents").createSignedUrl(person.photo_storage_path, 3600)
       : Promise.resolve({ data: null }),
     supabase.from("documents").select("id, doc_type, label, expires_at, details").eq("person_id", person.id).order("created_at", { ascending: true }),
-    buildPersonWorldStats(person.id),
+    buildTravelWorld({ familyId, personId: person.id }),
     supabase.from("memory_photos").select("id, storage_path, caption, is_highlight, taken_at, created_at").eq("uploaded_by_person_id", person.id).order("taken_at", { ascending: false, nullsFirst: false }).limit(12),
   ]);
   const photoUrl = signedPhoto.data?.signedUrl ?? null;
