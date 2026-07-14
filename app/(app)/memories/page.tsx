@@ -3,6 +3,7 @@ import { Star, Trash2, Users, Image as ImageIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { uploadMemoryPhotos, deleteMemoryPhoto, toggleMemoryHighlight, setCoverPhoto, createMemoryUploadSlots } from "@/lib/actions/memories";
+import { MAX_SELECTED_PHOTOS_PER_TRIP } from "@/lib/memory-limits";
 import { MultiPhotoFilePreview } from "@/components/MultiPhotoFilePreview";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
 import { DirectPhotoUploadForm } from "@/components/DirectPhotoUploadForm";
@@ -226,6 +227,11 @@ export default async function MemoriesPage({
               Alle Erinnerungen ansehen →
             </Link>
           )}
+          {!tripFilter && (
+            <Link href="/memories/unzugeordnet" style={{ color: "var(--accent)", fontSize: "0.72rem", textDecoration: "none" }}>
+              Nicht zugeordnete Erinnerungen →
+            </Link>
+          )}
         </header>
 
         {uploaded && <Banner variant="success">{uploaded} Foto(s) gespeichert.</Banner>}
@@ -320,7 +326,7 @@ export default async function MemoriesPage({
 
         {hiddenCount > 0 && (
           <p className="mt-2" style={{ color: "var(--muted)", fontSize: "0.68rem", fontStyle: "italic" }}>
-            {hiddenCount} weitere hochgeladene {hiddenCount === 1 ? "Foto ist" : "Fotos sind"} (Dubletten oder außerhalb der besten 30 je Reise) hier ausgeblendet, aber nicht gelöscht.
+            {hiddenCount} weitere hochgeladene {hiddenCount === 1 ? "Foto ist" : "Fotos sind"} (Dubletten oder außerhalb der besten {MAX_SELECTED_PHOTOS_PER_TRIP} je Reise) hier ausgeblendet, aber nicht gelöscht.
           </p>
         )}
       </div>

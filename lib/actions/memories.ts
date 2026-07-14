@@ -11,6 +11,8 @@ import { createUploadSlots, downloadAndClearStagedUpload, type UploadSlot } from
 import { parseStagedPaths } from '@/lib/staged-paths'
 import { getFamily } from '@/lib/family'
 import { readDateGroupFromFormData } from '@/lib/documents'
+import { deriveTripDateRange } from '@/lib/trip-dates'
+import { MAX_SELECTED_PHOTOS_PER_TRIP } from '@/lib/memory-limits'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 /**
@@ -25,8 +27,8 @@ export async function createMemoryUploadSlots(count: number): Promise<UploadSlot
 }
 
 const MAX_PHOTOS_PER_UPLOAD = 20
-/** §"Maximal 30 Erinnerungsbilder je Reise": Kappung als Auswahl (is_selected), kein Löschen. */
-const MAX_SELECTED_PHOTOS_PER_TRIP = 30
+// §MAX_SELECTED_PHOTOS_PER_TRIP: siehe lib/memory-limits.ts (Kappung als
+// Auswahl/is_selected, kein Löschen; wirkt nur auf künftige Analyse-Läufe).
 
 /**
  * §Root-Cause-Fix "Broken Image nach Upload": prüft die RIFF/WEBP-Magic-Bytes
@@ -80,14 +82,26 @@ async function uploadAndVerify(
 /**
  * Deterministische Reise-Zuordnung (kein Raten) — 1:1 nach dem Muster von
  * `suggestStageId` in lib/actions/bookings.ts: nur bei eindeutigem
- * Datums-Treffer, sonst bleibt das Foto unzugeordnet.
+ * Datums-Treffer, sonst bleibt das Foto unzugeordnet. §"Eine zentrale
+ * Zeitraum-Ableitung": nutzt denselben abgeleiteten Zeitraum
+ * (lib/trip-dates.ts) wie Reiseübersicht/Status/Dauer -- eine Reise ohne
+ * manuelles Datum, aber mit Buchungen/Etappen, ist damit trotzdem ein
+ * gültiger Zuordnungs-Kandidat, keine zweite/abweichende Datumslogik.
  */
 async function suggestTripId(supabase: SupabaseClient, familyId: string, takenAt: string | null): Promise<string | null> {
   if (!takenAt) return null
-  const { data: trips } = await supabase.from('trips').select('id, start_date, end_date').eq('family_id', familyId)
-  const matches = (trips ?? []).filter(
-    (t) => t.start_date && t.end_date && takenAt >= t.start_date && takenAt <= t.end_date,
-  )
+  const { data: trips } = await supabase
+    .from('trips')
+    .select(`
+      id, start_date, end_date,
+      stages ( start_date, end_date ),
+      bookings ( type, status, start_datetime, end_datetime )
+    `)
+    .eq('family_id', familyId)
+  const matches = (trips ?? []).filter((t) => {
+    const range = deriveTripDateRange(t, t.bookings, t.stages)
+    return range.startDate && range.endDate && takenAt >= range.startDate && takenAt <= range.endDate
+  })
   return matches.length === 1 ? matches[0].id : null
 }
 
@@ -95,8 +109,14 @@ export async function uploadMemoryPhotos(formData: FormData) {
   const familyId = String(formData.get('family_id') ?? '')
   const uploadedByPersonId = String(formData.get('uploaded_by_person_id') ?? '').trim() || null
   const caption = String(formData.get('caption') ?? '').trim() || null
+  // §"Optional Etappe zuordnen" (Galerie-Upload): nur gesetzt, wenn das
+  // Upload-Formular ein Etappen-Feld anbietet (Reise-Galerie) -- die alte
+  // /memories-Seite ohne Etappen-Auswahl liefert hier einfach nichts.
+  const stageId = String(formData.get('stage_id') ?? '').trim() || null
+  const markAsCover = formData.get('mark_as_cover') === 'on'
+  const returnTo = String(formData.get('return_to') ?? '').trim() || null
 
-  const backPath = '/memories'
+  const backPath = returnTo ?? '/memories'
 
   if (!familyId) redirect(`${backPath}?error=${encodeURIComponent('Familie nicht gefunden')}`)
 
@@ -122,6 +142,7 @@ export async function uploadMemoryPhotos(formData: FormData) {
   // berichten, wie viele Fotos gespeichert wurden bzw. fehlgeschlagen sind.
   let savedCount = 0
   let failedCount = 0
+  let firstSavedPhotoId: string | null = null
   for (const stagingPath of stagedPaths) {
     try {
       const staged = await downloadAndClearStagedUpload(stagingPath)
@@ -137,25 +158,35 @@ export async function uploadMemoryPhotos(formData: FormData) {
       const verified = await uploadAndVerify(supabase, storagePath, compressed)
       if (!verified) { failedCount++; continue }
 
-      const { error: insertError } = await supabase.from('memory_photos').insert({
+      const { data: inserted, error: insertError } = await supabase.from('memory_photos').insert({
         family_id: familyId,
         trip_id: tripId,
+        stage_id: stageId,
         uploaded_by_person_id: uploadedByPersonId,
         storage_path: storagePath,
         taken_at: takenAt,
         caption,
-      })
-      if (insertError) {
+      }).select('id').single()
+      if (insertError || !inserted) {
         console.error('[Memories][DIAGNOSTIC] DB-Insert fehlgeschlagen', insertError)
         await supabase.storage.from('documents').remove([storagePath])
         failedCount++
         continue
       }
+      if (!firstSavedPhotoId) firstSavedPhotoId = inserted.id
       savedCount++
     } catch (e) {
       console.error('[Memories][DIAGNOSTIC] Kompression/Upload-Exception', e)
       failedCount++
     }
+  }
+
+  // §"Optional als Titelbild markieren" (Galerie-Upload): setzt das erste
+  // erfolgreich gespeicherte Foto dieses Uploads als Reise-Titelbild --
+  // dieselbe Spalte/Auflösung wie der bestehende "Titelbild"-Button
+  // (trips.cover_photo_id), keine zweite Titelbild-Logik.
+  if (markAsCover && tripId && firstSavedPhotoId) {
+    await supabase.from('trips').update({ cover_photo_id: firstSavedPhotoId }).eq('id', tripId)
   }
 
   // §Root-Cause-Fix "This page couldn't load" bei Mehrfach-Upload: die
@@ -366,6 +397,118 @@ export async function setCoverPhoto(formData: FormData) {
   const supabase = await createClient()
   const { error } = await supabase.from('trips').update({ cover_photo_id: photoId }).eq('id', tripId)
   if (error) redirect(`${returnTo}?error=${encodeURIComponent('Titelbild konnte nicht gesetzt werden: ' + error.message)}`)
+
+  redirect(returnTo)
+}
+
+/** §"Optionale kurze Notiz oder Bildunterschrift" / "optional Zuordnung zu Etappe" nachträglich bearbeiten -- bisher nur einmalig beim Upload möglich. */
+export async function updateMemoryPhoto(formData: FormData) {
+  const photoId = String(formData.get('photo_id') ?? '')
+  const caption = String(formData.get('caption') ?? '').trim() || null
+  const stageId = String(formData.get('stage_id') ?? '').trim() || null
+  const returnTo = String(formData.get('return_to') ?? '').trim() || '/memories'
+
+  const supabase = await createClient()
+  const { error } = await supabase.from('memory_photos').update({ caption, stage_id: stageId }).eq('id', photoId)
+  if (error) redirect(`${returnTo}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
+
+  redirect(returnTo)
+}
+
+/**
+ * §"Bild ersetzen": neues Foto hochladen und an derselben `memory_photos`-
+ * Zeile (gleiche ID, gleiche Metadaten/Reihenfolge/Titelbild-Referenz)
+ * verankern -- das alte Storage-Objekt wird ERST nach erfolgreichem neuen
+ * Upload gelöscht (gleiches gehärtetes Muster wie deleteMemoryPhoto: neue
+ * Datei zuerst sicher an Ort und Stelle, dann erst die alte entfernen).
+ */
+export async function replaceMemoryPhoto(formData: FormData) {
+  const photoId = String(formData.get('photo_id') ?? '')
+  const familyId = String(formData.get('family_id') ?? '')
+  const returnTo = String(formData.get('return_to') ?? '').trim() || '/memories'
+
+  const stagedPaths = parseStagedPaths(formData.get('uploaded_paths'))
+  if (stagedPaths.length === 0) redirect(`${returnTo}?error=${encodeURIComponent('Bitte ein Ersatzfoto auswählen.')}`)
+
+  const supabase = await createClient()
+  const { data: existing } = await supabase.from('memory_photos').select('storage_path').eq('id', photoId).maybeSingle()
+  if (!existing) redirect(`${returnTo}?error=${encodeURIComponent('Foto nicht gefunden.')}`)
+
+  const staged = await downloadAndClearStagedUpload(stagedPaths[0])
+  if (!staged || !staged.mimeType.startsWith('image/'))
+    redirect(`${returnTo}?error=${encodeURIComponent('Foto-Upload fehlgeschlagen. Bitte erneut versuchen.')}`)
+
+  const compressed = await compressImageForStorage(staged.buffer)
+  const newStoragePath = `memories/${familyId}/${crypto.randomUUID()}.webp`
+  const verified = await uploadAndVerify(supabase, newStoragePath, compressed)
+  if (!verified) redirect(`${returnTo}?error=${encodeURIComponent('Foto-Upload fehlgeschlagen. Bitte erneut versuchen.')}`)
+
+  const { error: updateError } = await supabase.from('memory_photos').update({
+    storage_path: newStoragePath, phash: null, quality_score: null, analyzed_at: null, is_duplicate_of: null,
+  }).eq('id', photoId)
+  if (updateError) {
+    await supabase.storage.from('documents').remove([newStoragePath])
+    redirect(`${returnTo}?error=${encodeURIComponent('Speicherfehler: ' + updateError.message)}`)
+  }
+
+  await supabase.storage.from('documents').remove([existing.storage_path])
+
+  redirect(returnTo)
+}
+
+/**
+ * §"Reihenfolge ändern": einfache Auf-/Ab-Buttons statt Drag-and-Drop --
+ * konsistente Bedienung mit dem zuletzt eingeführten Content-Studio-Draft-
+ * Editor (moveContentSessionDraftItem). Neu bestimmt (statt nur zwei Werte
+ * zu tauschen) die komplette Liste neu und schreibt fortlaufende
+ * `sort_order`-Werte zurück -- reine `sort_order`-Wertetausche würde bei
+ * Fotos mit identischem Default-Wert (0) sonst wirkungslos bleiben.
+ */
+export async function reorderMemoryPhoto(formData: FormData) {
+  const photoId = String(formData.get('photo_id') ?? '')
+  const tripId = String(formData.get('trip_id') ?? '')
+  const direction = String(formData.get('direction') ?? '')
+  const returnTo = String(formData.get('return_to') ?? '').trim() || '/memories'
+
+  const supabase = await createClient()
+  const { data: photosRaw } = await supabase
+    .from('memory_photos')
+    .select('id, sort_order')
+    .eq('trip_id', tripId)
+    .eq('is_selected', true)
+    .order('sort_order', { ascending: true })
+    .order('taken_at', { ascending: false, nullsFirst: false })
+  const photos = photosRaw ?? []
+
+  const index = photos.findIndex((p) => p.id === photoId)
+  const swapWith = direction === 'up' ? index - 1 : index + 1
+  if (index === -1 || swapWith < 0 || swapWith >= photos.length) redirect(returnTo)
+
+  const reordered = [...photos]
+  ;[reordered[index], reordered[swapWith]] = [reordered[swapWith], reordered[index]]
+
+  await Promise.all(reordered.map((p, i) => supabase.from('memory_photos').update({ sort_order: i }).eq('id', p.id)))
+
+  redirect(returnTo)
+}
+
+/**
+ * §"Unsichere Fälle nicht raten, sondern in einer Reparaturliste anzeigen ...
+ * nur bei eindeutigem Treffer automatisch zuordnen, unsichere Fälle ... auf
+ * Bestätigung warten": setzt `trip_id` AUSSCHLIESSLICH nach explizitem Klick
+ * auf der "Nicht zugeordnete Erinnerungen"-Seite -- kein Bulk-Update, keine
+ * automatische Zuordnung an anderer Stelle.
+ */
+export async function assignMemoryPhotoToTrip(formData: FormData) {
+  const photoId = String(formData.get('photo_id') ?? '')
+  const tripId = String(formData.get('trip_id') ?? '')
+  const returnTo = String(formData.get('return_to') ?? '').trim() || '/memories/unzugeordnet'
+
+  if (!photoId || !tripId) redirect(`${returnTo}?error=${encodeURIComponent('Zuordnung fehlgeschlagen')}`)
+
+  const supabase = await createClient()
+  const { error } = await supabase.from('memory_photos').update({ trip_id: tripId }).eq('id', photoId)
+  if (error) redirect(`${returnTo}?error=${encodeURIComponent('Zuordnung fehlgeschlagen: ' + error.message)}`)
 
   redirect(returnTo)
 }
