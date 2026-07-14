@@ -414,16 +414,22 @@ export interface Database {
           id: string; family_id: string; trip_id: string | null; title: string
           status: string; project_type: string; created_at: string; updated_at: string
           content_date: string | null; stage_id: string | null; language: string | null; tonality: string | null
+          output_format: string | null
+          content_focus: string | null; custom_focus: string | null; mood: string[] | null; hint_text: string | null
         }
         Insert: {
           id?: string; family_id: string; trip_id?: string | null; title: string
           status?: string; project_type?: string; created_at?: string; updated_at?: string
           content_date?: string | null; stage_id?: string | null; language?: string | null; tonality?: string | null
+          output_format?: string | null
+          content_focus?: string | null; custom_focus?: string | null; mood?: string[] | null; hint_text?: string | null
         }
         Update: {
           id?: string; family_id?: string; trip_id?: string | null; title?: string
           status?: string; project_type?: string; created_at?: string; updated_at?: string
           content_date?: string | null; stage_id?: string | null; language?: string | null; tonality?: string | null
+          output_format?: string | null
+          content_focus?: string | null; custom_focus?: string | null; mood?: string[] | null; hint_text?: string | null
         }
         Relationships: [
           { foreignKeyName: "content_projects_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] },

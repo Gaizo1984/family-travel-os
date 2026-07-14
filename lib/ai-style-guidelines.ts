@@ -42,3 +42,41 @@ export function languageInstruction(language: string): string {
   if (language === 'both') return 'Liefere jeden Text zweisprachig: zuerst Deutsch, danach die englische Fassung, klar getrennt.'
   return 'Schreibe alle Ausgaben auf Deutsch.'
 }
+
+/** §"Geführter Content-Kontext": kompakte Fokus-Auswahl vor der Content-Erstellung -- fließt in die Passungsprüfung und den Generierungs-Prompt ein. */
+export const CONTENT_FOCUS_OPTIONS = [
+  { value: 'ausflug', label: 'Ausflug' },
+  { value: 'strandtag', label: 'Strandtag' },
+  { value: 'hotelmoment', label: 'Hotelmoment' },
+  { value: 'familienmoment', label: 'Familienmoment' },
+  { value: 'essen', label: 'Essen oder Restaurant' },
+  { value: 'natur', label: 'Natur' },
+  { value: 'tagesrueckblick', label: 'Tagesrückblick' },
+  { value: 'mix', label: 'Mix' },
+  { value: 'custom', label: 'Eigener Fokus' },
+] as const
+export const CONTENT_FOCUS_LABELS: Record<string, string> = Object.fromEntries(
+  CONTENT_FOCUS_OPTIONS.map((o) => [o.value, o.label]),
+)
+
+export const CONTENT_MOOD_OPTIONS = [
+  { value: 'ueberraschend', label: 'Überraschend' },
+  { value: 'entspannend', label: 'Entspannend' },
+  { value: 'lustig', label: 'Lustig' },
+  { value: 'luxurioes', label: 'Luxuriös' },
+  { value: 'abenteuerlich', label: 'Abenteuerlich' },
+  { value: 'emotional', label: 'Emotional' },
+  { value: 'kinderfokussiert', label: 'Kinderfokussiert' },
+  { value: 'informativ', label: 'Informativ' },
+  { value: 'ruhig', label: 'Besonders ruhig' },
+] as const
+export const CONTENT_MOOD_LABELS: Record<string, string> = Object.fromEntries(
+  CONTENT_MOOD_OPTIONS.map((o) => [o.value, o.label]),
+)
+
+/** §"Klickstärke ohne Clickbait": ein zum Entwurf passender Content-Winkel statt generischer KI-Floskeln oder billiger Übertreibung. */
+export const ENGAGEMENT_ANGLE_INSTRUCTION =
+  'Wähle einen zum Material passenden Content-Winkel (z.B. Kontrast, Überraschung, Familienmoment, ' +
+  'persönlicher Tipp, ehrliche Beobachtung, kleine Geschichte, Luxus und Atmosphäre, hilfreicher Mehrwert, ' +
+  'unerwartetes Highlight, ruhiger emotionaler Moment) und baue Hook/Caption entsprechend auf. ' +
+  'Kein billiges Clickbait, keine falschen Versprechen, keine erfundenen Erlebnisse, keine übertriebene Werbesprache.'
