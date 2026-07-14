@@ -18,9 +18,14 @@ const FIELD_STYLE: React.CSSProperties = {
 type ReelStructure = { scenes: { text: string }[]; outro?: string; hashtags?: string[] };
 type CarouselStructure = { slides: { text: string }[]; hashtags?: string[] };
 type CaptionStructure = { text: string; hashtags?: string[] };
+type HotelContentStructure = {
+  text: string; hashtags?: string[]
+  family_perspective?: string; design_atmosphere?: string; food?: string; pool_or_beach?: string; factual_rating?: string
+};
 
 const DRAFT_TYPE_LABELS: Record<string, string> = {
-  reel_plan: "Reel-Plan", carousel_plan: "Carousel-Plan", story_plan: "Story-Plan", caption: "Caption", journal_review: "Reisejournal",
+  reel_plan: "Reel-Plan", carousel_plan: "Carousel-Plan", story_plan: "Story-Plan", caption: "Caption",
+  journal_review: "Reisejournal", day_recap: "Tagesrückblick", highlight: "Ausflug/Highlight", hotel_content: "Hotel-Content",
 };
 
 export default async function ContentDraftPage({
@@ -36,18 +41,24 @@ export default async function ContentDraftPage({
   const supabase = await createClient();
   const { data: draft } = await supabase
     .from("content_drafts")
-    .select("id, project_id, draft_type, structure, visibility, scheduled_at, notes, instagram_ready")
+    .select("id, project_id, draft_type, structure, visibility, scheduled_at, notes, instagram_ready, content_projects(project_type)")
     .eq("id", draftId)
     .maybeSingle();
 
   if (!draft) notFound();
+
+  // §Content-Session-Entwürfe führen zurück auf die reichhaltigere
+  // Session-Seite (Fotos/Ablauf/Als-Erinnerung-behalten) statt auf die
+  // generische Projekt-Übersicht der älteren Ideen-/Analyse-Flows.
+  const isSessionDraft = (draft.content_projects as unknown as { project_type: string } | null)?.project_type === "session";
+  const backHref = isSessionDraft ? `/content-studio/session/${draft.project_id}` : `/content-studio/projects/${draft.project_id}`;
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
       <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-9">
 
         <Link
-          href={`/content-studio/projects/${draft.project_id}`}
+          href={backHref}
           className="flex items-center gap-2 mb-8 transition-opacity hover:opacity-70"
           style={{ color: "var(--muted)", fontSize: "0.78rem", letterSpacing: "0.04em", textDecoration: "none", width: "fit-content" }}
         >
@@ -93,7 +104,7 @@ export default async function ContentDraftPage({
               </>
             )}
 
-            {(draft.draft_type === "caption" || draft.draft_type === "journal_review") && (
+            {(draft.draft_type === "caption" || draft.draft_type === "journal_review" || draft.draft_type === "day_recap" || draft.draft_type === "highlight" || draft.draft_type === "hotel_content") && (
               <>
                 <label htmlFor="draft-caption" style={LABEL_STYLE}>Text</label>
                 <textarea
@@ -102,6 +113,16 @@ export default async function ContentDraftPage({
                   style={{ ...FIELD_STYLE, resize: "none", marginBottom: "16px" }}
                 />
               </>
+            )}
+
+            {draft.draft_type === "hotel_content" && (
+              <div className="mb-6 space-y-1.5" style={{ color: "var(--muted)", fontSize: "0.78rem", lineHeight: 1.5 }}>
+                <p><strong style={{ color: "var(--foreground)", fontWeight: 400 }}>Familienperspektive:</strong> {(draft.structure as HotelContentStructure).family_perspective}</p>
+                <p><strong style={{ color: "var(--foreground)", fontWeight: 400 }}>Design &amp; Atmosphäre:</strong> {(draft.structure as HotelContentStructure).design_atmosphere}</p>
+                <p><strong style={{ color: "var(--foreground)", fontWeight: 400 }}>Essen:</strong> {(draft.structure as HotelContentStructure).food}</p>
+                <p><strong style={{ color: "var(--foreground)", fontWeight: 400 }}>Pool/Strand:</strong> {(draft.structure as HotelContentStructure).pool_or_beach}</p>
+                <p><strong style={{ color: "var(--foreground)", fontWeight: 400 }}>Sachliche Bewertung:</strong> {(draft.structure as HotelContentStructure).factual_rating}</p>
+              </div>
             )}
 
             <label htmlFor="draft-hashtags" style={LABEL_STYLE}>Hashtags (kommagetrennt)</label>

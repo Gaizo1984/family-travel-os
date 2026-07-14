@@ -231,11 +231,40 @@ const CONTENT_FORMAT_SCHEMAS: Record<string, Record<string, unknown>> = {
     required: ['caption', 'hashtags', 'hook', 'clip_order', 'music_direction'],
     additionalProperties: false,
   },
+  day_recap: {
+    type: 'object',
+    properties: { ...BASE_CONTENT_PROPS },
+    required: ['caption', 'hashtags'],
+    additionalProperties: false,
+  },
+  highlight: {
+    type: 'object',
+    properties: { ...BASE_CONTENT_PROPS },
+    required: ['caption', 'hashtags'],
+    additionalProperties: false,
+  },
+  hotel_content: {
+    type: 'object',
+    properties: {
+      ...BASE_CONTENT_PROPS,
+      family_perspective: { type: 'string', description: 'Kurzer Absatz: das Hotel aus Familienperspektive' },
+      design_atmosphere: { type: 'string', description: 'Kurzer Absatz: Design und Atmosphäre' },
+      food: { type: 'string', description: 'Kurzer Absatz: Essen/Gastronomie' },
+      pool_or_beach: { type: 'string', description: 'Kurzer Absatz: Pool oder Strand' },
+      factual_rating: { type: 'string', description: 'Sachliche, nicht werbliche Kurzbewertung -- nur auf Basis vorhandener Reisedaten/Bilder, keine erfundenen Fakten' },
+    },
+    required: ['caption', 'hashtags', 'family_perspective', 'design_atmosphere', 'food', 'pool_or_beach', 'factual_rating'],
+    additionalProperties: false,
+  },
 }
 
 const FORMAT_TO_DRAFT_TYPE: Record<string, string> = {
   caption: 'caption', carousel: 'carousel_plan', story: 'story_plan', reel: 'reel_plan',
+  day_recap: 'day_recap', highlight: 'highlight', hotel_content: 'hotel_content',
 }
+
+/** §"Content-Paket": Reihenfolge/Bestandteile des Bündels -- Story bekommt eine zusätzliche Anweisung für 5-8 Ideen statt der sonst unbegrenzten Anzahl. */
+const PACKAGE_COMPONENT_FORMATS = ['caption', 'carousel', 'story', 'reel', 'day_recap'] as const
 
 type SessionPhoto = { id: string; storagePath: string; buffer: Buffer; mimeType: string }
 
@@ -255,8 +284,9 @@ export async function analyzeContentSession(formData: FormData) {
   const tonality = String(formData.get('tonality') ?? '').trim() || null
   const returnPath = `/content-studio/session/${projectId}`
 
+  const isPackage = outputFormat === 'package'
   if (!projectId) redirect('/content-studio/session/new')
-  if (!outputFormat || !CONTENT_FORMAT_SCHEMAS[outputFormat])
+  if (!outputFormat || (!isPackage && !CONTENT_FORMAT_SCHEMAS[outputFormat]))
     redirect(`${returnPath}?error=${encodeURIComponent('Bitte eine Content-Art auswählen.')}`)
   if (!process.env.OPENAI_API_KEY)
     redirect(`${returnPath}?error=${encodeURIComponent('Die Content-KI ist aktuell nicht konfiguriert.')}`)
@@ -344,25 +374,37 @@ export async function analyzeContentSession(formData: FormData) {
     .map((a) => `Foto-ID ${a.id}: Qualität ${a.qualityScore}/10${a.isBestMotif ? ', bestes Motiv' : ''}. ${a.description}`)
     .join('\n')
 
-  const promptText = [
-    `Du bist Social-Media-Stratege für eine Familie und erstellst einen fertigen ${outputFormat === 'caption' ? 'Instagram-Post' : outputFormat}-Vorschlag aus echten Reisefotos.`,
-    FACT_RULE_INSTRUCTION,
-    NO_CLICHE_INSTRUCTION,
-    tonalityInstruction(tonality),
-    languageInstruction(language),
-    'Referenziere Fotos ausschließlich über ihre Foto-ID aus der Liste unten, erfinde keine IDs.',
-    `Reisekontext: ${tripDigest}`,
-    `Foto-Übersicht:\n${manifestText}`,
-  ].filter(Boolean).join('\n\n')
+  // §"Content-Paket": erzeugt mehrere Bestandteile (Caption/Carousel/Story/
+  // Reel/Tagesrückblick) in einem Lauf, jeder als eigener content_drafts-
+  // Eintrag -- einzeln bearbeitbar/verwerfbar, kein Gruppen-Datensatz nötig
+  // (bereits über project_id verknüpft, wie alle anderen Drafts der Session).
+  if (isPackage) {
+    const createdCount = { value: 0 }
+    for (const componentFormat of PACKAGE_COMPONENT_FORMATS) {
+      try {
+        const extra = componentFormat === 'story' ? 'Erzeuge 5 bis 8 Story-Ideen (frames) für die Abfolge.' : undefined
+        const result = await generateFormatContent(openai, componentFormat, tripDigest, manifestText, tonality, language, extra)
+        const structure = buildDraftStructure(componentFormat, result)
+        const { data: draft } = await supabase.from('content_drafts').insert({
+          project_id: projectId, draft_type: FORMAT_TO_DRAFT_TYPE[componentFormat], structure: structure as Json,
+        }).select('id').single()
+        if (draft) createdCount.value++
+      } catch {
+        // Ein fehlgeschlagener Bestandteil darf das restliche Paket nicht abbrechen.
+        continue
+      }
+    }
+
+    if (createdCount.value === 0)
+      redirect(`${returnPath}?error=${encodeURIComponent('Das Content-Paket konnte nicht erstellt werden. Bitte gleich noch einmal versuchen.')}`)
+
+    await supabase.from('content_projects').update({ status: 'draft_created' }).eq('id', projectId)
+    redirect(`${returnPath}?package=${createdCount.value}`)
+  }
 
   let contentResult: Record<string, unknown>
   try {
-    const response = await openai.responses.create({
-      model: OPENAI_MODEL,
-      input: [{ role: 'user', content: [{ type: 'input_text', text: promptText }] }],
-      text: { format: { type: 'json_schema', name: 'session_content', schema: CONTENT_FORMAT_SCHEMAS[outputFormat], strict: true } },
-    })
-    contentResult = JSON.parse(response.output_text)
+    contentResult = await generateFormatContent(openai, outputFormat, tripDigest, manifestText, tonality, language)
   } catch {
     redirect(`${returnPath}?error=${encodeURIComponent('Die Inhalte-Generierung ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.')}`)
   }
@@ -381,6 +423,31 @@ export async function analyzeContentSession(formData: FormData) {
   await supabase.from('content_projects').update({ status: 'draft_created' }).eq('id', projectId)
 
   redirect(`/content-studio/drafts/${draft.id}`)
+}
+
+/** Ein Text-Call für EIN Content-Format -- von Einzelformat- und Content-Paket-Erzeugung gemeinsam genutzt. */
+async function generateFormatContent(
+  openai: OpenAI, format: string, tripDigest: string, manifestText: string,
+  tonality: string | null, language: string, extraInstruction?: string,
+): Promise<Record<string, unknown>> {
+  const promptText = [
+    `Du bist Social-Media-Stratege für eine Familie und erstellst einen fertigen ${format === 'caption' ? 'Instagram-Post' : format}-Vorschlag aus echten Reisefotos.`,
+    FACT_RULE_INSTRUCTION,
+    NO_CLICHE_INSTRUCTION,
+    tonalityInstruction(tonality),
+    languageInstruction(language),
+    extraInstruction ?? null,
+    'Referenziere Fotos ausschließlich über ihre Foto-ID aus der Liste unten, erfinde keine IDs.',
+    `Reisekontext: ${tripDigest}`,
+    `Foto-Übersicht:\n${manifestText}`,
+  ].filter(Boolean).join('\n\n')
+
+  const response = await openai.responses.create({
+    model: OPENAI_MODEL,
+    input: [{ role: 'user', content: [{ type: 'input_text', text: promptText }] }],
+    text: { format: { type: 'json_schema', name: 'session_content', schema: CONTENT_FORMAT_SCHEMAS[format], strict: true } },
+  })
+  return JSON.parse(response.output_text)
 }
 
 /** Baut aus dem KI-Ergebnis dieselbe structure-Form, die der bestehende Draft-Editor (content-studio/drafts/[draftId]) bereits versteht. */
@@ -402,6 +469,13 @@ function buildDraftStructure(format: string, result: Record<string, unknown>): R
     return {
       scenes: (result.clip_order as Array<{ photo_id: string; text_overlay: string }>).map((c) => ({ text: c.text_overlay, photo_id: c.photo_id })),
       outro: '', hashtags, caption: result.caption, hook: result.hook, music_direction: result.music_direction,
+    }
+  }
+  if (format === 'hotel_content') {
+    return {
+      text: result.caption, hashtags,
+      family_perspective: result.family_perspective, design_atmosphere: result.design_atmosphere,
+      food: result.food, pool_or_beach: result.pool_or_beach, factual_rating: result.factual_rating,
     }
   }
   return { text: result.caption, hashtags }

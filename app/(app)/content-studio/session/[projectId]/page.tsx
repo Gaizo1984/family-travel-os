@@ -29,10 +29,15 @@ const CONTENT_FORMAT_OPTIONS = [
   { value: "carousel", label: "Carousel" },
   { value: "story", label: "Story" },
   { value: "reel", label: "Reel-Konzept" },
+  { value: "day_recap", label: "Tagesrückblick" },
+  { value: "highlight", label: "Ausflug/Highlight" },
+  { value: "hotel_content", label: "Hotel-Content" },
+  { value: "package", label: "Content-Paket (alles auf einmal)" },
 ];
 
 const DRAFT_TYPE_LABELS: Record<string, string> = {
   caption: "Caption", carousel_plan: "Carousel", story_plan: "Story", reel_plan: "Reel",
+  day_recap: "Tagesrückblick", highlight: "Ausflug/Highlight", hotel_content: "Hotel-Content",
 };
 
 function Card({ children }: { children: React.ReactNode }) {
@@ -48,10 +53,10 @@ export default async function ContentSessionPage({
   searchParams,
 }: {
   params: Promise<{ projectId: string }>;
-  searchParams: Promise<{ error?: string; uploaded?: string }>;
+  searchParams: Promise<{ error?: string; uploaded?: string; package?: string }>;
 }) {
   const { projectId } = await params;
-  const { error, uploaded } = await searchParams;
+  const { error, uploaded, package: packageCount } = await searchParams;
 
   const supabase = await createClient();
   const { data: project } = await supabase
@@ -114,6 +119,11 @@ export default async function ContentSessionPage({
         {uploaded && (
           <p className="mb-6" style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
             {uploaded} Foto{uploaded === "1" ? "" : "s"} hochgeladen.
+          </p>
+        )}
+        {packageCount && (
+          <p className="mb-6" style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
+            Content-Paket erstellt: {packageCount} Entwürfe, einzeln bearbeitbar (siehe unten).
           </p>
         )}
 

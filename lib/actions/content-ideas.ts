@@ -138,6 +138,14 @@ export async function updateContentDraft(formData: FormData) {
   } else if (draftType === 'carousel_plan' || draftType === 'story_plan') {
     const slideTexts = formData.getAll('slide_text').map(String)
     structure = { slides: slideTexts.filter(Boolean).map((text) => ({ text })) }
+  } else if (draftType === 'hotel_content') {
+    // §"Hotel-Content" hat zusätzliche, im Editor nur angezeigte (nicht
+    // editierbare) Teilabschnitte (Familienperspektive/Design/Essen/Pool-
+    // Strand/Bewertung) -- beim Speichern aus der bestehenden Struktur
+    // übernehmen, statt sie stillschweigend zu verwerfen.
+    const { data: existing } = await supabase.from('content_drafts').select('structure').eq('id', draftId).maybeSingle()
+    const existingStructure = (existing?.structure ?? {}) as Record<string, unknown>
+    structure = { ...existingStructure, text: String(formData.get('caption_text') ?? '') }
   } else {
     structure = { text: String(formData.get('caption_text') ?? '') }
   }
