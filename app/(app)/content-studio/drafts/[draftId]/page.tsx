@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { updateContentDraft } from "@/lib/actions/content-ideas";
+import { updateContentDraft, deleteContentDraft } from "@/lib/actions/content-ideas";
 import {
   saveContentSessionDraftText, moveContentSessionDraftItem, removeContentSessionDraftItem,
   addContentSessionDraftItem, setContentSessionDraftCover, regenerateContentSessionDraftPart,
@@ -234,6 +234,21 @@ export default async function ContentDraftPage({
                 </button>
               </div>
             </div>
+          </form>
+
+          <form action={deleteContentDraft} className="flex justify-end">
+            <input type="hidden" name="draft_id" value={draft.id} />
+            <input type="hidden" name="return_to" value={backHref} />
+            <button
+              type="submit"
+              style={{
+                background: "transparent", color: "#B5624A", border: "1px solid rgba(181,98,74,0.35)",
+                borderRadius: "6px", padding: "9px 16px", fontSize: "0.62rem", letterSpacing: "0.08em",
+                textTransform: "uppercase", cursor: "pointer", WebkitAppearance: "none", appearance: "none",
+              }}
+            >
+              Entwurf löschen
+            </button>
           </form>
         </div>
       </div>

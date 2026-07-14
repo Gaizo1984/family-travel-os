@@ -92,9 +92,8 @@ export default async function NewContentIdeaPage({
               <select id="ci-goal" name="content_goal" style={FIELD_STYLE}>
                 <option value="">— egal, KI schlägt vor —</option>
                 <option value="reel">Reel</option>
-                <option value="carousel">Carousel</option>
-                <option value="story">Story-Serie</option>
-                <option value="caption">Einzelner Feed-Post</option>
+                <option value="carousel">Beitrag</option>
+                <option value="story">Story</option>
               </select>
             </div>
 

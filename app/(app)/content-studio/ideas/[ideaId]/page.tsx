@@ -14,8 +14,11 @@ type Suggestion = {
   caption_draft: string; hashtags: string[]
 };
 
+// §"caption"/"feed_post" werden nicht mehr neu erzeugt (Caption ist kein
+// eigenständiges Format mehr, siehe Story-Vereinheitlichung) -- Mapping
+// bleibt nur für bereits bestehende ältere Vorschläge erhalten.
 const FORMAT_LABELS: Record<string, string> = {
-  reel: "Reel", carousel: "Carousel", story: "Story-Serie", caption: "Feed-Post", feed_post: "Feed-Post",
+  reel: "Reel", carousel: "Beitrag", story: "Story", caption: "Story", feed_post: "Story",
 };
 
 export default async function ContentIdeaDetailPage({

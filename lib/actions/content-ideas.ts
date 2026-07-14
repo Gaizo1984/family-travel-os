@@ -164,3 +164,16 @@ export async function updateContentDraft(formData: FormData) {
 
   redirect(`/content-studio/drafts/${draftId}`)
 }
+
+/** §Bugfix "Draft in Content-Vorschläge nicht löschbar": der Editor bot bisher nur Speichern/Abbrechen, kein Löschen. */
+export async function deleteContentDraft(formData: FormData) {
+  const draftId = String(formData.get('draft_id') ?? '')
+  const returnTo = String(formData.get('return_to') ?? '').trim()
+
+  const supabase = await createClient()
+  const { error } = await supabase.from('content_drafts').delete().eq('id', draftId)
+  if (error)
+    redirect(`/content-studio/drafts/${draftId}?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)
+
+  redirect(returnTo || '/content-studio/ideas')
+}

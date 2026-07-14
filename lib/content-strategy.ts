@@ -1,6 +1,7 @@
 import { createClient } from './supabase/server'
 import { generateContentStrategy } from './content-strategy-ai'
 import type { ContentStrategy } from './content-strategy-ai'
+import type { ContentPostingPlanContext } from './content-strategy-context'
 
 /** Liest eine ggf. bereits heute generierte Strategie — kein KI-Aufruf. */
 export async function getCachedContentStrategy(
@@ -65,4 +66,38 @@ export async function generateAndCacheContentStrategy(
   )
 
   return result
+}
+
+export type PostingPlanDayEntry = ContentStrategy & { forDate: string; dateLabel: string; locationLabel: string }
+
+/**
+ * §"KI Urlaubs-/Postingfahrplan": liest/generiert für jeden Tag des
+ * Kontexts die (bereits pro Tag zwischengespeicherte) Content-Strategie --
+ * exakt dieselbe Cache-Tabelle/Funktion wie "Today's Content Strategy",
+ * nur über mehrere Tage geloopt statt nur für heute. Ein fehlgeschlagener
+ * Tag (z. B. KI kurzzeitig nicht verfügbar) darf die übrigen Tage nicht
+ * verhindern -- wird einfach ausgelassen.
+ */
+export async function getOrGeneratePostingPlan(
+  familyId: string,
+  context: ContentPostingPlanContext,
+): Promise<PostingPlanDayEntry[]> {
+  const entries: PostingPlanDayEntry[] = []
+
+  for (const day of context.days) {
+    let strategy = await getCachedContentStrategy(familyId, context.tripId, day.forDate)
+    if (!strategy) {
+      strategy = await generateAndCacheContentStrategy(
+        familyId, context.tripId, day.forDate,
+        {
+          dateLabel: day.dateLabel, locationLabel: day.locationLabel, weatherSummary: day.weatherSummary,
+          knownPlanText: day.knownPlanText, highlightTitle: day.highlightTitle,
+        },
+        false,
+      )
+    }
+    if (strategy) entries.push({ ...strategy, forDate: day.forDate, dateLabel: day.dateLabel, locationLabel: day.locationLabel })
+  }
+
+  return entries
 }

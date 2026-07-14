@@ -51,7 +51,10 @@ const CONTENT_IDEA_SCHEMA = {
         type: 'object',
         properties: {
           title: { type: 'string' },
-          format: { type: 'string', enum: ['reel', 'carousel', 'story', 'caption', 'feed_post'] },
+          format: {
+            type: 'string', enum: ['reel', 'carousel', 'story'],
+            description: '"story" deckt sowohl ein einzelnes starkes Bild als auch eine kurze Bildfolge ab -- entscheide selbst, was zum Material passt, es gibt keine separate "Story-Serie" mehr.',
+          },
           hook: { type: 'string', description: 'Erster Satz/Einstieg, der Aufmerksamkeit erzeugt' },
           angle: { type: 'string', description: 'Kreativer Blickwinkel der Idee' },
           caption_draft: { type: 'string' },
@@ -74,7 +77,8 @@ function buildPrompt(language: string, styleKey: string): string {
 
   return (
     'Du bist Social-Media-Stratege für eine Familie und entwickelst aus echten Reisedaten und optional mehreren Fotos ' +
-    'maximal 4 hochwertige, unterscheidbare Content-Ideen (Reel/Carousel/Story/Feed-Post) — Qualität vor Menge. ' +
+    'maximal 4 hochwertige, unterscheidbare Content-Ideen (Reel/Beitrag/Story) — Qualität vor Menge. ' +
+    'Bei "story" entscheidest du selbst, ob ein einzelnes starkes Bild oder eine kurze Bildfolge besser passt. ' +
     'Nutze ausschließlich die gegebenen Reisedaten und den Stil-Kontext als Faktengrundlage — erfinde keine Orte, ' +
     `Ereignisse oder Details, die dort nicht stehen. Falls Fotos beigefügt sind: ${PHOTO_ASSESSMENT_PROMPT_FRAGMENT} ` +
     'Die Content-Ideen sollen sich an den als beste Motive markierten Fotos orientieren. Erkenne Ort/Stimmung nur, ' +

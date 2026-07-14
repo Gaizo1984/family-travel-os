@@ -102,8 +102,8 @@ export default async function ContentStudioPage() {
           <span style={{ fontSize: "0.72rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--foreground)", borderBottom: "1px solid var(--accent)", paddingBottom: "14px", marginBottom: "-15px" }}>
             Content-Ideen
           </span>
-          <Link href="/content-studio/analyze" style={{ fontSize: "0.72rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--muted)", textDecoration: "none" }}>
-            Bilder analysieren
+          <Link href="/content-studio/posting-plan" style={{ fontSize: "0.72rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--muted)", textDecoration: "none" }}>
+            Content-Fahrplan
           </Link>
         </div>
 

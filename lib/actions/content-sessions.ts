@@ -381,8 +381,7 @@ async function checkContentFit(
 
 /**
  * §"Content erstellen -- nur nach ausdrücklichem Klick, kein automatischer
- * KI-Aufruf": zweistufig wie der bestehende Bildanalyse-Flow
- * (lib/actions/photo-analysis-generation.ts) -- (1) Qualität/Beschreibung
+ * KI-Aufruf": zweistufig -- (1) Qualität/Beschreibung
  * batch-weise mit Bildern, (2) EIN textbasierter Aufruf für das gewählte
  * Format, kein erneuter Bild-Upload. Reisekontext ausschließlich aus
  * buildTripDigest (echte Buchungen/Etappen/Journey-Einträge) -- keine

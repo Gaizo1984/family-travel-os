@@ -116,3 +116,95 @@ export async function buildContentStrategyContext(familyId: string): Promise<Con
     memberNames,
   }
 }
+
+export type ContentPostingPlanDay = {
+  forDate: string
+  dateLabel: string
+  locationLabel: string
+  weatherSummary: string | null
+  knownPlanText: string
+  highlightTitle: string | null
+}
+
+export type ContentPostingPlanContext = {
+  tripId: string
+  tripTitle: string
+  memberNames: string[]
+  days: ContentPostingPlanDay[]
+}
+
+/** §"KI Urlaubs-/Postingfahrplan" ersetzt "Bilder analysieren": zeigt nicht nur den heutigen Tag, sondern die nächsten Tage der laufenden Reise mit je einer Content-Empfehlung. */
+const POSTING_PLAN_DAYS_AHEAD = 5
+
+/**
+ * Wie buildContentStrategyContext, aber für mehrere kommende Tage statt nur
+ * heute -- baut auf denselben Timeline-/Standort-/Wetter-Bausteinen auf
+ * (keine zweite Kontext-Ermittlung). Wetter wird nur EINMAL für den
+ * heutigen Standort abgerufen (5-Tage-Forecast); wechselt der Standort an
+ * einem Folgetag (Etappenwechsel), wird das Wetter für diesen Tag bewusst
+ * weggelassen statt für einen anderen Ort geraten.
+ */
+export async function buildContentPostingPlanContext(familyId: string): Promise<ContentPostingPlanContext | null> {
+  const supabase = await createClient()
+  const todayIso = todayIsoInFamilyTimezone()
+
+  const { data: trips } = await supabase
+    .from('trips')
+    .select(`
+      id, slug, title, subtitle, status, start_date, end_date,
+      trip_members ( persons ( id, name ) ),
+      stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code ),
+      bookings ( id, type, title, provider, status, start_datetime, end_datetime, stage_id, details, created_at ),
+      journey_events ( id, stage_id, date, time, category, title, location, status )
+    `)
+    .eq('family_id', familyId)
+
+  const activeTrip = ((trips ?? []) as unknown as TripRow[]).find((t) => isTripCurrentlyRunning(t, todayIso))
+  if (!activeTrip) return null
+
+  const stages = sortStagesChronologically(activeTrip.stages) as StageInput[]
+  const bookings = sortBookingsChronologically(activeTrip.bookings) as TimelineBooking[]
+  const events = (activeTrip.journey_events ?? []) as TimelineEvent[]
+
+  const timeline = buildJourneyTimeline(
+    { start_date: activeTrip.start_date, end_date: activeTrip.end_date },
+    stages, bookings, events,
+  )
+  const allDays: TimelineDay[] = timeline.flatMap((seg) => (seg.kind === 'stay' ? seg.days : [seg.day]))
+  const candidateDates = allDays.map((d) => d.date).filter((date) => date >= todayIso).slice(0, POSTING_PLAN_DAYS_AHEAD)
+  if (candidateDates.length === 0) return null
+
+  const todayLocation = resolveCurrentLocation(activeTrip, stages, bookings, todayIso)
+  const countryNameToday = todayLocation.countryCode ? COUNTRY_NAMES[todayLocation.countryCode] ?? null : null
+  const weatherCandidates: WeatherLocationCandidate[] = [
+    { query: todayLocation.label, countryCode: todayLocation.countryCode },
+    ...nearbyStageGeocodeCandidates(stages, todayLocation.label, todayLocation.countryCode, todayIso),
+    ...(countryNameToday && countryNameToday !== todayLocation.label ? [{ query: countryNameToday }] : []),
+  ]
+  const weather = await getWeatherForLocation(weatherCandidates)
+
+  const days: ContentPostingPlanDay[] = candidateDates.map((dateIso) => {
+    const dayLocation = resolveCurrentLocation(activeTrip, stages, bookings, dateIso)
+    const timelineDay = allDays.find((d) => d.date === dateIso) ?? null
+    const timelineItems = timelineDay ? buildTodayTimelineItems(timelineDay) : []
+    const knownPlanText = timelineItems.map((i) => `${i.time ?? ''} ${i.title}`.trim()).join(', ')
+    const highlightTitle = detectDayHighlight(timelineItems)
+
+    let weatherSummary: string | null = null
+    if (weather && dayLocation.label === todayLocation.label) {
+      const forecastDay = weather.daily.find((d) => d.date === dateIso)
+      if (forecastDay) weatherSummary = `${forecastDay.tempMax}°C, ${describeWeatherCode(forecastDay.code).label}`
+      else if (dateIso === todayIso) weatherSummary = `${weather.currentTemp}°C, ${describeWeatherCode(weather.currentCode).label}`
+    }
+
+    const dateLabel = new Date(dateIso).toLocaleDateString('de-DE', {
+      weekday: 'long', day: '2-digit', month: 'long', year: 'numeric',
+    })
+
+    return { forDate: dateIso, dateLabel, locationLabel: dayLocation.label, weatherSummary, knownPlanText, highlightTitle }
+  })
+
+  const memberNames = activeTrip.trip_members.flatMap((m) => (m.persons ? [m.persons.name] : []))
+
+  return { tripId: activeTrip.id, tripTitle: activeTrip.title, memberNames, days }
+}

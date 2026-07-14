@@ -19,6 +19,7 @@ export async function regenerateContentStrategy(formData: FormData) {
   const weatherSummary = String(formData.get('weather_summary') ?? '').trim() || null
   const knownPlanText = String(formData.get('known_plan_text') ?? '')
   const highlightTitle = String(formData.get('highlight_title') ?? '').trim() || null
+  const returnTo = String(formData.get('return_to') ?? '/content-studio').trim() || '/content-studio'
 
   if (!familyId || !tripId || !forDate) redirect('/content-studio')
 
@@ -28,5 +29,5 @@ export async function regenerateContentStrategy(formData: FormData) {
     true,
   )
 
-  redirect('/content-studio')
+  redirect(returnTo)
 }
