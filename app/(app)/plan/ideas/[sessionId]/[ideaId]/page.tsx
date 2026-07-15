@@ -1,115 +1,21 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, Star, ExternalLink, Check, X as XIcon, Trash2 } from "lucide-react";
+import { ChevronLeft, Check, X as XIcon, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { updateTripIdeaNotes, deleteTripIdea } from "@/lib/actions/trip-ideas";
 import { generateHotelShortlist, estimateTripIdeaBudget, generateTripVariants } from "@/lib/actions/trip-idea-advisor";
 import { BUDGET_CATEGORY_ORDER, BUDGET_CATEGORY_LABELS, type BudgetCategory } from "@/lib/budget";
-import { LUXURY_TIER_LABELS, type LuxuryHotelTier } from "@/lib/data/luxury-hotel-brands";
+import { LUXURY_TIER_LABELS } from "@/lib/data/luxury-hotel-brands";
 import { TRIP_VARIANT_LABELS, type TripVariantType, type TransferBurden } from "@/lib/trip-idea-advisor-ai";
-import type { HotelShortlistItem, HotelShortlist } from "@/lib/trip-idea-hotel-types";
+import type { HotelShortlist, HotelShortlistItem } from "@/lib/trip-idea-hotel-types";
 import { Banner } from "@/components/Banner";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
-
-const TIER_COLORS: Record<LuxuryHotelTier, string> = {
-  standard: "var(--accent)",
-  premium: "#8B6F47",
-  ultra_luxury: "#B5624A",
-};
-const BELOW_STANDARD_COLOR = "#8A8578";
+import { HotelCard, TIER_COLORS, BELOW_STANDARD_COLOR } from "@/components/HotelCard";
 
 type BudgetBreakdown = {
   currency: string; totalMin: number | null; totalMax: number | null
   byCategory: Record<BudgetCategory, { min: number | null; max: number | null; note: string }>
 };
-
-const PRICE_LEVEL_LABELS: Record<string, string> = {
-  PRICE_LEVEL_FREE: "Kostenlos",
-  PRICE_LEVEL_INEXPENSIVE: "€",
-  PRICE_LEVEL_MODERATE: "€€",
-  PRICE_LEVEL_EXPENSIVE: "€€€",
-  PRICE_LEVEL_VERY_EXPENSIVE: "€€€€",
-};
-
-function HotelCard({ hotel }: { hotel: HotelShortlistItem }) {
-  const isUnverified = (field: string) => hotel.unverifiedFields.includes(field);
-  return (
-    <div className="rounded-xl overflow-hidden" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-      {hotel.photoName && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={`/api/places-photo/${hotel.photoName}?maxWidthPx=400`}
-          alt={hotel.name}
-          className="w-full object-cover"
-          style={{ height: "140px" }}
-        />
-      )}
-      <div className="p-4">
-        <div className="flex items-start justify-between gap-2 mb-1">
-          <div className="font-light" style={{ color: "var(--foreground)", fontSize: "0.95rem" }}>{hotel.name}</div>
-          {hotel.priceLevel && !isUnverified("priceLevel") && (
-            <span style={{ color: "var(--accent)", fontSize: "0.68rem", whiteSpace: "nowrap" }}>
-              {PRICE_LEVEL_LABELS[hotel.priceLevel] ?? hotel.priceLevel}
-            </span>
-          )}
-        </div>
-
-        <div className="flex items-center gap-1.5 mb-2 flex-wrap">
-          <span
-            style={{
-              color: hotel.tier ? TIER_COLORS[hotel.tier] : BELOW_STANDARD_COLOR,
-              fontSize: "0.6rem", letterSpacing: "0.06em", textTransform: "uppercase",
-              border: `1px solid ${(hotel.tier ? TIER_COLORS[hotel.tier] : BELOW_STANDARD_COLOR)}55`, borderRadius: "20px", padding: "2px 9px",
-            }}
-          >
-            {hotel.tier ? LUXURY_TIER_LABELS[hotel.tier] : "Unterhalb des gewünschten Niveaus"}
-          </span>
-          {hotel.tier && hotel.tierBasis === "heuristic" && (
-            <span style={{ color: "var(--muted)", fontSize: "0.6rem", fontStyle: "italic" }}>
-              (keine offizielle Sterne-Klassifizierung — Einordnung aus Bewertung/Preisniveau)
-            </span>
-          )}
-        </div>
-
-        <p className="mb-3" style={{ color: "var(--muted)", fontSize: "0.68rem" }}>{hotel.address}</p>
-
-        <div className="flex flex-wrap items-center gap-3 mb-3" style={{ fontSize: "0.72rem", color: "var(--muted)" }}>
-          {hotel.rating !== null && !isUnverified("rating") ? (
-            <span className="flex items-center gap-1">
-              <Star size={11} strokeWidth={1.6} fill="var(--accent)" style={{ color: "var(--accent)" }} />
-              {hotel.rating} ({hotel.reviewCount ?? 0})
-            </span>
-          ) : (
-            <span>Bewertung nicht verifiziert</span>
-          )}
-          {hotel.transferMinutes !== null ? (
-            <span>{hotel.transferMinutes} Min Transfer</span>
-          ) : (
-            <span>Transferzeit nicht verifiziert</span>
-          )}
-        </div>
-
-        <p className="mb-2 italic leading-relaxed" style={{ color: "var(--foreground)", fontSize: "0.78rem" }}>{hotel.familyFitReasoning}</p>
-        <p className="mb-2" style={{ color: "var(--muted)", fontSize: "0.72rem" }}>{hotel.styleImpression} · {hotel.bestFor}</p>
-        {hotel.caveats && (
-          <p className="mb-3" style={{ color: "#B5624A", fontSize: "0.7rem" }}>{hotel.caveats}</p>
-        )}
-
-        {hotel.websiteUri && (
-          <a
-            href={hotel.websiteUri}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1"
-            style={{ color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.04em", textDecoration: "none" }}
-          >
-            Hotelwebsite öffnen <ExternalLink size={11} strokeWidth={1.6} />
-          </a>
-        )}
-      </div>
-    </div>
-  );
-}
 
 /** Gespeicherte Form von `trip_ideas.variants` -- siehe generateTripVariants in lib/actions/trip-idea-advisor.ts (recommendedHotel ist dort bereits gegen die echte Shortlist abgeglichen, nie ein erfundener Fakt). */
 type StoredTripVariant = {
@@ -382,7 +288,7 @@ export default async function TripIdeaDetailPage({
                 </div>
               )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3">
-                {hotelShortlist.items.map((h) => <HotelCard key={h.placeId} hotel={h} />)}
+                {hotelShortlist.items.map((h) => <HotelCard key={h.placeId} hotel={h} destination={idea.destination} />)}
               </div>
               <p style={{ color: "var(--muted)", fontSize: "0.65rem", fontStyle: "italic" }}>
                 Auswahl auf Basis echter Google-Places-Daten, keine Live-Verfügbarkeit oder Livepreisprüfung.

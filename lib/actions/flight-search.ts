@@ -9,6 +9,8 @@ import { ProviderConfigError } from '@/lib/providers/provider-errors'
 import { FlightScoringService } from '@/lib/flight-scoring-service'
 import { generateFlightReasoning } from '@/lib/flight-advisor-ai'
 import { readDateGroupFromFormData } from '@/lib/documents'
+import { isoToday, isBeforeIso } from '@/lib/date-utils'
+import { generateFlexibleDateCombinations } from '@/lib/flight-date-combinations'
 import type { FlightSearchOption, FlightSearchResult } from '@/lib/flight-types'
 import type { Json } from '@/lib/supabase/types'
 
@@ -200,7 +202,12 @@ export async function getOrSearchFlightOptions(params: {
 function buildFlightsPageUrl(params: {
   destination?: string | null; departureCity?: string | null
   departureDate?: string | null; returnDate?: string | null
-  travelerIds?: string[]; ideaId?: string | null; searchKey?: string | null; error?: string | null
+  travelerIds?: string[]; ideaId?: string | null; searchKey?: string | null
+  mode?: 'fixed' | 'flexible'
+  windowStartDate?: string | null; windowEndDate?: string | null
+  nightsMin?: string | null; nightsMax?: string | null
+  batch?: number | null; searchKeys?: string[] | null
+  error?: string | null
 }): string {
   const usp = new URLSearchParams()
   if (params.destination) usp.set('destination', params.destination)
@@ -210,6 +217,13 @@ function buildFlightsPageUrl(params: {
   if (params.travelerIds && params.travelerIds.length > 0) usp.set('traveler_ids', params.travelerIds.join(','))
   if (params.ideaId) usp.set('idea_id', params.ideaId)
   if (params.searchKey) usp.set('search_key', params.searchKey)
+  if (params.mode) usp.set('mode', params.mode)
+  if (params.windowStartDate) usp.set('window_start_date', params.windowStartDate)
+  if (params.windowEndDate) usp.set('window_end_date', params.windowEndDate)
+  if (params.nightsMin) usp.set('nights_min', params.nightsMin)
+  if (params.nightsMax) usp.set('nights_max', params.nightsMax)
+  if (params.batch != null) usp.set('batch', String(params.batch))
+  if (params.searchKeys && params.searchKeys.length > 0) usp.set('search_keys', params.searchKeys.join(','))
   if (params.error) usp.set('error', params.error)
   return `/discover/flights?${usp.toString()}`
 }
@@ -227,13 +241,42 @@ export async function searchFlightsStandalone(formData: FormData) {
   const departureCity = String(formData.get('departure_city') ?? '').trim()
   const travelerIds = formData.getAll('traveler_ids').map(String)
   const ideaId = String(formData.get('idea_id') ?? '').trim() || null
+  const searchMode: 'fixed' | 'flexible' = String(formData.get('search_mode') ?? 'fixed') === 'flexible' ? 'flexible' : 'fixed'
 
-  const redirectBack = (error: string, departureDate?: string | null, returnDate?: string | null): never => {
-    redirect(buildFlightsPageUrl({ destination, departureCity, departureDate, returnDate, travelerIds, ideaId, error }))
+  const redirectBack = (error: string, extra?: Partial<Parameters<typeof buildFlightsPageUrl>[0]>): never => {
+    redirect(buildFlightsPageUrl({ destination, departureCity, travelerIds, ideaId, mode: searchMode, error, ...extra }))
   }
 
   if (!destination) redirectBack('Bitte ein Reiseziel angeben.')
   if (!departureCity) redirectBack('Bitte einen Abflugort angeben.')
+
+  const { id: familyId } = await getFamily()
+  const dnaSummary = await buildFamilyDnaSummary(familyId)
+  const selectedPersons = travelerIds.length > 0
+    ? dnaSummary.persons.filter((p) => travelerIds.includes(p.id))
+    : dnaSummary.persons
+
+  let originResolved: { code: string; name: string } | null = null
+  let destResolved: { code: string; name: string } | null = null
+  try {
+    originResolved = await resolveAirportCode(departureCity)
+    destResolved = await resolveAirportCode(destination)
+  } catch (e) {
+    const message = e instanceof ProviderConfigError
+      ? 'Die Flugsuche ist aktuell nicht konfiguriert -- bitte Support informieren.'
+      : 'Die Flugsuche ist gerade fehlgeschlagen -- bitte in Kürze erneut versuchen.'
+    redirectBack(message)
+  }
+  if (!originResolved) redirectBack(`Kein Flughafen für "${departureCity}" gefunden -- bitte präzisieren.`)
+  if (!destResolved) redirectBack(`Kein Zielflughafen für "${destination}" gefunden -- bitte Ziel präzisieren.`)
+
+  if (searchMode === 'flexible') {
+    await searchFlightsFlexible(formData, {
+      familyId, dnaSummary, selectedPersons, destination, departureCity, travelerIds, ideaId, redirectBack,
+      originCode: originResolved!.code, destinationCode: destResolved!.code,
+    })
+    return
+  }
 
   let departureDate: string | null = null
   let returnDate: string | null = null
@@ -245,29 +288,14 @@ export async function searchFlightsStandalone(formData: FormData) {
   }
   if (!departureDate) redirectBack('Bitte ein Hinflugdatum angeben.')
 
-  const { id: familyId } = await getFamily()
-  const dnaSummary = await buildFamilyDnaSummary(familyId)
-  const selectedPersons = travelerIds.length > 0
-    ? dnaSummary.persons.filter((p) => travelerIds.includes(p.id))
-    : dnaSummary.persons
+  const today = isoToday()
+  if (isBeforeIso(departureDate!, today)) redirectBack('Das Hinflugdatum darf nicht in der Vergangenheit liegen.')
+  if (returnDate && isBeforeIso(returnDate, departureDate!))
+    redirectBack('Der Rückflug darf nicht vor dem Hinflug liegen.', { departureDate })
 
   const passengerAges: Array<number | null> = selectedPersons.length > 0
     ? selectedPersons.map((p) => ageAtDate(p.birth_date, departureDate!))
     : [null]
-
-  let originResolved: { code: string; name: string } | null = null
-  let destResolved: { code: string; name: string } | null = null
-  try {
-    originResolved = await resolveAirportCode(departureCity)
-    destResolved = await resolveAirportCode(destination)
-  } catch (e) {
-    const message = e instanceof ProviderConfigError
-      ? 'Die Flugsuche ist aktuell nicht konfiguriert -- bitte Support informieren.'
-      : 'Die Flugsuche ist gerade fehlgeschlagen -- bitte in Kürze erneut versuchen.'
-    redirectBack(message, departureDate, returnDate)
-  }
-  if (!originResolved) redirectBack(`Kein Flughafen für "${departureCity}" gefunden -- bitte präzisieren.`, departureDate, returnDate)
-  if (!destResolved) redirectBack(`Kein Zielflughafen für "${destination}" gefunden -- bitte Ziel präzisieren.`, departureDate, returnDate)
 
   const safeDepartureDate = departureDate!
 
@@ -291,15 +319,15 @@ export async function searchFlightsStandalone(formData: FormData) {
     const message = e instanceof ProviderConfigError
       ? 'Die Flugsuche ist aktuell nicht konfiguriert -- bitte Support informieren.'
       : 'Die Flugsuche ist gerade fehlgeschlagen -- bitte in Kürze erneut versuchen.'
-    redirectBack(message, departureDate, returnDate)
+    redirectBack(message, { departureDate, returnDate })
   }
 
   if (outcome.status === 'limit_reached')
-    redirectBack('Monatliches Such-Limit erreicht -- weitere Suchen sind erst im nächsten Monat möglich.', departureDate, returnDate)
+    redirectBack('Monatliches Such-Limit erreicht -- weitere Suchen sind erst im nächsten Monat möglich.', { departureDate, returnDate })
   if (outcome.status === 'already_in_progress')
-    redirectBack('Für diese Suche läuft bereits eine Anfrage -- bitte kurz warten und erneut versuchen.', departureDate, returnDate)
+    redirectBack('Für diese Suche läuft bereits eine Anfrage -- bitte kurz warten und erneut versuchen.', { departureDate, returnDate })
   if (outcome.status === 'no_results')
-    redirectBack('Keine Flüge für diese Route/Daten gefunden.', departureDate, returnDate)
+    redirectBack('Keine Flüge für diese Route/Daten gefunden.', { departureDate, returnDate })
 
   const okOutcome = outcome as Extract<FlightSearchOutcome, { status: 'ok' }>
 
@@ -313,6 +341,92 @@ export async function searchFlightsStandalone(formData: FormData) {
   }
 
   redirect(buildFlightsPageUrl({
-    destination, departureCity, departureDate, returnDate, travelerIds, ideaId, searchKey: okOutcome.searchKey,
+    destination, departureCity, departureDate, returnDate, travelerIds, ideaId, searchKey: okOutcome.searchKey, mode: 'fixed',
+  }))
+}
+
+/**
+ * Flexible Suche: erzeugt aus Reisefenster + Nächte-Bereich eine gedeckelte
+ * Anzahl Datumskombinationen (`lib/flight-date-combinations.ts`, deterministisch,
+ * kein zweiter Suchalgorithmus) und ruft für jede dieselbe, unveränderte
+ * `getOrSearchFlightOptions`-Engine auf wie der feste Modus -- Cache-Treffer
+ * lösen dabei keinen neuen Duffel-Call aus. Bricht kontrolliert ab, sobald
+ * das monatliche Limit erreicht wird, statt abzustürzen.
+ */
+async function searchFlightsFlexible(
+  formData: FormData,
+  ctx: {
+    familyId: string
+    dnaSummary: Awaited<ReturnType<typeof buildFamilyDnaSummary>>
+    selectedPersons: Awaited<ReturnType<typeof buildFamilyDnaSummary>>['persons']
+    destination: string; departureCity: string; travelerIds: string[]; ideaId: string | null
+    originCode: string; destinationCode: string
+    redirectBack: (error: string, extra?: Partial<Parameters<typeof buildFlightsPageUrl>[0]>) => never
+  },
+): Promise<void> {
+  const { familyId, dnaSummary, selectedPersons, destination, departureCity, travelerIds, ideaId, originCode, destinationCode, redirectBack } = ctx
+
+  let windowStart: string | null = null
+  let windowEnd: string | null = null
+  try {
+    windowStart = readDateGroupFromFormData(formData, 'window_start_date', 'Frühester Abflug')
+    windowEnd = readDateGroupFromFormData(formData, 'window_end_date', 'Späteste Rückkehr')
+  } catch (e) {
+    redirectBack(e instanceof Error ? e.message : 'Ungültiges Datum')
+  }
+  if (!windowStart) redirectBack('Bitte ein frühestes Abflugdatum angeben.')
+  if (!windowEnd) redirectBack('Bitte ein spätestes Rückkehrdatum angeben.')
+
+  const today = isoToday()
+  if (isBeforeIso(windowStart!, today)) redirectBack('Das Reisefenster darf nicht in der Vergangenheit beginnen.')
+  if (isBeforeIso(windowEnd!, windowStart!))
+    redirectBack('Die späteste Rückkehr darf nicht vor dem frühesten Abflug liegen.', { windowStartDate: windowStart, mode: 'flexible' })
+
+  const nightsMin = Number(formData.get('nights_min') ?? '')
+  const nightsMax = Number(formData.get('nights_max') ?? '')
+  const flexibleExtra = { windowStartDate: windowStart!, windowEndDate: windowEnd!, nightsMin: String(nightsMin || ''), nightsMax: String(nightsMax || ''), mode: 'flexible' as const }
+  if (!Number.isFinite(nightsMin) || nightsMin < 1) redirectBack('Bitte eine gültige Nächtezahl (ab) angeben.', flexibleExtra)
+  if (!Number.isFinite(nightsMax) || nightsMax < nightsMin) redirectBack('Die maximale Nächtezahl muss mindestens der minimalen entsprechen.', flexibleExtra)
+
+  const batch = Math.max(0, Number(formData.get('batch') ?? '0') || 0)
+  const existingSearchKeys = String(formData.get('existing_search_keys') ?? '').split(',').map((k) => k.trim()).filter(Boolean)
+
+  const combinations = generateFlexibleDateCombinations(windowStart!, windowEnd!, nightsMin, nightsMax, batch)
+  if (combinations.length === 0)
+    redirectBack('Für dieses Reisefenster und diese Nächtezahl gibt es keine weiteren Datumskombinationen.', flexibleExtra)
+
+  const newSearchKeys: string[] = []
+  let limitReached = false
+  for (const combo of combinations) {
+    const passengerAges: Array<number | null> = selectedPersons.length > 0
+      ? selectedPersons.map((p) => ageAtDate(p.birth_date, combo.departureDate))
+      : [null]
+    const dnaText = formatFamilyDnaForPrompt({ ...dnaSummary, persons: selectedPersons }, combo.departureDate)
+
+    let comboOutcome: FlightSearchOutcome
+    try {
+      comboOutcome = await getOrSearchFlightOptions({
+        familyId, originCodes: [originCode], destinationCode,
+        departureDate: combo.departureDate, returnDate: combo.returnDate,
+        passengerAges, maxStops: null, familyDnaText: dnaText, stopoverPreference: null,
+      })
+    } catch {
+      continue // einzelne fehlgeschlagene Kombination überspringen, Rest der flexiblen Suche fortsetzen
+    }
+
+    if (comboOutcome.status === 'ok') newSearchKeys.push(comboOutcome.searchKey)
+    else if (comboOutcome.status === 'limit_reached') { limitReached = true; break }
+    // 'already_in_progress'/'no_results' für diese eine Kombination: überspringen, nicht die ganze Suche abbrechen
+  }
+
+  const allSearchKeys = Array.from(new Set([...existingSearchKeys, ...newSearchKeys]))
+  if (allSearchKeys.length === 0)
+    redirectBack('Keine Flüge für die geprüften Datumsvarianten gefunden.', flexibleExtra)
+
+  redirect(buildFlightsPageUrl({
+    destination, departureCity, travelerIds, ideaId, mode: 'flexible',
+    windowStartDate: windowStart, windowEndDate: windowEnd, nightsMin: String(nightsMin), nightsMax: String(nightsMax),
+    batch, searchKeys: allSearchKeys,
+    error: limitReached ? `${newSearchKeys.length} von ${combinations.length} Datumsvarianten geprüft, Rest übersprungen (monatliches Such-Limit erreicht).` : undefined,
   }))
 }

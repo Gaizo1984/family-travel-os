@@ -113,7 +113,7 @@ export default async function DiscoverPage() {
         <section className="mb-12">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <DiscoverTile href="/discover/flights" icon={Plane} title="Flugvergleich" subtitle="Beste Flüge finden." />
-            <DiscoverTile href="/discover/hotels" icon={Hotel} title="Hotelvergleich" subtitle="Die besten Hotels vergleichen." />
+            <DiscoverTile href="/hotels" icon={Hotel} title="Hotelvergleich" subtitle="Die besten Hotels vergleichen." />
             <DiscoverTile href="/plan" icon={Sparkles} title="Reiseidee vorschlagen" subtitle="LUMI schlägt passende Reiseideen vor." />
             <DiscoverTile href="/discover/ideas" icon={Heart} title="Gespeicherte Ideen" subtitle="Alle gemerkten Hotels und Reiseideen." />
           </div>

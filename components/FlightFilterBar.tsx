@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { FlightCard } from '@/components/FlightCard'
+import { FlightCard, type FlightDateContext } from '@/components/FlightCard'
 import type { FlightSearchOption } from '@/lib/flight-types'
 
 const CHIP_STYLE = (active: boolean): React.CSSProperties => ({
@@ -19,13 +19,15 @@ const CHIP_STYLE = (active: boolean): React.CSSProperties => ({
  * geladenen Liste.
  */
 export function FlightFilterBar({
-  options, isSandboxData, providerName, searchedAt,
+  options, isSandboxData, providerName, searchedAt, dateContextByOptionId,
 }: {
   options: FlightSearchOption[]
   isSandboxData: boolean
   /** §"Kein eigener Test-/Live-Codepfad in der UI": Anzeigename kommt providerneutral von außen -- keine Duffel-Sonderlogik in dieser Komponente. */
   providerName: string
   searchedAt: string
+  /** Nur bei flexibler Suche gesetzt: zeigt je Karte, aus welcher Datumskombination sie stammt. */
+  dateContextByOptionId?: Record<string, FlightDateContext>
 }) {
   const [directOnly, setDirectOnly] = useState(false)
   const [maxOneStop, setMaxOneStop] = useState(false)
@@ -90,7 +92,7 @@ export function FlightFilterBar({
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {filtered.map((o) => <FlightCard key={o.id} option={o} searchedAt={searchedAt} />)}
+          {filtered.map((o) => <FlightCard key={o.id} option={o} searchedAt={searchedAt} dateContext={dateContextByOptionId?.[o.id]} />)}
         </div>
       )}
 

@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { GERMAN_MONTHS, splitIsoDate } from "@/lib/documents";
+import { isoToday, isoMonthOffset } from "@/lib/date-utils";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -20,15 +21,32 @@ const QUICK_ACTION_STYLE: React.CSSProperties = {
 
 export type DateParts = { day: string; month: string; year: string };
 
-function isoToday(offsetDays = 0): string {
-  const d = new Date();
-  d.setDate(d.getDate() + offsetDays);
-  return d.toISOString().slice(0, 10);
+function daysInMonth(year: number, month: number): number {
+  return new Date(year, month, 0).getDate();
 }
-function isoMonthOffset(offsetMonths: number): string {
-  const d = new Date();
-  d.setMonth(d.getMonth() + offsetMonths);
-  return d.toISOString().slice(0, 10);
+
+/**
+ * Untere/obere Schranke für Jahr/Monat/Tag aus `minIso`/`maxIso` ableiten,
+ * abhängig von den bereits gewählten anderen Teilen (Jahr schränkt Monat
+ * ein, Jahr+Monat schränken Tag ein) — Optionen außerhalb bleiben sichtbar,
+ * aber `disabled`, statt ausgeblendet zu werden.
+ */
+function computeBounds(parts: DateParts, minIso?: string | null, maxIso?: string | null) {
+  const min = minIso ? splitIsoDate(minIso) : null;
+  const max = maxIso ? splitIsoDate(maxIso) : null;
+  const minYear = min ? Number(min.year) : undefined;
+  const maxYear = max ? Number(max.year) : undefined;
+
+  const selectedYear = parts.year ? Number(parts.year) : undefined;
+  const monthMin = min && selectedYear === minYear ? Number(min.month) : 1;
+  const monthMax = max && selectedYear === maxYear ? Number(max.month) : 12;
+
+  const selectedMonth = parts.month ? Number(parts.month) : undefined;
+  const dayMin = min && selectedYear === minYear && selectedMonth === monthMin ? Number(min.day) : 1;
+  const lastDayOfSelectedMonth = selectedYear && selectedMonth ? daysInMonth(selectedYear, selectedMonth) : 31;
+  const dayMax = max && selectedYear === maxYear && selectedMonth === monthMax ? Number(max.day) : lastDayOfSelectedMonth;
+
+  return { minYear, maxYear, monthMin, monthMax, dayMin, dayMax: Math.min(dayMax, lastDayOfSelectedMonth) };
 }
 
 /**
@@ -57,6 +75,8 @@ export function DateSelectFields({
   defaultIso,
   range,
   quickActions,
+  minIso,
+  maxIso,
   onChange,
 }: {
   label: string;
@@ -65,12 +85,34 @@ export function DateSelectFields({
   range: { minYear: number; maxYear: number };
   /** Sinnvoll für zukunftsgerichtete Felder (Reise-/Etappendatum), nicht für Geburtsdaten. */
   quickActions?: boolean;
+  /** Früheste/späteste wählbare ISO-Datum (z. B. heute, oder das gewählte Hinflugdatum) — Optionen außerhalb bleiben sichtbar, aber deaktiviert. */
+  minIso?: string | null;
+  maxIso?: string | null;
   onChange?: (iso: string | null, parts: DateParts) => void;
 }) {
   const [parts, setParts] = useState<DateParts>(() => splitIsoDate(defaultIso));
 
   const years: number[] = [];
   for (let y = range.maxYear; y >= range.minYear; y--) years.push(y);
+
+  const bounds = computeBounds(parts, minIso, maxIso);
+
+  // Wird die aktuelle Auswahl durch eine neue minIso/maxIso-Schranke ungültig
+  // (z. B. Rückflugdatum liegt jetzt vor dem geänderten Hinflugdatum), leeren
+  // wir die Auswahl statt sie stillschweigend als deaktivierte Option stehen
+  // zu lassen.
+  useEffect(() => {
+    if (!parts.day || !parts.month || !parts.year) return;
+    const iso = `${parts.year}-${parts.month}-${parts.day}`;
+    const tooEarly = minIso ? iso < minIso : false;
+    const tooLate = maxIso ? iso > maxIso : false;
+    if (tooEarly || tooLate) {
+      const cleared: DateParts = { day: "", month: "", year: "" };
+      setParts(cleared);
+      onChange?.(null, cleared);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [minIso, maxIso]);
 
   function update(next: Partial<DateParts>) {
     const merged = { ...parts, ...next };
@@ -100,7 +142,7 @@ export function DateSelectFields({
         >
           <option value="">Tag</option>
           {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
-            <option key={d} value={String(d).padStart(2, "0")}>{d}</option>
+            <option key={d} value={String(d).padStart(2, "0")} disabled={d < bounds.dayMin || d > bounds.dayMax}>{d}</option>
           ))}
         </select>
         <select
@@ -109,9 +151,12 @@ export function DateSelectFields({
           style={FIELD_STYLE} aria-label={`${label} – Monat`}
         >
           <option value="">Monat</option>
-          {GERMAN_MONTHS.map((m, idx) => (
-            <option key={m} value={String(idx + 1).padStart(2, "0")}>{m}</option>
-          ))}
+          {GERMAN_MONTHS.map((m, idx) => {
+            const monthNum = idx + 1;
+            return (
+              <option key={m} value={String(monthNum).padStart(2, "0")} disabled={monthNum < bounds.monthMin || monthNum > bounds.monthMax}>{m}</option>
+            );
+          })}
         </select>
         <select
           name={`${namePrefix}_year`} value={parts.year}
@@ -120,13 +165,12 @@ export function DateSelectFields({
         >
           <option value="">Jahr</option>
           {years.map((y) => (
-            <option key={y} value={String(y)}>{y}</option>
+            <option key={y} value={String(y)} disabled={(bounds.minYear !== undefined && y < bounds.minYear) || (bounds.maxYear !== undefined && y > bounds.maxYear)}>{y}</option>
           ))}
         </select>
       </div>
       {quickActions && (
         <div className="flex flex-wrap gap-2 mt-2">
-          <button type="button" onClick={() => applyQuickIso(isoToday(0))} style={QUICK_ACTION_STYLE}>Heute</button>
           <button type="button" onClick={() => applyQuickIso(isoToday(1))} style={QUICK_ACTION_STYLE}>Morgen</button>
           <button type="button" onClick={() => applyQuickIso(isoToday(7))} style={QUICK_ACTION_STYLE}>+1 Woche</button>
           <button type="button" onClick={() => applyQuickIso(isoMonthOffset(1))} style={QUICK_ACTION_STYLE}>+1 Monat</button>

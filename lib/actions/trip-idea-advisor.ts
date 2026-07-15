@@ -7,36 +7,8 @@ import { computeRouteMatrix } from '@/lib/providers/routes-provider'
 import { ProviderConfigError } from '@/lib/providers/provider-errors'
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt } from '@/lib/family-dna'
 import { selectHotelShortlist, generateBudgetBreakdown, generateTripVariants as generateTripVariantsAi, type HotelCandidateFact } from '@/lib/trip-idea-advisor-ai'
-import { classifyHotelBrand, type LuxuryHotelTier } from '@/lib/data/luxury-hotel-brands'
+import { classifyAndQualify } from '@/lib/hotel-qualification'
 import type { HotelShortlist } from '@/lib/trip-idea-hotel-types'
-
-/**
- * §"Hotel-Shortlist qualitativ neu kalibrieren": Google Places liefert keine
- * offizielle Sterne-Klassifizierung -- Mindeststandard ist daher entweder
- * eine verifizierte internationale Marke (siehe luxury-hotel-brands.ts) ODER,
- * für unabhängige Resorts ohne Markenzugehörigkeit, eine belastbare
- * Fakten-Kombination aus hoher Bewertung + ausreichend Rezensionen + hohem
- * Preisniveau. Rating oder Preis ALLEIN reichen bewusst nicht (ein günstiges,
- * gut bewertetes Gästehaus soll nicht durchrutschen) -- beides zusammen muss
- * stimmen. Erfüllt ein Kandidat keines von beidem, wird er VOR der KI-Auswahl
- * konsequent ausgeschlossen, nicht erst danach schöngeredet.
- */
-const QUALIFYING_MIN_RATING = 4.5
-const QUALIFYING_MIN_REVIEWS = 100
-const QUALIFYING_PRICE_LEVELS = new Set(['PRICE_LEVEL_EXPENSIVE', 'PRICE_LEVEL_VERY_EXPENSIVE'])
-
-type HotelQualification = { qualifies: boolean; tier: LuxuryHotelTier; tierBasis: 'brand' | 'heuristic' }
-
-function classifyAndQualify(hotel: LodgingResult): HotelQualification {
-  const brandTier = classifyHotelBrand(hotel.name)
-  if (brandTier) return { qualifies: true, tier: brandTier, tierBasis: 'brand' }
-
-  const highRating = hotel.rating !== null && hotel.rating >= QUALIFYING_MIN_RATING && (hotel.userRatingCount ?? 0) >= QUALIFYING_MIN_REVIEWS
-  const highPrice = hotel.priceLevel !== null && QUALIFYING_PRICE_LEVELS.has(hotel.priceLevel)
-  if (highRating && highPrice) return { qualifies: true, tier: 'standard', tierBasis: 'heuristic' }
-
-  return { qualifies: false, tier: 'standard', tierBasis: 'heuristic' }
-}
 
 type IdeaRow = {
   id: string

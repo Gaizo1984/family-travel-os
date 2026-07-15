@@ -1,6 +1,9 @@
-import { Star, Wallet, Zap, PlaneTakeoff, Luggage, Check, X as XIcon, HelpCircle } from "lucide-react";
+import { Star, Wallet, Zap, PlaneTakeoff, Luggage, Check, X as XIcon, HelpCircle, CalendarRange } from "lucide-react";
 import { FlightScoringService } from "@/lib/flight-scoring-service";
+import { formatDateDE } from "@/lib/demo-data";
 import type { FlightSearchOption, FlightItinerary, FlightBadge, CheckedBaggageStatus, BaggageEntryStatus } from "@/lib/flight-types";
+
+export type FlightDateContext = { departureDate: string; returnDate: string | null; nights: number | null };
 
 const BADGE_LABELS: Record<FlightBadge, string> = {
   lumi_empfehlung: "LUMI Empfehlung",
@@ -103,11 +106,19 @@ function BaggageDetail({ option }: { option: FlightSearchOption }) {
   );
 }
 
-export function FlightCard({ option, searchedAt }: { option: FlightSearchOption; searchedAt: string }) {
+export function FlightCard({ option, searchedAt, dateContext }: { option: FlightSearchOption; searchedAt: string; dateContext?: FlightDateContext }) {
   const isExpired = FlightScoringService.isExpired(option);
 
   return (
     <div className="rounded-xl p-5" style={{ background: "var(--surface)", border: "1px solid var(--border)", opacity: isExpired ? 0.55 : 1 }}>
+      {dateContext && (
+        <div className="flex items-center gap-1.5 mb-3" style={{ color: "var(--accent)", fontSize: "0.68rem" }}>
+          <CalendarRange size={12} strokeWidth={1.6} />
+          {formatDateDE(dateContext.departureDate)}
+          {dateContext.returnDate ? ` – ${formatDateDE(dateContext.returnDate)}` : ""}
+          {dateContext.nights ? ` · ${dateContext.nights} ${dateContext.nights === 1 ? "Nacht" : "Nächte"}` : ""}
+        </div>
+      )}
       {option.badges.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-3">
           {option.badges.map((badge) => {

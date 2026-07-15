@@ -855,6 +855,26 @@ export interface Database {
           { foreignKeyName: "flight_search_cache_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }
         ]
       }
+      hotel_search_cache: {
+        Row: {
+          id: string; family_id: string; search_key: string; destination: string
+          is_below_standard: boolean; results: Json
+          created_at: string; updated_at: string
+        }
+        Insert: {
+          id?: string; family_id: string; search_key: string; destination: string
+          is_below_standard?: boolean; results?: Json
+          created_at?: string; updated_at?: string
+        }
+        Update: {
+          id?: string; family_id?: string; search_key?: string; destination?: string
+          is_below_standard?: boolean; results?: Json
+          created_at?: string; updated_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "hotel_search_cache_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }
+        ]
+      }
       flight_search_usage: {
         Row: {
           id: string; family_id: string; month_key: string; search_count: number; updated_at: string
