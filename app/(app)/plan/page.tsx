@@ -1,14 +1,14 @@
 import Link from "next/link";
-import { ArrowRight, Users, Clock, CalendarDays, Plane } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { createTrip } from "@/lib/actions/trips";
 import { generateTripIdeas } from "@/lib/actions/trip-idea-generation";
 import { COMPASS_CATEGORY_LABELS } from "@/lib/family-dna";
 import { Banner } from "@/components/Banner";
-import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
 import { DateSelectFields } from "@/components/DateSelectFields";
 import { getDateFieldRange } from "@/lib/documents";
+import { TripBriefingWizard } from "@/components/TripBriefingWizard";
 
 // ── Verified Unsplash photos ──────────────────────────────────────────────────
 
@@ -136,7 +136,7 @@ export default async function PlanPage({
   const supabase = await createClient();
   const { data: persons } = await supabase
     .from("persons")
-    .select("id, name, initials, color")
+    .select("id, name, initials, color, birth_date, is_minor")
     .order("name");
 
   const { id: familyId } = await getFamily();
@@ -187,117 +187,36 @@ export default async function PlanPage({
           </p>
         </div>
 
-        {/* ── 2. Freitext + optionale Eckdaten → echter KI-Flow ── */}
+        {/* ── 2. Freitext + strukturiertes Reisebriefing (Wizard) → echter KI-Flow ── */}
         <section className="mb-16">
-          <form action={generateTripIdeas}>
+          {error && (
+            <Banner variant="error" className="mb-4 px-4 py-3 rounded-lg">
+              {error}
+            </Banner>
+          )}
+          <TripBriefingWizard persons={persons ?? []} action={generateTripIdeas}>
             <div
-              className="rounded-xl mb-4"
+              className="rounded-xl mb-6"
               style={{ background: "var(--surface)", border: "1px solid var(--border)", overflow: "hidden" }}
             >
-              {error && (
-                <Banner variant="error" className="mx-6 mt-6 px-4 py-3 rounded-lg">
-                  {error}
-                </Banner>
-              )}
               <textarea
                 name="wish_text"
                 required
                 placeholder="Zum Beispiel: Wir möchten im Oktober etwa zwei Wochen weg. Warm, außergewöhnlich und mit genug Zeit zum Genießen. Die Kinder sollen etwas erleben, aber wir möchten keinen stressigen Rundreise-Marathon."
-                rows={7}
+                rows={5}
                 style={{
-                  width: "100%", padding: "28px 32px", background: "transparent", border: "none",
+                  width: "100%", padding: "24px 28px", background: "transparent", border: "none",
                   outline: "none", resize: "none", color: "var(--foreground)", fontSize: "0.92rem",
                   lineHeight: 1.8, fontWeight: 300, letterSpacing: "0.01em",
                 }}
               />
-              <div className="flex items-center justify-between px-6 pb-5 pt-1" style={{ borderTop: "1px solid var(--border)" }}>
+              <div className="px-6 pb-5 pt-1" style={{ borderTop: "1px solid var(--border)" }}>
                 <p style={{ color: "var(--muted)", fontSize: "0.68rem", fontStyle: "italic", letterSpacing: "0.02em" }}>
-                  Schreibt einfach so, wie ihr es mir erzählen würdet.
+                  Schreibt einfach so, wie ihr es mir erzählen würdet — die folgenden Schritte ergänzen die Eckdaten.
                 </p>
-                <SubmitButtonWithProgress
-                  label="Reiseidee entwickeln"
-                  pendingLabel="Vorschlag wird ermittelt …"
-                  style={{ flexShrink: 0 }}
-                />
               </div>
             </div>
-
-            <SectionLabel>Was wisst ihr schon? (optional)</SectionLabel>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-              <div className="p-4 rounded-xl" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-                <div className="flex items-center gap-2 mb-3">
-                  <CalendarDays size={10} strokeWidth={1.5} style={{ color: "var(--accent)" }} />
-                  <span style={{ color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.16em", textTransform: "uppercase" }}>Wann</span>
-                </div>
-                <input
-                  name="rough_timeframe" type="text" placeholder="z. B. Oktober 2028"
-                  style={{ width: "100%", background: "transparent", border: "none", outline: "none", color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 300 }}
-                />
-              </div>
-
-              <div className="p-4 rounded-xl" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-                <div className="flex items-center gap-2 mb-3">
-                  <Clock size={10} strokeWidth={1.5} style={{ color: "var(--accent)" }} />
-                  <span style={{ color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.16em", textTransform: "uppercase" }}>Wie lange</span>
-                </div>
-                <input
-                  name="duration_days" type="number" min="1" placeholder="z. B. 14 Tage"
-                  style={{ width: "100%", background: "transparent", border: "none", outline: "none", color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 300 }}
-                />
-              </div>
-
-              <div className="p-4 rounded-xl" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-                <div className="flex items-center gap-2 mb-3">
-                  <Users size={10} strokeWidth={1.5} style={{ color: "var(--accent)" }} />
-                  <span style={{ color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.16em", textTransform: "uppercase" }}>Wer reist mit</span>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  {(persons ?? []).map((p) => (
-                    <label key={p.id} style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
-                      <input type="checkbox" name="traveler_ids" value={p.id} defaultChecked style={{ accentColor: "var(--accent)", width: "12px", height: "12px", cursor: "pointer" }} />
-                      <span style={{ color: "var(--foreground)", fontSize: "0.78rem", fontWeight: 300 }}>{p.name}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className="p-4 rounded-xl" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-                <div className="flex items-center gap-2 mb-3">
-                  <Plane size={10} strokeWidth={1.5} style={{ color: "var(--accent)" }} />
-                  <span style={{ color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.16em", textTransform: "uppercase" }}>Abflug</span>
-                </div>
-                <input
-                  name="departure_city" type="text" placeholder="z. B. Frankfurt"
-                  style={{ width: "100%", background: "transparent", border: "none", outline: "none", color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 300 }}
-                />
-              </div>
-            </div>
-
-            <div className="p-4 rounded-xl" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-              <div style={{ color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: "10px" }}>
-                Budget (optional)
-              </div>
-              <div className="flex items-center gap-3 flex-wrap">
-                <input
-                  name="budget_amount" type="number" min="0" step="100" placeholder="Gesamtbudget"
-                  style={{ width: 140, padding: "8px 12px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: "6px", color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 300, outline: "none" }}
-                />
-                <select
-                  name="budget_currency" defaultValue="EUR"
-                  style={{ padding: "8px 12px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: "6px", color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 300, outline: "none" }}
-                >
-                  <option value="EUR">EUR</option>
-                  <option value="USD">USD</option>
-                  <option value="CHF">CHF</option>
-                  <option value="GBP">GBP</option>
-                </select>
-                <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
-                  <input type="checkbox" name="includes_flights" style={{ accentColor: "var(--accent)", width: "12px", height: "12px", cursor: "pointer" }} />
-                  <span style={{ color: "var(--muted)", fontSize: "0.78rem" }}>inkl. Flüge</span>
-                </label>
-              </div>
-            </div>
-          </form>
+          </TripBriefingWizard>
         </section>
 
         {/* ── 3. Inspiration Cards ── */}

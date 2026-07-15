@@ -717,16 +717,40 @@ export interface Database {
         Row: {
           id: string; family_id: string; input_text: string; clarifying_answers: Json | null
           traveler_ids: string[] | null
+          travel_date_mode: string; travel_start_date: string | null; travel_end_date: string | null
+          travel_period_text: string | null; nights_min: number | null; nights_max: number | null
+          climate_preference: string | null; trip_type_preference: string | null; rain_risk_tolerant: boolean | null
+          max_stopovers: number | null; stopover_preference: string | null
+          budget_min: number | null; budget_max: number | null
+          excluded_destinations: string[] | null; avoid_past_destinations: boolean
+          excluded_trip_types: string[] | null; excluded_climates: string[] | null
+          departure_city: string | null
           status: string; created_at: string; updated_at: string
         }
         Insert: {
           id?: string; family_id: string; input_text: string; clarifying_answers?: Json | null
           traveler_ids?: string[] | null
+          travel_date_mode?: string; travel_start_date?: string | null; travel_end_date?: string | null
+          travel_period_text?: string | null; nights_min?: number | null; nights_max?: number | null
+          climate_preference?: string | null; trip_type_preference?: string | null; rain_risk_tolerant?: boolean | null
+          max_stopovers?: number | null; stopover_preference?: string | null
+          budget_min?: number | null; budget_max?: number | null
+          excluded_destinations?: string[] | null; avoid_past_destinations?: boolean
+          excluded_trip_types?: string[] | null; excluded_climates?: string[] | null
+          departure_city?: string | null
           status?: string; created_at?: string; updated_at?: string
         }
         Update: {
           id?: string; family_id?: string; input_text?: string; clarifying_answers?: Json | null
           traveler_ids?: string[] | null
+          travel_date_mode?: string; travel_start_date?: string | null; travel_end_date?: string | null
+          travel_period_text?: string | null; nights_min?: number | null; nights_max?: number | null
+          climate_preference?: string | null; trip_type_preference?: string | null; rain_risk_tolerant?: boolean | null
+          max_stopovers?: number | null; stopover_preference?: string | null
+          budget_min?: number | null; budget_max?: number | null
+          excluded_destinations?: string[] | null; avoid_past_destinations?: boolean
+          excluded_trip_types?: string[] | null; excluded_climates?: string[] | null
+          departure_city?: string | null
           status?: string; created_at?: string; updated_at?: string
         }
         Relationships: [
@@ -742,6 +766,7 @@ export interface Database {
           includes_flights: boolean | null; is_chosen: boolean; converted_trip_id: string | null
           development_notes: string | null
           hotel_shortlist: Json | null; hotel_shortlist_updated_at: string | null
+          flight_search_key: string | null; flight_options_updated_at: string | null
           budget_breakdown: Json | null; budget_breakdown_updated_at: string | null
           variants: Json | null; variants_generated_at: string | null
           is_favorite: boolean; chosen_variant_type: string | null
@@ -755,6 +780,7 @@ export interface Database {
           includes_flights?: boolean | null; is_chosen?: boolean; converted_trip_id?: string | null
           development_notes?: string | null
           hotel_shortlist?: Json | null; hotel_shortlist_updated_at?: string | null
+          flight_search_key?: string | null; flight_options_updated_at?: string | null
           budget_breakdown?: Json | null; budget_breakdown_updated_at?: string | null
           variants?: Json | null; variants_generated_at?: string | null
           is_favorite?: boolean; chosen_variant_type?: string | null
@@ -768,6 +794,7 @@ export interface Database {
           includes_flights?: boolean | null; is_chosen?: boolean; converted_trip_id?: string | null
           development_notes?: string | null
           hotel_shortlist?: Json | null; hotel_shortlist_updated_at?: string | null
+          flight_search_key?: string | null; flight_options_updated_at?: string | null
           budget_breakdown?: Json | null; budget_breakdown_updated_at?: string | null
           variants?: Json | null; variants_generated_at?: string | null
           is_favorite?: boolean; chosen_variant_type?: string | null
@@ -794,6 +821,52 @@ export interface Database {
         }
         Relationships: [
           { foreignKeyName: "trip_idea_comparisons_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }
+        ]
+      }
+      flight_search_cache: {
+        Row: {
+          id: string; family_id: string; search_key: string
+          origin_codes: string[]; destination_code: string
+          departure_date: string; return_date: string | null
+          adults: number; children: number; infants: number
+          is_sandbox_data: boolean; results: Json
+          search_started_at: string | null
+          created_at: string; updated_at: string
+        }
+        Insert: {
+          id?: string; family_id: string; search_key: string
+          origin_codes: string[]; destination_code: string
+          departure_date: string; return_date?: string | null
+          adults: number; children?: number; infants?: number
+          is_sandbox_data?: boolean; results?: Json
+          search_started_at?: string | null
+          created_at?: string; updated_at?: string
+        }
+        Update: {
+          id?: string; family_id?: string; search_key?: string
+          origin_codes?: string[]; destination_code?: string
+          departure_date?: string; return_date?: string | null
+          adults?: number; children?: number; infants?: number
+          is_sandbox_data?: boolean; results?: Json
+          search_started_at?: string | null
+          created_at?: string; updated_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "flight_search_cache_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }
+        ]
+      }
+      flight_search_usage: {
+        Row: {
+          id: string; family_id: string; month_key: string; search_count: number; updated_at: string
+        }
+        Insert: {
+          id?: string; family_id: string; month_key: string; search_count?: number; updated_at?: string
+        }
+        Update: {
+          id?: string; family_id?: string; month_key?: string; search_count?: number; updated_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "flight_search_usage_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }
         ]
       }
     }

@@ -1,5 +1,5 @@
-type ProviderName = 'places' | 'routes'
-type RequestType = 'geocode' | 'places_search' | 'place_lookup' | 'lodging_search' | 'compute_route' | 'compute_route_matrix'
+type ProviderName = 'places' | 'routes' | 'flights'
+type RequestType = 'geocode' | 'places_search' | 'place_lookup' | 'lodging_search' | 'compute_route' | 'compute_route_matrix' | 'flight_search' | 'airport_lookup'
 
 export class ProviderConfigError extends Error {
   constructor(public provider: ProviderName, public requestType: RequestType) {
@@ -32,10 +32,17 @@ export async function extractGoogleErrorCode(res: Response): Promise<string | un
   }
 }
 
+const PROVIDER_LABELS: Record<ProviderName, string> = {
+  places: 'Places/Geocoding', routes: 'Routes', flights: 'Flugsuche',
+}
+const PROVIDER_CONFIG_ENV_HINT: Record<ProviderName, string> = {
+  places: 'GOOGLE_PLACES_API_KEY', routes: 'GOOGLE_PLACES_API_KEY', flights: 'DUFFEL_API_KEY (bzw. DUFFEL_LIVE_MODE_ENABLED für Live-Token)',
+}
+
 /** Menschenlesbare Fehlermeldung für die Developer-Testkarten (`app/(app)/mehr/developer/*`) -- dort sind technische Details erwünscht, keine Nutzeransicht. */
 export function describeProviderError(err: ProviderConfigError | ProviderRequestError): string {
   if (err instanceof ProviderConfigError) {
-    return `${err.provider === 'places' ? 'Places/Geocoding' : 'Routes'}-API: Konfiguration fehlt (GOOGLE_PLACES_API_KEY, Aufruf ${err.requestType}).`
+    return `${PROVIDER_LABELS[err.provider]}-API: Konfiguration fehlt (${PROVIDER_CONFIG_ENV_HINT[err.provider]}, Aufruf ${err.requestType}).`
   }
-  return `${err.provider === 'places' ? 'Places/Geocoding' : 'Routes'}-API-Fehler bei ${err.requestType}: HTTP ${err.httpStatus}${err.googleErrorCode ? ` (${err.googleErrorCode})` : ''}.`
+  return `${PROVIDER_LABELS[err.provider]}-API-Fehler bei ${err.requestType}: HTTP ${err.httpStatus}${err.googleErrorCode ? ` (${err.googleErrorCode})` : ''}.`
 }

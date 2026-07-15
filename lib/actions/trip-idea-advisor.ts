@@ -63,7 +63,11 @@ async function loadIdeaContext(ideaId: string) {
   if (!idea) return null
 
   const { data: session } = idea.session_id
-    ? await supabase.from('trip_idea_sessions').select('traveler_ids').eq('id', idea.session_id).maybeSingle()
+    ? await supabase
+      .from('trip_idea_sessions')
+      .select('traveler_ids, travel_start_date, climate_preference, trip_type_preference, stopover_preference, max_stopovers')
+      .eq('id', idea.session_id)
+      .maybeSingle()
     : { data: null }
 
   const dnaSummary = await buildFamilyDnaSummary(idea.family_id)
@@ -72,7 +76,19 @@ async function loadIdeaContext(ideaId: string) {
     ? dnaSummary.persons.filter((p) => travelerIds.includes(p.id))
     : dnaSummary.persons
 
-  return { supabase, idea: idea as unknown as IdeaRow, dnaSummary, selectedPersons }
+  // §"Reisebriefing": echtes Reisedatum ersetzt das bisher hartkodierte
+  // "heute" für die Altersberechnung, sofern die Session eines hinterlegt hat
+  // (nur bei travel_date_mode='exact') -- alte Sessions ohne dieses Feld
+  // fallen kontrolliert auf "heute" zurück, wie zuvor.
+  const effectiveDate = session?.travel_start_date ?? new Date().toISOString().slice(0, 10)
+
+  return {
+    supabase, idea: idea as unknown as IdeaRow, dnaSummary, selectedPersons, effectiveDate,
+    climatePreference: (session?.climate_preference as string | null) ?? null,
+    tripTypePreference: (session?.trip_type_preference as string | null) ?? null,
+    stopoverPreference: (session?.stopover_preference as string | null) ?? null,
+    maxStopovers: (session?.max_stopovers as number | null) ?? null,
+  }
 }
 
 /**
@@ -89,7 +105,7 @@ export async function generateHotelShortlist(formData: FormData) {
 
   const ctx = await loadIdeaContext(ideaId)
   if (!ctx) redirect(returnTo)
-  const { supabase, idea, dnaSummary, selectedPersons } = ctx
+  const { supabase, idea, dnaSummary, selectedPersons, effectiveDate } = ctx
 
   let destGeo: Awaited<ReturnType<typeof geocodeLocation>>
   try {
@@ -177,7 +193,7 @@ export async function generateHotelShortlist(formData: FormData) {
     tier: belowStandardMode ? null : qualificationByPlaceId.get(r.candidate.id)!.tier,
   }))
 
-  const dnaText = formatFamilyDnaForPrompt({ ...dnaSummary, persons: selectedPersons }, new Date().toISOString().slice(0, 10))
+  const dnaText = formatFamilyDnaForPrompt({ ...dnaSummary, persons: selectedPersons }, effectiveDate)
   const picks = await selectHotelShortlist({ destination: idea.destination, familyDnaText: dnaText, candidates: candidateFacts, belowStandardMode })
 
   if (!picks || picks.length === 0)
@@ -257,9 +273,9 @@ export async function estimateTripIdeaBudget(formData: FormData) {
 
   const ctx = await loadIdeaContext(ideaId)
   if (!ctx) redirect(returnTo)
-  const { supabase, idea, dnaSummary, selectedPersons } = ctx
+  const { supabase, idea, dnaSummary, selectedPersons, effectiveDate } = ctx
 
-  const dnaText = formatFamilyDnaForPrompt({ ...dnaSummary, persons: selectedPersons }, new Date().toISOString().slice(0, 10))
+  const dnaText = formatFamilyDnaForPrompt({ ...dnaSummary, persons: selectedPersons }, effectiveDate)
   const membersText = selectedPersons.length > 0 ? selectedPersons.map((p) => p.name).join(', ') : 'keine Reisenden hinterlegt'
 
   const estimate = await generateBudgetBreakdown({
@@ -300,9 +316,9 @@ export async function generateTripVariants(formData: FormData) {
 
   const ctx = await loadIdeaContext(ideaId)
   if (!ctx) redirect(returnTo)
-  const { supabase, idea, dnaSummary, selectedPersons } = ctx
+  const { supabase, idea, dnaSummary, selectedPersons, effectiveDate, climatePreference, tripTypePreference, stopoverPreference, maxStopovers } = ctx
 
-  const dnaText = formatFamilyDnaForPrompt({ ...dnaSummary, persons: selectedPersons }, new Date().toISOString().slice(0, 10))
+  const dnaText = formatFamilyDnaForPrompt({ ...dnaSummary, persons: selectedPersons }, effectiveDate)
 
   const shortlistItems = idea.hotel_shortlist?.items ?? []
   // §"Wenn die Shortlist keine sinnvolle Differenzierung ermöglicht": ab 2
@@ -323,6 +339,14 @@ export async function generateTripVariants(formData: FormData) {
     budgetCurrency: idea.budget_currency,
     familyDnaText: dnaText,
     hotelCandidates,
+    // §"Reisebriefing": aus dem Wizard bekannte Präferenzen steuern die
+    // Varianten-Generierung, statt der KI die Anreise-/Themenfokus-Wahl
+    // vollständig zu überlassen (z. B. "Entspannte Anreise" bei explizit
+    // ausgeschlossenem Stopover).
+    climatePreference,
+    tripTypePreference,
+    stopoverPreference,
+    maxStopovers,
   })
 
   if (!variants || variants.length === 0)

@@ -23,6 +23,7 @@ function bestHotelTier(shortlist: HotelShortlist | null): LuxuryHotelTier | null
 
 type IdeaForComparison = {
   id: string
+  session_id: string | null
   destination: string
   route_summary: string | null
   best_season: string | null
@@ -34,6 +35,16 @@ type IdeaForComparison = {
   budget_currency: string
   hotel_shortlist: HotelShortlist | null
   budget_breakdown: { totalMin: number | null; totalMax: number | null; currency: string } | null
+}
+
+/** §"Reisebriefing": echtes Reisedatum/Zeitfenster der Session statt nur des Freitexts `best_season`, sofern vorhanden. */
+function travelTimingText(session: { travel_date_mode: string; travel_start_date: string | null; travel_end_date: string | null; travel_period_text: string | null } | undefined): string | null {
+  if (!session) return null
+  if (session.travel_date_mode === 'exact' && session.travel_start_date && session.travel_end_date)
+    return `${session.travel_start_date} bis ${session.travel_end_date}`
+  if ((session.travel_date_mode === 'month' || session.travel_date_mode === 'school_holiday') && session.travel_period_text)
+    return session.travel_period_text
+  return null
 }
 
 /**
@@ -57,7 +68,7 @@ export async function generateIdeaComparison(formData: FormData) {
   const supabase = await createClient()
   const { data: ideasRaw } = await supabase
     .from('trip_ideas')
-    .select('id, family_id, destination, route_summary, best_season, reasoning, duration_days_min, duration_days_max, budget_range_min, budget_range_max, budget_currency, hotel_shortlist, budget_breakdown')
+    .select('id, family_id, session_id, destination, route_summary, best_season, reasoning, duration_days_min, duration_days_max, budget_range_min, budget_range_max, budget_currency, hotel_shortlist, budget_breakdown')
     .in('id', ideaIds)
 
   const ideas = (ideasRaw ?? []) as unknown as (IdeaForComparison & { family_id: string })[]
@@ -67,10 +78,17 @@ export async function generateIdeaComparison(formData: FormData) {
   const dnaSummary = await buildFamilyDnaSummary(familyId)
   const dnaText = formatFamilyDnaForPrompt(dnaSummary, new Date().toISOString().slice(0, 10))
 
+  const sessionIds = [...new Set(ideas.map((i) => i.session_id).filter((id): id is string => Boolean(id)))]
+  const { data: sessionsRaw } = sessionIds.length > 0
+    ? await supabase.from('trip_idea_sessions').select('id, travel_date_mode, travel_start_date, travel_end_date, travel_period_text').in('id', sessionIds)
+    : { data: [] as Array<{ id: string; travel_date_mode: string; travel_start_date: string | null; travel_end_date: string | null; travel_period_text: string | null }> }
+  const sessionById = new Map((sessionsRaw ?? []).map((s) => [s.id, s]))
+
   const aiIdeas = ideas.map((idea) => ({
     destination: idea.destination,
     routeSummary: idea.route_summary,
     bestSeason: idea.best_season,
+    travelTiming: travelTimingText(idea.session_id ? sessionById.get(idea.session_id) : undefined),
     reasoning: idea.reasoning,
     bestHotelTier: bestHotelTier(idea.hotel_shortlist),
   }))

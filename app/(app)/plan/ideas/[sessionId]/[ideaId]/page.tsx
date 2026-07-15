@@ -4,12 +4,18 @@ import { ChevronLeft, Star, ExternalLink, Check, X as XIcon, Trash2 } from "luci
 import { createClient } from "@/lib/supabase/server";
 import { updateTripIdeaNotes, deleteTripIdea } from "@/lib/actions/trip-ideas";
 import { generateHotelShortlist, estimateTripIdeaBudget, generateTripVariants } from "@/lib/actions/trip-idea-advisor";
+import { searchFlightOptions } from "@/lib/actions/flight-search";
+import { getFlightProviderName } from "@/lib/providers/flights-provider";
 import { BUDGET_CATEGORY_ORDER, BUDGET_CATEGORY_LABELS, type BudgetCategory } from "@/lib/budget";
 import { LUXURY_TIER_LABELS, type LuxuryHotelTier } from "@/lib/data/luxury-hotel-brands";
 import { TRIP_VARIANT_LABELS, type TripVariantType, type TransferBurden } from "@/lib/trip-idea-advisor-ai";
 import type { HotelShortlistItem, HotelShortlist } from "@/lib/trip-idea-hotel-types";
+import type { FlightSearchOption } from "@/lib/flight-types";
 import { Banner } from "@/components/Banner";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
+import { DateSelectFields } from "@/components/DateSelectFields";
+import { FlightFilterBar } from "@/components/FlightFilterBar";
+import { getDateFieldRange } from "@/lib/documents";
 
 const TIER_COLORS: Record<LuxuryHotelTier, string> = {
   standard: "var(--accent)",
@@ -265,6 +271,29 @@ export default async function TripIdeaDetailPage({
   const budgetBreakdown = (idea.budget_breakdown as BudgetBreakdown | null) ?? null;
   const variants = (idea.variants as StoredTripVariant[] | null) ?? null;
 
+  const { data: session } = idea.session_id
+    ? await supabase
+      .from("trip_idea_sessions")
+      .select("departure_city, travel_date_mode, travel_start_date, travel_end_date")
+      .eq("id", idea.session_id)
+      .maybeSingle()
+    : { data: null };
+
+  let flightSearchCache: { results: FlightSearchOption[]; is_sandbox_data: boolean; updated_at: string } | null = null;
+  if (idea.flight_search_key) {
+    const { data: cached } = await supabase
+      .from("flight_search_cache")
+      .select("results, is_sandbox_data, updated_at")
+      .eq("family_id", idea.family_id)
+      .eq("search_key", idea.flight_search_key)
+      .maybeSingle();
+    flightSearchCache = cached ? { results: cached.results as unknown as FlightSearchOption[], is_sandbox_data: cached.is_sandbox_data, updated_at: cached.updated_at } : null;
+  }
+
+  const needsDepartureCity = !session?.departure_city;
+  const needsJustInTimeDates = session?.travel_date_mode !== "exact" || !session?.travel_start_date || !session?.travel_end_date;
+  const travelDateRange = getDateFieldRange("travel");
+
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
       <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-9">
@@ -365,6 +394,67 @@ export default async function TripIdeaDetailPage({
             <div className="rounded-xl p-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
               <p style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
                 Noch keine Hotels vorgeschlagen. LUMI sucht dafür reale Hotels am Zielort und wählt die passendsten für eure Familie aus.
+              </p>
+            </div>
+          )}
+        </section>
+
+        {/* ── Flugvergleich ── */}
+        <section className="mb-6">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+            <h2 className="text-xs font-medium" style={{ color: "var(--muted)", letterSpacing: "0.2em", textTransform: "uppercase", fontSize: "0.65rem" }}>
+              Flugvergleich
+            </h2>
+          </div>
+
+          <form action={searchFlightOptions} className="mb-5">
+            <input type="hidden" name="idea_id" value={idea.id} />
+            <input type="hidden" name="session_id" value={sessionId} />
+            {flightSearchCache && <input type="hidden" name="force_refresh" value="on" />}
+
+            {(needsDepartureCity || needsJustInTimeDates) && (
+              <div className="rounded-xl p-5 mb-4" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+                {needsDepartureCity && (
+                  <div className="mb-4">
+                    <label style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px" }}>
+                      Abflugort
+                    </label>
+                    <input
+                      name="departure_city" type="text" required placeholder="z. B. Frankfurt"
+                      style={{ width: "100%", padding: "12px 14px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)", fontSize: "0.85rem", fontWeight: 300, outline: "none" }}
+                    />
+                  </div>
+                )}
+                {needsJustInTimeDates && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <DateSelectFields label="Hinflug" namePrefix="search_departure_date" range={travelDateRange} quickActions />
+                    <DateSelectFields label="Rückflug" namePrefix="search_return_date" range={travelDateRange} quickActions />
+                  </div>
+                )}
+              </div>
+            )}
+
+            <SubmitButtonWithProgress
+              label={flightSearchCache ? "Neu suchen" : "Flüge suchen"}
+              pendingLabel="Flüge werden gesucht …"
+              style={{
+                background: "transparent", color: "var(--accent)", border: "1px solid rgba(184,154,94,0.4)",
+                borderRadius: "6px", padding: "7px 14px", fontSize: "0.6rem", letterSpacing: "0.1em",
+              }}
+            />
+          </form>
+
+          {flightSearchCache ? (
+            <FlightFilterBar
+              options={flightSearchCache.results}
+              isSandboxData={flightSearchCache.is_sandbox_data}
+              providerName={getFlightProviderName()}
+              searchedAt={flightSearchCache.updated_at}
+            />
+          ) : (
+            <div className="rounded-xl p-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+              <p style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
+                Noch keine Flüge gesucht. LUMI sucht dafür echte Flugverbindungen und bewertet sie transparent nach Preis, Reisezeit, Umstiegen und Gepäck.
               </p>
             </div>
           )}

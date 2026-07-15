@@ -1,6 +1,11 @@
 import OpenAI from 'openai'
 import { BUDGET_CATEGORY_ORDER, BUDGET_CATEGORY_LABELS, type BudgetCategory } from '@/lib/budget'
 import { LUXURY_TIER_LABELS, type LuxuryHotelTier } from '@/lib/data/luxury-hotel-brands'
+import {
+  TRIP_TYPE_PREFERENCE_LABELS, type TripTypePreference,
+  CLIMATE_PREFERENCE_LABELS, type ClimatePreference,
+  STOPOVER_PREFERENCE_LABELS, type StopoverPreference,
+} from '@/lib/travel-preferences'
 
 /** Gleiches Modell wie die übrigen KI-Flows (concierge, trip-idea-generation, content-sessions). */
 const OPENAI_MODEL = 'gpt-5.4'
@@ -326,6 +331,11 @@ export async function generateTripVariants(context: {
   familyDnaText: string
   /** Nur Name + Tier + Kernfakten der bereits echten, qualifizierten Hotels -- leer, wenn (noch) keine ausreichende Shortlist existiert. */
   hotelCandidates: Array<{ name: string; tier: LuxuryHotelTier | null; priceLevel: string | null; transferMinutes: number | null }>
+  /** §"Reisebriefing": aus dem /plan-Wizard bekannte Präferenzen -- `null`, wenn (noch) nicht angegeben oder Session vor dieser Erweiterung entstanden ist. */
+  climatePreference?: string | null
+  tripTypePreference?: string | null
+  stopoverPreference?: string | null
+  maxStopovers?: number | null
 }): Promise<TripVariant[] | null> {
   if (!process.env.OPENAI_API_KEY) {
     console.error('[provider:config-missing]', { provider: 'openai', requestType: 'trip_variants' })
@@ -347,9 +357,19 @@ Für "premium": wähle NICHT automatisch das Ultra-Luxus-Hotel aus der Liste, fa
 Für "value": KEINE Hotelqualität unterhalb des Mindeststandards -- wähle ein Standard-Tier-Hotel aus der Liste (weiterhin Westin-/Le-Méridien-Niveau oder besser), niemals ein günstigeres Hotel außerhalb dieser Liste.`
     : 'Für diese Reiseidee liegt noch keine ausreichende Hotel-Shortlist vor -- setze recommended_hotel_name bei ALLEN Varianten auf null und differenziere ausschließlich über Dauer, Route, Etappenzahl, Stopover, Themenfokus, Transferbelastung und Budgetklasse.'
 
+  // §"Reisebriefing": aus dem Wizard bekannte Präferenzen sind eine echte
+  // Vorgabe, keine Anregung -- "relaxed" MUSS eine explizit ausgeschlossene
+  // Stopover-Präferenz respektieren, statt sie der KI freizustellen.
+  const preferenceLines = [
+    context.tripTypePreference ? `Gewünschte Reiseart: ${TRIP_TYPE_PREFERENCE_LABELS[context.tripTypePreference as TripTypePreference] ?? context.tripTypePreference}.` : null,
+    context.climatePreference ? `Klimawunsch: ${CLIMATE_PREFERENCE_LABELS[context.climatePreference as ClimatePreference] ?? context.climatePreference}.` : null,
+    context.stopoverPreference ? `Anreise-Präferenz: ${STOPOVER_PREFERENCE_LABELS[context.stopoverPreference as StopoverPreference] ?? context.stopoverPreference}${context.maxStopovers != null ? `, max. ${context.maxStopovers} Umstiege` : ''}. Bei "ausgeschlossen" darf KEINE Variante (auch nicht "relaxed") einen Stopover vorschlagen.` : null,
+  ].filter(Boolean).join(' ')
+
   const prompt = `Du bist Reiseberater für eine Familie und entwickelst zu EINER bereits gewählten Reiseidee (Ziel: ${context.destination}${context.routeSummary ? `, bisherige Route: ${context.routeSummary}` : ''}) fünf unterscheidbare Varianten.
 ${context.familyDnaText || 'Keine besonderen Präferenzen bekannt.'}
 Bisherige grobe Eckdaten: ${context.durationDaysMin ?? '?'}-${context.durationDaysMax ?? '?'} Tage, Budget ca. ${context.budgetRangeMin ?? '?'}-${context.budgetRangeMax ?? '?'} ${context.budgetCurrency}.
+${preferenceLines}
 
 ${hotelInstruction}
 
@@ -436,7 +456,7 @@ function buildIdeaComparisonSchema(ideaCount: number) {
             destination: { type: 'string', description: 'EXAKT wie in der gelieferten Liste, zum Rückabgleich.' },
             flight_burden: { type: 'string', enum: FLIGHT_BURDEN_VALUES, description: '"nicht einschätzbar", wenn route_summary/includes_flights keine verlässliche Einschätzung erlauben.' },
             flight_burden_reasoning: { type: 'string' },
-            weather_fit: { type: 'string', enum: WEATHER_FIT_VALUES, description: '"nicht einschätzbar", wenn best_season fehlt -- keine erfundenen Klimaangaben.' },
+            weather_fit: { type: 'string', enum: WEATHER_FIT_VALUES, description: '"nicht einschätzbar", wenn weder Reisezeitraum noch best_season vorliegen -- keine erfundenen Klimaangaben.' },
             weather_fit_reasoning: { type: 'string' },
             kid_friendliness: { type: 'string', enum: THREE_LEVEL_VALUES },
             kid_friendliness_reasoning: { type: 'string', description: 'Gestützt auf Alter/Bedürfnisse der Kinder aus der Familien-DNA.' },
@@ -470,7 +490,12 @@ function buildIdeaComparisonSchema(ideaCount: number) {
  * Rateversuchs (z. B. Wetter ohne gesetztes best_season).
  */
 export async function generateIdeaComparisonScores(context: {
-  ideas: Array<{ destination: string; routeSummary: string | null; bestSeason: string | null; reasoning: string | null; bestHotelTier: LuxuryHotelTier | null }>
+  ideas: Array<{
+    destination: string; routeSummary: string | null; bestSeason: string | null
+    /** §"Reisebriefing": echtes Reisedatum/-fenster der Session, sofern vorhanden -- genauer als der reine best_season-Freitext. */
+    travelTiming?: string | null
+    reasoning: string | null; bestHotelTier: LuxuryHotelTier | null
+  }>
   familyDnaText: string
 }): Promise<IdeaComparisonScore[] | null> {
   if (!process.env.OPENAI_API_KEY) {
@@ -483,7 +508,7 @@ export async function generateIdeaComparisonScores(context: {
     .map((idea) => {
       const parts = [
         idea.routeSummary ? `Route: ${idea.routeSummary}` : 'Route: unbekannt',
-        idea.bestSeason ? `Beste Reisezeit: ${idea.bestSeason}` : 'Beste Reisezeit: nicht hinterlegt',
+        idea.travelTiming ? `Geplanter Reisezeitraum: ${idea.travelTiming}` : (idea.bestSeason ? `Beste Reisezeit: ${idea.bestSeason}` : 'Beste Reisezeit: nicht hinterlegt'),
         idea.reasoning ? `Begründung der Idee: ${idea.reasoning}` : null,
         idea.bestHotelTier ? `Bestes verfügbares Hotel-Niveau: ${LUXURY_TIER_LABELS[idea.bestHotelTier]}` : 'Noch keine Hotel-Shortlist',
       ].filter(Boolean)

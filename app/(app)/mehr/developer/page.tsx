@@ -8,6 +8,7 @@ import { ComputeRouteTestCard } from './ComputeRouteTestCard'
 import { ComputeRouteMatrixTestCard } from './ComputeRouteMatrixTestCard'
 import { DaytripTestCard } from './DaytripTestCard'
 import { OpenAiTestCard } from './OpenAiTestCard'
+import { FlightUsageCard } from './FlightUsageCard'
 
 /**
  * Dauerhafter, geschützter Developer-Bereich (Mehr → Developer) für
@@ -60,6 +61,7 @@ export default async function DeveloperPage() {
           <ComputeRouteMatrixTestCard lastRun={runs.routes_compute_route_matrix ?? null} />
           <DaytripTestCard lastRun={runs.daytrip_multi_stop ?? null} />
           <OpenAiTestCard lastRun={runs.openai_recommendations ?? null} placesAvailable={runs.places?.success === true} />
+          <FlightUsageCard />
         </div>
       </div>
     </div>
