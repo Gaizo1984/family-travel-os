@@ -13,11 +13,15 @@ export default async function DiscoverIdeasPage({
   const { error } = await searchParams;
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
-  const { data: ideas } = await supabase
+  const { data: ideasRaw } = await supabase
     .from("trip_ideas")
     .select("id, destination, route_summary, best_season, reasoning, origin, session_id, converted_trip_id")
-    .eq("family_id", familyId)
-    .order("created_at", { ascending: false });
+    .eq("family_id", familyId);
+
+  // §"Ideen alphabetisch nach Ländern ordnen": destination ist Freitext
+  // (z. B. "Costa Rica" oder "Bali + Nihi Sumba") -- kein separates
+  // Länderfeld vorhanden, daher alphabetisch auf diesem Text sortiert.
+  const ideas = [...(ideasRaw ?? [])].sort((a, b) => a.destination.localeCompare(b.destination, "de"));
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -41,7 +45,7 @@ export default async function DiscoverIdeasPage({
 
         {error && <Banner variant="error" className="mb-6 px-4 py-3 rounded-lg">{error}</Banner>}
 
-        {(ideas ?? []).length === 0 ? (
+        {ideas.length === 0 ? (
           <div className="rounded-xl p-6 text-center" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
             <p className="mb-4" style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
               Noch keine gemerkten Ideen. Speichert Vorschläge aus Entdecken oder entwickelt eine Reiseidee.
@@ -52,7 +56,7 @@ export default async function DiscoverIdeasPage({
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3">
-            {(ideas ?? []).map((idea) => (
+            {ideas.map((idea) => (
               <div key={idea.id} className="rounded-xl p-5" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
                 <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
                   <h3 className="text-base font-light" style={{ color: "var(--foreground)" }}>{idea.destination}</h3>
