@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, Star, ExternalLink, Check, X as XIcon } from "lucide-react";
+import { ChevronLeft, Star, ExternalLink, Check, X as XIcon, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { updateTripIdeaNotes } from "@/lib/actions/trip-ideas";
+import { updateTripIdeaNotes, deleteTripIdea } from "@/lib/actions/trip-ideas";
 import { generateHotelShortlist, estimateTripIdeaBudget, generateTripVariants } from "@/lib/actions/trip-idea-advisor";
 import { BUDGET_CATEGORY_ORDER, BUDGET_CATEGORY_LABELS, type BudgetCategory } from "@/lib/budget";
 import { LUXURY_TIER_LABELS, type LuxuryHotelTier } from "@/lib/data/luxury-hotel-brands";
@@ -522,6 +522,19 @@ export default async function TripIdeaDetailPage({
             In echte Reise umwandeln →
           </Link>
         </div>
+
+        <form action={deleteTripIdea} className="mt-4 flex justify-end">
+          <input type="hidden" name="idea_id" value={idea.id} />
+          <input type="hidden" name="return_to" value="/discover/ideas" />
+          <button
+            type="submit"
+            className="flex items-center gap-1.5"
+            style={{ background: "none", border: "none", cursor: "pointer", padding: "8px", color: "var(--muted)", fontSize: "0.65rem", letterSpacing: "0.04em" }}
+          >
+            <Trash2 size={12} strokeWidth={1.6} />
+            Diese Idee löschen
+          </button>
+        </form>
       </div>
     </div>
   );

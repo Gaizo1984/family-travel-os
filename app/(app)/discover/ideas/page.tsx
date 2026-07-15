@@ -1,9 +1,16 @@
 import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
+import { deleteTripIdea } from "@/lib/actions/trip-ideas";
+import { Banner } from "@/components/Banner";
 
-export default async function DiscoverIdeasPage() {
+export default async function DiscoverIdeasPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const { error } = await searchParams;
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
   const { data: ideas } = await supabase
@@ -32,6 +39,8 @@ export default async function DiscoverIdeasPage() {
           Eure Ideen-Inbox
         </h1>
 
+        {error && <Banner variant="error" className="mb-6 px-4 py-3 rounded-lg">{error}</Banner>}
+
         {(ideas ?? []).length === 0 ? (
           <div className="rounded-xl p-6 text-center" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
             <p className="mb-4" style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
@@ -54,11 +63,26 @@ export default async function DiscoverIdeasPage() {
                 </div>
                 {idea.route_summary && <p className="mb-2" style={{ color: "var(--muted)", fontSize: "0.74rem" }}>{idea.route_summary}</p>}
                 {idea.reasoning && <p className="mb-3 italic" style={{ color: "var(--muted)", fontSize: "0.72rem" }}>{idea.reasoning}</p>}
-                {idea.session_id && (
-                  <Link href={`/plan/ideas/${idea.session_id}/${idea.id}`} style={{ color: "var(--accent)", fontSize: "0.65rem", textDecoration: "none" }}>
-                    Weiterentwickeln →
-                  </Link>
-                )}
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  {idea.session_id ? (
+                    <Link href={`/plan/ideas/${idea.session_id}/${idea.id}`} style={{ color: "var(--accent)", fontSize: "0.65rem", textDecoration: "none" }}>
+                      Weiterentwickeln →
+                    </Link>
+                  ) : <span />}
+                  <form action={deleteTripIdea}>
+                    <input type="hidden" name="idea_id" value={idea.id} />
+                    <input type="hidden" name="return_to" value="/discover/ideas" />
+                    <button
+                      type="submit"
+                      aria-label="Idee löschen"
+                      className="flex items-center gap-1.5"
+                      style={{ background: "none", border: "none", cursor: "pointer", padding: "6px", margin: "-6px", color: "var(--muted)", fontSize: "0.65rem" }}
+                    >
+                      <Trash2 size={12} strokeWidth={1.6} />
+                      Löschen
+                    </button>
+                  </form>
+                </div>
               </div>
             ))}
           </div>

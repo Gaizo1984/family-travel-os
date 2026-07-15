@@ -28,6 +28,32 @@ export async function updateTripIdeaNotes(formData: FormData) {
   redirect(`/plan/ideas/${sessionId}/${ideaId}`)
 }
 
+/**
+ * §"Es muss die Löschoption geben": ohne dieses Löschen sammeln sich
+ * Reiseideen/-varianten unbegrenzt an (jede /plan-Anfrage erzeugt 3 neue
+ * Ideen). Löscht die einzelne Idee (inkl. Hotel-Shortlist/Budget/Varianten,
+ * da alles in derselben Zeile liegt) -- gehört eine Idee zu einer Session
+ * und war sie deren letzte verbliebene, wird die jetzt leere Session
+ * gleich mitgelöscht, damit keine verwaisten Sessions liegen bleiben.
+ */
+export async function deleteTripIdea(formData: FormData) {
+  const ideaId = String(formData.get('idea_id') ?? '')
+  const returnTo = String(formData.get('return_to') ?? '/discover/ideas')
+
+  const supabase = await createClient()
+  const { data: idea } = await supabase.from('trip_ideas').select('session_id').eq('id', ideaId).maybeSingle()
+
+  const { error } = await supabase.from('trip_ideas').delete().eq('id', ideaId)
+  if (error) redirect(`${returnTo}?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)
+
+  if (idea?.session_id) {
+    const { count } = await supabase.from('trip_ideas').select('id', { count: 'exact', head: true }).eq('session_id', idea.session_id)
+    if (!count) await supabase.from('trip_idea_sessions').delete().eq('id', idea.session_id)
+  }
+
+  redirect(returnTo)
+}
+
 /** Discover-Bookmark: legt eine trip_ideas-Zeile ohne Session an (origin='discover_bookmark'). */
 export async function bookmarkTripIdea(formData: FormData) {
   const destination = String(formData.get('destination') ?? '').trim()
