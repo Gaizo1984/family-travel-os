@@ -1,25 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, Star, ExternalLink } from "lucide-react";
+import { ChevronLeft, Star, ExternalLink, Check, X as XIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { updateTripIdeaNotes } from "@/lib/actions/trip-ideas";
-import { generateHotelShortlist, estimateTripIdeaBudget } from "@/lib/actions/trip-idea-advisor";
+import { generateHotelShortlist, estimateTripIdeaBudget, generateTripVariants } from "@/lib/actions/trip-idea-advisor";
 import { BUDGET_CATEGORY_ORDER, BUDGET_CATEGORY_LABELS, type BudgetCategory } from "@/lib/budget";
 import { LUXURY_TIER_LABELS, type LuxuryHotelTier } from "@/lib/data/luxury-hotel-brands";
+import { TRIP_VARIANT_LABELS, type TripVariantType, type TransferBurden } from "@/lib/trip-idea-advisor-ai";
+import type { HotelShortlistItem, HotelShortlist } from "@/lib/trip-idea-hotel-types";
 import { Banner } from "@/components/Banner";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
-
-type HotelShortlistItem = {
-  placeId: string; name: string; address: string
-  rating: number | null; reviewCount: number | null; priceLevel: string | null
-  photoName: string | null; websiteUri: string | null; transferMinutes: number | null
-  familyFitReasoning: string; styleImpression: string; bestFor: string; caveats: string
-  /** null = Fallback-Kandidat unterhalb des Mindeststandards (siehe HotelShortlist.belowStandard). */
-  tier: LuxuryHotelTier | null; tierBasis: "brand" | "heuristic"
-  unverifiedFields: string[]
-};
-
-type HotelShortlist = { items: HotelShortlistItem[]; belowStandard: boolean };
 
 const TIER_COLORS: Record<LuxuryHotelTier, string> = {
   standard: "var(--accent)",
@@ -121,6 +111,137 @@ function HotelCard({ hotel }: { hotel: HotelShortlistItem }) {
   );
 }
 
+/** Gespeicherte Form von `trip_ideas.variants` -- siehe generateTripVariants in lib/actions/trip-idea-advisor.ts (recommendedHotel ist dort bereits gegen die echte Shortlist abgeglichen, nie ein erfundener Fakt). */
+type StoredTripVariant = {
+  variantType: TripVariantType; title: string; routeSummary: string
+  stageCount: number | null; hasStopover: boolean
+  durationDaysMin: number | null; durationDaysMax: number | null
+  transferBurden: TransferBurden; themeFocus: string
+  budgetRangeMin: number | null; budgetRangeMax: number | null; budgetCurrency: string
+  pros: string[]; cons: string[]; whyThisVariant: string
+  recommendedHotel: HotelShortlistItem | null
+};
+
+const TRANSFER_BURDEN_LABELS: Record<TransferBurden, string> = { gering: "Gering", mittel: "Mittel", hoch: "Hoch" };
+const TRANSFER_BURDEN_COLORS: Record<TransferBurden, string> = { gering: "#4C7A5D", mittel: "#B89A5E", hoch: "#B5624A" };
+
+function durationText(v: StoredTripVariant): string {
+  if (!v.durationDaysMin && !v.durationDaysMax) return "—";
+  if (v.durationDaysMin && v.durationDaysMax && v.durationDaysMin !== v.durationDaysMax) return `${v.durationDaysMin}–${v.durationDaysMax} Tage`;
+  return `${v.durationDaysMin ?? v.durationDaysMax} Tage`;
+}
+
+function VariantCard({ variant }: { variant: StoredTripVariant }) {
+  return (
+    <div className="rounded-xl p-5" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+      <div style={{ color: "var(--accent)", fontSize: "0.58rem", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: "6px" }}>
+        {TRIP_VARIANT_LABELS[variant.variantType]}
+      </div>
+      <div className="font-light mb-3" style={{ color: "var(--foreground)", fontSize: "1rem" }}>{variant.title}</div>
+
+      <p className="mb-3" style={{ color: "var(--muted)", fontSize: "0.78rem", lineHeight: 1.5 }}>{variant.routeSummary}</p>
+
+      <div className="flex flex-wrap gap-x-5 gap-y-2 mb-3" style={{ fontSize: "0.72rem" }}>
+        <div>
+          <div style={{ color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.1em", textTransform: "uppercase" }}>Dauer</div>
+          <div style={{ color: "var(--foreground)" }}>{durationText(variant)}</div>
+        </div>
+        {variant.stageCount !== null && (
+          <div>
+            <div style={{ color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.1em", textTransform: "uppercase" }}>Etappen</div>
+            <div style={{ color: "var(--foreground)" }}>{variant.stageCount}{variant.hasStopover ? " · Stopover" : " · Direkt"}</div>
+          </div>
+        )}
+        <div>
+          <div style={{ color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.1em", textTransform: "uppercase" }}>Transfer</div>
+          <div style={{ color: TRANSFER_BURDEN_COLORS[variant.transferBurden] }}>{TRANSFER_BURDEN_LABELS[variant.transferBurden]}</div>
+        </div>
+        <div>
+          <div style={{ color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.1em", textTransform: "uppercase" }}>Budget (Schätzung)</div>
+          <div style={{ color: "var(--foreground)" }}>ca. {variant.budgetRangeMin ?? "?"}–{variant.budgetRangeMax ?? "?"} {variant.budgetCurrency}</div>
+        </div>
+      </div>
+
+      <p className="mb-3" style={{ color: "var(--muted)", fontSize: "0.72rem", fontStyle: "italic" }}>{variant.themeFocus}</p>
+
+      {variant.recommendedHotel ? (
+        <div className="mb-3 px-3 py-2 rounded-lg flex items-center justify-between gap-2" style={{ background: "var(--background)", border: "1px solid var(--border)" }}>
+          <span style={{ color: "var(--foreground)", fontSize: "0.75rem" }}>{variant.recommendedHotel.name}</span>
+          <span
+            style={{
+              color: variant.recommendedHotel.tier ? TIER_COLORS[variant.recommendedHotel.tier] : BELOW_STANDARD_COLOR,
+              fontSize: "0.58rem", letterSpacing: "0.04em", textTransform: "uppercase", whiteSpace: "nowrap",
+            }}
+          >
+            {variant.recommendedHotel.tier ? LUXURY_TIER_LABELS[variant.recommendedHotel.tier] : "Unterhalb Niveau"}
+          </span>
+        </div>
+      ) : (
+        <p className="mb-3" style={{ color: "var(--muted)", fontSize: "0.68rem", fontStyle: "italic" }}>Keine konkrete Hotelempfehlung für diese Variante.</p>
+      )}
+
+      <div className="mb-3 space-y-1">
+        {variant.pros.map((p, i) => (
+          <div key={`pro-${i}`} className="flex items-start gap-1.5" style={{ fontSize: "0.72rem", color: "var(--foreground)" }}>
+            <Check size={11} strokeWidth={2} style={{ color: "#4C7A5D", flexShrink: 0, marginTop: "2px" }} />
+            {p}
+          </div>
+        ))}
+        {variant.cons.map((c, i) => (
+          <div key={`con-${i}`} className="flex items-start gap-1.5" style={{ fontSize: "0.72rem", color: "var(--muted)" }}>
+            <XIcon size={11} strokeWidth={2} style={{ color: "#B5624A", flexShrink: 0, marginTop: "2px" }} />
+            {c}
+          </div>
+        ))}
+      </div>
+
+      <p style={{ color: "var(--accent)", fontSize: "0.72rem", lineHeight: 1.5 }}>Warum diese Variante? {variant.whyThisVariant}</p>
+    </div>
+  );
+}
+
+/** Kompakte Vergleichsansicht: reines Rendering der bereits gespeicherten Varianten-Daten, kein zusätzlicher KI-Aufruf. */
+function VariantComparisonTable({ variants }: { variants: StoredTripVariant[] }) {
+  const rows: Array<{ label: string; render: (v: StoredTripVariant) => React.ReactNode }> = [
+    { label: "Dauer", render: (v) => durationText(v) },
+    { label: "Etappen", render: (v) => v.stageCount ?? "—" },
+    { label: "Stopover", render: (v) => (v.hasStopover ? "Ja" : "Direkt") },
+    { label: "Transfer", render: (v) => <span style={{ color: TRANSFER_BURDEN_COLORS[v.transferBurden] }}>{TRANSFER_BURDEN_LABELS[v.transferBurden]}</span> },
+    { label: "Themenfokus", render: (v) => v.themeFocus },
+    { label: "Budget", render: (v) => `ca. ${v.budgetRangeMin ?? "?"}–${v.budgetRangeMax ?? "?"} ${v.budgetCurrency}` },
+    { label: "Hotel", render: (v) => v.recommendedHotel?.name ?? "—" },
+  ];
+
+  return (
+    <div className="rounded-xl overflow-x-auto" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+      <table className="w-full" style={{ borderCollapse: "collapse", minWidth: "640px" }}>
+        <thead>
+          <tr>
+            <th style={{ textAlign: "left", padding: "10px 14px", fontSize: "0.58rem", letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--muted)", borderBottom: "1px solid var(--border)" }} />
+            {variants.map((v) => (
+              <th key={v.variantType} style={{ textAlign: "left", padding: "10px 14px", fontSize: "0.6rem", letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--accent)", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" }}>
+                {TRIP_VARIANT_LABELS[v.variantType]}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.label}>
+              <td style={{ padding: "9px 14px", fontSize: "0.68rem", color: "var(--muted)", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" }}>{row.label}</td>
+              {variants.map((v) => (
+                <td key={v.variantType} style={{ padding: "9px 14px", fontSize: "0.72rem", color: "var(--foreground)", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" }}>
+                  {row.render(v)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default async function TripIdeaDetailPage({
   params,
   searchParams,
@@ -142,6 +263,7 @@ export default async function TripIdeaDetailPage({
 
   const hotelShortlist = (idea.hotel_shortlist as HotelShortlist | null) ?? null;
   const budgetBreakdown = (idea.budget_breakdown as BudgetBreakdown | null) ?? null;
+  const variants = (idea.variants as StoredTripVariant[] | null) ?? null;
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -305,6 +427,54 @@ export default async function TripIdeaDetailPage({
             <div className="rounded-xl p-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
               <p style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
                 Noch keine Budget-Schätzung erstellt.
+              </p>
+            </div>
+          )}
+        </section>
+
+        {/* ── Reisevarianten ── */}
+        <section className="mb-6">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+            <h2 className="text-xs font-medium" style={{ color: "var(--muted)", letterSpacing: "0.2em", textTransform: "uppercase", fontSize: "0.65rem" }}>
+              Reisevarianten
+            </h2>
+            <form action={generateTripVariants}>
+              <input type="hidden" name="idea_id" value={idea.id} />
+              <input type="hidden" name="session_id" value={sessionId} />
+              <SubmitButtonWithProgress
+                label={variants ? "Neu entwickeln" : "Varianten entwickeln"}
+                pendingLabel="Varianten werden entwickelt …"
+                style={{
+                  background: "transparent", color: "var(--accent)", border: "1px solid rgba(184,154,94,0.4)",
+                  borderRadius: "6px", padding: "7px 14px", fontSize: "0.6rem", letterSpacing: "0.1em",
+                }}
+              />
+            </form>
+          </div>
+
+          {!hotelShortlist || hotelShortlist.items.length < 2 ? (
+            <p className="mb-4" style={{ color: "var(--muted)", fontSize: "0.72rem", fontStyle: "italic" }}>
+              Für hotelspezifische Empfehlungen je Variante zuerst "Hotels vorschlagen" oben nutzen — Varianten funktionieren aber auch ohne (dann ohne konkrete Hotelempfehlung).
+            </p>
+          ) : null}
+
+          {variants ? (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+                {variants.map((v) => <VariantCard key={v.variantType} variant={v} />)}
+              </div>
+              <div className="mb-3" style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.14em", textTransform: "uppercase" }}>
+                Vergleich
+              </div>
+              <VariantComparisonTable variants={variants} />
+              <p className="mt-3" style={{ color: "var(--muted)", fontSize: "0.65rem", fontStyle: "italic" }}>
+                Grobe Schätzung, keine aktuellen/verfügbaren Preise oder Verfügbarkeiten.
+              </p>
+            </>
+          ) : (
+            <div className="rounded-xl p-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+              <p style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
+                Noch keine Varianten entwickelt. LUMI erstellt fünf strukturell unterschiedliche Pakete (Bestes Gesamtpaket, Premium/Luxus, Preis-Leistung, Entspannte Anreise, Besonderes Erlebnis).
               </p>
             </div>
           )}

@@ -228,3 +228,177 @@ Schätze eine grobe Kostenspanne (min/max, niemals ein erfundener Exaktpreis) f�
     return null
   }
 }
+
+export type TripVariantType = 'best_overall' | 'premium' | 'value' | 'relaxed' | 'special_experience'
+
+export const TRIP_VARIANT_LABELS: Record<TripVariantType, string> = {
+  best_overall: 'Bestes Gesamtpaket',
+  premium: 'Premium/Luxus',
+  value: 'Bestes Preis-Leistungs-Verhältnis',
+  relaxed: 'Entspannte Anreise',
+  special_experience: 'Besonderes Erlebnis',
+}
+
+export type TransferBurden = 'gering' | 'mittel' | 'hoch'
+
+export type TripVariant = {
+  variantType: TripVariantType
+  title: string
+  routeSummary: string
+  stageCount: number | null
+  hasStopover: boolean
+  durationDaysMin: number | null
+  durationDaysMax: number | null
+  transferBurden: TransferBurden
+  themeFocus: string
+  budgetRangeMin: number | null
+  budgetRangeMax: number | null
+  budgetCurrency: string
+  recommendedHotelName: string | null
+  pros: string[]
+  cons: string[]
+  whyThisVariant: string
+}
+
+const TRANSFER_BURDEN_VALUES = ['gering', 'mittel', 'hoch']
+
+const TRIP_VARIANT_SCHEMA = {
+  type: 'object',
+  properties: {
+    variants: {
+      type: 'array',
+      minItems: 5,
+      maxItems: 5,
+      items: {
+        type: 'object',
+        properties: {
+          variant_type: { type: 'string', enum: ['best_overall', 'premium', 'value', 'relaxed', 'special_experience'] },
+          title: { type: 'string', description: 'Kurzer, konkreter Titel dieser Variante.' },
+          route_summary: { type: 'string', description: 'Stationenfolge inkl. Reihenfolge, ausdrücklich mit oder ohne Zwischenstopp benannt.' },
+          stage_count: { type: ['number', 'null'], description: 'Anzahl Etappen/Stationen dieser Variante.' },
+          has_stopover: { type: 'boolean', description: 'true, wenn diese Variante einen Zwischenstopp/Stopover enthält.' },
+          duration_days_min: { type: ['number', 'null'] },
+          duration_days_max: { type: ['number', 'null'] },
+          transfer_burden: { type: 'string', enum: TRANSFER_BURDEN_VALUES, description: 'Geschätzte Flug-/Transferbelastung dieser Variante.' },
+          theme_focus: { type: 'string', description: 'Kurzer Schwerpunkt, z. B. "Schwerpunkt Erholung & Strand, wenig Stadt".' },
+          budget_range_min: { type: ['number', 'null'], description: 'Grobe Schätzung, niemals ein erfundener Exaktpreis.' },
+          budget_range_max: { type: ['number', 'null'] },
+          budget_currency: { type: 'string' },
+          recommended_hotel_name: {
+            type: ['string', 'null'],
+            description: 'EXAKT ein Name aus der mitgelieferten echten Hotel-Shortlist, oder null, wenn keine Shortlist vorliegt/kein Hotel passt. Niemals ein erfundener Hotelname.',
+          },
+          pros: { type: 'array', minItems: 2, maxItems: 4, items: { type: 'string' }, description: 'Konkrete Vorteile dieser Variante.' },
+          cons: { type: 'array', minItems: 2, maxItems: 4, items: { type: 'string' }, description: 'Konkrete Nachteile/Trade-offs dieser Variante, ehrlich.' },
+          why_this_variant: { type: 'string', description: 'Kurz: warum diese Variante wählen, was sie von den anderen vier unterscheidet.' },
+        },
+        required: [
+          'variant_type', 'title', 'route_summary', 'stage_count', 'has_stopover',
+          'duration_days_min', 'duration_days_max', 'transfer_burden', 'theme_focus',
+          'budget_range_min', 'budget_range_max', 'budget_currency', 'recommended_hotel_name',
+          'pros', 'cons', 'why_this_variant',
+        ],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['variants'],
+  additionalProperties: false,
+}
+
+/**
+ * §"Reisevarianten mit echten strukturellen Unterschieden": kein neues
+ * Multi-Stop-Routen-/Places-Subsystem -- Varianten unterscheiden sich über
+ * strukturierte Felder (Dauer, Etappenzahl, Stopover, Transferbelastung,
+ * Themenfokus, Budgetklasse), die Hotelreferenz kommt ausschließlich aus der
+ * bereits vorhandenen, ECHTEN Hotel-Shortlist der Idee (kein zweiter
+ * Places-Call, kein erfundener Hotelname -- `recommended_hotel_name` wird im
+ * Aufrufer gegen die echte Liste abgeglichen, exakt wie bei `selectHotelShortlist`).
+ */
+export async function generateTripVariants(context: {
+  destination: string
+  routeSummary: string | null
+  durationDaysMin: number | null
+  durationDaysMax: number | null
+  budgetRangeMin: number | null
+  budgetRangeMax: number | null
+  budgetCurrency: string
+  familyDnaText: string
+  /** Nur Name + Tier + Kernfakten der bereits echten, qualifizierten Hotels -- leer, wenn (noch) keine ausreichende Shortlist existiert. */
+  hotelCandidates: Array<{ name: string; tier: LuxuryHotelTier | null; priceLevel: string | null; transferMinutes: number | null }>
+}): Promise<TripVariant[] | null> {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('[provider:config-missing]', { provider: 'openai', requestType: 'trip_variants' })
+    return null
+  }
+
+  const hasHotelCandidates = context.hotelCandidates.length >= 2
+  const hotelText = hasHotelCandidates
+    ? context.hotelCandidates
+      .map((h) => `- ${h.name}: Einordnung ${h.tier ? LUXURY_TIER_LABELS[h.tier] : 'unterhalb des Mindeststandards'}${h.priceLevel ? `, Preisklasse ${h.priceLevel}` : ''}${h.transferMinutes !== null ? `, ${h.transferMinutes} Min Transferzeit` : ''}`)
+      .join('\n')
+    : ''
+
+  const hotelInstruction = hasHotelCandidates
+    ? `Echte Hotel-Kandidaten dieser Idee (bereits auf gehobenes 5-Sterne-Niveau oder höher geprüft -- wähle recommended_hotel_name NUR aus dieser Liste, exakt wie geschrieben, erfinde nichts):
+${hotelText}
+
+Für "premium": wähle NICHT automatisch das Ultra-Luxus-Hotel aus der Liste, falls eines vorhanden ist -- nur wenn es wirklich die beste Passung für diese Variante ist, sonst ein Premium- oder Standard-Tier-Hotel.
+Für "value": KEINE Hotelqualität unterhalb des Mindeststandards -- wähle ein Standard-Tier-Hotel aus der Liste (weiterhin Westin-/Le-Méridien-Niveau oder besser), niemals ein günstigeres Hotel außerhalb dieser Liste.`
+    : 'Für diese Reiseidee liegt noch keine ausreichende Hotel-Shortlist vor -- setze recommended_hotel_name bei ALLEN Varianten auf null und differenziere ausschließlich über Dauer, Route, Etappenzahl, Stopover, Themenfokus, Transferbelastung und Budgetklasse.'
+
+  const prompt = `Du bist Reiseberater für eine Familie und entwickelst zu EINER bereits gewählten Reiseidee (Ziel: ${context.destination}${context.routeSummary ? `, bisherige Route: ${context.routeSummary}` : ''}) fünf unterscheidbare Varianten.
+${context.familyDnaText || 'Keine besonderen Präferenzen bekannt.'}
+Bisherige grobe Eckdaten: ${context.durationDaysMin ?? '?'}-${context.durationDaysMax ?? '?'} Tage, Budget ca. ${context.budgetRangeMin ?? '?'}-${context.budgetRangeMax ?? '?'} ${context.budgetCurrency}.
+
+${hotelInstruction}
+
+Die fünf Varianten (in dieser Reihenfolge, jede mit variant_type):
+1. best_overall = Bestes Gesamtpaket -- beste Balance aus Hotelqualität, Reisebelastung, Erlebnis und Budget.
+2. premium = Premium/Luxus -- hochwertigste sinnvolle Variante, NICHT automatisch Ultra-Luxus.
+3. value = Bestes Preis-Leistungs-Verhältnis -- weiterhin mindestens Westin-/Le-Méridien-Niveau, keine Absenkung der Hotelqualität.
+4. relaxed = Entspannte Anreise -- möglichst wenige Umstiege, kurze Transfers, geringe Belastung für Kinder.
+5. special_experience = Besonderes Erlebnis -- ein außergewöhnlicher, familiengeeigneter Baustein oder eine besondere Kombination, ohne unrealistische Logistik.
+
+WICHTIG: Jede Variante MUSS sich strukturell unterscheiden -- Dauer, Etappenzahl, Stopover, Reihenfolge, Hotel, Themenfokus, Transferbelastung und/oder Budgetklasse dürfen NICHT bei allen fünf Varianten identisch sein. Keine zwei Varianten dürfen nur sprachlich unterschiedlich klingen, aber inhaltlich dasselbe Paket beschreiben. Nenne bei jeder Variante 2-4 konkrete Vor- und Nachteile sowie einen kurzen Grund, warum man genau diese Variante wählen würde. Erfinde keine Fakten, keine Live-Preise/Verfügbarkeiten -- Budgetangaben sind immer grobe, transparente Bandbreiten.`
+
+  try {
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+    const response = await openai.responses.create({
+      model: OPENAI_MODEL,
+      input: [{ role: 'user', content: [{ type: 'input_text', text: prompt }] }],
+      text: { format: { type: 'json_schema', name: 'trip_variants', schema: TRIP_VARIANT_SCHEMA, strict: true } },
+    })
+    const parsed = JSON.parse(response.output_text) as {
+      variants: Array<{
+        variant_type: TripVariantType; title: string; route_summary: string
+        stage_count: number | null; has_stopover: boolean
+        duration_days_min: number | null; duration_days_max: number | null
+        transfer_burden: TransferBurden; theme_focus: string
+        budget_range_min: number | null; budget_range_max: number | null; budget_currency: string
+        recommended_hotel_name: string | null; pros: string[]; cons: string[]; why_this_variant: string
+      }>
+    }
+    return parsed.variants.map((v) => ({
+      variantType: v.variant_type,
+      title: v.title,
+      routeSummary: v.route_summary,
+      stageCount: v.stage_count,
+      hasStopover: v.has_stopover,
+      durationDaysMin: v.duration_days_min,
+      durationDaysMax: v.duration_days_max,
+      transferBurden: v.transfer_burden,
+      themeFocus: v.theme_focus,
+      budgetRangeMin: v.budget_range_min,
+      budgetRangeMax: v.budget_range_max,
+      budgetCurrency: v.budget_currency,
+      recommendedHotelName: v.recommended_hotel_name,
+      pros: v.pros,
+      cons: v.cons,
+      whyThisVariant: v.why_this_variant,
+    }))
+  } catch (e) {
+    console.error('[provider:request-failed]', { provider: 'openai', requestType: 'trip_variants', httpStatus: (e as { status?: number })?.status ?? 0 })
+    return null
+  }
+}

@@ -6,8 +6,9 @@ import { geocodeLocation, searchLodging, type LodgingResult } from '@/lib/provid
 import { computeRouteMatrix } from '@/lib/providers/routes-provider'
 import { ProviderConfigError } from '@/lib/providers/provider-errors'
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt } from '@/lib/family-dna'
-import { selectHotelShortlist, generateBudgetBreakdown, type HotelCandidateFact } from '@/lib/trip-idea-advisor-ai'
+import { selectHotelShortlist, generateBudgetBreakdown, generateTripVariants as generateTripVariantsAi, type HotelCandidateFact } from '@/lib/trip-idea-advisor-ai'
 import { classifyHotelBrand, type LuxuryHotelTier } from '@/lib/data/luxury-hotel-brands'
+import type { HotelShortlist } from '@/lib/trip-idea-hotel-types'
 
 /**
  * §"Hotel-Shortlist qualitativ neu kalibrieren": Google Places liefert keine
@@ -42,19 +43,21 @@ type IdeaRow = {
   family_id: string
   session_id: string | null
   destination: string
+  route_summary: string | null
   duration_days_min: number | null
   duration_days_max: number | null
   budget_range_min: number | null
   budget_range_max: number | null
   budget_currency: string
   includes_flights: boolean
+  hotel_shortlist: HotelShortlist | null
 }
 
 async function loadIdeaContext(ideaId: string) {
   const supabase = await createClient()
   const { data: idea } = await supabase
     .from('trip_ideas')
-    .select('id, family_id, session_id, destination, duration_days_min, duration_days_max, budget_range_min, budget_range_max, budget_currency, includes_flights')
+    .select('id, family_id, session_id, destination, route_summary, duration_days_min, duration_days_max, budget_range_min, budget_range_max, budget_currency, includes_flights, hotel_shortlist')
     .eq('id', ideaId)
     .maybeSingle()
   if (!idea) return null
@@ -69,7 +72,7 @@ async function loadIdeaContext(ideaId: string) {
     ? dnaSummary.persons.filter((p) => travelerIds.includes(p.id))
     : dnaSummary.persons
 
-  return { supabase, idea: idea as IdeaRow, dnaSummary, selectedPersons }
+  return { supabase, idea: idea as unknown as IdeaRow, dnaSummary, selectedPersons }
 }
 
 /**
@@ -276,6 +279,82 @@ export async function estimateTripIdeaBudget(formData: FormData) {
   const { error: updateError } = await supabase
     .from('trip_ideas')
     .update({ budget_breakdown: estimate, budget_breakdown_updated_at: new Date().toISOString() })
+    .eq('id', ideaId)
+
+  if (updateError) redirect(`${returnTo}?error=${encodeURIComponent('Speicherfehler: ' + updateError.message)}`)
+
+  redirect(returnTo)
+}
+
+/**
+ * §"Reiseideen 2.0, Phase 2 -- Reisevarianten": kein neuer Places-/Routes-
+ * Aufruf -- die Hotelreferenz je Variante kommt ausschließlich aus der
+ * bereits vorhandenen, echten `hotel_shortlist` der Idee. Einziger Auslöser
+ * ist ein expliziter Button-Klick (gleiche Diskretion wie die beiden
+ * anderen Aktionen dieser Datei).
+ */
+export async function generateTripVariants(formData: FormData) {
+  const ideaId = String(formData.get('idea_id') ?? '')
+  const sessionId = String(formData.get('session_id') ?? '')
+  const returnTo = `/plan/ideas/${sessionId}/${ideaId}`
+
+  const ctx = await loadIdeaContext(ideaId)
+  if (!ctx) redirect(returnTo)
+  const { supabase, idea, dnaSummary, selectedPersons } = ctx
+
+  const dnaText = formatFamilyDnaForPrompt({ ...dnaSummary, persons: selectedPersons }, new Date().toISOString().slice(0, 10))
+
+  const shortlistItems = idea.hotel_shortlist?.items ?? []
+  // §"Wenn die Shortlist keine sinnvolle Differenzierung ermöglicht": ab 2
+  // echten, qualifizierten Hotelnamen bekommt die KI sie als Auswahl-Pool,
+  // sonst bleibt recommended_hotel_name bei jeder Variante null (siehe Prompt
+  // in generateTripVariants/lib/trip-idea-advisor-ai.ts).
+  const hotelCandidates = shortlistItems.map((h) => ({
+    name: h.name, tier: h.tier, priceLevel: h.priceLevel, transferMinutes: h.transferMinutes,
+  }))
+
+  const variants = await generateTripVariantsAi({
+    destination: idea.destination,
+    routeSummary: idea.route_summary,
+    durationDaysMin: idea.duration_days_min,
+    durationDaysMax: idea.duration_days_max,
+    budgetRangeMin: idea.budget_range_min,
+    budgetRangeMax: idea.budget_range_max,
+    budgetCurrency: idea.budget_currency,
+    familyDnaText: dnaText,
+    hotelCandidates,
+  })
+
+  if (!variants || variants.length === 0)
+    redirect(`${returnTo}?error=${encodeURIComponent('Die Varianten-Entwicklung ist gerade nicht verfügbar -- bitte in Kürze erneut versuchen.')}`)
+
+  const shortlistByName = new Map(shortlistItems.map((h) => [h.name, h]))
+
+  // §Defensive zweite Absicherung neben dem Schema: jeder von der KI
+  // genannte Hotelname ohne echten Treffer in der Shortlist wird verworfen
+  // (recommendedHotel bleibt null) -- kein erfundenes Hotel kann durchrutschen.
+  const storedVariants = variants.map((v) => ({
+    variantType: v.variantType,
+    title: v.title,
+    routeSummary: v.routeSummary,
+    stageCount: v.stageCount,
+    hasStopover: v.hasStopover,
+    durationDaysMin: v.durationDaysMin,
+    durationDaysMax: v.durationDaysMax,
+    transferBurden: v.transferBurden,
+    themeFocus: v.themeFocus,
+    budgetRangeMin: v.budgetRangeMin,
+    budgetRangeMax: v.budgetRangeMax,
+    budgetCurrency: v.budgetCurrency,
+    pros: v.pros,
+    cons: v.cons,
+    whyThisVariant: v.whyThisVariant,
+    recommendedHotel: v.recommendedHotelName ? shortlistByName.get(v.recommendedHotelName) ?? null : null,
+  }))
+
+  const { error: updateError } = await supabase
+    .from('trip_ideas')
+    .update({ variants: storedVariants, variants_generated_at: new Date().toISOString() })
     .eq('id', ideaId)
 
   if (updateError) redirect(`${returnTo}?error=${encodeURIComponent('Speicherfehler: ' + updateError.message)}`)

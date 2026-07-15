@@ -743,6 +743,7 @@ export interface Database {
           development_notes: string | null
           hotel_shortlist: Json | null; hotel_shortlist_updated_at: string | null
           budget_breakdown: Json | null; budget_breakdown_updated_at: string | null
+          variants: Json | null; variants_generated_at: string | null
           created_at: string; updated_at: string
         }
         Insert: {
@@ -754,6 +755,7 @@ export interface Database {
           development_notes?: string | null
           hotel_shortlist?: Json | null; hotel_shortlist_updated_at?: string | null
           budget_breakdown?: Json | null; budget_breakdown_updated_at?: string | null
+          variants?: Json | null; variants_generated_at?: string | null
           created_at?: string; updated_at?: string
         }
         Update: {
@@ -765,6 +767,7 @@ export interface Database {
           development_notes?: string | null
           hotel_shortlist?: Json | null; hotel_shortlist_updated_at?: string | null
           budget_breakdown?: Json | null; budget_breakdown_updated_at?: string | null
+          variants?: Json | null; variants_generated_at?: string | null
           created_at?: string; updated_at?: string
         }
         Relationships: [
