@@ -13,8 +13,15 @@ export type HotelCandidateFact = {
   transferMinutes: number | null
   address: string
   types: string[]
-  /** §"Qualitativ neu kalibrieren": bereits VOR der KI deterministisch aus echten Fakten (Marke oder Bewertung+Preisniveau) bestimmt -- die KI ordnet nicht selbst ein, sie bekommt es nur als Kontext, um die Auswahl auszubalancieren. */
-  tier: LuxuryHotelTier
+  /**
+   * §"Qualitativ neu kalibrieren": bereits VOR der KI deterministisch aus
+   * echten Fakten (Marke oder Bewertung+Preisniveau) bestimmt -- die KI
+   * ordnet nicht selbst ein, sie bekommt es nur als Kontext, um die Auswahl
+   * auszubalancieren. `null` = Fallback-Modus: kein Kandidat in dieser
+   * Region erreicht den gewünschten Mindeststandard (siehe `belowStandardMode`
+   * in `selectHotelShortlist`).
+   */
+  tier: LuxuryHotelTier | null
 }
 
 export type HotelPick = {
@@ -71,6 +78,8 @@ export async function selectHotelShortlist(context: {
   destination: string
   familyDnaText: string
   candidates: HotelCandidateFact[]
+  /** §"Fallback für Regionen ohne qualifizierte Hotels": true, wenn KEIN Kandidat den Mindeststandard erreicht -- alle `candidates` haben dann `tier: null`. */
+  belowStandardMode: boolean
 }): Promise<HotelPick[] | null> {
   if (!process.env.OPENAI_API_KEY) {
     console.error('[provider:config-missing]', { provider: 'openai', requestType: 'hotel_shortlist' })
@@ -81,7 +90,7 @@ export async function selectHotelShortlist(context: {
   const candidateText = context.candidates
     .map((c) => {
       const parts = [
-        `Einordnung: ${LUXURY_TIER_LABELS[c.tier]}`,
+        `Einordnung: ${c.tier ? LUXURY_TIER_LABELS[c.tier] : 'unterhalb des gewünschten 5-Sterne-Mindeststandards'}`,
         c.rating !== null ? `Bewertung ${c.rating} (${c.userRatingCount ?? 0} Rezensionen)` : 'keine Bewertung bekannt',
         c.priceLevel ? `Preisklasse ${c.priceLevel}` : 'Preisklasse unbekannt',
         c.transferMinutes !== null ? `${c.transferMinutes} Min Transferzeit` : 'Transferzeit unbekannt',
@@ -92,10 +101,14 @@ export async function selectHotelShortlist(context: {
     })
     .join('\n')
 
+  const qualityInstruction = context.belowStandardMode
+    ? 'WICHTIG: Kein einziges Hotel in dieser Region erreicht den eigentlich gewünschten gehobenen 5-Sterne-Mindeststandard (Westin/Le Méridien oder besser) -- das ist eine Ausnahme, keine Regel. Wähle trotzdem die besten der unten aufgeführten, real existierenden Optionen aus und sei in caveats bei JEDEM Hotel ausdrücklich und ehrlich deutlich, dass es UNTER dem gewünschten Niveau liegt.'
+    : 'Alle Kandidaten sind bereits auf gehobenes 5-Sterne-Niveau oder höher vorgefiltert.'
+
   const prompt = `Du bist Reiseberater für eine Familie, die eine Reiseidee nach ${context.destination} entwickelt.
 ${context.familyDnaText || 'Keine besonderen Präferenzen bekannt.'}
 
-Hotel-Kandidaten (ausschließlich echte, bereits über Google Places geprüfte Hotels, alle bereits auf gehobenes 5-Sterne-Niveau oder höher vorgefiltert -- wähle NUR aus dieser Liste, erfinde nichts):
+Hotel-Kandidaten (ausschließlich echte, bereits über Google Places geprüfte Hotels -- wähle NUR aus dieser Liste, erfinde nichts). ${qualityInstruction}
 ${candidateText}
 
 Wähle die passendsten dieser Hotels aus, die am besten zu dieser Familie passen, und ordne sie nach Passung (bestes zuerst). Achte auf eine ausgewogene Auswahl: Ultra-Luxus-Hotels dürfen vorkommen, sollen aber nicht die gesamte Auswahl dominieren, wenn auch Standard-/Premium-Kandidaten vorhanden sind -- bevorzuge insgesamt eine Mischung, die nicht ausschließlich aus Ultra-Luxus besteht. Gib place_name exakt wie in der Liste zurück, ohne Zusätze. Behaupte keine Ausstattungsmerkmale (Kinderclub, Zimmer-/Villengröße, Pool, Strandlage, Restaurants etc.), die nicht Teil der gelieferten Fakten sind -- stütze dich ausschließlich auf Name, Einordnung, Bewertung, Rezensionsanzahl, Preisklasse, Transferzeit, Adresse und Places-Typen. Sei auch ehrlich in caveats, wenn ein Hotel nicht perfekt passt.`

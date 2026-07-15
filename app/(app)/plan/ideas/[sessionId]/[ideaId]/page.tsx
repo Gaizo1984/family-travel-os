@@ -7,21 +7,26 @@ import { generateHotelShortlist, estimateTripIdeaBudget } from "@/lib/actions/tr
 import { BUDGET_CATEGORY_ORDER, BUDGET_CATEGORY_LABELS, type BudgetCategory } from "@/lib/budget";
 import { LUXURY_TIER_LABELS, type LuxuryHotelTier } from "@/lib/data/luxury-hotel-brands";
 import { Banner } from "@/components/Banner";
+import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
 
 type HotelShortlistItem = {
   placeId: string; name: string; address: string
   rating: number | null; reviewCount: number | null; priceLevel: string | null
   photoName: string | null; websiteUri: string | null; transferMinutes: number | null
   familyFitReasoning: string; styleImpression: string; bestFor: string; caveats: string
-  tier: LuxuryHotelTier; tierBasis: "brand" | "heuristic"
+  /** null = Fallback-Kandidat unterhalb des Mindeststandards (siehe HotelShortlist.belowStandard). */
+  tier: LuxuryHotelTier | null; tierBasis: "brand" | "heuristic"
   unverifiedFields: string[]
 };
+
+type HotelShortlist = { items: HotelShortlistItem[]; belowStandard: boolean };
 
 const TIER_COLORS: Record<LuxuryHotelTier, string> = {
   standard: "var(--accent)",
   premium: "#8B6F47",
   ultra_luxury: "#B5624A",
 };
+const BELOW_STANDARD_COLOR = "#8A8578";
 
 type BudgetBreakdown = {
   currency: string; totalMin: number | null; totalMax: number | null
@@ -62,13 +67,14 @@ function HotelCard({ hotel }: { hotel: HotelShortlistItem }) {
         <div className="flex items-center gap-1.5 mb-2 flex-wrap">
           <span
             style={{
-              color: TIER_COLORS[hotel.tier], fontSize: "0.6rem", letterSpacing: "0.06em", textTransform: "uppercase",
-              border: `1px solid ${TIER_COLORS[hotel.tier]}55`, borderRadius: "20px", padding: "2px 9px",
+              color: hotel.tier ? TIER_COLORS[hotel.tier] : BELOW_STANDARD_COLOR,
+              fontSize: "0.6rem", letterSpacing: "0.06em", textTransform: "uppercase",
+              border: `1px solid ${(hotel.tier ? TIER_COLORS[hotel.tier] : BELOW_STANDARD_COLOR)}55`, borderRadius: "20px", padding: "2px 9px",
             }}
           >
-            {LUXURY_TIER_LABELS[hotel.tier]}
+            {hotel.tier ? LUXURY_TIER_LABELS[hotel.tier] : "Unterhalb des gewünschten Niveaus"}
           </span>
-          {hotel.tierBasis === "heuristic" && (
+          {hotel.tier && hotel.tierBasis === "heuristic" && (
             <span style={{ color: "var(--muted)", fontSize: "0.6rem", fontStyle: "italic" }}>
               (keine offizielle Sterne-Klassifizierung — Einordnung aus Bewertung/Preisniveau)
             </span>
@@ -134,7 +140,7 @@ export default async function TripIdeaDetailPage({
 
   if (!idea) notFound();
 
-  const hotelShortlist = (idea.hotel_shortlist as HotelShortlistItem[] | null) ?? null;
+  const hotelShortlist = (idea.hotel_shortlist as HotelShortlist | null) ?? null;
   const budgetBreakdown = (idea.budget_breakdown as BudgetBreakdown | null) ?? null;
 
   return (
@@ -206,23 +212,28 @@ export default async function TripIdeaDetailPage({
             <form action={generateHotelShortlist}>
               <input type="hidden" name="idea_id" value={idea.id} />
               <input type="hidden" name="session_id" value={sessionId} />
-              <button
-                type="submit"
+              <SubmitButtonWithProgress
+                label={hotelShortlist ? "Neu vorschlagen" : "Hotels vorschlagen"}
+                pendingLabel="Hotels werden ermittelt …"
                 style={{
                   background: "transparent", color: "var(--accent)", border: "1px solid rgba(184,154,94,0.4)",
                   borderRadius: "6px", padding: "7px 14px", fontSize: "0.6rem", letterSpacing: "0.1em",
-                  textTransform: "uppercase", cursor: "pointer", whiteSpace: "nowrap", WebkitAppearance: "none", appearance: "none",
                 }}
-              >
-                {hotelShortlist ? "Neu vorschlagen" : "Hotels vorschlagen"}
-              </button>
+              />
             </form>
           </div>
 
           {hotelShortlist ? (
             <>
+              {hotelShortlist.belowStandard && (
+                <div className="mb-4 px-4 py-3 rounded-lg" style={{ background: "rgba(138,133,120,0.12)", border: "1px solid rgba(138,133,120,0.35)" }}>
+                  <p style={{ color: "var(--foreground)", fontSize: "0.75rem", lineHeight: 1.5 }}>
+                    Kein Hotel in dieser Region erfüllt den gewünschten gehobenen 5-Sterne-Mindeststandard (Westin/Le Méridien oder besser) — hier die besten real verfügbaren Optionen, deutlich unterhalb des gewünschten Niveaus.
+                  </p>
+                </div>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3">
-                {hotelShortlist.map((h) => <HotelCard key={h.placeId} hotel={h} />)}
+                {hotelShortlist.items.map((h) => <HotelCard key={h.placeId} hotel={h} />)}
               </div>
               <p style={{ color: "var(--muted)", fontSize: "0.65rem", fontStyle: "italic" }}>
                 Auswahl auf Basis echter Google-Places-Daten, keine Live-Verfügbarkeit oder Livepreisprüfung.
@@ -246,16 +257,14 @@ export default async function TripIdeaDetailPage({
             <form action={estimateTripIdeaBudget}>
               <input type="hidden" name="idea_id" value={idea.id} />
               <input type="hidden" name="session_id" value={sessionId} />
-              <button
-                type="submit"
+              <SubmitButtonWithProgress
+                label={budgetBreakdown ? "Neu schätzen" : "Budget schätzen"}
+                pendingLabel="Budget wird geschätzt …"
                 style={{
                   background: "transparent", color: "var(--accent)", border: "1px solid rgba(184,154,94,0.4)",
                   borderRadius: "6px", padding: "7px 14px", fontSize: "0.6rem", letterSpacing: "0.1em",
-                  textTransform: "uppercase", cursor: "pointer", whiteSpace: "nowrap", WebkitAppearance: "none", appearance: "none",
                 }}
-              >
-                {budgetBreakdown ? "Neu schätzen" : "Budget schätzen"}
-              </button>
+              />
             </form>
           </div>
 

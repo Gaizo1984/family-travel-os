@@ -6,6 +6,7 @@ import { createTrip } from "@/lib/actions/trips";
 import { generateTripIdeas } from "@/lib/actions/trip-idea-generation";
 import { COMPASS_CATEGORY_LABELS } from "@/lib/family-dna";
 import { Banner } from "@/components/Banner";
+import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
 import { DateSelectFields } from "@/components/DateSelectFields";
 import { getDateFieldRange } from "@/lib/documents";
 
@@ -213,16 +214,11 @@ export default async function PlanPage({
                 <p style={{ color: "var(--muted)", fontSize: "0.68rem", fontStyle: "italic", letterSpacing: "0.02em" }}>
                   Schreibt einfach so, wie ihr es mir erzählen würdet.
                 </p>
-                <button
-                  type="submit"
-                  style={{
-                    background: "var(--foreground)", color: "var(--surface)", border: "none", borderRadius: "6px",
-                    padding: "10px 22px", fontSize: "0.65rem", letterSpacing: "0.16em", textTransform: "uppercase",
-                    cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0, WebkitAppearance: "none", appearance: "none",
-                  }}
-                >
-                  Reiseidee entwickeln
-                </button>
+                <SubmitButtonWithProgress
+                  label="Reiseidee entwickeln"
+                  pendingLabel="Vorschlag wird ermittelt …"
+                  style={{ flexShrink: 0 }}
+                />
               </div>
             </div>
 
