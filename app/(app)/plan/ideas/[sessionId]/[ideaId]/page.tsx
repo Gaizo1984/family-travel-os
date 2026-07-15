@@ -4,18 +4,12 @@ import { ChevronLeft, Star, ExternalLink, Check, X as XIcon, Trash2 } from "luci
 import { createClient } from "@/lib/supabase/server";
 import { updateTripIdeaNotes, deleteTripIdea } from "@/lib/actions/trip-ideas";
 import { generateHotelShortlist, estimateTripIdeaBudget, generateTripVariants } from "@/lib/actions/trip-idea-advisor";
-import { searchFlightOptions } from "@/lib/actions/flight-search";
-import { getFlightProviderName } from "@/lib/providers/flights-provider";
 import { BUDGET_CATEGORY_ORDER, BUDGET_CATEGORY_LABELS, type BudgetCategory } from "@/lib/budget";
 import { LUXURY_TIER_LABELS, type LuxuryHotelTier } from "@/lib/data/luxury-hotel-brands";
 import { TRIP_VARIANT_LABELS, type TripVariantType, type TransferBurden } from "@/lib/trip-idea-advisor-ai";
 import type { HotelShortlistItem, HotelShortlist } from "@/lib/trip-idea-hotel-types";
-import type { FlightSearchOption } from "@/lib/flight-types";
 import { Banner } from "@/components/Banner";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
-import { DateSelectFields } from "@/components/DateSelectFields";
-import { FlightFilterBar } from "@/components/FlightFilterBar";
-import { getDateFieldRange } from "@/lib/documents";
 
 const TIER_COLORS: Record<LuxuryHotelTier, string> = {
   standard: "var(--accent)",
@@ -130,6 +124,10 @@ type StoredTripVariant = {
 
 const TRANSFER_BURDEN_LABELS: Record<TransferBurden, string> = { gering: "Gering", mittel: "Mittel", hoch: "Hoch" };
 const TRANSFER_BURDEN_COLORS: Record<TransferBurden, string> = { gering: "#4C7A5D", mittel: "#B89A5E", hoch: "#B5624A" };
+
+function formatSearchedAt(iso: string): string {
+  return new Date(iso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
 
 function durationText(v: StoredTripVariant): string {
   if (!v.durationDaysMin && !v.durationDaysMax) return "—";
@@ -274,25 +272,25 @@ export default async function TripIdeaDetailPage({
   const { data: session } = idea.session_id
     ? await supabase
       .from("trip_idea_sessions")
-      .select("departure_city, travel_date_mode, travel_start_date, travel_end_date")
+      .select("departure_city, travel_date_mode, travel_start_date, travel_end_date, traveler_ids")
       .eq("id", idea.session_id)
       .maybeSingle()
     : { data: null };
 
-  let flightSearchCache: { results: FlightSearchOption[]; is_sandbox_data: boolean; updated_at: string } | null = null;
-  if (idea.flight_search_key) {
-    const { data: cached } = await supabase
-      .from("flight_search_cache")
-      .select("results, is_sandbox_data, updated_at")
-      .eq("family_id", idea.family_id)
-      .eq("search_key", idea.flight_search_key)
-      .maybeSingle();
-    flightSearchCache = cached ? { results: cached.results as unknown as FlightSearchOption[], is_sandbox_data: cached.is_sandbox_data, updated_at: cached.updated_at } : null;
+  // §"Eine einzige Flugvergleich-UI": diese Seite zeigt keine Ergebnisse mehr
+  // selbst, sondern verlinkt mit den bereits bekannten Eckdaten vorausgefüllt
+  // auf `/discover/flights` -- inkl. `search_key`, falls bereits gesucht wurde.
+  const flightsParams = new URLSearchParams();
+  flightsParams.set("destination", idea.destination);
+  if (session?.departure_city) flightsParams.set("departure_city", session.departure_city);
+  if (session?.travel_date_mode === "exact" && session.travel_start_date && session.travel_end_date) {
+    flightsParams.set("departure_date", session.travel_start_date);
+    flightsParams.set("return_date", session.travel_end_date);
   }
-
-  const needsDepartureCity = !session?.departure_city;
-  const needsJustInTimeDates = session?.travel_date_mode !== "exact" || !session?.travel_start_date || !session?.travel_end_date;
-  const travelDateRange = getDateFieldRange("travel");
+  if (session?.traveler_ids && session.traveler_ids.length > 0) flightsParams.set("traveler_ids", session.traveler_ids.join(","));
+  flightsParams.set("idea_id", idea.id);
+  if (idea.flight_search_key) flightsParams.set("search_key", idea.flight_search_key);
+  const flightsDeepLink = `/discover/flights?${flightsParams.toString()}`;
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -406,58 +404,28 @@ export default async function TripIdeaDetailPage({
               Flugvergleich
             </h2>
           </div>
-
-          <form action={searchFlightOptions} className="mb-5">
-            <input type="hidden" name="idea_id" value={idea.id} />
-            <input type="hidden" name="session_id" value={sessionId} />
-            {flightSearchCache && <input type="hidden" name="force_refresh" value="on" />}
-
-            {(needsDepartureCity || needsJustInTimeDates) && (
-              <div className="rounded-xl p-5 mb-4" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-                {needsDepartureCity && (
-                  <div className="mb-4">
-                    <label style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px" }}>
-                      Abflugort
-                    </label>
-                    <input
-                      name="departure_city" type="text" required placeholder="z. B. Frankfurt"
-                      style={{ width: "100%", padding: "12px 14px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)", fontSize: "0.85rem", fontWeight: 300, outline: "none" }}
-                    />
-                  </div>
-                )}
-                {needsJustInTimeDates && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <DateSelectFields label="Hinflug" namePrefix="search_departure_date" range={travelDateRange} quickActions />
-                    <DateSelectFields label="Rückflug" namePrefix="search_return_date" range={travelDateRange} quickActions />
-                  </div>
-                )}
+          <div className="rounded-xl p-6 flex items-center justify-between flex-wrap gap-4" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+            <div>
+              <div style={{ color: "var(--foreground)", fontSize: "0.85rem", fontWeight: 400, marginBottom: "4px" }}>
+                {idea.flight_search_key ? "Flüge bereits gesucht" : "Noch keine Flüge gesucht"}
               </div>
-            )}
-
-            <SubmitButtonWithProgress
-              label={flightSearchCache ? "Neu suchen" : "Flüge suchen"}
-              pendingLabel="Flüge werden gesucht …"
-              style={{
-                background: "transparent", color: "var(--accent)", border: "1px solid rgba(184,154,94,0.4)",
-                borderRadius: "6px", padding: "7px 14px", fontSize: "0.6rem", letterSpacing: "0.1em",
-              }}
-            />
-          </form>
-
-          {flightSearchCache ? (
-            <FlightFilterBar
-              options={flightSearchCache.results}
-              isSandboxData={flightSearchCache.is_sandbox_data}
-              providerName={getFlightProviderName()}
-              searchedAt={flightSearchCache.updated_at}
-            />
-          ) : (
-            <div className="rounded-xl p-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-              <p style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
-                Noch keine Flüge gesucht. LUMI sucht dafür echte Flugverbindungen und bewertet sie transparent nach Preis, Reisezeit, Umstiegen und Gepäck.
+              <p style={{ color: "var(--muted)", fontSize: "0.72rem" }}>
+                {idea.flight_search_key && idea.flight_options_updated_at
+                  ? `Zuletzt gesucht am ${formatSearchedAt(idea.flight_options_updated_at)}.`
+                  : "LUMI sucht dafür echte Flugverbindungen und bewertet sie transparent nach Preis, Reisezeit, Umstiegen und Gepäck."}
               </p>
             </div>
-          )}
+            <Link
+              href={flightsDeepLink}
+              style={{
+                background: "transparent", color: "var(--accent)", border: "1px solid rgba(184,154,94,0.4)",
+                borderRadius: "6px", padding: "10px 18px", fontSize: "0.62rem", letterSpacing: "0.1em",
+                textTransform: "uppercase", textDecoration: "none", whiteSpace: "nowrap",
+              }}
+            >
+              {idea.flight_search_key ? "Ergebnisse ansehen →" : "Flugvergleich öffnen →"}
+            </Link>
+          </div>
         </section>
 
         {/* ── Budget-Schätzung ── */}

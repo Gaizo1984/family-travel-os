@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { getFamily } from '@/lib/family'
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt, ageAtDate } from '@/lib/family-dna'
 import { resolveAirportCode, searchFlights, isFlightProviderSandbox } from '@/lib/providers/flights-provider'
 import { ProviderConfigError } from '@/lib/providers/provider-errors'
@@ -196,64 +197,60 @@ export async function getOrSearchFlightOptions(params: {
   return { status: 'ok', searchKey, result: { options: finalOptions, isSandboxData, searchedAt } }
 }
 
+function buildFlightsPageUrl(params: {
+  destination?: string | null; departureCity?: string | null
+  departureDate?: string | null; returnDate?: string | null
+  travelerIds?: string[]; ideaId?: string | null; searchKey?: string | null; error?: string | null
+}): string {
+  const usp = new URLSearchParams()
+  if (params.destination) usp.set('destination', params.destination)
+  if (params.departureCity) usp.set('departure_city', params.departureCity)
+  if (params.departureDate) usp.set('departure_date', params.departureDate)
+  if (params.returnDate) usp.set('return_date', params.returnDate)
+  if (params.travelerIds && params.travelerIds.length > 0) usp.set('traveler_ids', params.travelerIds.join(','))
+  if (params.ideaId) usp.set('idea_id', params.ideaId)
+  if (params.searchKey) usp.set('search_key', params.searchKey)
+  if (params.error) usp.set('error', params.error)
+  return `/discover/flights?${usp.toString()}`
+}
+
 /**
- * §"Flüge suchen"-Button auf der Ideen-Detailseite -- einziger Auslöser für
- * Flug-Provider-/OpenAI-Aufrufe dieser Idee, nie beim bloßen Seitenaufruf
- * (gleiche Disziplin wie `generateHotelShortlist`). Reines Formular-Glue:
- * lädt Kontext, löst Flughafencodes auf, delegiert die eigentliche Arbeit
- * an `getOrSearchFlightOptions`.
+ * §"Eine einzige Flugvergleich-UI, keine doppelte Logik": ersetzt die
+ * frühere idee-gekoppelte `searchFlightOptions` vollständig. Funktioniert
+ * sowohl mit leeren Suchparametern (Kachel auf `/discover`) als auch
+ * vorausgefüllt (Deep-Link von einer Ideen-Detailseite, inkl. optionalem
+ * `idea_id`-Feld) -- einziger Auslöser für den echten Providerruf ist der
+ * Button-Klick auf `/discover/flights`, nie ein Seitenaufruf.
  */
-export async function searchFlightOptions(formData: FormData) {
-  const ideaId = String(formData.get('idea_id') ?? '')
-  const sessionId = String(formData.get('session_id') ?? '')
-  const returnTo = `/plan/ideas/${sessionId}/${ideaId}`
+export async function searchFlightsStandalone(formData: FormData) {
+  const destination = String(formData.get('destination') ?? '').trim()
+  const departureCity = String(formData.get('departure_city') ?? '').trim()
+  const travelerIds = formData.getAll('traveler_ids').map(String)
+  const ideaId = String(formData.get('idea_id') ?? '').trim() || null
 
-  const supabase = await createClient()
-  const { data: idea } = await supabase
-    .from('trip_ideas')
-    .select('id, family_id, session_id, destination')
-    .eq('id', ideaId)
-    .maybeSingle()
-  if (!idea) redirect(returnTo)
+  const redirectBack = (error: string, departureDate?: string | null, returnDate?: string | null): never => {
+    redirect(buildFlightsPageUrl({ destination, departureCity, departureDate, returnDate, travelerIds, ideaId, error }))
+  }
 
-  const { data: session } = idea.session_id
-    ? await supabase
-      .from('trip_idea_sessions')
-      .select('traveler_ids, departure_city, travel_date_mode, travel_start_date, travel_end_date, stopover_preference, max_stopovers')
-      .eq('id', idea.session_id)
-      .maybeSingle()
-    : { data: null }
+  if (!destination) redirectBack('Bitte ein Reiseziel angeben.')
+  if (!departureCity) redirectBack('Bitte einen Abflugort angeben.')
 
-  const departureCityInput = String(formData.get('departure_city') ?? '').trim()
-  const departureCity = departureCityInput || session?.departure_city || ''
-  if (!departureCity)
-    redirect(`${returnTo}?error=${encodeURIComponent('Bitte einen Abflugort angeben.')}`)
-
-  // §"Echtes Flugdatum ist zwingend": bei exact-Modus aus der Session, sonst
-  // Just-in-time aus dem Suchformular -- schreibt nie in die Session zurück.
   let departureDate: string | null = null
   let returnDate: string | null = null
-  if (session?.travel_date_mode === 'exact' && session.travel_start_date && session.travel_end_date) {
-    departureDate = session.travel_start_date
-    returnDate = session.travel_end_date
-  } else {
-    try {
-      departureDate = readDateGroupFromFormData(formData, 'search_departure_date', 'Hinflugdatum')
-      returnDate = readDateGroupFromFormData(formData, 'search_return_date', 'Rückflugdatum')
-    } catch (e) {
-      redirect(`${returnTo}?error=${encodeURIComponent(e instanceof Error ? e.message : 'Ungültiges Datum')}`)
-    }
+  try {
+    departureDate = readDateGroupFromFormData(formData, 'departure_date', 'Hinflugdatum')
+    returnDate = readDateGroupFromFormData(formData, 'return_date', 'Rückflugdatum')
+  } catch (e) {
+    redirectBack(e instanceof Error ? e.message : 'Ungültiges Datum')
   }
-  if (!departureDate)
-    redirect(`${returnTo}?error=${encodeURIComponent('Bitte ein Hinflugdatum angeben.')}`)
+  if (!departureDate) redirectBack('Bitte ein Hinflugdatum angeben.')
 
-  const dnaSummary = await buildFamilyDnaSummary(idea.family_id)
-  const travelerIds = (session?.traveler_ids as string[] | null) ?? null
-  const selectedPersons = travelerIds && travelerIds.length > 0
+  const { id: familyId } = await getFamily()
+  const dnaSummary = await buildFamilyDnaSummary(familyId)
+  const selectedPersons = travelerIds.length > 0
     ? dnaSummary.persons.filter((p) => travelerIds.includes(p.id))
     : dnaSummary.persons
 
-  // §"Reisebriefing berücksichtigen": exakte Einzelalter zum Hinflugdatum, keine Bucket-Umrechnung an dieser Stelle.
   const passengerAges: Array<number | null> = selectedPersons.length > 0
     ? selectedPersons.map((p) => ageAtDate(p.birth_date, departureDate!))
     : [null]
@@ -262,51 +259,60 @@ export async function searchFlightOptions(formData: FormData) {
   let destResolved: { code: string; name: string } | null = null
   try {
     originResolved = await resolveAirportCode(departureCity)
-    destResolved = await resolveAirportCode(idea.destination)
+    destResolved = await resolveAirportCode(destination)
   } catch (e) {
     const message = e instanceof ProviderConfigError
       ? 'Die Flugsuche ist aktuell nicht konfiguriert -- bitte Support informieren.'
       : 'Die Flugsuche ist gerade fehlgeschlagen -- bitte in Kürze erneut versuchen.'
-    redirect(`${returnTo}?error=${encodeURIComponent(message)}`)
+    redirectBack(message, departureDate, returnDate)
   }
-  if (!originResolved) redirect(`${returnTo}?error=${encodeURIComponent(`Kein Flughafen für "${departureCity}" gefunden -- bitte präzisieren.`)}`)
-  if (!destResolved) redirect(`${returnTo}?error=${encodeURIComponent(`Kein Zielflughafen für "${idea.destination}" gefunden -- bitte Ziel präzisieren.`)}`)
+  if (!originResolved) redirectBack(`Kein Flughafen für "${departureCity}" gefunden -- bitte präzisieren.`, departureDate, returnDate)
+  if (!destResolved) redirectBack(`Kein Zielflughafen für "${destination}" gefunden -- bitte Ziel präzisieren.`, departureDate, returnDate)
 
-  const dnaText = formatFamilyDnaForPrompt({ ...dnaSummary, persons: selectedPersons }, departureDate)
+  const safeDepartureDate = departureDate!
 
-  let outcome: FlightSearchOutcome
+  const dnaText = formatFamilyDnaForPrompt({ ...dnaSummary, persons: selectedPersons }, safeDepartureDate)
+
+  let outcome!: FlightSearchOutcome
   try {
     outcome = await getOrSearchFlightOptions({
-      familyId: idea.family_id,
-      originCodes: [originResolved.code],
-      destinationCode: destResolved.code,
-      departureDate,
+      familyId,
+      originCodes: [originResolved!.code],
+      destinationCode: destResolved!.code,
+      departureDate: safeDepartureDate,
       returnDate,
       passengerAges,
-      maxStops: session?.max_stopovers ?? null,
+      maxStops: null,
       familyDnaText: dnaText,
-      stopoverPreference: session?.stopover_preference ?? null,
+      stopoverPreference: null,
       forceRefresh: formData.get('force_refresh') === 'on',
     })
   } catch (e) {
     const message = e instanceof ProviderConfigError
       ? 'Die Flugsuche ist aktuell nicht konfiguriert -- bitte Support informieren.'
       : 'Die Flugsuche ist gerade fehlgeschlagen -- bitte in Kürze erneut versuchen.'
-    redirect(`${returnTo}?error=${encodeURIComponent(message)}`)
+    redirectBack(message, departureDate, returnDate)
   }
 
   if (outcome.status === 'limit_reached')
-    redirect(`${returnTo}?error=${encodeURIComponent('Monatliches Such-Limit erreicht -- weitere Suchen sind erst im nächsten Monat möglich.')}`)
+    redirectBack('Monatliches Such-Limit erreicht -- weitere Suchen sind erst im nächsten Monat möglich.', departureDate, returnDate)
   if (outcome.status === 'already_in_progress')
-    redirect(`${returnTo}?error=${encodeURIComponent('Für diese Suche läuft bereits eine Anfrage -- bitte kurz warten und erneut versuchen.')}`)
+    redirectBack('Für diese Suche läuft bereits eine Anfrage -- bitte kurz warten und erneut versuchen.', departureDate, returnDate)
   if (outcome.status === 'no_results')
-    redirect(`${returnTo}?error=${encodeURIComponent('Keine Flüge für diese Route/Daten gefunden.')}`)
+    redirectBack('Keine Flüge für diese Route/Daten gefunden.', departureDate, returnDate)
 
-  const { error: updateError } = await supabase
-    .from('trip_ideas')
-    .update({ flight_search_key: outcome.searchKey, flight_options_updated_at: outcome.result.searchedAt })
-    .eq('id', ideaId)
-  if (updateError) redirect(`${returnTo}?error=${encodeURIComponent('Speicherfehler: ' + updateError.message)}`)
+  const okOutcome = outcome as Extract<FlightSearchOutcome, { status: 'ok' }>
 
-  redirect(returnTo)
+  // §"Zuletzt gesucht"-Erinnerung auf der Ideen-Seite: best-effort, blockiert die eigentliche Anzeige nicht.
+  if (ideaId) {
+    const supabase = await createClient()
+    await supabase
+      .from('trip_ideas')
+      .update({ flight_search_key: okOutcome.searchKey, flight_options_updated_at: okOutcome.result.searchedAt })
+      .eq('id', ideaId)
+  }
+
+  redirect(buildFlightsPageUrl({
+    destination, departureCity, departureDate, returnDate, travelerIds, ideaId, searchKey: okOutcome.searchKey,
+  }))
 }

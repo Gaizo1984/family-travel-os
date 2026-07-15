@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { DateSelectFields } from '@/components/DateSelectFields'
 import { SubmitButtonWithProgress } from '@/components/SubmitButtonWithProgress'
+import { TravelerChipSelector, type BriefingPerson } from '@/components/TravelerChipSelector'
 import { getDateFieldRange } from '@/lib/documents'
 import {
   CLIMATE_PREFERENCE_LABELS, CLIMATE_PREFERENCE_ORDER, type ClimatePreference,
@@ -11,7 +12,7 @@ import {
   TRAVEL_DATE_MODE_LABELS, TRAVEL_DATE_MODE_ORDER, type TravelDateMode,
 } from '@/lib/travel-preferences'
 
-export type BriefingPerson = { id: string; name: string; birth_date: string | null; is_minor: boolean }
+export type { BriefingPerson }
 
 const STEP_LABELS = ['Wer reist?', 'Wann?', 'Welche Reise?', 'Klima & Anreise', 'Budget & Ausschlüsse', 'Zusammenfassung']
 
@@ -25,13 +26,6 @@ const FIELD_STYLE: React.CSSProperties = {
 const SHORTCUT_STYLE: React.CSSProperties = {
   fontSize: '0.65rem', color: 'var(--accent)', background: 'var(--background)', border: '1px solid var(--border)',
   padding: '8px 14px', borderRadius: '20px', cursor: 'pointer', WebkitAppearance: 'none', appearance: 'none',
-}
-
-/** Nur für den "Familie ohne Baby"-Shortcut -- reine UI-Schwelle, keine Reisebedürfnis-Logik. */
-function isBaby(p: BriefingPerson): boolean {
-  if (!p.birth_date) return false
-  const ageYears = (Date.now() - new Date(p.birth_date).getTime()) / (365.25 * 24 * 3600 * 1000)
-  return ageYears < 2
 }
 
 function computeNights(start: string | null, end: string | null): number | null {
@@ -91,9 +85,6 @@ export function TripBriefingWizard({ persons, action, children }: { persons: Bri
   const dateRange = getDateFieldRange('travel')
   const exactNights = computeNights(startIso, endIso)
 
-  function toggleTraveler(id: string) {
-    setTravelerIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
-  }
   function toggleInArray<T>(setter: React.Dispatch<React.SetStateAction<T[]>>, value: T) {
     setter((prev) => (prev.includes(value) ? prev.filter((x) => x !== value) : [...prev, value]))
   }
@@ -154,19 +145,7 @@ export function TripBriefingWizard({ persons, action, children }: { persons: Bri
         {/* 1. Wer reist? */}
         <div style={{ display: step === 0 ? 'block' : 'none' }}>
           <SectionTitle>Wer reist mit?</SectionTitle>
-          <div className="flex flex-wrap gap-2 mb-4">
-            <button type="button" style={SHORTCUT_STYLE} onClick={() => setTravelerIds(persons.map((p) => p.id))}>Alle</button>
-            <button type="button" style={SHORTCUT_STYLE} onClick={() => setTravelerIds(persons.filter((p) => !p.is_minor).map((p) => p.id))}>Nur Erwachsene</button>
-            <button type="button" style={SHORTCUT_STYLE} onClick={() => setTravelerIds(persons.filter((p) => !isBaby(p)).map((p) => p.id))}>Familie ohne Baby</button>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {persons.map((p) => (
-              <label key={p.id}>
-                <input type="checkbox" name="traveler_ids" value={p.id} checked={travelerIds.includes(p.id)} onChange={() => toggleTraveler(p.id)} className="sr-only" />
-                <ChipToggle selected={travelerIds.includes(p.id)} onClick={() => toggleTraveler(p.id)}>{p.name}</ChipToggle>
-              </label>
-            ))}
-          </div>
+          <TravelerChipSelector persons={persons} selectedIds={travelerIds} onChange={setTravelerIds} />
           {travelerIds.length === 0 && (
             <p className="mt-4" style={{ color: 'var(--muted)', fontSize: '0.7rem', fontStyle: 'italic' }}>Bitte mindestens einen Reisenden auswählen.</p>
           )}

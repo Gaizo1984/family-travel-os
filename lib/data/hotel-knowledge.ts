@@ -14,6 +14,19 @@ export type CuratedHotel = {
   highlights: string[]
 }
 
+/**
+ * §"Keine doppelte Sortierlogik": von `/discover/hotels` UND der "Besondere
+ * Hotels"-Sektion auf `/discover` genutzt -- Hotels, deren `hotelStyleTags`
+ * am meisten mit den Familien-Kriterien übereinstimmen, zuerst.
+ */
+export function sortHotelsByFamilyCriteria(hotels: CuratedHotel[], criteria: Set<string>): CuratedHotel[] {
+  return [...hotels].sort((a, b) => {
+    const scoreA = a.hotelStyleTags.filter((t) => criteria.has(t)).length
+    const scoreB = b.hotelStyleTags.filter((t) => criteria.has(t)).length
+    return scoreB - scoreA
+  })
+}
+
 export const HOTELS: CuratedHotel[] = [
   {
     name: 'Nihi Sumba', destination: 'Indonesien',

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { HOTELS } from "@/lib/data/hotel-knowledge";
+import { HOTELS, sortHotelsByFamilyCriteria } from "@/lib/data/hotel-knowledge";
 import { HOTEL_CRITERIA_OPTIONS } from "@/lib/family-dna";
 
 export default async function DiscoverHotelsPage() {
@@ -9,11 +9,7 @@ export default async function DiscoverHotelsPage() {
   const { data: family } = await supabase.from("families").select("id, exceptional_hotel_criteria").limit(1).single();
   const criteria = new Set(family?.exceptional_hotel_criteria ?? []);
 
-  const sorted = [...HOTELS].sort((a, b) => {
-    const scoreA = a.hotelStyleTags.filter((t) => criteria.has(t)).length;
-    const scoreB = b.hotelStyleTags.filter((t) => criteria.has(t)).length;
-    return scoreB - scoreA;
-  });
+  const sorted = sortHotelsByFamilyCriteria(HOTELS, criteria);
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
