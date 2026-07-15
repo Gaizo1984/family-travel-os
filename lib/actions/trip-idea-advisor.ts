@@ -7,6 +7,35 @@ import { computeRouteMatrix } from '@/lib/providers/routes-provider'
 import { ProviderConfigError } from '@/lib/providers/provider-errors'
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt } from '@/lib/family-dna'
 import { selectHotelShortlist, generateBudgetBreakdown, type HotelCandidateFact } from '@/lib/trip-idea-advisor-ai'
+import { classifyHotelBrand, type LuxuryHotelTier } from '@/lib/data/luxury-hotel-brands'
+
+/**
+ * §"Hotel-Shortlist qualitativ neu kalibrieren": Google Places liefert keine
+ * offizielle Sterne-Klassifizierung -- Mindeststandard ist daher entweder
+ * eine verifizierte internationale Marke (siehe luxury-hotel-brands.ts) ODER,
+ * für unabhängige Resorts ohne Markenzugehörigkeit, eine belastbare
+ * Fakten-Kombination aus hoher Bewertung + ausreichend Rezensionen + hohem
+ * Preisniveau. Rating oder Preis ALLEIN reichen bewusst nicht (ein günstiges,
+ * gut bewertetes Gästehaus soll nicht durchrutschen) -- beides zusammen muss
+ * stimmen. Erfüllt ein Kandidat keines von beidem, wird er VOR der KI-Auswahl
+ * konsequent ausgeschlossen, nicht erst danach schöngeredet.
+ */
+const QUALIFYING_MIN_RATING = 4.5
+const QUALIFYING_MIN_REVIEWS = 100
+const QUALIFYING_PRICE_LEVELS = new Set(['PRICE_LEVEL_EXPENSIVE', 'PRICE_LEVEL_VERY_EXPENSIVE'])
+
+type HotelQualification = { qualifies: boolean; tier: LuxuryHotelTier; tierBasis: 'brand' | 'heuristic' }
+
+function classifyAndQualify(hotel: LodgingResult): HotelQualification {
+  const brandTier = classifyHotelBrand(hotel.name)
+  if (brandTier) return { qualifies: true, tier: brandTier, tierBasis: 'brand' }
+
+  const highRating = hotel.rating !== null && hotel.rating >= QUALIFYING_MIN_RATING && (hotel.userRatingCount ?? 0) >= QUALIFYING_MIN_REVIEWS
+  const highPrice = hotel.priceLevel !== null && QUALIFYING_PRICE_LEVELS.has(hotel.priceLevel)
+  if (highRating && highPrice) return { qualifies: true, tier: 'standard', tierBasis: 'heuristic' }
+
+  return { qualifies: false, tier: 'standard', tierBasis: 'heuristic' }
+}
 
 type IdeaRow = {
   id: string
@@ -82,11 +111,21 @@ export async function generateHotelShortlist(formData: FormData) {
   // §"Nach Place ID deduplizieren": zwei Hotels können ähnliche/identische
   // Namen tragen, aber nie dieselbe Place ID -- Dedupe bewusst auf `id`, nicht auf `name`.
   const seenIds = new Set<string>()
-  const deduped = candidates.filter((c) => {
+  const dedupedRaw = candidates.filter((c) => {
     if (seenIds.has(c.id)) return false
     seenIds.add(c.id)
     return true
   })
+
+  // §"Qualitativ neu kalibrieren": Mindeststandard gehobenes 5-Sterne-Niveau
+  // (Westin/Le Méridien-Klasse) -- Kandidaten unterhalb davon fliegen HIER
+  // raus, bevor Route Matrix/KI überhaupt dafür aufgerufen werden (spart auch
+  // Kosten für Hotels, die ohnehin nicht in Frage kommen).
+  const qualificationByPlaceId = new Map(dedupedRaw.map((c) => [c.id, classifyAndQualify(c)]))
+  const deduped = dedupedRaw.filter((c) => qualificationByPlaceId.get(c.id)!.qualifies)
+
+  if (deduped.length === 0)
+    redirect(`${returnTo}?error=${encodeURIComponent('Keine Hotels auf dem geforderten gehobenen 5-Sterne-Niveau (Westin/Le Méridien oder besser) gefunden -- bitte später erneut versuchen.')}`)
 
   // §"Referenzpunkt für Transferzeit": erst der Flughafen des Ziels
   // versuchen, sonst der Zielort selbst als Näherung.
@@ -125,6 +164,7 @@ export async function generateHotelShortlist(formData: FormData) {
     transferMinutes: r.durationMinutes,
     address: r.candidate.formattedAddress,
     types: r.candidate.types,
+    tier: qualificationByPlaceId.get(r.candidate.id)!.tier,
   }))
 
   const dnaText = formatFamilyDnaForPrompt({ ...dnaSummary, persons: selectedPersons }, new Date().toISOString().slice(0, 10))
@@ -141,6 +181,7 @@ export async function generateHotelShortlist(formData: FormData) {
     .filter((r) => pickByName.has(r.candidate.name))
     .map((r) => {
       const pick = pickByName.get(r.candidate.name)!
+      const qualification = qualificationByPlaceId.get(r.candidate.id)!
       const unverifiedFields: string[] = []
       if (r.candidate.rating === null) unverifiedFields.push('rating')
       if (!r.candidate.priceLevel) unverifiedFields.push('priceLevel')
@@ -160,6 +201,13 @@ export async function generateHotelShortlist(formData: FormData) {
         styleImpression: pick.styleImpression,
         bestFor: pick.bestFor,
         caveats: pick.caveats,
+        // §"Falls Google Places keine sichere Sterneklassifizierung liefert,
+        // nicht raten": tier ist deterministisch aus Marke ODER Bewertung+
+        // Preisniveau bestimmt (siehe classifyAndQualify oben), NIE von der
+        // KI. tierBasis === 'heuristic' kennzeichnet die Unsicherheit in der
+        // UI (kein verifizierter Markenname, nur Fakten-Kombination).
+        tier: qualification.tier,
+        tierBasis: qualification.tierBasis,
         unverifiedFields,
         // §Vorbereitung für einen späteren HotelAvailabilityProvider
         // (Booking.com/Expedia): reserviertes Feld, damit ein Live-Preis-/

@@ -1,5 +1,6 @@
 import OpenAI from 'openai'
 import { BUDGET_CATEGORY_ORDER, BUDGET_CATEGORY_LABELS, type BudgetCategory } from '@/lib/budget'
+import { LUXURY_TIER_LABELS, type LuxuryHotelTier } from '@/lib/data/luxury-hotel-brands'
 
 /** Gleiches Modell wie die übrigen KI-Flows (concierge, trip-idea-generation, content-sessions). */
 const OPENAI_MODEL = 'gpt-5.4'
@@ -12,6 +13,8 @@ export type HotelCandidateFact = {
   transferMinutes: number | null
   address: string
   types: string[]
+  /** §"Qualitativ neu kalibrieren": bereits VOR der KI deterministisch aus echten Fakten (Marke oder Bewertung+Preisniveau) bestimmt -- die KI ordnet nicht selbst ein, sie bekommt es nur als Kontext, um die Auswahl auszubalancieren. */
+  tier: LuxuryHotelTier
 }
 
 export type HotelPick = {
@@ -22,32 +25,36 @@ export type HotelPick = {
   caveats: string
 }
 
-const HOTEL_SHORTLIST_SCHEMA = {
-  type: 'object',
-  properties: {
-    picks: {
-      type: 'array',
-      minItems: 3,
-      maxItems: 6,
-      items: {
-        type: 'object',
-        properties: {
-          place_name: { type: 'string', description: 'Name des Hotels, EXAKT wie in der Kandidatenliste.' },
-          family_fit_reasoning: {
-            type: 'string',
-            description: 'Warum dieses Hotel zu genau dieser Familie passt -- NUR gestützt auf Name, Bewertung, Rezensionsanzahl, Preisklasse, Transferzeit, Adresse und Places-Typen aus der Kandidatenliste. Keine erfundenen Ausstattungsmerkmale (Kinderclub, Zimmer-/Villengröße, Pool, Strandlage, Restaurants etc.), die dort nicht stehen.',
+function buildHotelShortlistSchema(availableCount: number) {
+  const minItems = Math.min(3, availableCount)
+  const maxItems = Math.min(6, availableCount)
+  return {
+    type: 'object',
+    properties: {
+      picks: {
+        type: 'array',
+        minItems,
+        maxItems,
+        items: {
+          type: 'object',
+          properties: {
+            place_name: { type: 'string', description: 'Name des Hotels, EXAKT wie in der Kandidatenliste.' },
+            family_fit_reasoning: {
+              type: 'string',
+              description: 'Warum dieses Hotel zu genau dieser Familie passt -- NUR gestützt auf Name, Bewertung, Rezensionsanzahl, Preisklasse, Transferzeit, Adresse und Places-Typen aus der Kandidatenliste. Keine erfundenen Ausstattungsmerkmale (Kinderclub, Zimmer-/Villengröße, Pool, Strandlage, Restaurants etc.), die dort nicht stehen.',
+            },
+            style_impression: { type: 'string', description: 'Kurzer Stil-/Charaktereindruck (max. 15 Wörter), abgeleitet aus Name/Typen/Preisklasse -- keine erfundenen Details.' },
+            best_for: { type: 'string', description: 'Für wen/welchen Reisetyp dieses Hotel am ehesten passt, z. B. "Paare" oder "Familien mit Kleinkindern" -- kurz.' },
+            caveats: { type: 'string', description: 'Ehrliche Einschränkungen/Bedenken (z. B. lange Transferzeit, wenige Rezensionen, hohe Preisklasse) -- leerer String, wenn keine.' },
           },
-          style_impression: { type: 'string', description: 'Kurzer Stil-/Charaktereindruck (max. 15 Wörter), abgeleitet aus Name/Typen/Preisklasse -- keine erfundenen Details.' },
-          best_for: { type: 'string', description: 'Für wen/welchen Reisetyp dieses Hotel am ehesten passt, z. B. "Paare" oder "Familien mit Kleinkindern" -- kurz.' },
-          caveats: { type: 'string', description: 'Ehrliche Einschränkungen/Bedenken (z. B. lange Transferzeit, wenige Rezensionen, hohe Preisklasse) -- leerer String, wenn keine.' },
+          required: ['place_name', 'family_fit_reasoning', 'style_impression', 'best_for', 'caveats'],
+          additionalProperties: false,
         },
-        required: ['place_name', 'family_fit_reasoning', 'style_impression', 'best_for', 'caveats'],
-        additionalProperties: false,
       },
     },
-  },
-  required: ['picks'],
-  additionalProperties: false,
+    required: ['picks'],
+    additionalProperties: false,
+  }
 }
 
 /**
@@ -74,6 +81,7 @@ export async function selectHotelShortlist(context: {
   const candidateText = context.candidates
     .map((c) => {
       const parts = [
+        `Einordnung: ${LUXURY_TIER_LABELS[c.tier]}`,
         c.rating !== null ? `Bewertung ${c.rating} (${c.userRatingCount ?? 0} Rezensionen)` : 'keine Bewertung bekannt',
         c.priceLevel ? `Preisklasse ${c.priceLevel}` : 'Preisklasse unbekannt',
         c.transferMinutes !== null ? `${c.transferMinutes} Min Transferzeit` : 'Transferzeit unbekannt',
@@ -87,17 +95,17 @@ export async function selectHotelShortlist(context: {
   const prompt = `Du bist Reiseberater für eine Familie, die eine Reiseidee nach ${context.destination} entwickelt.
 ${context.familyDnaText || 'Keine besonderen Präferenzen bekannt.'}
 
-Hotel-Kandidaten (ausschließlich echte, bereits über Google Places geprüfte Hotels -- wähle NUR aus dieser Liste, erfinde nichts):
+Hotel-Kandidaten (ausschließlich echte, bereits über Google Places geprüfte Hotels, alle bereits auf gehobenes 5-Sterne-Niveau oder höher vorgefiltert -- wähle NUR aus dieser Liste, erfinde nichts):
 ${candidateText}
 
-Wähle 3 bis 6 dieser Hotels aus, die am besten zu dieser Familie passen, und ordne sie nach Passung (bestes zuerst). Gib place_name exakt wie in der Liste zurück, ohne Zusätze. Behaupte keine Ausstattungsmerkmale (Kinderclub, Zimmer-/Villengröße, Pool, Strandlage, Restaurants etc.), die nicht Teil der gelieferten Fakten sind -- stütze dich ausschließlich auf Name, Bewertung, Rezensionsanzahl, Preisklasse, Transferzeit, Adresse und Places-Typen. Sei auch ehrlich in caveats, wenn ein Hotel nicht perfekt passt.`
+Wähle die passendsten dieser Hotels aus, die am besten zu dieser Familie passen, und ordne sie nach Passung (bestes zuerst). Achte auf eine ausgewogene Auswahl: Ultra-Luxus-Hotels dürfen vorkommen, sollen aber nicht die gesamte Auswahl dominieren, wenn auch Standard-/Premium-Kandidaten vorhanden sind -- bevorzuge insgesamt eine Mischung, die nicht ausschließlich aus Ultra-Luxus besteht. Gib place_name exakt wie in der Liste zurück, ohne Zusätze. Behaupte keine Ausstattungsmerkmale (Kinderclub, Zimmer-/Villengröße, Pool, Strandlage, Restaurants etc.), die nicht Teil der gelieferten Fakten sind -- stütze dich ausschließlich auf Name, Einordnung, Bewertung, Rezensionsanzahl, Preisklasse, Transferzeit, Adresse und Places-Typen. Sei auch ehrlich in caveats, wenn ein Hotel nicht perfekt passt.`
 
   try {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
     const response = await openai.responses.create({
       model: OPENAI_MODEL,
       input: [{ role: 'user', content: [{ type: 'input_text', text: prompt }] }],
-      text: { format: { type: 'json_schema', name: 'hotel_shortlist', schema: HOTEL_SHORTLIST_SCHEMA, strict: true } },
+      text: { format: { type: 'json_schema', name: 'hotel_shortlist', schema: buildHotelShortlistSchema(context.candidates.length), strict: true } },
     })
     const parsed = JSON.parse(response.output_text)
     return (parsed.picks as Array<{ place_name: string; family_fit_reasoning: string; style_impression: string; best_for: string; caveats: string }>)

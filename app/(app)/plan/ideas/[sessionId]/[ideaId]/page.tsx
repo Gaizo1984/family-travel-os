@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { updateTripIdeaNotes } from "@/lib/actions/trip-ideas";
 import { generateHotelShortlist, estimateTripIdeaBudget } from "@/lib/actions/trip-idea-advisor";
 import { BUDGET_CATEGORY_ORDER, BUDGET_CATEGORY_LABELS, type BudgetCategory } from "@/lib/budget";
+import { LUXURY_TIER_LABELS, type LuxuryHotelTier } from "@/lib/data/luxury-hotel-brands";
 import { Banner } from "@/components/Banner";
 
 type HotelShortlistItem = {
@@ -12,7 +13,14 @@ type HotelShortlistItem = {
   rating: number | null; reviewCount: number | null; priceLevel: string | null
   photoName: string | null; websiteUri: string | null; transferMinutes: number | null
   familyFitReasoning: string; styleImpression: string; bestFor: string; caveats: string
+  tier: LuxuryHotelTier; tierBasis: "brand" | "heuristic"
   unverifiedFields: string[]
+};
+
+const TIER_COLORS: Record<LuxuryHotelTier, string> = {
+  standard: "var(--accent)",
+  premium: "#8B6F47",
+  ultra_luxury: "#B5624A",
 };
 
 type BudgetBreakdown = {
@@ -50,6 +58,23 @@ function HotelCard({ hotel }: { hotel: HotelShortlistItem }) {
             </span>
           )}
         </div>
+
+        <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+          <span
+            style={{
+              color: TIER_COLORS[hotel.tier], fontSize: "0.6rem", letterSpacing: "0.06em", textTransform: "uppercase",
+              border: `1px solid ${TIER_COLORS[hotel.tier]}55`, borderRadius: "20px", padding: "2px 9px",
+            }}
+          >
+            {LUXURY_TIER_LABELS[hotel.tier]}
+          </span>
+          {hotel.tierBasis === "heuristic" && (
+            <span style={{ color: "var(--muted)", fontSize: "0.6rem", fontStyle: "italic" }}>
+              (keine offizielle Sterne-Klassifizierung — Einordnung aus Bewertung/Preisniveau)
+            </span>
+          )}
+        </div>
+
         <p className="mb-3" style={{ color: "var(--muted)", fontSize: "0.68rem" }}>{hotel.address}</p>
 
         <div className="flex flex-wrap items-center gap-3 mb-3" style={{ fontSize: "0.72rem", color: "var(--muted)" }}>
