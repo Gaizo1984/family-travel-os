@@ -744,6 +744,7 @@ export interface Database {
           hotel_shortlist: Json | null; hotel_shortlist_updated_at: string | null
           budget_breakdown: Json | null; budget_breakdown_updated_at: string | null
           variants: Json | null; variants_generated_at: string | null
+          is_favorite: boolean; chosen_variant_type: string | null
           created_at: string; updated_at: string
         }
         Insert: {
@@ -756,6 +757,7 @@ export interface Database {
           hotel_shortlist?: Json | null; hotel_shortlist_updated_at?: string | null
           budget_breakdown?: Json | null; budget_breakdown_updated_at?: string | null
           variants?: Json | null; variants_generated_at?: string | null
+          is_favorite?: boolean; chosen_variant_type?: string | null
           created_at?: string; updated_at?: string
         }
         Update: {
@@ -768,12 +770,30 @@ export interface Database {
           hotel_shortlist?: Json | null; hotel_shortlist_updated_at?: string | null
           budget_breakdown?: Json | null; budget_breakdown_updated_at?: string | null
           variants?: Json | null; variants_generated_at?: string | null
+          is_favorite?: boolean; chosen_variant_type?: string | null
           created_at?: string; updated_at?: string
         }
         Relationships: [
           { foreignKeyName: "trip_ideas_session_id_fkey";        columns: ["session_id"];        isOneToOne: false; referencedRelation: "trip_idea_sessions"; referencedColumns: ["id"] },
           { foreignKeyName: "trip_ideas_family_id_fkey";         columns: ["family_id"];         isOneToOne: false; referencedRelation: "families";            referencedColumns: ["id"] },
           { foreignKeyName: "trip_ideas_converted_trip_id_fkey"; columns: ["converted_trip_id"]; isOneToOne: false; referencedRelation: "trips";                referencedColumns: ["id"] }
+        ]
+      }
+      trip_idea_comparisons: {
+        Row: {
+          id: string; family_id: string; idea_ids: string[]; comparison_key: string
+          scores: Json; created_at: string
+        }
+        Insert: {
+          id?: string; family_id: string; idea_ids: string[]; comparison_key: string
+          scores: Json; created_at?: string
+        }
+        Update: {
+          id?: string; family_id?: string; idea_ids?: string[]; comparison_key?: string
+          scores?: Json; created_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "trip_idea_comparisons_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }
         ]
       }
     }

@@ -402,3 +402,130 @@ WICHTIG: Jede Variante MUSS sich strukturell unterscheiden -- Dauer, Etappenzahl
     return null
   }
 }
+
+export type FlightBurdenRating = 'gering' | 'mittel' | 'hoch' | 'nicht einschätzbar'
+export type WeatherFitRating = 'ideal' | 'akzeptabel' | 'ungünstig' | 'nicht einschätzbar'
+export type ThreeLevelRating = 'hoch' | 'mittel' | 'niedrig'
+export type LumiFitRating = 'sehr gut' | 'gut' | 'mittel' | 'gering'
+
+export type IdeaComparisonScore = {
+  destination: string
+  flightBurden: FlightBurdenRating; flightBurdenReasoning: string
+  weatherFit: WeatherFitRating; weatherFitReasoning: string
+  kidFriendliness: ThreeLevelRating; kidFriendlinessReasoning: string
+  experienceValue: ThreeLevelRating; experienceValueReasoning: string
+  lumiFit: LumiFitRating; lumiFitReasoning: string
+}
+
+const FLIGHT_BURDEN_VALUES = ['gering', 'mittel', 'hoch', 'nicht einschätzbar']
+const WEATHER_FIT_VALUES = ['ideal', 'akzeptabel', 'ungünstig', 'nicht einschätzbar']
+const THREE_LEVEL_VALUES = ['hoch', 'mittel', 'niedrig']
+const LUMI_FIT_VALUES = ['sehr gut', 'gut', 'mittel', 'gering']
+
+function buildIdeaComparisonSchema(ideaCount: number) {
+  return {
+    type: 'object',
+    properties: {
+      ideas: {
+        type: 'array',
+        minItems: ideaCount,
+        maxItems: ideaCount,
+        items: {
+          type: 'object',
+          properties: {
+            destination: { type: 'string', description: 'EXAKT wie in der gelieferten Liste, zum Rückabgleich.' },
+            flight_burden: { type: 'string', enum: FLIGHT_BURDEN_VALUES, description: '"nicht einschätzbar", wenn route_summary/includes_flights keine verlässliche Einschätzung erlauben.' },
+            flight_burden_reasoning: { type: 'string' },
+            weather_fit: { type: 'string', enum: WEATHER_FIT_VALUES, description: '"nicht einschätzbar", wenn best_season fehlt -- keine erfundenen Klimaangaben.' },
+            weather_fit_reasoning: { type: 'string' },
+            kid_friendliness: { type: 'string', enum: THREE_LEVEL_VALUES },
+            kid_friendliness_reasoning: { type: 'string', description: 'Gestützt auf Alter/Bedürfnisse der Kinder aus der Familien-DNA.' },
+            experience_value: { type: 'string', enum: THREE_LEVEL_VALUES },
+            experience_value_reasoning: { type: 'string' },
+            lumi_fit: { type: 'string', enum: LUMI_FIT_VALUES },
+            lumi_fit_reasoning: { type: 'string', description: 'Explizit gestützt auf die Reisekompass-Gewichtungen der Familien-DNA.' },
+          },
+          required: [
+            'destination', 'flight_burden', 'flight_burden_reasoning', 'weather_fit', 'weather_fit_reasoning',
+            'kid_friendliness', 'kid_friendliness_reasoning', 'experience_value', 'experience_value_reasoning',
+            'lumi_fit', 'lumi_fit_reasoning',
+          ],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['ideas'],
+    additionalProperties: false,
+  }
+}
+
+/**
+ * §"Favoriten & Vergleich": bewertet 2-3 bereits favorisierte Reiseideen
+ * gleichzeitig auf den 5 qualitativen Vergleichskriterien, die keinen
+ * "harten" Fakt haben (Gesamtkosten/Reisedauer/Hotelqualität kommen direkt
+ * aus echten gespeicherten Daten, siehe lib/actions/trip-idea-comparisons.ts,
+ * NIE von hier). Feste Enums statt Freitext, damit der Aufrufer daraus
+ * automatisch einen Gewinner je Kriterium bestimmen kann. "Nicht
+ * einschätzbar" ist eine explizit erlaubte, ehrliche Antwort statt eines
+ * Rateversuchs (z. B. Wetter ohne gesetztes best_season).
+ */
+export async function generateIdeaComparisonScores(context: {
+  ideas: Array<{ destination: string; routeSummary: string | null; bestSeason: string | null; reasoning: string | null; bestHotelTier: LuxuryHotelTier | null }>
+  familyDnaText: string
+}): Promise<IdeaComparisonScore[] | null> {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('[provider:config-missing]', { provider: 'openai', requestType: 'idea_comparison' })
+    return null
+  }
+  if (context.ideas.length < 2) return null
+
+  const ideasText = context.ideas
+    .map((idea) => {
+      const parts = [
+        idea.routeSummary ? `Route: ${idea.routeSummary}` : 'Route: unbekannt',
+        idea.bestSeason ? `Beste Reisezeit: ${idea.bestSeason}` : 'Beste Reisezeit: nicht hinterlegt',
+        idea.reasoning ? `Begründung der Idee: ${idea.reasoning}` : null,
+        idea.bestHotelTier ? `Bestes verfügbares Hotel-Niveau: ${LUXURY_TIER_LABELS[idea.bestHotelTier]}` : 'Noch keine Hotel-Shortlist',
+      ].filter(Boolean)
+      return `- ${idea.destination}: ${parts.join(', ')}`
+    })
+    .join('\n')
+
+  const prompt = `Du vergleichst für eine Familie ${context.ideas.length} bereits favorisierte Reiseideen miteinander.
+${context.familyDnaText || 'Keine besonderen Präferenzen bekannt.'}
+
+Reiseideen (ausschließlich echte, bereits vorhandene Daten -- erfinde keine neuen Fakten):
+${ideasText}
+
+Bewerte JEDE Idee auf: Flug-/Reisebelastung, Wettertauglichkeit zur genannten Reisezeit, Kindergeeignetheit, Erlebniswert und "LUMI-Fit" (wie gut passt die Idee zu den Reisekompass-Gewichtungen dieser Familie). Nutze "nicht einschätzbar" ehrlich, wenn die gelieferten Daten dafür nicht ausreichen (z. B. keine Reisezeit hinterlegt) -- rate nicht. Gib destination exakt wie in der Liste zurück.`
+
+  try {
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+    const response = await openai.responses.create({
+      model: OPENAI_MODEL,
+      input: [{ role: 'user', content: [{ type: 'input_text', text: prompt }] }],
+      text: { format: { type: 'json_schema', name: 'idea_comparison', schema: buildIdeaComparisonSchema(context.ideas.length), strict: true } },
+    })
+    const parsed = JSON.parse(response.output_text) as {
+      ideas: Array<{
+        destination: string
+        flight_burden: FlightBurdenRating; flight_burden_reasoning: string
+        weather_fit: WeatherFitRating; weather_fit_reasoning: string
+        kid_friendliness: ThreeLevelRating; kid_friendliness_reasoning: string
+        experience_value: ThreeLevelRating; experience_value_reasoning: string
+        lumi_fit: LumiFitRating; lumi_fit_reasoning: string
+      }>
+    }
+    return parsed.ideas.map((i) => ({
+      destination: i.destination,
+      flightBurden: i.flight_burden, flightBurdenReasoning: i.flight_burden_reasoning,
+      weatherFit: i.weather_fit, weatherFitReasoning: i.weather_fit_reasoning,
+      kidFriendliness: i.kid_friendliness, kidFriendlinessReasoning: i.kid_friendliness_reasoning,
+      experienceValue: i.experience_value, experienceValueReasoning: i.experience_value_reasoning,
+      lumiFit: i.lumi_fit, lumiFitReasoning: i.lumi_fit_reasoning,
+    }))
+  } catch (e) {
+    console.error('[provider:request-failed]', { provider: 'openai', requestType: 'idea_comparison', httpStatus: (e as { status?: number })?.status ?? 0 })
+    return null
+  }
+}

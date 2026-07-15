@@ -54,6 +54,39 @@ export async function deleteTripIdea(formData: FormData) {
   redirect(returnTo)
 }
 
+/** §"Favoriten & Vergleich": einfacher An/Aus-Toggle, keine Bestätigungsseite nötig (niedriges Risiko, jederzeit umkehrbar). */
+export async function toggleTripIdeaFavorite(formData: FormData) {
+  const ideaId = String(formData.get('idea_id') ?? '')
+  const currentlyFavorite = String(formData.get('current') ?? '') === 'true'
+  const returnTo = String(formData.get('return_to') ?? '/discover/ideas')
+
+  const supabase = await createClient()
+  const { error } = await supabase.from('trip_ideas').update({ is_favorite: !currentlyFavorite }).eq('id', ideaId)
+  if (error) redirect(`${returnTo}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
+
+  redirect(returnTo)
+}
+
+/**
+ * §"Späteres 'Als Reise anlegen' vorbereiten": markiert eine Idee aus dem
+ * Vergleich als Gewinner (is_chosen, bereits bestehendes Feld -- ohne
+ * Session-Statuswechsel wie bei chooseTripIdea, da eine verglichene Idee
+ * auch ein sessionloser Discover-Bookmark sein kann) und speichert optional
+ * die bevorzugte Variante strukturiert. Setzt noch KEINE Buchung/
+ * Verfügbarkeit voraus -- reine Vormerkung für eine spätere Umwandlung.
+ */
+export async function chooseComparisonWinner(formData: FormData) {
+  const ideaId = String(formData.get('idea_id') ?? '')
+  const variantType = String(formData.get('variant_type') ?? '').trim() || null
+  const returnTo = String(formData.get('return_to') ?? '/discover/ideas')
+
+  const supabase = await createClient()
+  const { error } = await supabase.from('trip_ideas').update({ is_chosen: true, chosen_variant_type: variantType }).eq('id', ideaId)
+  if (error) redirect(`${returnTo}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
+
+  redirect(returnTo)
+}
+
 /** Discover-Bookmark: legt eine trip_ideas-Zeile ohne Session an (origin='discover_bookmark'). */
 export async function bookmarkTripIdea(formData: FormData) {
   const destination = String(formData.get('destination') ?? '').trim()
