@@ -287,11 +287,13 @@ export default async function Dashboard() {
     })),
   ];
 
-  // §"Unsere Reisegeschichte von Familie mit aufs Dashboard": gleiche
-  // Ableitung wie zuvor auf der Familienseite (letzte 5 Timeline-Einträge).
+  // §Bugfix "zeigt nicht alle Reisen": zuvor pauschal auf die letzten 5
+  // Timeline-Einträge gekappt, unabhängig von Jahr/Reisenden -- zeigt jetzt
+  // alle Reisen ab 2021 mit mindestens 2 beteiligten Personen (Nutzervorgabe,
+  // wörtlich), keine willkürliche Obergrenze mehr.
   const timelineEntries = worldStats.timeline
-    .map((e) => ({ key: e.key, year: e.year ?? 0, label: e.title, isNext: e.isCurrent }))
-    .slice(-5);
+    .filter((e) => (e.year ?? 0) >= 2021 && e.travelerIds.length >= 2)
+    .map((e) => ({ key: e.key, year: e.year ?? 0, label: e.title, isNext: e.isCurrent }));
 
   return (
     <div className="flex-1 flex flex-col">
