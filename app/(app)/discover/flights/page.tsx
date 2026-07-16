@@ -126,12 +126,12 @@ export default async function DiscoverFlightsPage({
       <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-9">
 
         <Link
-          href="/discover"
+          href="/today"
           className="flex items-center gap-2 mb-8 transition-opacity hover:opacity-70"
           style={{ color: "var(--muted)", fontSize: "0.78rem", letterSpacing: "0.04em", textDecoration: "none", width: "fit-content" }}
         >
           <ChevronLeft size={13} strokeWidth={1.5} />
-          Entdecken
+          LUMI
         </Link>
 
         <div style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "12px" }}>
