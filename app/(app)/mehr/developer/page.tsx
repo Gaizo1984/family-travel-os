@@ -8,6 +8,7 @@ import { ComputeRouteTestCard } from './ComputeRouteTestCard'
 import { ComputeRouteMatrixTestCard } from './ComputeRouteMatrixTestCard'
 import { DaytripTestCard } from './DaytripTestCard'
 import { OpenAiTestCard } from './OpenAiTestCard'
+import { FlightSearchTestCard } from './FlightSearchTestCard'
 import { FlightUsageCard } from './FlightUsageCard'
 
 /**
@@ -61,6 +62,7 @@ export default async function DeveloperPage() {
           <ComputeRouteMatrixTestCard lastRun={runs.routes_compute_route_matrix ?? null} />
           <DaytripTestCard lastRun={runs.daytrip_multi_stop ?? null} />
           <OpenAiTestCard lastRun={runs.openai_recommendations ?? null} placesAvailable={runs.places?.success === true} />
+          <FlightSearchTestCard lastRun={runs.flight_search ?? null} />
           <FlightUsageCard />
         </div>
       </div>

@@ -395,28 +395,38 @@ async function searchFlightsFlexible(
   if (combinations.length === 0)
     redirectBack('Für dieses Reisefenster und diese Nächtezahl gibt es keine weiteren Datumskombinationen.', flexibleExtra)
 
+  // §"Analysiert viel zu lange": bis zu MAX_FLEXIBLE_DATE_COMBINATIONS
+  // sequentielle Duffel-Aufrufe (je mehrere Sekunden) summierten sich zu
+  // einer Laufzeit, die leicht ein Vercel-Funktions-Timeout reißt -- läuft
+  // stattdessen in kleinen parallelen Blöcken, ohne die Kostenkontrolle
+  // (Claim-Guard/monatliches Limit in `getOrSearchFlightOptions`) zu ändern.
+  const FLEXIBLE_SEARCH_CONCURRENCY = 4
   const newSearchKeys: string[] = []
   let limitReached = false
-  for (const combo of combinations) {
-    const passengerAges: Array<number | null> = selectedPersons.length > 0
-      ? selectedPersons.map((p) => ageAtDate(p.birth_date, combo.departureDate))
-      : [null]
-    const dnaText = formatFamilyDnaForPrompt({ ...dnaSummary, persons: selectedPersons }, combo.departureDate)
+  for (let i = 0; i < combinations.length && !limitReached; i += FLEXIBLE_SEARCH_CONCURRENCY) {
+    const chunk = combinations.slice(i, i + FLEXIBLE_SEARCH_CONCURRENCY)
+    const chunkOutcomes = await Promise.all(chunk.map(async (combo) => {
+      const passengerAges: Array<number | null> = selectedPersons.length > 0
+        ? selectedPersons.map((p) => ageAtDate(p.birth_date, combo.departureDate))
+        : [null]
+      const dnaText = formatFamilyDnaForPrompt({ ...dnaSummary, persons: selectedPersons }, combo.departureDate)
+      try {
+        return await getOrSearchFlightOptions({
+          familyId, originCodes: [originCode], destinationCode,
+          departureDate: combo.departureDate, returnDate: combo.returnDate,
+          passengerAges, maxStops: null, familyDnaText: dnaText, stopoverPreference: null,
+        })
+      } catch {
+        return null // einzelne fehlgeschlagene Kombination überspringen, Rest der flexiblen Suche fortsetzen
+      }
+    }))
 
-    let comboOutcome: FlightSearchOutcome
-    try {
-      comboOutcome = await getOrSearchFlightOptions({
-        familyId, originCodes: [originCode], destinationCode,
-        departureDate: combo.departureDate, returnDate: combo.returnDate,
-        passengerAges, maxStops: null, familyDnaText: dnaText, stopoverPreference: null,
-      })
-    } catch {
-      continue // einzelne fehlgeschlagene Kombination überspringen, Rest der flexiblen Suche fortsetzen
+    for (const comboOutcome of chunkOutcomes) {
+      if (!comboOutcome) continue
+      if (comboOutcome.status === 'ok') newSearchKeys.push(comboOutcome.searchKey)
+      else if (comboOutcome.status === 'limit_reached') limitReached = true
+      // 'already_in_progress'/'no_results' für diese eine Kombination: überspringen, nicht die ganze Suche abbrechen
     }
-
-    if (comboOutcome.status === 'ok') newSearchKeys.push(comboOutcome.searchKey)
-    else if (comboOutcome.status === 'limit_reached') { limitReached = true; break }
-    // 'already_in_progress'/'no_results' für diese eine Kombination: überspringen, nicht die ganze Suche abbrechen
   }
 
   const allSearchKeys = Array.from(new Set([...existingSearchKeys, ...newSearchKeys]))

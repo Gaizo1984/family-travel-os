@@ -13,7 +13,6 @@ export default async function HotelsPage({
 }: {
   searchParams: Promise<{
     destination?: string; check_in?: string; nights?: string
-    traveler_ids?: string; rooms?: string; budget_min?: string; budget_max?: string
     idea_id?: string; search_key?: string; error?: string
   }>;
 }) {
@@ -21,12 +20,6 @@ export default async function HotelsPage({
 
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
-  const { data: persons } = await supabase
-    .from("persons")
-    .select("id, name, initials, color, birth_date, is_minor")
-    .order("name");
-
-  const defaultTravelerIds = sp.traveler_ids ? sp.traveler_ids.split(",").filter(Boolean) : [];
 
   let hotelResult: { items: HotelShortlistItem[]; belowStandard: boolean; searchedAt: string } | null = null;
   if (sp.search_key) {
@@ -65,15 +58,10 @@ export default async function HotelsPage({
 
         <div className="rounded-xl p-6 md:p-8 mb-8" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
           <HotelSearchForm
-            persons={persons ?? []}
             action={searchHotelsStandalone}
             defaultDestination={sp.destination}
             defaultCheckInIso={sp.check_in}
             defaultNights={sp.nights}
-            defaultTravelerIds={defaultTravelerIds}
-            defaultRooms={sp.rooms}
-            defaultBudgetMin={sp.budget_min}
-            defaultBudgetMax={sp.budget_max}
             ideaId={sp.idea_id}
           />
         </div>

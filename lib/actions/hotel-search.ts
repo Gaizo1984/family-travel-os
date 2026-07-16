@@ -192,17 +192,12 @@ export async function getOrSearchHotelOptions(params: {
 
 function buildHotelsPageUrl(params: {
   destination?: string | null; checkIn?: string | null; nights?: string | null
-  travelerIds?: string[]; rooms?: string | null; budgetMin?: string | null; budgetMax?: string | null
   ideaId?: string | null; searchKey?: string | null; error?: string | null
 }): string {
   const usp = new URLSearchParams()
   if (params.destination) usp.set('destination', params.destination)
   if (params.checkIn) usp.set('check_in', params.checkIn)
   if (params.nights) usp.set('nights', params.nights)
-  if (params.travelerIds && params.travelerIds.length > 0) usp.set('traveler_ids', params.travelerIds.join(','))
-  if (params.rooms) usp.set('rooms', params.rooms)
-  if (params.budgetMin) usp.set('budget_min', params.budgetMin)
-  if (params.budgetMax) usp.set('budget_max', params.budgetMax)
   if (params.ideaId) usp.set('idea_id', params.ideaId)
   if (params.searchKey) usp.set('search_key', params.searchKey)
   if (params.error) usp.set('error', params.error)
@@ -210,30 +205,27 @@ function buildHotelsPageUrl(params: {
 }
 
 /**
- * §"Eine echte eigenständige Hotelsuche, unabhängig von einer Reiseidee":
- * funktioniert sowohl leer (Kachel auf `/discover`) als auch vorausgefüllt
- * (Deep-Link aus einer Ideen-Detailseite). Check-in/Nächte/Zimmer/Budget
- * fließen bewusst NICHT in die eigentliche Places-Suche ein (siehe
- * `getOrSearchHotelOptions`) -- sie werden nur für die spätere HolidayCheck-
- * Suche bzw. einen künftigen `HotelAvailabilityProvider` durchgereicht.
+ * §"Nur Ort, Reisezeitraum, Nächte" (Nutzervorgabe): funktioniert sowohl
+ * leer (Kachel auf `/discover`) als auch vorausgefüllt (Deep-Link aus einer
+ * Ideen-Detailseite). Check-in/Nächte fließen bewusst NICHT in die
+ * eigentliche Places-Suche ein (siehe `getOrSearchHotelOptions`) -- sie
+ * werden nur für die spätere HolidayCheck-Suche bzw. einen künftigen
+ * `HotelAvailabilityProvider` durchgereicht. Ohne Reisenden-Auswahl in der
+ * UI wird die DNA-Zusammenfassung immer für die gesamte Familie gebildet.
  */
 export async function searchHotelsStandalone(formData: FormData) {
   const destination = String(formData.get('destination') ?? '').trim()
-  const travelerIds = formData.getAll('traveler_ids').map(String)
-  const rooms = String(formData.get('rooms') ?? '').trim()
-  const budgetMin = String(formData.get('budget_min') ?? '').trim()
-  const budgetMax = String(formData.get('budget_max') ?? '').trim()
   const ideaId = String(formData.get('idea_id') ?? '').trim() || null
 
   const redirectBack = (error: string, extra?: Partial<Parameters<typeof buildHotelsPageUrl>[0]>): never => {
-    redirect(buildHotelsPageUrl({ destination, travelerIds, rooms, budgetMin, budgetMax, ideaId, error, ...extra }))
+    redirect(buildHotelsPageUrl({ destination, ideaId, error, ...extra }))
   }
 
-  if (!destination) redirectBack('Bitte ein Reiseziel angeben.')
+  if (!destination) redirectBack('Bitte einen Ort angeben.')
 
   let checkIn: string | null = null
   try {
-    checkIn = readDateGroupFromFormData(formData, 'check_in', 'Check-in')
+    checkIn = readDateGroupFromFormData(formData, 'check_in', 'Reisezeitraum')
   } catch (e) {
     redirectBack(e instanceof Error ? e.message : 'Ungültiges Datum')
   }
@@ -244,10 +236,7 @@ export async function searchHotelsStandalone(formData: FormData) {
 
   const { id: familyId } = await getFamily()
   const dnaSummary = await buildFamilyDnaSummary(familyId)
-  const selectedPersons = travelerIds.length > 0
-    ? dnaSummary.persons.filter((p) => travelerIds.includes(p.id))
-    : dnaSummary.persons
-  const dnaText = formatFamilyDnaForPrompt({ ...dnaSummary, persons: selectedPersons }, checkIn ?? today)
+  const dnaText = formatFamilyDnaForPrompt(dnaSummary, checkIn ?? today)
 
   const outcome = await getOrSearchHotelOptions({
     familyId, destination, familyDnaText: dnaText, forceRefresh: formData.get('force_refresh') === 'on',
@@ -258,7 +247,5 @@ export async function searchHotelsStandalone(formData: FormData) {
 
   const okOutcome = outcome as Extract<HotelSearchOutcome, { status: 'ok' }>
 
-  redirect(buildHotelsPageUrl({
-    destination, checkIn, nights, travelerIds, rooms, budgetMin, budgetMax, ideaId, searchKey: okOutcome.searchKey,
-  }))
+  redirect(buildHotelsPageUrl({ destination, checkIn, nights, ideaId, searchKey: okOutcome.searchKey }))
 }
