@@ -1,7 +1,7 @@
 import Link from "next/link";
 import {
   Clock, ArrowRight, Ticket, Car, ChevronRight, Sparkles, Compass, MessageSquare,
-  FileQuestion, CloudSun, Shuffle, AlertTriangle, RefreshCw, Route,
+  FileQuestion, CloudSun, Shuffle, AlertTriangle, RefreshCw, Route, Plane, Hotel,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
@@ -238,14 +238,19 @@ function formatTimestamp(iso: string): string {
 /** §Punkt 3 "Icon-Navigation", vollständig datengetrieben: eine Kachel je TODAY_CATEGORIES-Eintrag, kein hartkodiertes JSX pro Kategorie. */
 /**
  * §"Neue Reiseideen und Frag LUMI ins Dashboard LUMI integrieren, mit
- * extra Icon analog den dortigen Unterpunkten": zwei zusätzliche, statische
+ * extra Icon analog den dortigen Unterpunkten": zusätzliche, statische
  * Kacheln neben den TODAY_CATEGORIES -- bewusst NICHT Teil von
  * TODAY_CATEGORIES selbst, da sie keine KI-Vorschlags-Kategorien sind
  * (kein concierge_category_suggestions-Cache, eigene, bereits bestehende
  * Zielseiten) und die generische Kategorie-Architektur sonst verwässern würden.
+ * §"Flugsuche/Hotelsuche gehören nicht zur Ideen-Generierung" (Nutzervorgabe):
+ * von den vier Funktionskacheln auf /discover hierher umgezogen -- Flug-/
+ * Hotelvergleich sind allgemeine Werkzeuge, keine Ideen-Generierung.
  */
 const LUMI_SHORTCUTS: Array<{ href: string; label: string; Icon: LucideIcon }> = [
   { href: "/today/plan", label: "Tagesplaner", Icon: Route },
+  { href: "/discover/flights", label: "Flugvergleich", Icon: Plane },
+  { href: "/hotels", label: "Hotelvergleich", Icon: Hotel },
   { href: "/discover", label: "Neue Reiseideen", Icon: Compass },
   { href: "/concierge", label: "Frag LUMI", Icon: MessageSquare },
 ];

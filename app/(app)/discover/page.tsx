@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Plane, Hotel, Sparkles, Heart } from "lucide-react";
+import { Sparkles, Heart } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { buildFamilyDnaSummary } from "@/lib/family-dna";
@@ -109,11 +109,13 @@ export default async function DiscoverPage() {
           </section>
         )}
 
-        {/* ── Vier Funktionskacheln ── */}
+        {/* ── Funktionskacheln ── */}
+        {/* §"Flugsuche/Hotelsuche gehören nicht zur Ideen-Generierung": beide
+            Kacheln sind auf das LUMI-Dashboard (/today, "Entdecken für diese
+            Reise") umgezogen, siehe LUMI_SHORTCUTS dort -- hier bleiben nur
+            die beiden tatsächlich ideen-bezogenen Funktionen. */}
         <section className="mb-12">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <DiscoverTile href="/discover/flights" icon={Plane} title="Flugvergleich" subtitle="Beste Flüge finden." />
-            <DiscoverTile href="/hotels" icon={Hotel} title="Hotelvergleich" subtitle="Die besten Hotels vergleichen." />
+          <div className="grid grid-cols-2 gap-3">
             <DiscoverTile href="/plan" icon={Sparkles} title="Reiseidee vorschlagen" subtitle="LUMI schlägt passende Reiseideen vor." />
             <DiscoverTile href="/discover/ideas" icon={Heart} title="Gespeicherte Ideen" subtitle="Alle gemerkten Hotels und Reiseideen." />
           </div>

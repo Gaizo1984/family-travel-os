@@ -39,6 +39,11 @@ export type FlightSearchOutcome =
  */
 function describeFlightSearchFailure(e: unknown): string {
   if (e instanceof ProviderConfigError || e instanceof ProviderRequestError) return describeProviderError(e)
+  // §"Nicht nur Duffel-HTTP-Fehler zeigen": auch eigene Fehler (z. B. ein
+  // fehlgeschlagener Cache-Speicherversuch) haben eine konkrete `message`,
+  // die den generischen Fallback-Text ersetzen soll, statt die eigentliche
+  // Ursache zu verschlucken.
+  if (e instanceof Error && e.message) return `Die Flugsuche ist gerade fehlgeschlagen: ${e.message}`
   return 'Die Flugsuche ist gerade fehlgeschlagen -- bitte in Kürze erneut versuchen.'
 }
 
