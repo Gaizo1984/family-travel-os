@@ -20,6 +20,34 @@ export const QUALIFYING_MIN_RATING = 4.5
 export const QUALIFYING_MIN_REVIEWS = 100
 export const QUALIFYING_PRICE_LEVELS = new Set(['PRICE_LEVEL_EXPENSIVE', 'PRICE_LEVEL_VERY_EXPENSIVE'])
 
+/**
+ * §"priceLevel = null ist eine Datenlücke und darf nicht als negatives
+ * Preissignal gelten" (Nutzervorgabe, wörtlich): Google liefert für viele
+ * echte Hotels/Resorts schlicht kein priceLevel -- das ist etwas anderes als
+ * ein bekannt niedriges/mittleres priceLevel. Der Bewertungs-Bar für diesen
+ * Fall liegt bewusst UNTER `QUALIFYING_MIN_RATING`, weil er zusätzlich durch
+ * `isPlausibleHotelCategory` (siehe unten) abgesichert ist -- verhindert,
+ * dass beliebige Unterkünfte allein wegen guter Bewertungen qualifizieren.
+ */
+export const QUALIFYING_MIN_RATING_PRICE_UNKNOWN = 4.4
+
+/**
+ * §"Plausible Hotel-/Resort-Kategorie" (Nutzervorgabe): Google-Places-Typen,
+ * die KEIN gehobenes Hotel/Resort im gewünschten Sinn sind -- schließen den
+ * "priceLevel unbekannt"-Heuristik-Zweig aus, unabhängig von der Bewertung.
+ * Als Ausschlussliste (statt Positivliste) geführt, damit ein echtes Resort
+ * mit einem von Google unüblich benannten Typ nicht versehentlich durchfällt.
+ */
+const NON_HOTEL_LODGING_TYPES = new Set([
+  'guest_house', 'hostel', 'campground', 'rv_park', 'farmstay',
+  'bed_and_breakfast', 'cottage', 'japanese_inn', 'budget_japanese_inn',
+  'capsule_hotel', 'private_guest_room', 'camping_cabin',
+])
+
+function isPlausibleHotelCategory(types: string[]): boolean {
+  return !types.some((t) => NON_HOTEL_LODGING_TYPES.has(t))
+}
+
 export type HotelQualification = {
   qualifies: boolean; tier: LuxuryHotelTier; tierBasis: 'brand' | 'heuristic'
   isIconic: boolean; iconicReason: string | null
@@ -42,6 +70,21 @@ export function classifyAndQualify(hotel: LodgingResult): HotelQualification {
   const highRating = hotel.rating !== null && hotel.rating >= QUALIFYING_MIN_RATING && (hotel.userRatingCount ?? 0) >= QUALIFYING_MIN_REVIEWS
   const highPrice = hotel.priceLevel !== null && QUALIFYING_PRICE_LEVELS.has(hotel.priceLevel)
   if (highRating && highPrice) return { qualifies: true, tier: 'upper_upscale', tierBasis: 'heuristic', ...iconic }
+
+  // §"Fehlendes priceLevel darf nicht automatisch zur Disqualifikation
+  // führen, aber keine pauschale Qualifizierung beliebiger Unterkünfte"
+  // (Nutzervorgabe): nur bei echter Datenlücke (nicht: bekannt günstig/
+  // mittel), ausreichend Rezensionen UND plausibler Hotel-/Resort-Kategorie.
+  // Landet wie der reguläre Heuristik-Zweig auf `upper_upscale` -- die
+  // Einordnung bleibt an der bestehenden Hauslogik, wird nicht automatisch
+  // höher eingestuft.
+  const priceUnknown = hotel.priceLevel === null
+  const strongRatingWithoutPrice = hotel.rating !== null
+    && hotel.rating >= QUALIFYING_MIN_RATING_PRICE_UNKNOWN
+    && (hotel.userRatingCount ?? 0) >= QUALIFYING_MIN_REVIEWS
+  if (priceUnknown && strongRatingWithoutPrice && isPlausibleHotelCategory(hotel.types)) {
+    return { qualifies: true, tier: 'upper_upscale', tierBasis: 'heuristic', ...iconic }
+  }
 
   return { qualifies: false, tier: 'upper_upscale', tierBasis: 'heuristic', ...iconic }
 }
@@ -102,6 +145,21 @@ export function selectBalancedQualified(
   takeFrom(byTier.ultra_luxury, composition.ultraLuxury)
   takeFrom(byTier.premium_luxury, composition.premiumLuxury)
   takeFrom(byTier.upper_upscale, composition.upperUpscale)
+
+  // §"Kapazitätsweitergabe nur zwischen bereits qualifizierten Hotels,
+  // Priorität Iconic -> Ultra Luxury -> Premium Luxury -> Gehobene 5 Sterne,
+  // Gesamtausgabe weiterhin maximal 11, keine Duplikate, keine künstliche
+  // Auffüllung" (Nutzervorgabe, wörtlich): bleibt eine Stufe unter ihrem
+  // Ziel-Slot (z. B. Premium Luxury hat keinen einzigen echten Kandidaten),
+  // wird die dadurch ungenutzte Gesamtkapazität an ECHTE, bereits
+  // qualifizierte, noch nicht ausgewählte Kandidaten aus den anderen Stufen
+  // weitergereicht -- in derselben Prioritätsreihenfolge. `takeFrom`
+  // überspringt bereits ausgewählte IDs, füllt also nie künstlich auf.
+  const totalCap = composition.iconic + composition.ultraLuxury + composition.premiumLuxury + composition.upperUpscale
+  for (const pool of [iconicPool, byTier.ultra_luxury, byTier.premium_luxury, byTier.upper_upscale]) {
+    if (selected.length >= totalCap) break
+    takeFrom(pool, totalCap - selected.length)
+  }
 
   return selected
 }

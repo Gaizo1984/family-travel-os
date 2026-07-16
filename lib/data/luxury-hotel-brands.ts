@@ -57,7 +57,7 @@ const LUXURY_HOTEL_BRANDS: Array<{ keywords: string[]; tier: LuxuryHotelTier }> 
     keywords: [
       'one&only', 'one & only', 'four seasons', 'mandarin oriental', 'aman',
       'cheval blanc', 'six senses', 'belmond', 'nihi',
-      'singita',
+      'singita', 'oberoi',
     ],
   },
 ]
