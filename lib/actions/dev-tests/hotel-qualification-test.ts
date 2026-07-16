@@ -1,8 +1,8 @@
 'use server'
 
 import { redirect } from 'next/navigation'
-import { geocodeLocation, searchLodgingRaw } from '@/lib/providers/places-provider'
-import { classifyAndQualify, selectBalancedQualified } from '@/lib/hotel-qualification'
+import { geocodeLocation, searchLodgingRaw, computeLodgingRadiusMeters } from '@/lib/providers/places-provider'
+import { classifyAndQualify, selectHotelDisplayList } from '@/lib/hotel-qualification'
 import { ProviderConfigError, ProviderRequestError, describeProviderError } from '@/lib/providers/provider-errors'
 import { recordTestRun } from '@/lib/dev-test-runs'
 
@@ -10,9 +10,11 @@ const LODGING_TYPE = 'lodging'
 
 export type HotelQualificationTestResult = {
   destination: string
+  usedRadiusMeters: number
   candidateCount: number
   qualifiedCount: number
   belowStandardMode: boolean
+  limitedInventory: boolean
   balancedPickNames: string[]
   candidates: Array<{
     name: string; rating: number | null; userRatingCount: number | null; priceLevel: string | null
@@ -51,9 +53,11 @@ export async function runHotelQualificationTest(formData: FormData) {
   // aber mit einem anderen Google-Typ (z. B. `tourist_attraction`)
   // kategorisiert und deshalb in der Produktivsuche stillschweigend verworfen
   // werden. `hasLodgingType` macht das pro Kandidat sichtbar.
+  const radiusMeters = computeLodgingRadiusMeters(destGeo)
+
   let candidates: Awaited<ReturnType<typeof searchLodgingRaw>>
   try {
-    candidates = await searchLodgingRaw({ locationName: destination, lat: destGeo.lat, lng: destGeo.lng })
+    candidates = await searchLodgingRaw({ locationName: destination, lat: destGeo.lat, lng: destGeo.lng, radiusMeters })
   } catch (e) {
     if (!(e instanceof ProviderConfigError || e instanceof ProviderRequestError)) throw e
     await recordTestRun('hotel_qualification', { success: false, errorMessage: describeProviderError(e) })
@@ -78,14 +82,16 @@ export async function runHotelQualificationTest(formData: FormData) {
   const classified = lodgingOnly.map((c) => ({ candidate: c, q: classifyAndQualify(c) }))
   const qualifiedCount = classified.filter((c) => c.q.qualifies).length
   const qualificationByPlaceId = new Map(classified.map(({ candidate, q }) => [candidate.id, q]))
-  const balancedPick = selectBalancedQualified(lodgingOnly, qualificationByPlaceId)
+  const { items: displayList, belowStandard, limitedInventory } = selectHotelDisplayList(lodgingOnly, qualificationByPlaceId)
 
   const result: HotelQualificationTestResult = {
     destination,
+    usedRadiusMeters: Math.round(radiusMeters),
     candidateCount: lodgingOnly.length,
     qualifiedCount,
-    belowStandardMode: qualifiedCount === 0,
-    balancedPickNames: balancedPick.map((c) => c.name),
+    belowStandardMode: belowStandard,
+    limitedInventory,
+    balancedPickNames: displayList.map((c) => c.name),
     candidates: [...deduped]
       .sort((a, b) => (b.rating ?? -1) - (a.rating ?? -1))
       .slice(0, 25)
@@ -101,7 +107,7 @@ export async function runHotelQualificationTest(formData: FormData) {
 
   await recordTestRun('hotel_qualification', {
     success: true,
-    summary: `${destination}: ${deduped.length} Kandidaten gesamt (${lodgingOnly.length} mit lodging-Typ), ${qualifiedCount} qualifiziert`,
+    summary: `${destination} (Radius ${Math.round(radiusMeters / 1000)}km): ${deduped.length} Kandidaten gesamt (${lodgingOnly.length} mit lodging-Typ), ${qualifiedCount} qualifiziert${limitedInventory ? ' -- kleines Ziel, Mindeststandard gelockert' : ''}`,
     result,
   })
   redirect('/mehr/developer')

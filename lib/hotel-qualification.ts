@@ -106,6 +106,47 @@ export function selectBalancedQualified(
   return selected
 }
 
+/** §"Bei kleinen Zielen (wenige Inseln, Safari-Regionen) kann ruhig jedes Hotel bedacht werden" (Nutzervorgabe): unterhalb dieser Gesamtkandidatenzahl wird der Mindeststandard-Filter bewusst gelockert. */
+export const SMALL_DESTINATION_THRESHOLD = 10
+const MAX_FALLBACK_CANDIDATES = 10
+
+export type HotelSelectionResult = {
+  items: LodgingResult[]
+  /** true, wenn KEIN einziger Kandidat qualifiziert -- Hinweis "unterhalb des Mindeststandards" in der UI. */
+  belowStandard: boolean
+  /** true, wenn insgesamt nur wenige echte Kandidaten gefunden wurden (z. B. kleine Insel/abgelegene Region) -- Mindeststandard-Filter/Komposition wird dann bewusst gelockert, damit nicht fast nichts übrig bleibt. */
+  limitedInventory: boolean
+}
+
+/**
+ * §"Gibt es die eine Lösung?" -- nein, aber diese eine Funktion bündelt die
+ * Entscheidung zentral (Nutzervorgabe: "keine parallele Logik"): bei wenigen
+ * echten Gesamttreffern (kleine Insel, abgelegene Safari-Region) wird JEDES
+ * real gefundene Hotel gezeigt und trotzdem einzeln klassifiziert (kein
+ * Auffüllen, keine Erfindung) -- sonst greift wie gehabt entweder die
+ * ausgewogene Komposition (`selectBalancedQualified`) oder, wenn wirklich
+ * kein einziger Kandidat qualifiziert, der Bewertungs-Fallback. Zentral
+ * genutzt von der idee-gekoppelten Hotel-Shortlist UND der eigenständigen
+ * Hotelsuche, keine parallele Auswahllogik.
+ */
+export function selectHotelDisplayList(
+  candidates: LodgingResult[],
+  qualificationByPlaceId: Map<string, HotelQualification>,
+): HotelSelectionResult {
+  const anyQualified = candidates.some((c) => qualificationByPlaceId.get(c.id)?.qualifies)
+  const limitedInventory = candidates.length <= SMALL_DESTINATION_THRESHOLD
+  const belowStandard = !anyQualified
+  const byRatingDesc = (a: LodgingResult, b: LodgingResult) => (b.rating ?? -1) - (a.rating ?? -1)
+
+  if (limitedInventory) {
+    return { items: [...candidates].sort(byRatingDesc), belowStandard, limitedInventory }
+  }
+  if (belowStandard) {
+    return { items: [...candidates].sort(byRatingDesc).slice(0, MAX_FALLBACK_CANDIDATES), belowStandard, limitedInventory }
+  }
+  return { items: selectBalancedQualified(candidates, qualificationByPlaceId), belowStandard, limitedInventory }
+}
+
 /**
  * §"Kein unbestätigtes HolidayCheck-Deep-Link-Format erfinden" (Nutzervorgabe):
  * öffnet stattdessen eine Google-Suche mit `site:holidaycheck.de` -- keine

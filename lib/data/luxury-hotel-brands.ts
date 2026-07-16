@@ -44,6 +44,12 @@ const LUXURY_HOTEL_BRANDS: Array<{ keywords: string[]; tier: LuxuryHotelTier }> 
       'ritz-carlton', 'ritz carlton', 'waldorf astoria', 'park hyatt', 'jw marriott',
       'rosewood', 'raffles', 'capella', 'como hotel', 'como shambhala', 'como uma',
       'auberge resort', 'oetker collection', 'fasano',
+      // §"Auch Safari-/Lodge-Marken abdecken, nicht nur Stadt-/Resort-Ketten"
+      // (Nutzervorgabe): ohne diese Marken fallen Safari-Lodges komplett auf
+      // die Heuristik zurück, die bei Google oft an fehlendem `priceLevel`
+      // scheitert.
+      'andbeyond', '&beyond', 'wilderness safaris', 'sabi sabi', "governors' camp",
+      'governors camp', 'sanctuary retreats',
     ],
   },
   {
@@ -51,6 +57,7 @@ const LUXURY_HOTEL_BRANDS: Array<{ keywords: string[]; tier: LuxuryHotelTier }> 
     keywords: [
       'one&only', 'one & only', 'four seasons', 'mandarin oriental', 'aman',
       'cheval blanc', 'six senses', 'belmond', 'nihi',
+      'singita',
     ],
   },
 ]

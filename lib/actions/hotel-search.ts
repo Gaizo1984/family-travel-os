@@ -4,17 +4,15 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { getFamily } from '@/lib/family'
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt } from '@/lib/family-dna'
-import { geocodeLocation, searchLodging, type LodgingResult } from '@/lib/providers/places-provider'
+import { geocodeLocation, searchLodging, computeLodgingRadiusMeters, type LodgingResult } from '@/lib/providers/places-provider'
 import { computeRouteMatrix } from '@/lib/providers/routes-provider'
 import { ProviderConfigError } from '@/lib/providers/provider-errors'
 import { selectHotelShortlist, type HotelCandidateFact } from '@/lib/trip-idea-advisor-ai'
-import { classifyAndQualify, selectBalancedQualified } from '@/lib/hotel-qualification'
+import { classifyAndQualify, selectHotelDisplayList, SMALL_DESTINATION_THRESHOLD } from '@/lib/hotel-qualification'
 import { readDateGroupFromFormData } from '@/lib/documents'
 import { isoToday, isBeforeIso } from '@/lib/date-utils'
 import type { HotelShortlistItem } from '@/lib/trip-idea-hotel-types'
 import type { Json } from '@/lib/supabase/types'
-
-const MAX_FALLBACK_CANDIDATES = 10
 
 /** Nur nach normalisiertem Ziel qualifiziert -- Google Places kennt keine terminabhängige Verfügbarkeit, die realen Kandidaten hängen nur vom Ziel ab. */
 function buildHotelSearchKey(destination: string): string {
@@ -22,7 +20,7 @@ function buildHotelSearchKey(destination: string): string {
 }
 
 export type HotelSearchOutcome =
-  | { status: 'ok'; searchKey: string; items: HotelShortlistItem[]; belowStandard: boolean; searchedAt: string }
+  | { status: 'ok'; searchKey: string; items: HotelShortlistItem[]; belowStandard: boolean; limitedInventory: boolean; searchedAt: string }
   | { status: 'no_results' }
   | { status: 'error'; message: string }
 
@@ -53,11 +51,17 @@ export async function getOrSearchHotelOptions(params: {
 
   const hasCachedResults = Array.isArray(existing?.results) && (existing.results as unknown[]).length > 0
   if (!params.forceRefresh && hasCachedResults) {
+    const cachedItems = existing!.results as unknown as HotelShortlistItem[]
     return {
       status: 'ok',
       searchKey,
-      items: existing!.results as unknown as HotelShortlistItem[],
+      items: cachedItems,
       belowStandard: existing!.is_below_standard,
+      // §"hotel_search_cache hat keine eigene Spalte dafür": Näherung aus der
+      // bereits gespeicherten Trefferzahl (echte Berechnung nur bei einer
+      // frischen Suche unten) -- rein informativ für den UI-Hinweis, nicht
+      // sicherheitsrelevant.
+      limitedInventory: cachedItems.length <= SMALL_DESTINATION_THRESHOLD,
       searchedAt: existing!.updated_at,
     }
   }
@@ -77,7 +81,7 @@ export async function getOrSearchHotelOptions(params: {
 
   let candidates: LodgingResult[] | null
   try {
-    candidates = await searchLodging({ locationName: params.destination, lat: destGeo.lat, lng: destGeo.lng })
+    candidates = await searchLodging({ locationName: params.destination, lat: destGeo.lat, lng: destGeo.lng, radiusMeters: computeLodgingRadiusMeters(destGeo) })
   } catch {
     return { status: 'error', message: 'Die Hotelsuche ist gerade fehlgeschlagen -- bitte in Kürze erneut versuchen.' }
   }
@@ -92,16 +96,12 @@ export async function getOrSearchHotelOptions(params: {
   })
 
   const qualificationByPlaceId = new Map(dedupedRaw.map((c) => [c.id, classifyAndQualify(c)]))
-  const anyQualified = dedupedRaw.some((c) => qualificationByPlaceId.get(c.id)!.qualifies)
 
-  const belowStandardMode = !anyQualified
-  // §"Ausgewogen zusammengesetzt, nicht nur die höchste Stufe": siehe
-  // selectBalancedQualified -- 2 gehobene 5-Sterne + 2 Premium Luxury + 1
-  // Ultra Luxury + optional 1 iconic Pick, ausschließlich aus echten,
-  // bereits qualifizierten Places-Treffern.
-  const deduped = belowStandardMode
-    ? [...dedupedRaw].sort((a, b) => (b.rating ?? -1) - (a.rating ?? -1)).slice(0, MAX_FALLBACK_CANDIDATES)
-    : selectBalancedQualified(dedupedRaw, qualificationByPlaceId)
+  // §"Gibt es die eine Lösung? Nein" -- `selectHotelDisplayList` bündelt die
+  // Entscheidung zentral: ausgewogene Komposition, Bewertungs-Fallback bei
+  // Null-Qualifizierten, oder bei kleinen Zielen mit wenigen Gesamttreffern
+  // (Insel/abgelegene Region) bewusst gelockert.
+  const { items: deduped, belowStandard: belowStandardMode, limitedInventory } = selectHotelDisplayList(dedupedRaw, qualificationByPlaceId)
 
   let referencePoint = destGeo
   try {
@@ -135,7 +135,7 @@ export async function getOrSearchHotelOptions(params: {
     transferMinutes: r.durationMinutes,
     address: r.candidate.formattedAddress,
     types: r.candidate.types,
-    tier: belowStandardMode ? null : qualificationByPlaceId.get(r.candidate.id)!.tier,
+    tier: qualificationByPlaceId.get(r.candidate.id)!.qualifies ? qualificationByPlaceId.get(r.candidate.id)!.tier : null,
   }))
 
   const picks = await selectHotelShortlist({
@@ -171,7 +171,7 @@ export async function getOrSearchHotelOptions(params: {
         styleImpression: pick.styleImpression,
         bestFor: pick.bestFor,
         caveats: pick.caveats,
-        tier: belowStandardMode ? null : qualification.tier,
+        tier: qualification.qualifies ? qualification.tier : null,
         tierBasis: qualification.tierBasis,
         isIconic: qualification.isIconic,
         iconicReason: qualification.iconicReason,
@@ -193,7 +193,7 @@ export async function getOrSearchHotelOptions(params: {
   )
   if (upsertError) console.error('[hotel_search_cache] Speicherfehler:', upsertError.message)
 
-  return { status: 'ok', searchKey, items, belowStandard: belowStandardMode, searchedAt }
+  return { status: 'ok', searchKey, items, belowStandard: belowStandardMode, limitedInventory, searchedAt }
 }
 
 function buildHotelsPageUrl(params: {

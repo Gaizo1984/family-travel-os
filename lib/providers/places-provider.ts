@@ -5,7 +5,11 @@ const PLACES_SEARCH_URL = 'https://places.googleapis.com/v1/places:searchText'
 
 export type PlacesCategory = 'restaurant' | 'attraction' | 'beach' | 'nature'
 
-export type GeocodeResult = { lat: number; lng: number; formattedAddress: string }
+/** `viewport` = Googles eigene Bounding Box für das geokodierte Ziel -- skaliert natürlich mit dessen Größe (Hotel/Adresse: winzig, Stadt: mittel, Land/Inselgruppe: groß). Siehe `computeLodgingRadiusMeters`. */
+export type GeocodeResult = {
+  lat: number; lng: number; formattedAddress: string
+  viewport: { neLat: number; neLng: number; swLat: number; swLng: number } | null
+}
 
 export type PlaceResult = {
   id: string
@@ -115,10 +119,14 @@ async function googleGeocode(query: string): Promise<GeocodeResult | null> {
     const data = await res.json()
     const first = data?.results?.[0]
     if (!first) return null
+    const vp = first.geometry?.viewport
     return {
       lat: first.geometry.location.lat,
       lng: first.geometry.location.lng,
       formattedAddress: first.formatted_address,
+      viewport: vp
+        ? { neLat: vp.northeast.lat, neLng: vp.northeast.lng, swLat: vp.southwest.lat, swLng: vp.southwest.lng }
+        : null,
     }
   } catch (e) {
     if (e instanceof ProviderConfigError || e instanceof ProviderRequestError) throw e
@@ -223,15 +231,38 @@ export type LodgingResult = PlaceResult & { priceLevel: string | null; websiteUr
  * er überhaupt als Kandidat zählt -- gleiches Prinzip wie `resolveReferencePoint`.
  */
 const LODGING_FIELD_MASK = `${PLACES_FIELD_MASK},places.priceLevel,places.websiteUri`
-// §Bugfix "Hotelsuche für Cancún liefert Hotels aus Playa del Carmen": der
-// bisherige Radius stand auf dem von Google erlaubten Maximum (50 km) -- auf
-// dieser Distanz liegen an dicht besiedelten Küstenabschnitten (Riviera
-// Maya, aber auch andere Regionen) mehrere eigenständige Nachbarorte, die
-// nicht als Treffer für die gesuchte Stadt gelten sollen. 20 km deckt eine
-// Stadt inkl. Hotelzone komfortabel ab, ohne den nächsten Ort mit
-// hineinzuziehen.
-const LODGING_RADIUS_METERS = 20000
+// §Bugfix "Hotelsuche für Cancún liefert Hotels aus Playa del Carmen": ein
+// fester 50-km-Radius (Google-Maximum) zieht an dicht besiedelten
+// Küstenabschnitten eigenständige Nachbarorte mit hinein.
+// §Bugfix "Mauritius/Seychellen finden fast keine Hotels": derselbe feste
+// Radius ist umgekehrt für ein ganzes Land/eine Inselgruppe viel zu eng und
+// schneidet die meisten Resorts ab. Es gibt also keinen einzigen
+// "richtigen" festen Wert -- der Radius muss sich an der tatsächlichen
+// Ausdehnung des geokodierten Ziels orientieren (siehe
+// `computeLodgingRadiusMeters` unten, nutzt Googles eigene Viewport-Angabe).
+const MIN_LODGING_RADIUS_METERS = 20000
+const MAX_LODGING_RADIUS_METERS = 50000 // von Google für locationBias.circle.radius hart begrenzt
 const LODGING_MAX_RESULT_COUNT = MAX_GOOGLE_RESULT_COUNT
+
+const METERS_PER_DEGREE_LAT = 111_320
+
+/**
+ * §"Radius an die tatsächliche Ausdehnung des Ziels anpassen": Googles
+ * Geocoding-Antwort liefert für jedes Ziel eine eigene `viewport`-Bounding-
+ * Box, die natürlich mit dessen Größe skaliert -- eine Stadt bekommt eine
+ * kleine Box, ein Land/eine Inselgruppe eine große. Der Radius wird daraus
+ * als halbe Diagonale abgeleitet und zwischen `MIN_LODGING_RADIUS_METERS`
+ * (verhindert weiterhin Nachbarort-Vermischung bei kleinen Zielen) und
+ * `MAX_LODGING_RADIUS_METERS` (Google-Maximum) begrenzt.
+ */
+export function computeLodgingRadiusMeters(geo: GeocodeResult): number {
+  if (!geo.viewport) return MIN_LODGING_RADIUS_METERS
+  const metersPerDegreeLng = METERS_PER_DEGREE_LAT * Math.cos((geo.lat * Math.PI) / 180)
+  const latSpanMeters = Math.abs(geo.viewport.neLat - geo.viewport.swLat) * METERS_PER_DEGREE_LAT
+  const lngSpanMeters = Math.abs(geo.viewport.neLng - geo.viewport.swLng) * metersPerDegreeLng
+  const halfDiagonal = Math.max(latSpanMeters, lngSpanMeters) / 2
+  return Math.min(MAX_LODGING_RADIUS_METERS, Math.max(MIN_LODGING_RADIUS_METERS, halfDiagonal))
+}
 
 // §Bugfix "Berühmte Einzelhotels (Belmond, Fasano, ...) fehlen in
 // Großstädten": Google Places Text Search liefert maximal 20 Treffer pro
@@ -249,7 +280,7 @@ const LODGING_QUERY_TEMPLATES = (locationName: string): string[] => [
   `Luxushotels und 5-Sterne-Resorts in ${locationName}`,
 ]
 
-async function fetchLodgingPageRaw(textQuery: string, lat: number, lng: number, apiKey: string): Promise<LodgingResult[]> {
+async function fetchLodgingPageRaw(textQuery: string, lat: number, lng: number, radiusMeters: number, apiKey: string): Promise<LodgingResult[]> {
   const res = await fetch(PLACES_SEARCH_URL, {
     method: 'POST',
     headers: {
@@ -261,7 +292,7 @@ async function fetchLodgingPageRaw(textQuery: string, lat: number, lng: number, 
       textQuery,
       languageCode: 'de',
       maxResultCount: LODGING_MAX_RESULT_COUNT,
-      locationBias: { circle: { center: { latitude: lat, longitude: lng }, radius: LODGING_RADIUS_METERS } },
+      locationBias: { circle: { center: { latitude: lat, longitude: lng }, radius: radiusMeters } },
     }),
     cache: 'no-store',
   })
@@ -289,16 +320,16 @@ async function fetchLodgingPageRaw(textQuery: string, lat: number, lng: number, 
   }))
 }
 
-async function fetchLodgingPage(textQuery: string, lat: number, lng: number, apiKey: string): Promise<LodgingResult[]> {
-  const raw = await fetchLodgingPageRaw(textQuery, lat, lng, apiKey)
+async function fetchLodgingPage(textQuery: string, lat: number, lng: number, radiusMeters: number, apiKey: string): Promise<LodgingResult[]> {
+  const raw = await fetchLodgingPageRaw(textQuery, lat, lng, radiusMeters, apiKey)
   return raw.filter((p) => p.types.includes(LODGING_TYPE))
 }
 
 async function runLodgingQueries(
-  locationName: string, lat: number, lng: number, apiKey: string,
+  locationName: string, lat: number, lng: number, radiusMeters: number, apiKey: string,
   fetchPage: typeof fetchLodgingPage,
 ): Promise<LodgingResult[]> {
-  const pages = await Promise.all(LODGING_QUERY_TEMPLATES(locationName).map((textQuery) => fetchPage(textQuery, lat, lng, apiKey)))
+  const pages = await Promise.all(LODGING_QUERY_TEMPLATES(locationName).map((textQuery) => fetchPage(textQuery, lat, lng, radiusMeters, apiKey)))
   const seenIds = new Set<string>()
   const merged: LodgingResult[] = []
   for (const page of pages) {
@@ -311,7 +342,15 @@ async function runLodgingQueries(
   return merged
 }
 
-export async function searchLodging(params: { locationName: string; lat?: number; lng?: number }): Promise<LodgingResult[] | null> {
+/**
+ * §"Radius an die tatsächliche Ausdehnung des Ziels anpassen": `radiusMeters`
+ * ist optional -- wird es nicht mitgegeben (z. B. wenn der Aufrufer bereits
+ * selbst geokodiert hat), berechnet diese Funktion es intern über
+ * `computeLodgingRadiusMeters`. Aufrufer, die schon ein `GeocodeResult` mit
+ * Viewport haben (z. B. `getOrSearchHotelOptions`), sollten den Radius direkt
+ * mitgeben, um den zusätzlichen Geocoding-Aufruf zu sparen.
+ */
+export async function searchLodging(params: { locationName: string; lat?: number; lng?: number; radiusMeters?: number }): Promise<LodgingResult[] | null> {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY
   if (!apiKey) {
     const err = new ProviderConfigError('places', 'lodging_search')
@@ -321,15 +360,18 @@ export async function searchLodging(params: { locationName: string; lat?: number
 
   let lat = params.lat
   let lng = params.lng
+  let radiusMeters = params.radiusMeters
   if (lat === undefined || lng === undefined) {
     const geo = await googleGeocode(params.locationName)
     if (!geo) return null
     lat = geo.lat
     lng = geo.lng
+    radiusMeters = radiusMeters ?? computeLodgingRadiusMeters(geo)
   }
+  radiusMeters = radiusMeters ?? MIN_LODGING_RADIUS_METERS
 
   try {
-    return await runLodgingQueries(params.locationName, lat, lng, apiKey, fetchLodgingPage)
+    return await runLodgingQueries(params.locationName, lat, lng, radiusMeters, apiKey, fetchLodgingPage)
   } catch (e) {
     if (e instanceof ProviderConfigError || e instanceof ProviderRequestError) throw e
     const err = new ProviderRequestError('places', 'lodging_search', 0)
@@ -346,7 +388,7 @@ export async function searchLodging(params: { locationName: string; lat?: number
  * überhaupt findet, aber mit einem anderen Google-Typ (z. B. `tourist_
  * attraction`) kategorisiert und deshalb bisher stillschweigend verworfen hat.
  */
-export async function searchLodgingRaw(params: { locationName: string; lat?: number; lng?: number }): Promise<LodgingResult[] | null> {
+export async function searchLodgingRaw(params: { locationName: string; lat?: number; lng?: number; radiusMeters?: number }): Promise<LodgingResult[] | null> {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY
   if (!apiKey) {
     const err = new ProviderConfigError('places', 'lodging_search')
@@ -356,15 +398,18 @@ export async function searchLodgingRaw(params: { locationName: string; lat?: num
 
   let lat = params.lat
   let lng = params.lng
+  let radiusMeters = params.radiusMeters
   if (lat === undefined || lng === undefined) {
     const geo = await googleGeocode(params.locationName)
     if (!geo) return null
     lat = geo.lat
     lng = geo.lng
+    radiusMeters = radiusMeters ?? computeLodgingRadiusMeters(geo)
   }
+  radiusMeters = radiusMeters ?? MIN_LODGING_RADIUS_METERS
 
   try {
-    return await runLodgingQueries(params.locationName, lat, lng, apiKey, fetchLodgingPageRaw)
+    return await runLodgingQueries(params.locationName, lat, lng, radiusMeters, apiKey, fetchLodgingPageRaw)
   } catch (e) {
     if (e instanceof ProviderConfigError || e instanceof ProviderRequestError) throw e
     const err = new ProviderRequestError('places', 'lodging_search', 0)

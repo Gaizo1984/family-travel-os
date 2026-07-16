@@ -288,6 +288,13 @@ export default async function TripIdeaDetailPage({
                   </p>
                 </div>
               )}
+              {!hotelShortlist.belowStandard && hotelShortlist.limitedInventory && (
+                <div className="mb-4 px-4 py-3 rounded-lg" style={{ background: "rgba(107,143,113,0.12)", border: "1px solid rgba(107,143,113,0.3)" }}>
+                  <p style={{ color: "var(--foreground)", fontSize: "0.75rem", lineHeight: 1.5 }}>
+                    An diesem Ziel gibt es insgesamt nur wenige Hotels — hier werden alle real gefundenen Optionen gezeigt, nicht nur die üblichen Top-Kategorien.
+                  </p>
+                </div>
+              )}
               <div className="mb-3">
                 <HotelResultGroups items={hotelShortlist.items} destination={idea.destination} />
               </div>

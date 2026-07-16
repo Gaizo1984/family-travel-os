@@ -21,13 +21,20 @@ export function HotelQualificationTestCard({ lastRun }: { lastRun: DevTestRun | 
 
       {result && (
         <div style={{ marginTop: '0.85rem', fontSize: '0.72rem', color: '#d1d5db' }}>
+          <div style={{ marginBottom: '0.25rem', color: '#9ca3af' }}>
+            Suchradius: {Math.round(result.usedRadiusMeters / 1000)} km (an Zielgröße angepasst, 20–50 km)
+          </div>
           <div style={{ marginBottom: '0.5rem' }}>
             <strong>{result.candidateCount}</strong> Kandidaten, <strong>{result.qualifiedCount}</strong> qualifiziert
             {result.belowStandardMode && <span style={{ color: '#fbbf24' }}> — Fallback-Modus (unterhalb Mindeststandard)</span>}
+            {!result.belowStandardMode && result.limitedInventory && <span style={{ color: '#fbbf24' }}> — kleines Ziel, Mindeststandard gelockert</span>}
           </div>
           {result.balancedPickNames.length > 0 && (
             <div style={{ marginBottom: '0.75rem', color: '#4ade80' }}>
-              Ausgewogene Shortlist-Auswahl (bis zu 2 Iconic + 3 Ultra Luxury + 3 Premium Luxury + 3 Gehobene 5 Sterne): {result.balancedPickNames.join(', ')}
+              {result.limitedInventory
+                ? 'Alle real gefundenen Hotels (Mindeststandard gelockert): '
+                : 'Ausgewogene Shortlist-Auswahl (bis zu 2 Iconic + 3 Ultra Luxury + 3 Premium Luxury + 3 Gehobene 5 Sterne): '}
+              {result.balancedPickNames.join(', ')}
             </div>
           )}
           <ul className="flex flex-col gap-1.5">

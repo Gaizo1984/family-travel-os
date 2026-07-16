@@ -2,12 +2,12 @@
 
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { geocodeLocation, searchLodging, type LodgingResult } from '@/lib/providers/places-provider'
+import { geocodeLocation, searchLodging, computeLodgingRadiusMeters, type LodgingResult } from '@/lib/providers/places-provider'
 import { computeRouteMatrix } from '@/lib/providers/routes-provider'
 import { ProviderConfigError } from '@/lib/providers/provider-errors'
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt } from '@/lib/family-dna'
 import { selectHotelShortlist, generateBudgetBreakdown, generateTripVariants as generateTripVariantsAi, type HotelCandidateFact } from '@/lib/trip-idea-advisor-ai'
-import { classifyAndQualify, selectBalancedQualified } from '@/lib/hotel-qualification'
+import { classifyAndQualify, selectHotelDisplayList } from '@/lib/hotel-qualification'
 import type { HotelShortlist } from '@/lib/trip-idea-hotel-types'
 
 type IdeaRow = {
@@ -92,7 +92,7 @@ export async function generateHotelShortlist(formData: FormData) {
 
   let candidates: LodgingResult[] | null
   try {
-    candidates = await searchLodging({ locationName: idea.destination, lat: destGeo.lat, lng: destGeo.lng })
+    candidates = await searchLodging({ locationName: idea.destination, lat: destGeo.lat, lng: destGeo.lng, radiusMeters: computeLodgingRadiusMeters(destGeo) })
   } catch {
     redirect(`${returnTo}?error=${encodeURIComponent('Die Hotelsuche ist gerade fehlgeschlagen -- bitte in Kürze erneut versuchen.')}`)
   }
@@ -113,20 +113,13 @@ export async function generateHotelShortlist(formData: FormData) {
   // raus, bevor Route Matrix/KI überhaupt dafür aufgerufen werden (spart auch
   // Kosten für Hotels, die ohnehin nicht in Frage kommen).
   const qualificationByPlaceId = new Map(dedupedRaw.map((c) => [c.id, classifyAndQualify(c)]))
-  const anyQualified = dedupedRaw.some((c) => qualificationByPlaceId.get(c.id)!.qualifies)
 
-  // §"Fallback für Regionen ohne qualifizierte Hotels": statt gar nichts
-  // anzuzeigen, fällt die Suche auf die real gefundenen Kandidaten mit der
-  // besten Bewertung zurück -- klar als unterhalb des Mindeststandards
-  // gekennzeichnet (siehe belowStandardMode/tier:null unten), nie stillschweigend aufgewertet.
-  const belowStandardMode = !anyQualified
-  const MAX_FALLBACK_CANDIDATES = 10
-  // §"Ausgewogen zusammengesetzt, nicht nur die höchste Stufe": 2 gehobene
-  // 5-Sterne + 2 Premium Luxury + 1 Ultra Luxury + optional 1 iconic Pick,
-  // ausschließlich aus echten, bereits qualifizierten Places-Treffern.
-  const deduped = belowStandardMode
-    ? [...dedupedRaw].sort((a, b) => (b.rating ?? -1) - (a.rating ?? -1)).slice(0, MAX_FALLBACK_CANDIDATES)
-    : selectBalancedQualified(dedupedRaw, qualificationByPlaceId)
+  // §"Gibt es die eine Lösung? Nein" -- `selectHotelDisplayList` bündelt die
+  // Entscheidung zentral: ausgewogene Komposition, Bewertungs-Fallback bei
+  // Null-Qualifizierten, oder (neu) bei kleinen Zielen mit wenigen
+  // Gesamttreffern (Insel/abgelegene Region) bewusst gelockert -- jedes
+  // echte Hotel wird gezeigt und trotzdem individuell klassifiziert.
+  const { items: deduped, belowStandard: belowStandardMode, limitedInventory } = selectHotelDisplayList(dedupedRaw, qualificationByPlaceId)
 
   // §"Referenzpunkt für Transferzeit": erst der Flughafen des Ziels
   // versuchen, sonst der Zielort selbst als Näherung.
@@ -165,7 +158,10 @@ export async function generateHotelShortlist(formData: FormData) {
     transferMinutes: r.durationMinutes,
     address: r.candidate.formattedAddress,
     types: r.candidate.types,
-    tier: belowStandardMode ? null : qualificationByPlaceId.get(r.candidate.id)!.tier,
+    // §"Jedes Hotel bekommt seine eigene, echte Klassifizierung" statt eines
+    // global geleerten Tiers -- betrifft vor allem den neuen `limitedInventory`-
+    // Fall (kleines Ziel, gemischt qualifizierte/nicht qualifizierte Kandidaten).
+    tier: qualificationByPlaceId.get(r.candidate.id)!.qualifies ? qualificationByPlaceId.get(r.candidate.id)!.tier : null,
   }))
 
   const dnaText = formatFamilyDnaForPrompt({ ...dnaSummary, persons: selectedPersons }, effectiveDate)
@@ -205,11 +201,11 @@ export async function generateHotelShortlist(formData: FormData) {
         // §"Falls Google Places keine sichere Sterneklassifizierung liefert,
         // nicht raten": tier ist deterministisch aus Marke ODER Bewertung+
         // Preisniveau bestimmt (siehe classifyAndQualify oben), NIE von der
-        // KI. `null` = Fallback-Kandidat unterhalb des Mindeststandards
-        // (siehe belowStandardMode). tierBasis === 'heuristic' kennzeichnet
-        // zusätzlich die Unsicherheit in der UI (kein verifizierter
-        // Markenname, nur Fakten-Kombination).
-        tier: belowStandardMode ? null : qualification.tier,
+        // KI. `null` = dieser konkrete Kandidat qualifiziert nicht (siehe
+        // belowStandardMode/limitedInventory). tierBasis === 'heuristic'
+        // kennzeichnet zusätzlich die Unsicherheit in der UI (kein
+        // verifizierter Markenname, nur Fakten-Kombination).
+        tier: qualification.qualifies ? qualification.tier : null,
         tierBasis: qualification.tierBasis,
         isIconic: qualification.isIconic,
         iconicReason: qualification.iconicReason,
@@ -228,7 +224,7 @@ export async function generateHotelShortlist(formData: FormData) {
   const { error: updateError } = await supabase
     .from('trip_ideas')
     .update({
-      hotel_shortlist: { items: shortlist, belowStandard: belowStandardMode },
+      hotel_shortlist: { items: shortlist, belowStandard: belowStandardMode, limitedInventory },
       hotel_shortlist_updated_at: new Date().toISOString(),
     })
     .eq('id', ideaId)

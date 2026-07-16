@@ -16,4 +16,9 @@ export type HotelShortlistItem = {
   livePricing: null
 }
 
-export type HotelShortlist = { items: HotelShortlistItem[]; belowStandard: boolean }
+export type HotelShortlist = {
+  items: HotelShortlistItem[]
+  belowStandard: boolean
+  /** true = insgesamt nur wenige echte Kandidaten gefunden (kleine Insel/abgelegene Region) -- Mindeststandard-Komposition bewusst gelockert, siehe `selectHotelDisplayList`. */
+  limitedInventory: boolean
+}

@@ -6,6 +6,7 @@ import { searchHotelsStandalone } from "@/lib/actions/hotel-search";
 import { HotelSearchForm } from "@/components/HotelSearchForm";
 import { HotelResultGroups } from "@/components/HotelResultGroups";
 import { Banner } from "@/components/Banner";
+import { SMALL_DESTINATION_THRESHOLD } from "@/lib/hotel-qualification";
 import type { HotelShortlistItem } from "@/lib/trip-idea-hotel-types";
 
 function formatSearchedAt(iso: string): string {
@@ -25,7 +26,7 @@ export default async function HotelsPage({
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
 
-  let hotelResult: { items: HotelShortlistItem[]; belowStandard: boolean; searchedAt: string } | null = null;
+  let hotelResult: { items: HotelShortlistItem[]; belowStandard: boolean; limitedInventory: boolean; searchedAt: string } | null = null;
   if (sp.search_key) {
     const { data: cached } = await supabase
       .from("hotel_search_cache")
@@ -34,7 +35,14 @@ export default async function HotelsPage({
       .eq("search_key", sp.search_key)
       .maybeSingle();
     hotelResult = cached
-      ? { items: cached.results as unknown as HotelShortlistItem[], belowStandard: cached.is_below_standard, searchedAt: cached.updated_at }
+      ? {
+          items: cached.results as unknown as HotelShortlistItem[],
+          belowStandard: cached.is_below_standard,
+          // §"hotel_search_cache hat keine eigene Spalte dafür": Näherung aus
+          // der Trefferzahl, rein informativ (siehe getOrSearchHotelOptions).
+          limitedInventory: (cached.results as unknown[]).length <= SMALL_DESTINATION_THRESHOLD,
+          searchedAt: cached.updated_at,
+        }
       : null;
   }
 
@@ -108,6 +116,11 @@ export default async function HotelsPage({
             {hotelResult.belowStandard && (
               <Banner variant="error">
                 Kein Hotel in dieser Region erfüllt den gewünschten gehobenen 5-Sterne-Mindeststandard (Westin/Le Méridien oder besser) — hier die besten real verfügbaren Optionen, deutlich unterhalb des gewünschten Niveaus.
+              </Banner>
+            )}
+            {!hotelResult.belowStandard && hotelResult.limitedInventory && (
+              <Banner variant="success">
+                An diesem Ziel gibt es insgesamt nur wenige Hotels — hier werden alle real gefundenen Optionen gezeigt, nicht nur die üblichen Top-Kategorien.
               </Banner>
             )}
             <HotelResultGroups items={hotelResult.items} destination={sp.destination ?? ""} />
