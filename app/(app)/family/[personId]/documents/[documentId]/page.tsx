@@ -9,6 +9,7 @@ import {
 import type { DocumentType, DocumentDetails } from "@/lib/documents";
 import { assignDocumentToTrip, unassignDocumentFromTrip } from "@/lib/actions/documents";
 import { Banner } from "@/components/Banner";
+import { getCachedSignedUrl } from "@/lib/signed-storage-url";
 
 type DocumentDetail = {
   id: string;
@@ -63,9 +64,7 @@ export default async function DocumentDetailPage({
   const Icon = config.icon;
   const details = doc.details ?? {};
 
-  const { data: signedUrlData } = await supabase.storage
-    .from("documents")
-    .createSignedUrl(doc.storage_path, 3600);
+  const signedDocUrl = await getCachedSignedUrl("documents", doc.storage_path);
 
   const isImage = /\.(jpe?g|png|webp)$/i.test(doc.storage_path);
   const validity = getDocumentValidity(doc);
@@ -199,18 +198,18 @@ export default async function DocumentDetailPage({
           <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: "12px" }}>
             Hinterlegte Datei
           </div>
-          {signedUrlData?.signedUrl ? (
+          {signedDocUrl ? (
             isImage ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={signedUrlData.signedUrl}
+                src={signedDocUrl}
                 alt={doc.label}
                 className="rounded-lg w-full"
                 style={{ maxHeight: 480, objectFit: "contain", background: "var(--background)" }}
               />
             ) : (
               <a
-                href={signedUrlData.signedUrl}
+                href={signedDocUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{ color: "var(--accent)", fontSize: "0.8rem", textDecoration: "none" }}

@@ -4,6 +4,7 @@ import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { updatePastTrip, deletePastTrip } from "@/lib/actions/past-trips";
 import { Banner } from "@/components/Banner";
+import { getPhotoDisplayUrl } from "@/lib/photo-thumbnails";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -38,11 +39,9 @@ export default async function EditPastTripPage({
   const { data: travelers } = await supabase.from("past_trip_travelers").select("person_id").eq("past_trip_id", pastTripId);
   const travelerIds = new Set((travelers ?? []).map((t) => t.person_id));
 
-  let photoUrl: string | null = null;
-  if (pastTrip.photo_storage_path) {
-    const { data: signed } = await supabase.storage.from("documents").createSignedUrl(pastTrip.photo_storage_path, 3600);
-    photoUrl = signed?.signedUrl ?? null;
-  }
+  const photoUrl = pastTrip.photo_storage_path
+    ? (await getPhotoDisplayUrl("documents", pastTrip.photo_storage_path, "thumb400"))?.url ?? null
+    : null;
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>

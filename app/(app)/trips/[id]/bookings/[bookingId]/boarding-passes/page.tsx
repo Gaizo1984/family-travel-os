@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { sortForBoardingPassViewer } from "@/lib/boarding-passes";
 import { OfflineDocumentViewer } from "@/components/OfflineDocumentViewer";
+import { getCachedSignedUrl } from "@/lib/signed-storage-url";
 
 export default async function BoardingPassViewerPage({
   params,
@@ -52,9 +53,9 @@ export default async function BoardingPassViewerPage({
 
   const withUrl = await Promise.all(
     passes.map(async (p) => {
-      const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.storage_path, 3600);
+      const url = await getCachedSignedUrl("documents", p.storage_path);
       const isPdf = p.storage_path.toLowerCase().endsWith(".pdf");
-      return { ...p, url: signed?.signedUrl ?? null, isPdf };
+      return { ...p, url, isPdf };
     })
   );
 

@@ -10,6 +10,7 @@ import type { DocumentType, DocumentDetails } from "@/lib/documents";
 import { TRAVEL_NEED_OPTIONS } from "@/lib/family-dna";
 import { buildTravelWorld } from "@/lib/travel-world";
 import { getFamily } from "@/lib/family";
+import { getPhotoDisplayUrl, getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
 import { WorldMap } from "@/components/WorldMap";
 import { Map as MapIcon, Globe } from "lucide-react";
 
@@ -80,23 +81,20 @@ export default async function PersonDetailPage({
 
   // §Performance-Audit: vier voneinander unabhängige Ladevorgänge (alle
   // brauchen nur person.id/photo_storage_path) liefen bisher seriell.
-  const [signedPhoto, { data: documents }, personWorldStats, { data: memoryPhotosRaw }] = await Promise.all([
+  // §"Egress-Analyse 2026-07-16": 40px-Avatar + 1/1-Grid -- Thumbnails statt Originale, gecachte Signed URLs.
+  const [resolvedPhoto, { data: documents }, personWorldStats, { data: memoryPhotosRaw }] = await Promise.all([
     person.photo_storage_path
-      ? supabase.storage.from("documents").createSignedUrl(person.photo_storage_path, 3600)
-      : Promise.resolve({ data: null }),
+      ? getPhotoDisplayUrl("documents", person.photo_storage_path, "thumb400")
+      : Promise.resolve(null),
     supabase.from("documents").select("id, doc_type, label, expires_at, details").eq("person_id", person.id).order("created_at", { ascending: true }),
     buildTravelWorld({ familyId, personId: person.id }),
     supabase.from("memory_photos").select("id, storage_path, caption, taken_at, created_at").eq("uploaded_by_person_id", person.id).order("taken_at", { ascending: false, nullsFirst: false }).limit(12),
   ]);
-  const photoUrl = signedPhoto.data?.signedUrl ?? null;
+  const photoUrl = resolvedPhoto?.url ?? null;
   const docs = (documents ?? []) as unknown as DocumentRow[];
 
-  const memoryPhotos = await Promise.all(
-    (memoryPhotosRaw ?? []).map(async (p) => {
-      const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.storage_path, 3600);
-      return { ...p, url: signed?.signedUrl ?? null };
-    }),
-  );
+  const memoryPhotosDisplayByPath = await getPhotoDisplayUrls("documents", (memoryPhotosRaw ?? []).map((p) => p.storage_path), "thumb400");
+  const memoryPhotos = (memoryPhotosRaw ?? []).map((p) => ({ ...p, url: memoryPhotosDisplayByPath.get(p.storage_path)?.url ?? null }));
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>

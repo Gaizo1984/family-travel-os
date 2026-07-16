@@ -7,6 +7,7 @@ import { COUNTRY_OPTIONS } from "@/lib/geo-suggestions";
 import { StageDateFields } from "../../StageDateFields";
 import { Banner } from "@/components/Banner";
 import { SignedPhoto } from "@/components/SignedPhoto";
+import { getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
 
 type StageRow = {
   id: string
@@ -65,12 +66,12 @@ export default async function EditStagePage({
 
   const canDelete = (stageCount ?? 0) > 1;
 
-  const galleryPhotos = await Promise.all(
-    (photosRaw ?? []).map(async (p) => {
-      const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.storage_path, 3600);
-      return { id: p.id, storagePath: p.storage_path, caption: p.caption, url: signed?.signedUrl ?? null };
-    }),
-  );
+  // §"Egress-Analyse 2026-07-16": 1/1-Auswahlraster für Titelbild -- Thumbnail statt Original.
+  const galleryDisplayByPath = await getPhotoDisplayUrls("documents", (photosRaw ?? []).map((p) => p.storage_path), "thumb400");
+  const galleryPhotos = (photosRaw ?? []).map((p) => {
+    const resolved = galleryDisplayByPath.get(p.storage_path);
+    return { id: p.id, storagePath: resolved?.resolvedPath ?? p.storage_path, caption: p.caption, url: resolved?.url ?? null };
+  });
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>

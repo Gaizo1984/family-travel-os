@@ -20,6 +20,7 @@ import { getCachedTodayRecommendation } from "@/lib/today-recommendation";
 import { generateTodayPlan } from "@/lib/actions/today-plan";
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt } from "@/lib/family-dna";
 import { COUNTRY_STAGE_IMAGES, FALLBACK_STAGE_IMAGE, resolveStageImages } from "@/lib/stage-images";
+import { getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
 import { SignedPhoto } from "@/components/SignedPhoto";
 import { COUNTRY_NAMES } from "@/lib/geo-suggestions";
 import { todayIsoInFamilyTimezone, nowHHMMInFamilyTimezone } from "@/lib/time";
@@ -336,12 +337,9 @@ export default async function TodayPage({
     supabase.from("past_trips").select("country_or_region").eq("family_id", familyId),
   ]);
 
-  const onThisDayMemoriesWithUrls = await Promise.all(
-    onThisDayMemories.map(async (m) => {
-      const { data: signed } = await supabase.storage.from("documents").createSignedUrl(m.storagePath, 3600);
-      return { ...m, url: signed?.signedUrl ?? null };
-    }),
-  );
+  // §"Egress-Analyse 2026-07-16": 120×120-Kachel -- Thumbnail statt Original, gecachte Signed URL statt Neusignierung bei jedem Dashboard-Aufruf.
+  const onThisDayDisplayByPath = await getPhotoDisplayUrls("documents", onThisDayMemories.map((m) => m.storagePath), "thumb400");
+  const onThisDayMemoriesWithUrls = onThisDayMemories.map((m) => ({ ...m, url: onThisDayDisplayByPath.get(m.storagePath)?.url ?? null }));
 
   // todayIso (Familienzeitzone) explizit übergeben, statt auf den UTC-basierten
   // Default von isTripCurrentlyRunning zu vertrauen — sonst könnte die "aktive

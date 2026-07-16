@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { assignPolicyToTrip, unassignPolicyFromTrip } from "@/lib/actions/insurance";
 import { formatExpiresAt } from "@/lib/documents";
+import { getCachedSignedUrl } from "@/lib/signed-storage-url";
 
 function MetaItem({ label, value }: { label: string; value: string }) {
   return (
@@ -38,11 +39,7 @@ export default async function InsurancePolicyDetailPage({
   const persons = (policy.insurance_policy_persons as unknown as Array<{ persons: { id: string; name: string; initials: string } | null }>)
     .flatMap((p) => (p.persons ? [p.persons] : []));
 
-  let signedUrl: string | null = null;
-  if (policy.storage_path) {
-    const { data } = await supabase.storage.from("documents").createSignedUrl(policy.storage_path, 3600);
-    signedUrl = data?.signedUrl ?? null;
-  }
+  const signedUrl = policy.storage_path ? await getCachedSignedUrl("documents", policy.storage_path) : null;
   const isImage = policy.storage_path ? /\.(jpe?g|png|webp)$/i.test(policy.storage_path) : false;
 
   const { data: assignedTripsRaw } = await supabase

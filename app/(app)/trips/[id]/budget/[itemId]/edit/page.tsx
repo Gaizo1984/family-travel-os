@@ -7,6 +7,7 @@ import { BUDGET_CATEGORY_ORDER, BUDGET_CATEGORY_LABELS } from "@/lib/budget";
 import { suggestTripCurrencies } from "@/lib/currency-suggestions";
 import { CurrencyQuickSelect } from "@/components/CurrencyQuickSelect";
 import { Banner } from "@/components/Banner";
+import { getCachedSignedUrl } from "@/lib/signed-storage-url";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -65,13 +66,9 @@ export default async function EditBudgetItemPage({
     item.currency,
   ]));
 
-  let receiptUrl: string | null = null;
-  if (item.storage_path) {
-    const { data: signed } = await supabase.storage
-      .from(item.storage_bucket ?? "documents")
-      .createSignedUrl(item.storage_path, 3600);
-    receiptUrl = signed?.signedUrl ?? null;
-  }
+  const receiptUrl = item.storage_path
+    ? await getCachedSignedUrl(item.storage_bucket ?? "documents", item.storage_path)
+    : null;
   const isImageReceipt = item.storage_path ? /\.(jpe?g|png|webp)$/i.test(item.storage_path) : false;
 
   const cancelHref = return_to || `/trips/${trip.slug}/budget`;

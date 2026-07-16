@@ -11,6 +11,7 @@ import { isTripHistorical, isTripCurrentlyRunning } from "@/lib/trip-status";
 import { deriveTripDateRange, tripDurationDays, TRIP_DATE_RANGE_OPEN_LABEL } from "@/lib/trip-dates";
 import { SignedPhoto } from "@/components/SignedPhoto";
 import { PastTripsAccordion, type PastYearGroup } from "@/components/PastTripsAccordion";
+import { getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
 
 const H_FG    = "#F0EBE3";
 const H_MUTED = "#A89880";
@@ -322,7 +323,7 @@ type LegacyPastTripRow = {
  * (kein Slug/keine Etappen, Link führt auf die Bearbeiten-Seite statt auf
  * eine Reisedetailseite, die für diese Einträge nicht existiert).
  */
-function LegacyPastCard({ entry, url, members }: { entry: LegacyPastTripRow; url: string | null; members: PersonRow[] }) {
+function LegacyPastCard({ entry, url, resolvedPath, members }: { entry: LegacyPastTripRow; url: string | null; resolvedPath: string | null; members: PersonRow[] }) {
   const subtitle = [entry.places, entry.duration_days ? `${entry.duration_days} Tage` : null].filter(Boolean).join(" · ") || `${entry.year}`;
 
   return (
@@ -333,7 +334,7 @@ function LegacyPastCard({ entry, url, members }: { entry: LegacyPastTripRow; url
     >
       {url ? (
         <SignedPhoto
-          storagePath={entry.photo_storage_path}
+          storagePath={resolvedPath ?? entry.photo_storage_path}
           initialUrl={url}
           alt={entry.country_or_region}
           className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
@@ -442,12 +443,15 @@ export default async function TripsPage({
     list.push(person);
     travelersByPastTrip.set(row.past_trip_id, list);
   });
+  // §"Egress-Analyse 2026-07-16": 320px-Hero-Kachel -- Thumbnail statt Original, gecachte Signed URL.
+  const legacyWithPhoto = legacyForDisplay.filter((p): p is typeof p & { photo_storage_path: string } => !!p.photo_storage_path);
+  const legacyDisplayByPath = await getPhotoDisplayUrls("documents", legacyWithPhoto.map((p) => p.photo_storage_path), "thumb800");
   const pastTripPhotoUrlById = new Map<string, string>();
-  await Promise.all(legacyForDisplay.map(async (p) => {
-    if (!p.photo_storage_path) return;
-    const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.photo_storage_path, 3600);
-    if (signed?.signedUrl) pastTripPhotoUrlById.set(p.id, signed.signedUrl);
-  }));
+  const pastTripResolvedPathById = new Map<string, string>();
+  for (const p of legacyWithPhoto) {
+    const resolved = legacyDisplayByPath.get(p.photo_storage_path);
+    if (resolved) { pastTripPhotoUrlById.set(p.id, resolved.url); pastTripResolvedPathById.set(p.id, resolved.resolvedPath); }
+  }
 
   const pastYearGroups: PastYearGroup[] = groupPastTripsByYear(pastAllYears, legacyForDisplay).map((g) => ({
     year: g.year,
@@ -462,6 +466,7 @@ export default async function TripsPage({
             key={entry.id}
             entry={entry}
             url={pastTripPhotoUrlById.get(entry.id) ?? null}
+            resolvedPath={pastTripResolvedPathById.get(entry.id) ?? null}
             members={travelersByPastTrip.get(entry.id) ?? []}
           />
         ))}

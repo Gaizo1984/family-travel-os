@@ -9,6 +9,7 @@ import { sortForBoardingPassViewer } from "@/lib/boarding-passes";
 import type { BookingType, BookingStatus, PaymentStatus } from "@/lib/supabase/types";
 import { Banner } from "@/components/Banner";
 import { formatCurrencyDE } from "@/lib/demo-data";
+import { getCachedSignedUrl } from "@/lib/signed-storage-url";
 
 type BookingDetail = {
   id: string;
@@ -81,8 +82,8 @@ export default async function BookingDetailPage({
     .eq("booking_id", b.id);
 
   const withSignedUrl = async (d: { id: string; label: string | null; storage_path: string; person_id: string | null }) => {
-    const { data: signed } = await supabase.storage.from("documents").createSignedUrl(d.storage_path, 3600);
-    return { id: d.id, label: d.label ?? "Dokument", storage_path: d.storage_path, person_id: d.person_id, url: signed?.signedUrl ?? null };
+    const url = await getCachedSignedUrl("documents", d.storage_path);
+    return { id: d.id, label: d.label ?? "Dokument", storage_path: d.storage_path, person_id: d.person_id, url };
   };
 
   const documents = await Promise.all((docsRaw ?? []).filter((d) => d.doc_type === "booking_document").map(withSignedUrl));

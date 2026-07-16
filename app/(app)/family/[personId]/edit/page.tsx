@@ -6,6 +6,7 @@ import { updatePersonProfile } from "@/lib/actions/persons";
 import { TRAVEL_NEED_OPTIONS } from "@/lib/family-dna";
 import { PhotoCropInput } from "@/components/PhotoCropInput";
 import { Banner } from "@/components/Banner";
+import { getPhotoDisplayUrl } from "@/lib/photo-thumbnails";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -36,11 +37,9 @@ export default async function EditPersonPage({
 
   if (!person) notFound();
 
-  let photoUrl: string | null = null;
-  if (person.photo_storage_path) {
-    const { data: signed } = await supabase.storage.from("documents").createSignedUrl(person.photo_storage_path, 3600);
-    photoUrl = signed?.signedUrl ?? null;
-  }
+  const photoUrl = person.photo_storage_path
+    ? (await getPhotoDisplayUrl("documents", person.photo_storage_path, "thumb800"))?.url ?? null
+    : null;
 
   const cancelHref = return_to || `/family/${person.id}`;
 

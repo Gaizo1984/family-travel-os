@@ -7,6 +7,7 @@ import { updateMemoryPhoto, replaceMemoryPhoto, deleteMemoryPhoto, createMemoryU
 import { DirectPhotoUploadForm } from "@/components/DirectPhotoUploadForm";
 import { Banner } from "@/components/Banner";
 import { SignedPhoto } from "@/components/SignedPhoto";
+import { getPhotoDisplayUrl } from "@/lib/photo-thumbnails";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -41,7 +42,7 @@ export default async function GalleryPhotoEditPage({
   if (!photo || photo.trip_id !== trip.id) notFound();
 
   const stages = stagesRaw ?? [];
-  const { data: signed } = await supabase.storage.from("documents").createSignedUrl(photo.storage_path, 3600);
+  const resolvedPhoto = await getPhotoDisplayUrl("documents", photo.storage_path, "thumb800");
   const returnTo = `/trips/${trip.slug}/gallery`;
 
   return (
@@ -63,9 +64,9 @@ export default async function GalleryPhotoEditPage({
 
         {error && <Banner variant="error">{error}</Banner>}
 
-        {signed?.signedUrl && (
+        {resolvedPhoto && (
           <div className="relative rounded-xl overflow-hidden mb-6" style={{ aspectRatio: "4/3" }}>
-            <SignedPhoto storagePath={photo.storage_path} initialUrl={signed.signedUrl} alt={photo.caption ?? ""} className="absolute inset-0 w-full h-full object-cover" />
+            <SignedPhoto storagePath={resolvedPhoto.resolvedPath} initialUrl={resolvedPhoto.url} alt={photo.caption ?? ""} className="absolute inset-0 w-full h-full object-cover" />
           </div>
         )}
 

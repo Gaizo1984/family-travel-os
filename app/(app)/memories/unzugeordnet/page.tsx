@@ -7,6 +7,7 @@ import { deriveTripDateRange, type TripDateRange } from "@/lib/trip-dates";
 import { formatDateDE } from "@/lib/demo-data";
 import { Banner } from "@/components/Banner";
 import { SignedPhoto } from "@/components/SignedPhoto";
+import { getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
 
 type PhotoRow = { id: string; storage_path: string; caption: string | null; taken_at: string | null; created_at: string };
 type TripCandidate = { id: string; title: string; range: TripDateRange };
@@ -69,12 +70,12 @@ export default async function UnassignedMemoriesPage({
     id: t.id, title: t.title, range: deriveTripDateRange(t, t.bookings, t.stages),
   }));
 
-  const photosWithUrls = await Promise.all(
-    photos.map(async (p) => {
-      const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.storage_path, 3600);
-      return { photo: p, url: signed?.signedUrl ?? null, suggestion: suggestTrip(p.taken_at, trips) };
-    }),
-  );
+  // §"Egress-Analyse 2026-07-16": 72×72-Kachel -- Thumbnail statt Original.
+  const displayByPath = await getPhotoDisplayUrls("documents", photos.map((p) => p.storage_path), "thumb400");
+  const photosWithUrls = photos.map((p) => {
+    const resolved = displayByPath.get(p.storage_path);
+    return { photo: p, url: resolved?.url ?? null, resolvedPath: resolved?.resolvedPath ?? p.storage_path, suggestion: suggestTrip(p.taken_at, trips) };
+  });
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -108,10 +109,10 @@ export default async function UnassignedMemoriesPage({
           </p>
         ) : (
           <div className="space-y-4">
-            {photosWithUrls.map(({ photo, url, suggestion }) => url && (
+            {photosWithUrls.map(({ photo, url, resolvedPath, suggestion }) => url && (
               <div key={photo.id} className="flex items-center gap-4 p-4 rounded-xl flex-wrap" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
                 <div className="relative shrink-0 rounded-lg overflow-hidden" style={{ width: 72, height: 72 }}>
-                  <SignedPhoto storagePath={photo.storage_path} initialUrl={url} alt={photo.caption ?? ""} loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
+                  <SignedPhoto storagePath={resolvedPath} initialUrl={url} alt={photo.caption ?? ""} loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
                 </div>
                 <div className="flex-1" style={{ minWidth: "160px" }}>
                   <div style={{ color: "var(--foreground)", fontSize: "0.78rem" }}>

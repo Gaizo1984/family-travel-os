@@ -3,6 +3,7 @@ import { ArrowRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { COMPASS_CATEGORY_ORDER, COMPASS_CATEGORY_LABELS } from "@/lib/family-dna";
+import { getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
 
 type PersonRow = {
   id: string; name: string; initials: string; is_minor: boolean
@@ -58,15 +59,14 @@ export default async function FamilyPage() {
 
   const persons = (personsRaw ?? []) as PersonRow[];
 
+  // §"Egress-Analyse 2026-07-16": 175px-Profilkarte -- Thumbnail statt Original, gecachte Signed URL.
+  const personsWithPhoto = persons.filter((p): p is PersonRow & { photo_storage_path: string } => !!p.photo_storage_path);
+  const personDisplayByPath = await getPhotoDisplayUrls("documents", personsWithPhoto.map((p) => p.photo_storage_path), "thumb400");
   const photoUrlByPersonId = new Map<string, string>();
-  await Promise.all(
-    persons
-      .filter((p): p is PersonRow & { photo_storage_path: string } => !!p.photo_storage_path)
-      .map(async (p) => {
-        const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.photo_storage_path, 3600);
-        if (signed?.signedUrl) photoUrlByPersonId.set(p.id, signed.signedUrl);
-      }),
-  );
+  for (const p of personsWithPhoto) {
+    const resolved = personDisplayByPath.get(p.photo_storage_path);
+    if (resolved) photoUrlByPersonId.set(p.id, resolved.url);
+  }
 
   const prefByKey = new Map((preferences ?? []).map((p) => [p.category_key, p]));
 
