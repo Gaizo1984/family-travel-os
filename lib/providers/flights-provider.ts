@@ -196,12 +196,19 @@ async function duffelSearchFlights(params: {
     if (params.returnDate) slices.push({ origin: params.destinationCode, destination: originCode, departure_date: params.returnDate })
 
     try {
+      // §"Hin- und Rückflug dauert deutlich länger als nur Hinflug": ein
+      // Rundflug-Offer-Request muss Kombinationen über zwei Slices bilden --
+      // 25s reichten dafür in der Praxis nicht (Timeout wurde zur
+      // eigentlichen Fehlerursache). Die aufrufenden Seiten haben genug
+      // `maxDuration`-Spielraum (siehe discover/flights/page.tsx), um diesen
+      // längeren Wert auszuschöpfen.
+      const timeoutMs = params.returnDate ? 60_000 : 25_000
       const res = await fetchWithTimeout(`${DUFFEL_BASE_URL}/air/offer_requests?return_offers=true`, {
         method: 'POST',
         headers: duffelHeaders(apiKey, true),
         body: JSON.stringify({ data: { slices, passengers } }),
         cache: 'no-store',
-      }, 25_000)
+      }, timeoutMs)
       if (!res.ok) {
         const err = new ProviderRequestError('flights', 'flight_search', res.status, await extractDuffelErrorCode(res))
         logProviderError(err)

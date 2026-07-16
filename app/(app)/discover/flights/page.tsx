@@ -16,10 +16,11 @@ import type { FlightSearchOption } from "@/lib/flight-types";
 import type { FlightDateContext } from "@/components/FlightCard";
 
 // §"Duffel-Suchen können mehrere Sekunden bis über eine Minute dauern"
-// (insbesondere die flexible Suche mit mehreren Kombinationen): höher als
-// die Plattform-Standardlaufzeit, damit eine langsame, aber erfolgreiche
-// Suche nicht durch ein Funktions-Timeout abgewürgt wird.
-export const maxDuration = 90;
+// (insbesondere die flexible Suche: mehrere Datumskombinationen à bis zu 60s
+// Rundflug-Timeout, in Vierer-Blöcken): deutlich höher als die Plattform-
+// Standardlaufzeit, damit eine langsame, aber erfolgreiche Suche nicht durch
+// ein Funktions-Timeout abgewürgt wird.
+export const maxDuration = 280;
 
 function nightsBetween(start: string, end: string): number {
   return Math.round((new Date(end).getTime() - new Date(start).getTime()) / 86400000);

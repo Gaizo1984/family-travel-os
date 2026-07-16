@@ -223,7 +223,14 @@ export type LodgingResult = PlaceResult & { priceLevel: string | null; websiteUr
  * er überhaupt als Kandidat zählt -- gleiches Prinzip wie `resolveReferencePoint`.
  */
 const LODGING_FIELD_MASK = `${PLACES_FIELD_MASK},places.priceLevel,places.websiteUri`
-const LODGING_RADIUS_METERS = 50000
+// §Bugfix "Hotelsuche für Cancún liefert Hotels aus Playa del Carmen": der
+// bisherige Radius stand auf dem von Google erlaubten Maximum (50 km) -- auf
+// dieser Distanz liegen an dicht besiedelten Küstenabschnitten (Riviera
+// Maya, aber auch andere Regionen) mehrere eigenständige Nachbarorte, die
+// nicht als Treffer für die gesuchte Stadt gelten sollen. 20 km deckt eine
+// Stadt inkl. Hotelzone komfortabel ab, ohne den nächsten Ort mit
+// hineinzuziehen.
+const LODGING_RADIUS_METERS = 20000
 const LODGING_MAX_RESULT_COUNT = MAX_GOOGLE_RESULT_COUNT
 
 export async function searchLodging(params: { locationName: string; lat?: number; lng?: number }): Promise<LodgingResult[] | null> {

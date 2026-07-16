@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getFamily } from '@/lib/family'
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt, ageAtDate } from '@/lib/family-dna'
 import { resolveAirportCode, searchFlights, isFlightProviderSandbox } from '@/lib/providers/flights-provider'
-import { ProviderConfigError } from '@/lib/providers/provider-errors'
+import { ProviderConfigError, ProviderRequestError, describeProviderError } from '@/lib/providers/provider-errors'
 import { FlightScoringService } from '@/lib/flight-scoring-service'
 import { generateFlightReasoning } from '@/lib/flight-advisor-ai'
 import { readDateGroupFromFormData } from '@/lib/documents'
@@ -30,6 +30,17 @@ export type FlightSearchOutcome =
   | { status: 'limit_reached' }
   | { status: 'already_in_progress' }
   | { status: 'no_results' }
+
+/**
+ * §"Konkrete Fehlerursache statt allgemeiner Meldung" (Nutzervorgabe): zeigt
+ * bei einem Provider-Fehler direkt HTTP-Status/Fehlercode im Banner an
+ * (dieselbe Information wie die Developer-Testkarten), statt hinter einer
+ * generischen "gerade fehlgeschlagen"-Meldung zu verschwinden.
+ */
+function describeFlightSearchFailure(e: unknown): string {
+  if (e instanceof ProviderConfigError || e instanceof ProviderRequestError) return describeProviderError(e)
+  return 'Die Flugsuche ist gerade fehlgeschlagen -- bitte in Kürze erneut versuchen.'
+}
 
 function buildSearchKey(params: {
   originCodes: string[]; destinationCode: string; departureDate: string; returnDate: string | null
@@ -279,10 +290,7 @@ export async function searchFlightsStandalone(formData: FormData) {
     originResolved = await resolveAirportCode(departureCity)
     destResolved = await resolveAirportCode(destination)
   } catch (e) {
-    const message = e instanceof ProviderConfigError
-      ? 'Die Flugsuche ist aktuell nicht konfiguriert -- bitte Support informieren.'
-      : 'Die Flugsuche ist gerade fehlgeschlagen -- bitte in Kürze erneut versuchen.'
-    redirectBack(message)
+    redirectBack(describeFlightSearchFailure(e))
   }
   if (!originResolved) redirectBack(`Kein Flughafen für "${departureCity}" gefunden -- bitte präzisieren.`)
   if (!destResolved) redirectBack(`Kein Zielflughafen für "${destination}" gefunden -- bitte Ziel präzisieren.`)
@@ -333,10 +341,7 @@ export async function searchFlightsStandalone(formData: FormData) {
       forceRefresh: formData.get('force_refresh') === 'on',
     })
   } catch (e) {
-    const message = e instanceof ProviderConfigError
-      ? 'Die Flugsuche ist aktuell nicht konfiguriert -- bitte Support informieren.'
-      : 'Die Flugsuche ist gerade fehlgeschlagen -- bitte in Kürze erneut versuchen.'
-    redirectBack(message, { departureDate, returnDate })
+    redirectBack(describeFlightSearchFailure(e), { departureDate, returnDate })
   }
 
   if (outcome.status === 'limit_reached')
@@ -420,6 +425,7 @@ async function searchFlightsFlexible(
   const FLEXIBLE_SEARCH_CONCURRENCY = 4
   const newSearchKeys: string[] = []
   let limitReached = false
+  let lastError: string | null = null
   for (let i = 0; i < combinations.length && !limitReached; i += FLEXIBLE_SEARCH_CONCURRENCY) {
     const chunk = combinations.slice(i, i + FLEXIBLE_SEARCH_CONCURRENCY)
     const chunkOutcomes = await Promise.all(chunk.map(async (combo) => {
@@ -433,8 +439,9 @@ async function searchFlightsFlexible(
           departureDate: combo.departureDate, returnDate: combo.returnDate,
           passengerAges, maxStops: null, familyDnaText: dnaText, stopoverPreference: null,
         })
-      } catch {
-        return null // einzelne fehlgeschlagene Kombination überspringen, Rest der flexiblen Suche fortsetzen
+      } catch (e) {
+        lastError = describeFlightSearchFailure(e) // einzelne fehlgeschlagene Kombination überspringen, Rest der flexiblen Suche fortsetzen -- Ursache aber für die "keine Flüge gefunden"-Meldung merken
+        return null
       }
     }))
 
@@ -448,7 +455,10 @@ async function searchFlightsFlexible(
 
   const allSearchKeys = Array.from(new Set([...existingSearchKeys, ...newSearchKeys]))
   if (allSearchKeys.length === 0)
-    redirectBack('Keine Flüge für die geprüften Datumsvarianten gefunden.', flexibleExtra)
+    redirectBack(
+      lastError ? `Keine Flüge für die geprüften Datumsvarianten gefunden (${lastError}).` : 'Keine Flüge für die geprüften Datumsvarianten gefunden.',
+      flexibleExtra,
+    )
 
   redirect(buildFlightsPageUrl({
     destination, departureCity, travelerIds, ideaId, mode: 'flexible',
