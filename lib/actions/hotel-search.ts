@@ -8,7 +8,7 @@ import { geocodeLocation, searchLodging, type LodgingResult } from '@/lib/provid
 import { computeRouteMatrix } from '@/lib/providers/routes-provider'
 import { ProviderConfigError } from '@/lib/providers/provider-errors'
 import { selectHotelShortlist, type HotelCandidateFact } from '@/lib/trip-idea-advisor-ai'
-import { classifyAndQualify } from '@/lib/hotel-qualification'
+import { classifyAndQualify, selectBalancedQualified } from '@/lib/hotel-qualification'
 import { readDateGroupFromFormData } from '@/lib/documents'
 import { isoToday, isBeforeIso } from '@/lib/date-utils'
 import type { HotelShortlistItem } from '@/lib/trip-idea-hotel-types'
@@ -92,12 +92,16 @@ export async function getOrSearchHotelOptions(params: {
   })
 
   const qualificationByPlaceId = new Map(dedupedRaw.map((c) => [c.id, classifyAndQualify(c)]))
-  const qualified = dedupedRaw.filter((c) => qualificationByPlaceId.get(c.id)!.qualifies)
+  const anyQualified = dedupedRaw.some((c) => qualificationByPlaceId.get(c.id)!.qualifies)
 
-  const belowStandardMode = qualified.length === 0
+  const belowStandardMode = !anyQualified
+  // §"Ausgewogen zusammengesetzt, nicht nur die höchste Stufe": siehe
+  // selectBalancedQualified -- 2 gehobene 5-Sterne + 2 Premium Luxury + 1
+  // Ultra Luxury + optional 1 iconic Pick, ausschließlich aus echten,
+  // bereits qualifizierten Places-Treffern.
   const deduped = belowStandardMode
     ? [...dedupedRaw].sort((a, b) => (b.rating ?? -1) - (a.rating ?? -1)).slice(0, MAX_FALLBACK_CANDIDATES)
-    : qualified
+    : selectBalancedQualified(dedupedRaw, qualificationByPlaceId)
 
   let referencePoint = destGeo
   try {
@@ -169,6 +173,7 @@ export async function getOrSearchHotelOptions(params: {
         caveats: pick.caveats,
         tier: belowStandardMode ? null : qualification.tier,
         tierBasis: qualification.tierBasis,
+        isIconic: qualification.isIconic,
         unverifiedFields,
         livePricing: null,
       }

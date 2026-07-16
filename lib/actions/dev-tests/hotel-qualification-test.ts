@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { geocodeLocation, searchLodging } from '@/lib/providers/places-provider'
-import { classifyAndQualify } from '@/lib/hotel-qualification'
+import { classifyAndQualify, selectBalancedQualified } from '@/lib/hotel-qualification'
 import { ProviderConfigError, ProviderRequestError, describeProviderError } from '@/lib/providers/provider-errors'
 import { recordTestRun } from '@/lib/dev-test-runs'
 
@@ -11,9 +11,10 @@ export type HotelQualificationTestResult = {
   candidateCount: number
   qualifiedCount: number
   belowStandardMode: boolean
+  balancedPickNames: string[]
   candidates: Array<{
     name: string; rating: number | null; userRatingCount: number | null; priceLevel: string | null
-    qualifies: boolean; tier: string; tierBasis: 'brand' | 'heuristic'
+    qualifies: boolean; tier: string; tierBasis: 'brand' | 'heuristic'; isIconic: boolean
   }>
 }
 
@@ -64,18 +65,21 @@ export async function runHotelQualificationTest(formData: FormData) {
 
   const classified = deduped.map((c) => ({ candidate: c, q: classifyAndQualify(c) }))
   const qualifiedCount = classified.filter((c) => c.q.qualifies).length
+  const qualificationByPlaceId = new Map(classified.map(({ candidate, q }) => [candidate.id, q]))
+  const balancedPick = selectBalancedQualified(deduped, qualificationByPlaceId)
 
   const result: HotelQualificationTestResult = {
     destination,
     candidateCount: deduped.length,
     qualifiedCount,
     belowStandardMode: qualifiedCount === 0,
+    balancedPickNames: balancedPick.map((c) => c.name),
     candidates: classified
       .sort((a, b) => (b.candidate.rating ?? -1) - (a.candidate.rating ?? -1))
       .slice(0, 20)
       .map(({ candidate, q }) => ({
         name: candidate.name, rating: candidate.rating, userRatingCount: candidate.userRatingCount,
-        priceLevel: candidate.priceLevel, qualifies: q.qualifies, tier: q.tier, tierBasis: q.tierBasis,
+        priceLevel: candidate.priceLevel, qualifies: q.qualifies, tier: q.tier, tierBasis: q.tierBasis, isIconic: q.isIconic,
       })),
   }
 

@@ -4,7 +4,7 @@ import { ChevronLeft, Trophy } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { generateIdeaComparison } from "@/lib/actions/trip-idea-comparisons";
 import { chooseComparisonWinner } from "@/lib/actions/trip-ideas";
-import { LUXURY_TIER_LABELS, type LuxuryHotelTier } from "@/lib/data/luxury-hotel-brands";
+import { LUXURY_TIER_LABELS, TIER_RANK, type LuxuryHotelTier } from "@/lib/data/luxury-hotel-brands";
 import { TRIP_VARIANT_LABELS, type TripVariantType } from "@/lib/trip-idea-advisor-ai";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
 import { Banner } from "@/components/Banner";
@@ -27,7 +27,7 @@ type IdeaRow = {
   variants: Array<{ variantType: TripVariantType; title: string }> | null
 };
 
-const HOTEL_TIER_RANK: Record<LuxuryHotelTier, number> = { standard: 1, premium: 2, ultra_luxury: 3 };
+const HOTEL_TIER_RANK: Record<LuxuryHotelTier, number> = TIER_RANK;
 const FLIGHT_BURDEN_RANK: Record<string, number> = { gering: 1, mittel: 2, hoch: 3 };
 const THREE_LEVEL_RANK: Record<string, number> = { hoch: 3, mittel: 2, niedrig: 1 };
 const WEATHER_RANK: Record<string, number> = { ideal: 1, akzeptabel: 2, "ungünstig": 3 };

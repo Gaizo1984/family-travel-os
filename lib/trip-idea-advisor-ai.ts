@@ -353,8 +353,8 @@ export async function generateTripVariants(context: {
     ? `Echte Hotel-Kandidaten dieser Idee (bereits auf gehobenes 5-Sterne-Niveau oder höher geprüft -- wähle recommended_hotel_name NUR aus dieser Liste, exakt wie geschrieben, erfinde nichts):
 ${hotelText}
 
-Für "premium": wähle NICHT automatisch das Ultra-Luxus-Hotel aus der Liste, falls eines vorhanden ist -- nur wenn es wirklich die beste Passung für diese Variante ist, sonst ein Premium- oder Standard-Tier-Hotel.
-Für "value": KEINE Hotelqualität unterhalb des Mindeststandards -- wähle ein Standard-Tier-Hotel aus der Liste (weiterhin Westin-/Le-Méridien-Niveau oder besser), niemals ein günstigeres Hotel außerhalb dieser Liste.`
+Für "premium": wähle NICHT automatisch das Ultra-Luxury-Hotel aus der Liste, falls eines vorhanden ist -- nur wenn es wirklich die beste Passung für diese Variante ist, sonst ein Premium-Luxury- oder Upper-Upscale-Hotel.
+Für "value": KEINE Hotelqualität unterhalb des Mindeststandards -- wähle ein Upper-Upscale-Hotel aus der Liste (weiterhin Westin-/Le-Méridien-Niveau oder besser), niemals ein günstigeres Hotel außerhalb dieser Liste.`
     : 'Für diese Reiseidee liegt noch keine ausreichende Hotel-Shortlist vor -- setze recommended_hotel_name bei ALLEN Varianten auf null und differenziere ausschließlich über Dauer, Route, Etappenzahl, Stopover, Themenfokus, Transferbelastung und Budgetklasse.'
 
   // §"Reisebriefing": aus dem Wizard bekannte Präferenzen sind eine echte

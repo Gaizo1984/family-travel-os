@@ -7,7 +7,7 @@ import { computeRouteMatrix } from '@/lib/providers/routes-provider'
 import { ProviderConfigError } from '@/lib/providers/provider-errors'
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt } from '@/lib/family-dna'
 import { selectHotelShortlist, generateBudgetBreakdown, generateTripVariants as generateTripVariantsAi, type HotelCandidateFact } from '@/lib/trip-idea-advisor-ai'
-import { classifyAndQualify } from '@/lib/hotel-qualification'
+import { classifyAndQualify, selectBalancedQualified } from '@/lib/hotel-qualification'
 import type { HotelShortlist } from '@/lib/trip-idea-hotel-types'
 
 type IdeaRow = {
@@ -113,17 +113,20 @@ export async function generateHotelShortlist(formData: FormData) {
   // raus, bevor Route Matrix/KI überhaupt dafür aufgerufen werden (spart auch
   // Kosten für Hotels, die ohnehin nicht in Frage kommen).
   const qualificationByPlaceId = new Map(dedupedRaw.map((c) => [c.id, classifyAndQualify(c)]))
-  const qualified = dedupedRaw.filter((c) => qualificationByPlaceId.get(c.id)!.qualifies)
+  const anyQualified = dedupedRaw.some((c) => qualificationByPlaceId.get(c.id)!.qualifies)
 
   // §"Fallback für Regionen ohne qualifizierte Hotels": statt gar nichts
   // anzuzeigen, fällt die Suche auf die real gefundenen Kandidaten mit der
   // besten Bewertung zurück -- klar als unterhalb des Mindeststandards
   // gekennzeichnet (siehe belowStandardMode/tier:null unten), nie stillschweigend aufgewertet.
-  const belowStandardMode = qualified.length === 0
+  const belowStandardMode = !anyQualified
   const MAX_FALLBACK_CANDIDATES = 10
+  // §"Ausgewogen zusammengesetzt, nicht nur die höchste Stufe": 2 gehobene
+  // 5-Sterne + 2 Premium Luxury + 1 Ultra Luxury + optional 1 iconic Pick,
+  // ausschließlich aus echten, bereits qualifizierten Places-Treffern.
   const deduped = belowStandardMode
     ? [...dedupedRaw].sort((a, b) => (b.rating ?? -1) - (a.rating ?? -1)).slice(0, MAX_FALLBACK_CANDIDATES)
-    : qualified
+    : selectBalancedQualified(dedupedRaw, qualificationByPlaceId)
 
   // §"Referenzpunkt für Transferzeit": erst der Flughafen des Ziels
   // versuchen, sonst der Zielort selbst als Näherung.
@@ -208,6 +211,7 @@ export async function generateHotelShortlist(formData: FormData) {
         // Markenname, nur Fakten-Kombination).
         tier: belowStandardMode ? null : qualification.tier,
         tierBasis: qualification.tierBasis,
+        isIconic: qualification.isIconic,
         unverifiedFields,
         // §Vorbereitung für einen späteren HotelAvailabilityProvider
         // (Booking.com/Expedia): reserviertes Feld, damit ein Live-Preis-/

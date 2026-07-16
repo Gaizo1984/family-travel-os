@@ -25,14 +25,19 @@ export function HotelQualificationTestCard({ lastRun }: { lastRun: DevTestRun | 
             <strong>{result.candidateCount}</strong> Kandidaten, <strong>{result.qualifiedCount}</strong> qualifiziert
             {result.belowStandardMode && <span style={{ color: '#fbbf24' }}> — Fallback-Modus (unterhalb Mindeststandard)</span>}
           </div>
+          {result.balancedPickNames.length > 0 && (
+            <div style={{ marginBottom: '0.75rem', color: '#4ade80' }}>
+              Ausgewogene Shortlist-Auswahl (2 Upper Upscale + 2 Premium Luxury + 1 Ultra Luxury + optional Iconic): {result.balancedPickNames.join(', ')}
+            </div>
+          )}
           <ul className="flex flex-col gap-1.5">
             {result.candidates.map((c, i) => (
               <li key={i} className="flex items-center gap-2 flex-wrap" style={{ borderTop: i > 0 ? '1px solid #1f2937' : undefined, paddingTop: i > 0 ? '0.35rem' : undefined }}>
-                <span style={{ flex: 1, color: c.qualifies ? '#4ade80' : '#9ca3af' }}>{c.name}</span>
+                <span style={{ flex: 1, color: c.qualifies ? '#4ade80' : '#9ca3af' }}>{c.name}{c.isIconic ? ' ✦' : ''}</span>
                 <span style={{ color: '#6b7280' }}>{c.rating != null ? `★ ${c.rating} (${c.userRatingCount ?? 0})` : 'kein Rating'}</span>
                 <span style={{ color: '#6b7280' }}>{c.priceLevel ?? 'kein priceLevel'}</span>
                 <span style={{ color: c.qualifies ? '#4ade80' : '#f87171' }}>
-                  {c.qualifies ? `qualifiziert (${c.tierBasis === 'brand' ? 'Marke' : 'Heuristik'})` : 'nicht qualifiziert'}
+                  {c.qualifies ? `${c.tier} (${c.tierBasis === 'brand' ? 'Marke' : 'Heuristik'})` : 'nicht qualifiziert'}
                 </span>
               </li>
             ))}

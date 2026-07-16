@@ -1,11 +1,11 @@
-import { Star, ExternalLink, Search } from "lucide-react";
+import { Star, ExternalLink, Search, Sparkles } from "lucide-react";
 import { LUXURY_TIER_LABELS, type LuxuryHotelTier } from "@/lib/data/luxury-hotel-brands";
 import { buildHolidayCheckSearchUrl } from "@/lib/hotel-qualification";
 import type { HotelShortlistItem } from "@/lib/trip-idea-hotel-types";
 
 export const TIER_COLORS: Record<LuxuryHotelTier, string> = {
-  standard: "var(--accent)",
-  premium: "#8B6F47",
+  upper_upscale: "var(--accent)",
+  premium_luxury: "#8B6F47",
   ultra_luxury: "#B5624A",
 };
 export const BELOW_STANDARD_COLOR = "#8A8578";
@@ -60,6 +60,18 @@ export function HotelCard({ hotel, destination }: { hotel: HotelShortlistItem; d
           >
             {hotel.tier ? LUXURY_TIER_LABELS[hotel.tier] : "Unterhalb des gewünschten Niveaus"}
           </span>
+          {hotel.isIconic && (
+            <span
+              className="inline-flex items-center gap-1"
+              style={{
+                color: "#C9A96E", fontSize: "0.6rem", letterSpacing: "0.06em", textTransform: "uppercase",
+                border: "1px solid rgba(201,169,110,0.4)", borderRadius: "20px", padding: "2px 9px",
+              }}
+            >
+              <Sparkles size={10} strokeWidth={1.8} />
+              Iconic
+            </span>
+          )}
           {hotel.tier && hotel.tierBasis === "heuristic" && (
             <span style={{ color: "var(--muted)", fontSize: "0.6rem", fontStyle: "italic" }}>
               (keine offizielle Sterne-Klassifizierung — Einordnung aus Bewertung/Preisniveau)

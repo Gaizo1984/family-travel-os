@@ -4,11 +4,9 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt } from '@/lib/family-dna'
 import { generateIdeaComparisonScores } from '@/lib/trip-idea-advisor-ai'
-import type { LuxuryHotelTier } from '@/lib/data/luxury-hotel-brands'
+import { TIER_RANK, type LuxuryHotelTier } from '@/lib/data/luxury-hotel-brands'
 import type { HotelShortlist } from '@/lib/trip-idea-hotel-types'
 import type { Json } from '@/lib/supabase/types'
-
-const TIER_RANK: Record<LuxuryHotelTier, number> = { standard: 1, premium: 2, ultra_luxury: 3 }
 
 /** Höchstes Tier unter den (bereits qualifizierten) Shortlist-Hotels -- `null`, wenn noch keine Shortlist oder ausschließlich Fallback-Hotels (tier=null) vorhanden sind. */
 function bestHotelTier(shortlist: HotelShortlist | null): LuxuryHotelTier | null {

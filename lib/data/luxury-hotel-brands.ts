@@ -7,51 +7,71 @@
  * knowledge.ts`/`hotel-knowledge.ts`/`flight-knowledge.ts` -- reines
  * Textmatching, kein Raten, jederzeit erweiterbar ohne Migration.
  *
- * Drei Stufen, exakt nach Nutzervorgabe:
- * - standard: gehobenes 5-Sterne-Niveau (Westin/Le Méridien-Klasse) -- der
- *   MINDESTSTANDARD für die gesamte Shortlist.
- * - premium: deutlich über Westin/Le Méridien.
- * - ultra_luxury: darf vorkommen, soll aber laut Vorgabe nicht die gesamte
- *   Auswahl dominieren (siehe Prompt in lib/trip-idea-advisor-ai.ts).
+ * Vier Stufen, exakt nach Nutzervorgabe (2026-07-16 überarbeitet):
+ * - upper_upscale: gehobenes 5-Sterne-Niveau -- der MINDESTSTANDARD für die
+ *   gesamte Shortlist.
+ * - premium_luxury: deutlich oberhalb des Mindeststandards, aber nicht
+ *   automatisch Ultra-Luxus.
+ * - ultra_luxury: sehr exklusives Luxussegment.
+ * - iconic: KEINE eigene Stufe, sondern eine Zusatzkennzeichnung für
+ *   außergewöhnliche Einzelhotels (siehe `HOTEL_OVERRIDES`/`getHotelOverride`
+ *   unten) -- ersetzt nie die Hauptstufe, ein Hotel bleibt z. B.
+ *   `ultra_luxury` UND zusätzlich `isIconic: true`.
  */
-export type LuxuryHotelTier = 'standard' | 'premium' | 'ultra_luxury'
+export type LuxuryHotelTier = 'upper_upscale' | 'premium_luxury' | 'ultra_luxury'
 
 export const LUXURY_TIER_LABELS: Record<LuxuryHotelTier, string> = {
-  standard: 'Gehobenes 5-Sterne-Hotel',
-  premium: 'Premium — deutlich über Westin-/Le-Méridien-Niveau',
-  ultra_luxury: 'Ultra-Luxus',
+  upper_upscale: 'Gehobenes 5-Sterne-Hotel',
+  premium_luxury: 'Premium Luxury — deutlich über dem Mindeststandard',
+  ultra_luxury: 'Ultra Luxury',
 }
 
+/** Rangfolge der Stufen (höher = exklusiver) -- zentral statt in jeder Vergleichs-/Sortierlogik erneut dupliziert. */
+export const TIER_RANK: Record<LuxuryHotelTier, number> = { upper_upscale: 1, premium_luxury: 2, ultra_luxury: 3 }
+
 const LUXURY_HOTEL_BRANDS: Array<{ keywords: string[]; tier: LuxuryHotelTier }> = [
-  // §Standard: gehobenes 5-Sterne-Niveau, Westin/Le Méridien-Klasse.
   {
-    tier: 'standard',
+    tier: 'upper_upscale',
     keywords: [
-      'westin', 'le méridien', 'le meridien', 'sheraton', 'renaissance hotel',
-      'hyatt regency', 'intercontinental', 'kempinski', 'hilton', 'doubletree',
-      'radisson collection', 'marriott hotel', 'marriott resort', 'autograph collection',
+      'westin', 'le méridien', 'le meridien', 'grand hyatt', 'intercontinental',
+      'conrad', 'fairmont', 'kempinski', 'anantara', 'shangri-la', 'shangri la',
+      'constance',
     ],
   },
-  // §Premium: deutlich über Westin/Le Méridien.
   {
-    tier: 'premium',
+    tier: 'premium_luxury',
     keywords: [
-      'jw marriott', 'st. regis', 'st regis', 'waldorf astoria', 'park hyatt',
-      'conrad', 'grand hyatt', 'the luxury collection', 'luxury collection',
-      'anantara', 'banyan tree', 'shangri-la', 'shangri la', 'fairmont', 'raffles',
-      'oberoi', 'taj hotel', 'taj resort',
+      'ritz-carlton', 'ritz carlton', 'waldorf astoria', 'park hyatt', 'jw marriott',
+      'rosewood', 'raffles', 'capella', 'como hotel', 'como shambhala', 'como uma',
+      'auberge resort', 'oetker collection', 'fasano',
     ],
   },
-  // §Ultra-Luxus.
   {
     tier: 'ultra_luxury',
     keywords: [
-      'four seasons', 'ritz-carlton', 'ritz carlton', 'aman', 'one&only', 'one & only',
-      'six senses', 'rosewood', 'mandarin oriental', 'belmond', 'como hotel', 'como shambhala',
-      'bulgari hotel', 'cheval blanc', 'nihi sumba', 'amanpuri', 'soneva',
+      'one&only', 'one & only', 'four seasons', 'mandarin oriental', 'aman',
+      'cheval blanc', 'six senses', 'belmond', 'nihi',
     ],
   },
 ]
+
+/**
+ * §"Hausbezogene Overrides" (Nutzervorgabe): einzelne Hotels können
+ * innerhalb derselben Marke höher/niedriger einzustufen sein als der
+ * Markendurchschnitt, oder zusätzlich als "iconic" (außergewöhnliches
+ * Einzelhotel) markiert werden -- unabhängig von der Hauptstufe. Overrides
+ * werden per Teilstring auf den echten Places-Namen geprüft und haben
+ * Vorrang vor der reinen Markenzuordnung. Absichtlich noch leer/minimal --
+ * hier können jederzeit weitere Einzelhotels ergänzt werden, ohne Migration.
+ */
+const HOTEL_OVERRIDES: Array<{ match: string; tier?: LuxuryHotelTier; iconic?: boolean }> = [
+  { match: 'belmond copacabana palace', iconic: true },
+]
+
+function findOverride(name: string): { tier?: LuxuryHotelTier; iconic?: boolean } | undefined {
+  const lower = name.toLowerCase()
+  return HOTEL_OVERRIDES.find((o) => lower.includes(o.match))
+}
 
 /** Reines Textmatching auf den echten Places-Namen -- kein Raten, keine externe Abhängigkeit. */
 export function classifyHotelBrand(name: string): LuxuryHotelTier | null {
@@ -60,4 +80,14 @@ export function classifyHotelBrand(name: string): LuxuryHotelTier | null {
     if (entry.keywords.some((kw) => lower.includes(kw))) return entry.tier
   }
   return null
+}
+
+/**
+ * Kombiniert hausbezogenen Tier-Override (falls vorhanden) mit der reinen
+ * Markenzuordnung, plus die unabhängige "iconic"-Zusatzkennzeichnung.
+ * `tier: undefined` bedeutet "kein Override, normale Markenzuordnung nutzen".
+ */
+export function getHotelOverride(name: string): { tier?: LuxuryHotelTier; iconic: boolean } {
+  const override = findOverride(name)
+  return { tier: override?.tier, iconic: override?.iconic ?? false }
 }

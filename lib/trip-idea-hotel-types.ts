@@ -8,6 +8,8 @@ export type HotelShortlistItem = {
   familyFitReasoning: string; styleImpression: string; bestFor: string; caveats: string
   /** null = Fallback-Kandidat unterhalb des Mindeststandards (siehe HotelShortlist.belowStandard). */
   tier: LuxuryHotelTier | null; tierBasis: 'brand' | 'heuristic'
+  /** Zusatzkennzeichnung für außergewöhnliche Einzelhotels -- kein Ersatz für `tier`. */
+  isIconic: boolean
   unverifiedFields: string[]
   livePricing: null
 }
