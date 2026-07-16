@@ -10,7 +10,8 @@ import { TRIP_VARIANT_LABELS, type TripVariantType, type TransferBurden } from "
 import type { HotelShortlist, HotelShortlistItem } from "@/lib/trip-idea-hotel-types";
 import { Banner } from "@/components/Banner";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
-import { HotelCard, TIER_COLORS, BELOW_STANDARD_COLOR } from "@/components/HotelCard";
+import { TIER_COLORS, BELOW_STANDARD_COLOR } from "@/components/HotelCard";
+import { HotelResultGroups } from "@/components/HotelResultGroups";
 
 type BudgetBreakdown = {
   currency: string; totalMin: number | null; totalMax: number | null
@@ -287,8 +288,8 @@ export default async function TripIdeaDetailPage({
                   </p>
                 </div>
               )}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3">
-                {hotelShortlist.items.map((h) => <HotelCard key={h.placeId} hotel={h} destination={idea.destination} />)}
+              <div className="mb-3">
+                <HotelResultGroups items={hotelShortlist.items} destination={idea.destination} />
               </div>
               <p style={{ color: "var(--muted)", fontSize: "0.65rem", fontStyle: "italic" }}>
                 Auswahl auf Basis echter Google-Places-Daten, keine Live-Verfügbarkeit oder Livepreisprüfung.

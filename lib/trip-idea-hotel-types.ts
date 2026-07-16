@@ -10,6 +10,8 @@ export type HotelShortlistItem = {
   tier: LuxuryHotelTier | null; tierBasis: 'brand' | 'heuristic'
   /** Zusatzkennzeichnung für außergewöhnliche Einzelhotels -- kein Ersatz für `tier`. */
   isIconic: boolean
+  /** Konkrete, hausbezogene Begründung für `isIconic` -- nie pauschal aus der Marke abgeleitet. */
+  iconicReason: string | null
   unverifiedFields: string[]
   livePricing: null
 }

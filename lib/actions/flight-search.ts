@@ -220,7 +220,7 @@ export async function getOrSearchFlightOptions(params: {
   // nichts findet -- kein Banner, keine Karten, nur eine leere Seite.
   if (upsertError) {
     console.error('[flight_search_cache] Speicherfehler:', upsertError.message)
-    throw new Error('Suchergebnisse konnten nicht gespeichert werden.')
+    throw new Error(`Suchergebnisse konnten nicht gespeichert werden: ${upsertError.message}`)
   }
 
   const { error: usageError } = await supabase.from('flight_search_usage').upsert(

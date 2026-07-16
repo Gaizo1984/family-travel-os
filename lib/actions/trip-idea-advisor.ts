@@ -212,6 +212,7 @@ export async function generateHotelShortlist(formData: FormData) {
         tier: belowStandardMode ? null : qualification.tier,
         tierBasis: qualification.tierBasis,
         isIconic: qualification.isIconic,
+        iconicReason: qualification.iconicReason,
         unverifiedFields,
         // §Vorbereitung für einen späteren HotelAvailabilityProvider
         // (Booking.com/Expedia): reserviertes Feld, damit ein Live-Preis-/

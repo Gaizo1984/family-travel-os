@@ -174,6 +174,7 @@ export async function getOrSearchHotelOptions(params: {
         tier: belowStandardMode ? null : qualification.tier,
         tierBasis: qualification.tierBasis,
         isIconic: qualification.isIconic,
+        iconicReason: qualification.iconicReason,
         unverifiedFields,
         livePricing: null,
       }

@@ -37,9 +37,10 @@ export type HotelPick = {
   caveats: string
 }
 
+// §"Bis zu 3 Ultra Luxury + 3 Premium Luxury + 3 Upper Upscale + 2 Iconic" (Nutzervorgabe): maximal 11 statt zuvor 6 Kandidaten möglich.
 function buildHotelShortlistSchema(availableCount: number) {
   const minItems = Math.min(3, availableCount)
-  const maxItems = Math.min(6, availableCount)
+  const maxItems = Math.min(11, availableCount)
   return {
     type: 'object',
     properties: {

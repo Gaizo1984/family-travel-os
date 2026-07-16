@@ -56,19 +56,39 @@ const LUXURY_HOTEL_BRANDS: Array<{ keywords: string[]; tier: LuxuryHotelTier }> 
 ]
 
 /**
- * §"Hausbezogene Overrides" (Nutzervorgabe): einzelne Hotels können
- * innerhalb derselben Marke höher/niedriger einzustufen sein als der
- * Markendurchschnitt, oder zusätzlich als "iconic" (außergewöhnliches
- * Einzelhotel) markiert werden -- unabhängig von der Hauptstufe. Overrides
- * werden per Teilstring auf den echten Places-Namen geprüft und haben
- * Vorrang vor der reinen Markenzuordnung. Absichtlich noch leer/minimal --
- * hier können jederzeit weitere Einzelhotels ergänzt werden, ohne Migration.
+ * §"Iconic darf nicht ausschließlich über die Marke vergeben werden --
+ * es muss für das konkrete Hotel begründet werden" (Nutzervorgabe, wörtlich):
+ * einzelne Hotels können innerhalb derselben Marke höher/niedriger einzustufen
+ * sein als der Markendurchschnitt, oder zusätzlich als "iconic"
+ * (außergewöhnliches Einzelhotel) markiert werden -- unabhängig von der
+ * Hauptstufe. `reason` ist PFLICHT bei `iconic: true` (dokumentiert die
+ * konkrete Begründung, z. B. historische Bedeutung, Landmark-Status,
+ * unverwechselbare Architektur/Lage, eigenständiges Resortkonzept, kulturelle
+ * Verankerung, außergewöhnliche Exklusivität, langfristig prägender Ruf) --
+ * nie pauschal für eine ganze Marke. Overrides werden per Teilstring auf den
+ * echten Places-Namen geprüft und haben Vorrang vor der reinen
+ * Markenzuordnung. Zentral gepflegt, hier erweiterbar ohne Migration.
  */
-const HOTEL_OVERRIDES: Array<{ match: string; tier?: LuxuryHotelTier; iconic?: boolean }> = [
-  { match: 'belmond copacabana palace', iconic: true },
+const HOTEL_OVERRIDES: Array<{ match: string; tier?: LuxuryHotelTier; iconic?: boolean; reason?: string }> = [
+  {
+    match: 'belmond copacabana palace', iconic: true,
+    reason: 'Außergewöhnliche historische Bedeutung und internationaler Landmark-Status in Rio de Janeiro.',
+  },
+  {
+    match: 'one&only le saint géran', iconic: true,
+    reason: 'Historie, hoher Wiedererkennungswert und prägende Bedeutung für Mauritius.',
+  },
+  {
+    match: 'one&only le saint geran', iconic: true,
+    reason: 'Historie, hoher Wiedererkennungswert und prägende Bedeutung für Mauritius.',
+  },
+  {
+    match: 'one&only mandarina', iconic: true,
+    reason: 'Außergewöhnliche Lage, Architektur, Privatsphäre und eigenständiges Resorterlebnis.',
+  },
 ]
 
-function findOverride(name: string): { tier?: LuxuryHotelTier; iconic?: boolean } | undefined {
+function findOverride(name: string): { tier?: LuxuryHotelTier; iconic?: boolean; reason?: string } | undefined {
   const lower = name.toLowerCase()
   return HOTEL_OVERRIDES.find((o) => lower.includes(o.match))
 }
@@ -84,10 +104,11 @@ export function classifyHotelBrand(name: string): LuxuryHotelTier | null {
 
 /**
  * Kombiniert hausbezogenen Tier-Override (falls vorhanden) mit der reinen
- * Markenzuordnung, plus die unabhängige "iconic"-Zusatzkennzeichnung.
- * `tier: undefined` bedeutet "kein Override, normale Markenzuordnung nutzen".
+ * Markenzuordnung, plus die unabhängige, IMMER hausbezogen begründete
+ * "iconic"-Zusatzkennzeichnung. `tier: undefined` bedeutet "kein Override,
+ * normale Markenzuordnung nutzen".
  */
-export function getHotelOverride(name: string): { tier?: LuxuryHotelTier; iconic: boolean } {
+export function getHotelOverride(name: string): { tier?: LuxuryHotelTier; iconic: boolean; reason: string | null } {
   const override = findOverride(name)
-  return { tier: override?.tier, iconic: override?.iconic ?? false }
+  return { tier: override?.tier, iconic: override?.iconic ?? false, reason: override?.reason ?? null }
 }

@@ -4,9 +4,13 @@ import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { searchHotelsStandalone } from "@/lib/actions/hotel-search";
 import { HotelSearchForm } from "@/components/HotelSearchForm";
-import { HotelCard } from "@/components/HotelCard";
+import { HotelResultGroups } from "@/components/HotelResultGroups";
 import { Banner } from "@/components/Banner";
 import type { HotelShortlistItem } from "@/lib/trip-idea-hotel-types";
+
+function formatSearchedAt(iso: string): string {
+  return new Date(iso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
 
 export default async function HotelsPage({
   searchParams,
@@ -33,6 +37,18 @@ export default async function HotelsPage({
       ? { items: cached.results as unknown as HotelShortlistItem[], belowStandard: cached.is_below_standard, searchedAt: cached.updated_at }
       : null;
   }
+
+  // §"Letzte 3 Suchanfragen speichern, um Vorschläge später in Ruhe
+  // anzuschauen" (Nutzervorgabe): reiner Read auf den bereits vorhandenen
+  // hotel_search_cache -- keine neue Tabelle/Migration nötig, jede
+  // abgeschlossene Suche liegt dort schon mit destination/search_key/
+  // updated_at.
+  const { data: recentSearches } = await supabase
+    .from("hotel_search_cache")
+    .select("destination, search_key, updated_at")
+    .eq("family_id", familyId)
+    .order("updated_at", { ascending: false })
+    .limit(3);
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -66,6 +82,27 @@ export default async function HotelsPage({
           />
         </div>
 
+        {!hotelResult && recentSearches && recentSearches.length > 0 && (
+          <section className="mb-8">
+            <div style={{ color: "var(--muted)", fontSize: "0.58rem", letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: "10px" }}>
+              Zuletzt gesucht
+            </div>
+            <div className="flex flex-col gap-2">
+              {recentSearches.map((s) => (
+                <Link
+                  key={s.search_key}
+                  href={`/hotels?destination=${encodeURIComponent(s.destination)}&search_key=${encodeURIComponent(s.search_key)}`}
+                  className="flex items-center justify-between gap-3 rounded-lg px-4 py-3 transition-opacity hover:opacity-80"
+                  style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}
+                >
+                  <span style={{ color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 300 }}>{s.destination}</span>
+                  <span style={{ color: "var(--muted)", fontSize: "0.65rem" }}>{formatSearchedAt(s.updated_at)}</span>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
+
         {hotelResult && (
           <>
             {hotelResult.belowStandard && (
@@ -73,11 +110,7 @@ export default async function HotelsPage({
                 Kein Hotel in dieser Region erfüllt den gewünschten gehobenen 5-Sterne-Mindeststandard (Westin/Le Méridien oder besser) — hier die besten real verfügbaren Optionen, deutlich unterhalb des gewünschten Niveaus.
               </Banner>
             )}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {hotelResult.items.map((h) => (
-                <HotelCard key={h.placeId} hotel={h} destination={sp.destination ?? ""} />
-              ))}
-            </div>
+            <HotelResultGroups items={hotelResult.items} destination={sp.destination ?? ""} />
           </>
         )}
       </div>

@@ -27,7 +27,7 @@ export function HotelQualificationTestCard({ lastRun }: { lastRun: DevTestRun | 
           </div>
           {result.balancedPickNames.length > 0 && (
             <div style={{ marginBottom: '0.75rem', color: '#4ade80' }}>
-              Ausgewogene Shortlist-Auswahl (2 Upper Upscale + 2 Premium Luxury + 1 Ultra Luxury + optional Iconic): {result.balancedPickNames.join(', ')}
+              Ausgewogene Shortlist-Auswahl (bis zu 2 Iconic + 3 Ultra Luxury + 3 Premium Luxury + 3 Gehobene 5 Sterne): {result.balancedPickNames.join(', ')}
             </div>
           )}
           <ul className="flex flex-col gap-1.5">

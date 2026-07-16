@@ -20,40 +20,47 @@ export const QUALIFYING_MIN_RATING = 4.5
 export const QUALIFYING_MIN_REVIEWS = 100
 export const QUALIFYING_PRICE_LEVELS = new Set(['PRICE_LEVEL_EXPENSIVE', 'PRICE_LEVEL_VERY_EXPENSIVE'])
 
-export type HotelQualification = { qualifies: boolean; tier: LuxuryHotelTier; tierBasis: 'brand' | 'heuristic'; isIconic: boolean }
+export type HotelQualification = {
+  qualifies: boolean; tier: LuxuryHotelTier; tierBasis: 'brand' | 'heuristic'
+  isIconic: boolean; iconicReason: string | null
+}
 
 /**
  * §"Hausbezogene Overrides ermöglichen": ein per Name gefundener Override
  * (siehe `getHotelOverride`) geht der reinen Markenzuordnung vor -- ein
  * einzelnes Hotel kann so höher/niedriger als seine Marke im Schnitt
  * eingestuft werden. `isIconic` ist davon unabhängig und ersetzt nie die
- * Hauptstufe.
+ * Hauptstufe -- wird NIE pauschal aus der Marke abgeleitet, nur aus einem
+ * konkret begründeten Override (`iconicReason`).
  */
 export function classifyAndQualify(hotel: LodgingResult): HotelQualification {
   const override = getHotelOverride(hotel.name)
   const brandTier = override.tier ?? classifyHotelBrand(hotel.name)
-  if (brandTier) return { qualifies: true, tier: brandTier, tierBasis: 'brand', isIconic: override.iconic }
+  const iconic = { isIconic: override.iconic, iconicReason: override.reason }
+  if (brandTier) return { qualifies: true, tier: brandTier, tierBasis: 'brand', ...iconic }
 
   const highRating = hotel.rating !== null && hotel.rating >= QUALIFYING_MIN_RATING && (hotel.userRatingCount ?? 0) >= QUALIFYING_MIN_REVIEWS
   const highPrice = hotel.priceLevel !== null && QUALIFYING_PRICE_LEVELS.has(hotel.priceLevel)
-  if (highRating && highPrice) return { qualifies: true, tier: 'upper_upscale', tierBasis: 'heuristic', isIconic: override.iconic }
+  if (highRating && highPrice) return { qualifies: true, tier: 'upper_upscale', tierBasis: 'heuristic', ...iconic }
 
-  return { qualifies: false, tier: 'upper_upscale', tierBasis: 'heuristic', isIconic: override.iconic }
+  return { qualifies: false, tier: 'upper_upscale', tierBasis: 'heuristic', ...iconic }
 }
 
-export type TierComposition = { upperUpscale: number; premiumLuxury: number; ultraLuxury: number; iconicBonus: number }
+export type TierComposition = { upperUpscale: number; premiumLuxury: number; ultraLuxury: number; iconic: number }
 
-/** §"2 upper_upscale / 2 premium_luxury / 1 ultra_luxury / optional 1 iconic Pick" (Nutzervorgabe, wörtlich). */
-export const DEFAULT_TIER_COMPOSITION: TierComposition = { upperUpscale: 2, premiumLuxury: 2, ultraLuxury: 1, iconicBonus: 1 }
+/** §"Bis zu 3 Ultra Luxury / 3 Premium Luxury / 3 Gehobene 5 Sterne / 2 Iconic" (Nutzervorgabe, wörtlich). */
+export const DEFAULT_TIER_COMPOSITION: TierComposition = { upperUpscale: 3, premiumLuxury: 3, ultraLuxury: 3, iconic: 2 }
 
 /**
  * §"Nicht nur nach einer einzelnen höchsten Stufe sortieren, sondern
- * ausgewogen zusammengesetzt": wählt je Stufe die bestbewerteten ECHTEN,
- * bereits qualifizierten Kandidaten (kein Auffüllen mit unqualifizierten
- * Treffern) -- fehlt eine Stufe komplett, bleibt der Slot einfach leer,
- * nie mit einem erfundenen oder unqualifizierten Hotel aufgefüllt. Der
- * optionale iconic-Slot kommt obendrauf, wenn ein noch nicht anderweitig
- * gewähltes, als `isIconic` markiertes Hotel existiert.
+ * ausgewogen zusammengesetzt, Iconic exklusiv" (Nutzervorgabe): wählt je
+ * Kategorie die bestbewerteten ECHTEN, bereits qualifizierten Kandidaten
+ * (kein Auffüllen mit unqualifizierten Treffern) -- fehlt eine Kategorie
+ * komplett, bleibt der Slot einfach leer, nie künstlich aufgefüllt. Ein
+ * als `isIconic` markiertes Hotel erscheint AUSSCHLIESSLICH im Iconic-Bereich,
+ * nie zusätzlich in seiner Hauptstufe -- jedes Hotel erscheint nur einmal.
+ * Rückgabe bereits in Anzeigereihenfolge (Iconic → Ultra Luxury → Premium
+ * Luxury → Gehobene 5 Sterne), damit die UI direkt danach gruppieren kann.
  * Zentral genutzt von der idee-gekoppelten Hotel-Shortlist UND der
  * eigenständigen Hotelsuche, keine parallele Auswahllogik.
  */
@@ -67,8 +74,9 @@ export function selectBalancedQualified(
   for (const c of candidates) {
     const q = qualificationByPlaceId.get(c.id)
     if (!q?.qualifies) continue
-    byTier[q.tier].push(c)
+    // §"Iconic ausschließlich im Iconic-Bereich, nicht zusätzlich in der Hauptstufe": exklusive Zuordnung.
     if (q.isIconic) iconicPool.push(c)
+    else byTier[q.tier].push(c)
   }
   const byRatingDesc = (a: LodgingResult, b: LodgingResult) => (b.rating ?? -1) - (a.rating ?? -1)
   byTier.upper_upscale.sort(byRatingDesc)
@@ -89,10 +97,11 @@ export function selectBalancedQualified(
     }
   }
 
-  takeFrom(byTier.upper_upscale, composition.upperUpscale)
-  takeFrom(byTier.premium_luxury, composition.premiumLuxury)
+  // §"Aufstellung beginnt beim höchsten Standard: Iconic oder Ultra Luxury".
+  takeFrom(iconicPool, composition.iconic)
   takeFrom(byTier.ultra_luxury, composition.ultraLuxury)
-  takeFrom(iconicPool, composition.iconicBonus)
+  takeFrom(byTier.premium_luxury, composition.premiumLuxury)
+  takeFrom(byTier.upper_upscale, composition.upperUpscale)
 
   return selected
 }

@@ -79,6 +79,10 @@ export function HotelCard({ hotel, destination }: { hotel: HotelShortlistItem; d
           )}
         </div>
 
+        {hotel.isIconic && hotel.iconicReason && (
+          <p className="mb-2" style={{ color: "#C9A96E", fontSize: "0.68rem", fontStyle: "italic" }}>{hotel.iconicReason}</p>
+        )}
+
         <p className="mb-3" style={{ color: "var(--muted)", fontSize: "0.68rem" }}>{hotel.address}</p>
 
         <div className="flex flex-wrap items-center gap-3 mb-3" style={{ fontSize: "0.72rem", color: "var(--muted)" }}>
