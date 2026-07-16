@@ -91,8 +91,12 @@ export function classifyAndQualify(hotel: LodgingResult): HotelQualification {
 
 export type TierComposition = { upperUpscale: number; premiumLuxury: number; ultraLuxury: number; iconic: number }
 
-/** §"Bis zu 3 Ultra Luxury / 3 Premium Luxury / 3 Gehobene 5 Sterne / 2 Iconic" (Nutzervorgabe, wörtlich). */
-export const DEFAULT_TIER_COMPOSITION: TierComposition = { upperUpscale: 3, premiumLuxury: 3, ultraLuxury: 3, iconic: 2 }
+/**
+ * §"Gehobene 5 Sterne auf bis zu 5, Premium auf 4, Ultra auf 3, Iconic auf 2"
+ * (Nutzervorgabe, 2026-07-17 nachjustiert nach Mauritius-Livetest -- die
+ * meisten echten Treffer liegen typischerweise im Einstiegssegment).
+ */
+export const DEFAULT_TIER_COMPOSITION: TierComposition = { upperUpscale: 5, premiumLuxury: 4, ultraLuxury: 3, iconic: 2 }
 
 /**
  * §"Nicht nur nach einer einzelnen höchsten Stufe sortieren, sondern

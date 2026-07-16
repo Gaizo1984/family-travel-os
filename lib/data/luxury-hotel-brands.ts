@@ -36,6 +36,11 @@ const LUXURY_HOTEL_BRANDS: Array<{ keywords: string[]; tier: LuxuryHotelTier }> 
       'westin', 'le méridien', 'le meridien', 'grand hyatt', 'intercontinental',
       'conrad', 'fairmont', 'kempinski', 'anantara', 'shangri-la', 'shangri la',
       'constance',
+      // §"Mauritius-Markenlücke" (Nutzervorgabe, 2026-07-17): 'lux*' ist ein
+      // hinreichend eindeutiges Markentoken (literales Sternchen, z. B. "LUX*
+      // Grand Gaube"/"LUX* Belle Mare") -- kein Risiko für Fehltreffer bei
+      // anderen Namen mit "luxury" o. Ä.
+      'lux*',
     ],
   },
   {
@@ -50,6 +55,10 @@ const LUXURY_HOTEL_BRANDS: Array<{ keywords: string[]; tier: LuxuryHotelTier }> 
       // scheitert.
       'andbeyond', '&beyond', 'wilderness safaris', 'sabi sabi', "governors' camp",
       'governors camp', 'sanctuary retreats',
+      // §"Global bekannte gehobene Marke, vergleichbares Niveau wie Ritz-
+      // Carlton/Waldorf Astoria" (Nutzervorgabe): 'st regis'/'st. regis'
+      // deckt beide üblichen Google-Places-Schreibweisen ab.
+      'st. regis', 'st regis',
     ],
   },
   {
@@ -110,6 +119,13 @@ const HOTEL_OVERRIDES: Array<{ match: string; tier?: LuxuryHotelTier; iconic?: b
     match: 'one & only mandarina', iconic: true,
     reason: 'Außergewöhnliche Lage, Architektur, Privatsphäre und eigenständiges Resorterlebnis.',
   },
+  // §"Heritage Resorts Mauritius, gehobenes 5-Sterne-Niveau" (Nutzervorgabe,
+  // 2026-07-17): namensgenaue Overrides statt eines generischen
+  // "heritage"-Markenkeywords -- das Wort allein wäre zu unspezifisch und
+  // würde weltweit bei unabhängigen Häusern mit "Heritage" im Namen
+  // fälschlich mitqualifizieren.
+  { match: 'heritage le telfair', tier: 'upper_upscale' },
+  { match: 'heritage awali', tier: 'upper_upscale' },
 ]
 
 function findOverride(name: string): { tier?: LuxuryHotelTier; iconic?: boolean; reason?: string } | undefined {

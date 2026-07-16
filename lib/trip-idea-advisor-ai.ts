@@ -37,10 +37,23 @@ export type HotelPick = {
   caveats: string
 }
 
-// §"Bis zu 3 Ultra Luxury + 3 Premium Luxury + 3 Upper Upscale + 2 Iconic" (Nutzervorgabe): maximal 11 statt zuvor 6 Kandidaten möglich.
+/**
+ * §Bugfix "7 qualifizierte Hotels, aber nur 4 angezeigt" (Mauritius-
+ * Livetest, 2026-07-17): `selectHotelDisplayList`/`selectBalancedQualified`
+ * haben die Auswahl (WELCHE Hotels gezeigt werden, ausgewogen nach Stufe)
+ * bereits vollständig und deterministisch getroffen, bevor die KI überhaupt
+ * aufgerufen wird. Ein `minItems < availableCount` erlaubte der KI bisher,
+ * einen Teil dieser bereits kuratierten, echten Kandidaten stillschweigend
+ * wegzulassen -- die KI soll aber nur noch JEDEN gelieferten Kandidaten
+ * einordnen/beschreiben, nicht zusätzlich selbst nachfiltern. Deshalb
+ * `minItems === maxItems === availableCount`: die KI muss zu jedem
+ * Kandidaten genau einen Eintrag liefern (Reihenfolge des Aufrufers bleibt
+ * ohnehin maßgeblich, siehe Merge-Verify in `hotel-search.ts`/
+ * `trip-idea-advisor.ts`).
+ */
 function buildHotelShortlistSchema(availableCount: number) {
-  const minItems = Math.min(3, availableCount)
-  const maxItems = Math.min(11, availableCount)
+  const minItems = availableCount
+  const maxItems = availableCount
   return {
     type: 'object',
     properties: {
@@ -72,9 +85,11 @@ function buildHotelShortlistSchema(availableCount: number) {
 
 /**
  * §"Reiseideen 2.0, Hotel-Shortlist": identisches Prinzip wie
- * `generateFiveRecommendations` (lib/concierge-ai.ts) -- die KI wählt und
- * bewertet nur, harte Fakten (Name, Bewertung, Preisklasse, Transferzeit)
- * liefert ausschließlich der Aufrufer aus bereits geladenen Places-/Routes-
+ * `generateFiveRecommendations` (lib/concierge-ai.ts) -- die KI bewertet nur
+ * (WELCHE Hotels gezeigt werden, entscheidet bereits deterministisch
+ * `selectHotelDisplayList`/`selectBalancedQualified` vor diesem Aufruf),
+ * harte Fakten (Name, Bewertung, Preisklasse, Transferzeit) liefert
+ * ausschließlich der Aufrufer aus bereits geladenen Places-/Routes-
  * Daten. Das Schema enthält bewusst keine Zahlen-/Faktenfelder, nur
  * Rückabgleich (`place_name`) plus qualitative Einschätzungen -- verhindert
  * Halluzination strukturell statt nur per Prompt-Bitte. Nur auf
@@ -108,16 +123,16 @@ export async function selectHotelShortlist(context: {
     .join('\n')
 
   const qualityInstruction = context.belowStandardMode
-    ? 'WICHTIG: Kein einziges Hotel in dieser Region erreicht den eigentlich gewünschten gehobenen 5-Sterne-Mindeststandard (Westin/Le Méridien oder besser) -- das ist eine Ausnahme, keine Regel. Wähle trotzdem die besten der unten aufgeführten, real existierenden Optionen aus und sei in caveats bei JEDEM Hotel ausdrücklich und ehrlich deutlich, dass es UNTER dem gewünschten Niveau liegt.'
+    ? 'WICHTIG: Kein einziges Hotel in dieser Region erreicht den eigentlich gewünschten gehobenen 5-Sterne-Mindeststandard (Westin/Le Méridien oder besser) -- das ist eine Ausnahme, keine Regel. Sei in caveats bei JEDEM Hotel ausdrücklich und ehrlich deutlich, dass es UNTER dem gewünschten Niveau liegt.'
     : 'Alle Kandidaten sind bereits auf gehobenes 5-Sterne-Niveau oder höher vorgefiltert.'
 
   const prompt = `Du bist Reiseberater für eine Familie, die eine Reiseidee nach ${context.destination} entwickelt.
 ${context.familyDnaText || 'Keine besonderen Präferenzen bekannt.'}
 
-Hotel-Kandidaten (ausschließlich echte, bereits über Google Places geprüfte Hotels -- wähle NUR aus dieser Liste, erfinde nichts). ${qualityInstruction}
+Hotel-Kandidaten (ausschließlich echte, bereits über Google Places geprüfte und bereits ausgewählte Hotels -- diese Auswahl steht schon fest, du triffst hier KEINE eigene Vorauswahl mehr). ${qualityInstruction}
 ${candidateText}
 
-Wähle die passendsten dieser Hotels aus, die am besten zu dieser Familie passen, und ordne sie nach Passung (bestes zuerst). Achte auf eine ausgewogene Auswahl: Ultra-Luxus-Hotels dürfen vorkommen, sollen aber nicht die gesamte Auswahl dominieren, wenn auch Standard-/Premium-Kandidaten vorhanden sind -- bevorzuge insgesamt eine Mischung, die nicht ausschließlich aus Ultra-Luxus besteht. Gib place_name exakt wie in der Liste zurück, ohne Zusätze. Behaupte keine Ausstattungsmerkmale (Kinderclub, Zimmer-/Villengröße, Pool, Strandlage, Restaurants etc.), die nicht Teil der gelieferten Fakten sind -- stütze dich ausschließlich auf Name, Einordnung, Bewertung, Rezensionsanzahl, Preisklasse, Transferzeit, Adresse und Places-Typen. Sei auch ehrlich in caveats, wenn ein Hotel nicht perfekt passt.`
+Erstelle für JEDES einzelne der oben aufgeführten Hotels (keines auslassen, keines hinzufügen) eine kurze, ehrliche Einschätzung, warum bzw. wie gut es zu dieser Familie passt. Gib place_name exakt wie in der Liste zurück, ohne Zusätze. Behaupte keine Ausstattungsmerkmale (Kinderclub, Zimmer-/Villengröße, Pool, Strandlage, Restaurants etc.), die nicht Teil der gelieferten Fakten sind -- stütze dich ausschließlich auf Name, Einordnung, Bewertung, Rezensionsanzahl, Preisklasse, Transferzeit, Adresse und Places-Typen. Sei auch ehrlich in caveats, wenn ein Hotel nicht perfekt passt.`
 
   try {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
