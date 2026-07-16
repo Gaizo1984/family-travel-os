@@ -1,5 +1,6 @@
-import { DevTestCard, inputStyle, buttonStyle } from './DevTestCard'
+import { DevTestCard, inputStyle } from './DevTestCard'
 import { runFlightSearchTest, type FlightSearchTestResult } from '@/lib/actions/dev-tests/flight-search-test'
+import { SubmitButtonWithProgress } from '@/components/SubmitButtonWithProgress'
 import type { DevTestRun } from '@/lib/dev-test-runs'
 
 export function FlightSearchTestCard({ lastRun }: { lastRun: DevTestRun | null }) {
@@ -32,7 +33,15 @@ export function FlightSearchTestCard({ lastRun }: { lastRun: DevTestRun | null }
             <input name="return_date" placeholder="YYYY-MM-DD" style={inputStyle} />
           </label>
         </div>
-        <button type="submit" style={{ ...buttonStyle, alignSelf: 'flex-start' }}>Testen</button>
+        <SubmitButtonWithProgress
+          label="Testen"
+          pendingLabel="Fragt Duffel an … (kann bis zu 25s dauern)"
+          style={{
+            alignSelf: 'flex-start', background: '#312e81', color: '#e0e7ff', border: '1px solid #4338ca',
+            borderRadius: '6px', padding: '0.5rem 1rem', fontSize: '0.75rem', fontFamily: 'inherit',
+            textTransform: 'none', letterSpacing: 'normal',
+          }}
+        />
       </form>
 
       {result && (

@@ -11,6 +11,11 @@ import { OpenAiTestCard } from './OpenAiTestCard'
 import { FlightSearchTestCard } from './FlightSearchTestCard'
 import { FlightUsageCard } from './FlightUsageCard'
 
+// §"Duffel-Testaufruf kann mehrere Sekunden dauern": höher als die
+// Plattform-Standardlaufzeit, damit der Flugsuche-Testcard-Button nicht
+// durch ein Funktions-Timeout abgewürgt wird.
+export const maxDuration = 60;
+
 /**
  * Dauerhafter, geschützter Developer-Bereich (Mehr → Developer) für
  * serverseitige Smoke-Tests neuer Integrationen (aktuell Places API New,

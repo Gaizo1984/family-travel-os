@@ -73,6 +73,23 @@ function duffelIsSandbox(): boolean {
   return !(isLiveToken && liveModeEnabled)
 }
 
+/**
+ * §"Button reagiert nicht, keine Ergebnisse": ohne eigenes Timeout hängt ein
+ * langsamer/hängender Duffel-Call unbegrenzt (bis die Plattform die Funktion
+ * irgendwann selbst abbricht) -- ohne für den Nutzer sichtbaren Fehler.
+ * Bricht stattdessen kontrolliert ab und wirft einen normalen, oben bereits
+ * behandelten Fehler (`ProviderRequestError`), der eine klare Meldung zeigt.
+ */
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(url, { ...options, signal: controller.signal })
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 async function extractDuffelErrorCode(res: Response): Promise<string | undefined> {
   try {
     const data = await res.json()
@@ -179,12 +196,12 @@ async function duffelSearchFlights(params: {
     if (params.returnDate) slices.push({ origin: params.destinationCode, destination: originCode, departure_date: params.returnDate })
 
     try {
-      const res = await fetch(`${DUFFEL_BASE_URL}/air/offer_requests?return_offers=true`, {
+      const res = await fetchWithTimeout(`${DUFFEL_BASE_URL}/air/offer_requests?return_offers=true`, {
         method: 'POST',
         headers: duffelHeaders(apiKey, true),
         body: JSON.stringify({ data: { slices, passengers } }),
         cache: 'no-store',
-      })
+      }, 25_000)
       if (!res.ok) {
         const err = new ProviderRequestError('flights', 'flight_search', res.status, await extractDuffelErrorCode(res))
         logProviderError(err)
@@ -211,10 +228,10 @@ async function duffelResolveAirportCode(query: string): Promise<{ code: string; 
   assertLiveModeAllowed(apiKey, 'airport_lookup')
   try {
     const params = new URLSearchParams({ query })
-    const res = await fetch(`${DUFFEL_BASE_URL}/places/suggestions?${params.toString()}`, {
+    const res = await fetchWithTimeout(`${DUFFEL_BASE_URL}/places/suggestions?${params.toString()}`, {
       headers: duffelHeaders(apiKey, false),
       cache: 'no-store',
-    })
+    }, 10_000)
     if (!res.ok) {
       const err = new ProviderRequestError('flights', 'airport_lookup', res.status, await extractDuffelErrorCode(res))
       logProviderError(err)
