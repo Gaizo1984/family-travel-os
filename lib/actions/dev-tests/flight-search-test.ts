@@ -10,6 +10,7 @@ export type FlightSearchTestResult = {
   originQuery: string; destinationQuery: string
   originCode: string | null; destinationCode: string | null
   departureDate: string; returnDate: string | null
+  passengerSummary: string
   offerCount: number
   cheapestPrice: number | null; cheapestCurrency: string | null
 }
@@ -27,13 +28,21 @@ function isoDaysFromNow(days: number): string {
  * den Cache oder das monatliche Limit der echten Flugsuche berührt. Zeigt
  * die rohe Duffel-Antwort (Angebotsanzahl, Sandbox/Live, aufgelöste
  * IATA-Codes), damit sich "keine Flüge gefunden" von "Provider-Fehler"
- * unterscheiden lässt.
+ * unterscheiden lässt. Passagiere/Rückflug lassen sich frei einstellen, um
+ * eine echte, fehlgeschlagene Suche (Hin- + Rückflug, mehrere Reisende
+ * inkl. Kindern) 1:1 nachzustellen und so von einem simplen Erwachsenen-
+ * Hinflug-Test zu unterscheiden.
  */
 export async function runFlightSearchTest(formData: FormData) {
   const originQuery = String(formData.get('origin') ?? '').trim()
   const destinationQuery = String(formData.get('destination') ?? '').trim()
   const departureDate = String(formData.get('departure_date') ?? '').trim() || isoDaysFromNow(30)
   const returnDate = String(formData.get('return_date') ?? '').trim() || null
+  const adults = Math.max(1, Number(formData.get('adults') ?? '1') || 1)
+  const childAges = String(formData.get('child_ages') ?? '')
+    .split(',').map((s) => s.trim()).filter(Boolean).map(Number).filter((n) => Number.isFinite(n) && n >= 0 && n < 18)
+  const passengerAges: Array<number | null> = [...Array(adults).fill(null), ...childAges]
+  const passengerSummary = `${adults} Erwachsene${childAges.length > 0 ? `, Kinder: ${childAges.join(', ')}` : ''}`
 
   if (!originQuery || !destinationQuery) redirect('/mehr/developer')
 
@@ -63,7 +72,7 @@ export async function runFlightSearchTest(formData: FormData) {
   try {
     offers = await searchFlights({
       originCodes: [originResolved.code], destinationCode: destResolved.code,
-      departureDate, returnDate, passengerAges: [null], maxStops: null,
+      departureDate, returnDate, passengerAges, maxStops: null,
     })
   } catch (e) {
     if (!(e instanceof ProviderConfigError || e instanceof ProviderRequestError)) throw e
@@ -76,13 +85,13 @@ export async function runFlightSearchTest(formData: FormData) {
   const result: FlightSearchTestResult = {
     providerName, isSandbox, originQuery, destinationQuery,
     originCode: originResolved.code, destinationCode: destResolved.code,
-    departureDate, returnDate, offerCount: offers.length,
+    departureDate, returnDate, passengerSummary, offerCount: offers.length,
     cheapestPrice: cheapest?.price ?? null, cheapestCurrency: cheapest?.currency ?? null,
   }
 
   await recordTestRun('flight_search', {
     success: true,
-    summary: `${originResolved.code} → ${destResolved.code} am ${departureDate}: ${offers.length} Angebote${cheapest ? `, ab ${cheapest.price} ${cheapest.currency}` : ''}`,
+    summary: `${originResolved.code} → ${destResolved.code} am ${departureDate} (${passengerSummary}): ${offers.length} Angebote${cheapest ? `, ab ${cheapest.price} ${cheapest.currency}` : ''}`,
     result,
   })
   redirect('/mehr/developer')

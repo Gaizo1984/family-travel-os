@@ -9,6 +9,7 @@ import { ComputeRouteMatrixTestCard } from './ComputeRouteMatrixTestCard'
 import { DaytripTestCard } from './DaytripTestCard'
 import { OpenAiTestCard } from './OpenAiTestCard'
 import { FlightSearchTestCard } from './FlightSearchTestCard'
+import { HotelQualificationTestCard } from './HotelQualificationTestCard'
 import { FlightUsageCard } from './FlightUsageCard'
 
 // §"Duffel-Testaufruf kann mehrere Sekunden dauern": höher als die
@@ -68,6 +69,7 @@ export default async function DeveloperPage() {
           <DaytripTestCard lastRun={runs.daytrip_multi_stop ?? null} />
           <OpenAiTestCard lastRun={runs.openai_recommendations ?? null} placesAvailable={runs.places?.success === true} />
           <FlightSearchTestCard lastRun={runs.flight_search ?? null} />
+          <HotelQualificationTestCard lastRun={runs.hotel_qualification ?? null} />
           <FlightUsageCard />
         </div>
       </div>

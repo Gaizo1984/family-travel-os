@@ -29,8 +29,18 @@ export function FlightSearchTestCard({ lastRun }: { lastRun: DevTestRun | null }
             <input name="departure_date" placeholder="YYYY-MM-DD" style={inputStyle} />
           </label>
           <label style={{ flex: 1 }}>
-            <div style={{ fontSize: '0.68rem', color: '#9ca3af', marginBottom: '0.25rem' }}>Rückflugdatum (optional)</div>
+            <div style={{ fontSize: '0.68rem', color: '#9ca3af', marginBottom: '0.25rem' }}>Rückflugdatum (optional -- leer = nur Hinflug)</div>
             <input name="return_date" placeholder="YYYY-MM-DD" style={inputStyle} />
+          </label>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <label style={{ flex: 1 }}>
+            <div style={{ fontSize: '0.68rem', color: '#9ca3af', marginBottom: '0.25rem' }}>Erwachsene</div>
+            <input name="adults" type="number" min={1} max={10} defaultValue="1" style={inputStyle} />
+          </label>
+          <label style={{ flex: 1 }}>
+            <div style={{ fontSize: '0.68rem', color: '#9ca3af', marginBottom: '0.25rem' }}>Kinderalter, kommagetrennt (optional, z. B. "8, 3, 0")</div>
+            <input name="child_ages" placeholder="z. B. 8, 3, 0" style={inputStyle} />
           </label>
         </div>
         <SubmitButtonWithProgress
@@ -55,6 +65,7 @@ export function FlightSearchTestCard({ lastRun }: { lastRun: DevTestRun | null }
           <div style={{ marginTop: '0.3rem' }}>
             {result.departureDate}{result.returnDate ? ` – ${result.returnDate}` : ' (nur Hinflug)'}
           </div>
+          <div style={{ marginTop: '0.3rem', color: '#9ca3af' }}>{result.passengerSummary}</div>
           <div style={{ marginTop: '0.3rem' }}>
             <strong>{result.offerCount}</strong> Angebote{result.cheapestPrice != null ? `, ab ${result.cheapestPrice} ${result.cheapestCurrency}` : ''}
           </div>
