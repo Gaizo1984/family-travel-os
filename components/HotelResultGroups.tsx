@@ -39,13 +39,15 @@ export function HotelResultGroups({ items, destination }: { items: HotelShortlis
     grouped.get(category)!.push(item);
   }
 
+  const firstNonEmptyKey = CATEGORY_ORDER.find(({ key }) => (grouped.get(key)?.length ?? 0) > 0)?.key;
+
   return (
     <div className="flex flex-col gap-4">
       {CATEGORY_ORDER.map(({ key, label }) => {
         const groupItems = grouped.get(key);
         if (!groupItems || groupItems.length === 0) return null;
         return (
-          <details key={key} open className="rounded-xl overflow-hidden" style={{ border: "1px solid var(--border)" }}>
+          <details key={key} open={key === firstNonEmptyKey} className="rounded-xl overflow-hidden" style={{ border: "1px solid var(--border)" }}>
             <summary
               className="cursor-pointer p-4"
               style={{ background: "var(--surface)", color: "var(--accent)", fontSize: "0.7rem", letterSpacing: "0.1em", textTransform: "uppercase" }}

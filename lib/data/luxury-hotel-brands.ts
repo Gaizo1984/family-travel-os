@@ -74,6 +74,11 @@ const HOTEL_OVERRIDES: Array<{ match: string; tier?: LuxuryHotelTier; iconic?: b
     match: 'belmond copacabana palace', iconic: true,
     reason: 'Außergewöhnliche historische Bedeutung und internationaler Landmark-Status in Rio de Janeiro.',
   },
+  // §Bugfix "One&Only-Overrides matchten nicht": Google schreibt die Marke in
+  // Places-Namen mal mit, mal ohne Leerzeichen um das "&" (analog zur
+  // LUXURY_HOTEL_BRANDS-Markenliste oben, die deshalb ebenfalls beide
+  // Varianten führt) -- jede Override-Begründung deckt daher beide Schreib-
+  // weisen (mit/ohne Leerzeichen, mit/ohne Akzent) ab.
   {
     match: 'one&only le saint géran', iconic: true,
     reason: 'Historie, hoher Wiedererkennungswert und prägende Bedeutung für Mauritius.',
@@ -83,7 +88,19 @@ const HOTEL_OVERRIDES: Array<{ match: string; tier?: LuxuryHotelTier; iconic?: b
     reason: 'Historie, hoher Wiedererkennungswert und prägende Bedeutung für Mauritius.',
   },
   {
+    match: 'one & only le saint géran', iconic: true,
+    reason: 'Historie, hoher Wiedererkennungswert und prägende Bedeutung für Mauritius.',
+  },
+  {
+    match: 'one & only le saint geran', iconic: true,
+    reason: 'Historie, hoher Wiedererkennungswert und prägende Bedeutung für Mauritius.',
+  },
+  {
     match: 'one&only mandarina', iconic: true,
+    reason: 'Außergewöhnliche Lage, Architektur, Privatsphäre und eigenständiges Resorterlebnis.',
+  },
+  {
+    match: 'one & only mandarina', iconic: true,
     reason: 'Außergewöhnliche Lage, Architektur, Privatsphäre und eigenständiges Resorterlebnis.',
   },
 ]
