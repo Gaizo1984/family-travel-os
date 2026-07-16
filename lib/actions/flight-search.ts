@@ -17,6 +17,9 @@ import type { Json } from '@/lib/supabase/types'
 /** Kostenkontrolle: KI-Begründung nur für eine begrenzte, bereits vorsortierte Kandidatenzahl -- nicht für die gesamte Trefferliste. */
 const MAX_AI_REASONING_CANDIDATES = 8
 
+/** §"Sandbox liefert tausende Fake-Angebote": nach LUMI-Score sortiert werden nur die besten N gespeichert/angezeigt -- niemand braucht Tausende Flugkarten. */
+const MAX_STORED_OFFERS = 40
+
 /** §"Mehrfachklicks/parallele Suchen verhindern": Claim gilt als "noch laufend", solange er jünger als das ist -- danach self-heals ein hängengebliebener Claim automatisch. */
 const CLAIM_TTL_MS = 60_000
 
@@ -155,7 +158,14 @@ export async function getOrSearchFlightOptions(params: {
 
   // §"LUMI Flight Score zentral, nie in der UI": Badges/Gepäckstatus/Sortierung stehen bereits fest, bevor die KI überhaupt aufgerufen wird -- sie ändert sie nie.
   const withBadges = FlightScoringService.computeBadges(rawOptions)
-  const sorted = FlightScoringService.sortByDefault(withBadges)
+  const sortedAll = FlightScoringService.sortByDefault(withBadges)
+
+  // §"Sandbox liefert tausende Fake-Angebote": Duffels Testmodus kann
+  // mehrere Tausend synthetische Kombinationen zurückgeben -- ungekürzt
+  // gespeichert/gerendert sprengt das den JSONB-Cache-Eintrag und die
+  // Ergebnisseite (Tausende Flugkarten). Niemand braucht mehr als die
+  // bereits nach LUMI-Score sortierten besten Treffer.
+  const sorted = sortedAll.slice(0, MAX_STORED_OFFERS)
 
   const topCandidates = sorted.slice(0, MAX_AI_REASONING_CANDIDATES)
   const reasoning = await generateFlightReasoning({
@@ -188,7 +198,14 @@ export async function getOrSearchFlightOptions(params: {
     },
     { onConflict: 'family_id,search_key' },
   )
-  if (upsertError) console.error('[flight_search_cache] Speicherfehler:', upsertError.message)
+  // §"Nie stillschweigend 'ok' zurückgeben, wenn nichts gespeichert wurde":
+  // ein bloß geloggter, aber ignorierter Speicherfehler hätte zuvor zu einem
+  // Redirect mit einem search_key geführt, unter dem die Ergebnisseite
+  // nichts findet -- kein Banner, keine Karten, nur eine leere Seite.
+  if (upsertError) {
+    console.error('[flight_search_cache] Speicherfehler:', upsertError.message)
+    throw new Error('Suchergebnisse konnten nicht gespeichert werden.')
+  }
 
   const { error: usageError } = await supabase.from('flight_search_usage').upsert(
     { family_id: params.familyId, month_key: monthKey, search_count: (usage?.search_count ?? 0) + 1, updated_at: new Date().toISOString() },
