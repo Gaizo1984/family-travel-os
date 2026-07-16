@@ -90,6 +90,7 @@ export async function extractReceiptData(formData: FormData) {
 
   const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
     contentType: file.type,
+    cacheControl: '31536000',
   })
   if (uploadError)
     fail('Upload fehlgeschlagen: ' + uploadError.message)

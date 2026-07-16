@@ -3,6 +3,7 @@ import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { buildTravelWorld } from "@/lib/travel-world";
+import { getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
 import { SignedPhoto } from "@/components/SignedPhoto";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
 
@@ -17,23 +18,38 @@ export default async function YearbookPage({
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
 
-  const [worldStats, { data: photosRaw }] = await Promise.all([
+  // §"Egress-Analyse 2026-07-16": lud bisher ALLE Fotos der Familie (inkl.
+  // storage_path) und filterte erst in JS aufs Jahr -- ein leichter
+  // Metadaten-Pass (kein storage_path) bestimmt hier zuerst nur die IDs des
+  // gewünschten Jahres, ein zweiter, gefilterter Pass lädt dafür die vollen
+  // Zeilen.
+  const [worldStats, { data: photoMetaRaw }] = await Promise.all([
     buildTravelWorld({ familyId }),
     supabase
       .from("memory_photos")
-      .select("id, storage_path, caption, taken_at, created_at")
+      .select("id, taken_at, created_at")
       .eq("family_id", familyId),
   ]);
 
-  const photosOfYear = (photosRaw ?? []).filter(
-    (p) => new Date(p.taken_at ?? p.created_at).getFullYear() === year,
-  );
-  const photosWithUrls = await Promise.all(
-    photosOfYear.map(async (p) => {
-      const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.storage_path, 3600);
-      return { ...p, url: signed?.signedUrl ?? null };
-    }),
-  );
+  const photoIdsOfYear = (photoMetaRaw ?? [])
+    .filter((p) => new Date(p.taken_at ?? p.created_at).getFullYear() === year)
+    .map((p) => p.id);
+
+  const { data: photosRaw } = photoIdsOfYear.length > 0
+    ? await supabase
+      .from("memory_photos")
+      .select("id, storage_path, caption, taken_at, created_at")
+      .in("id", photoIdsOfYear)
+    : { data: [] };
+
+  const photosOfYear = photosRaw ?? [];
+  // §"Karten-/Grid-Ansicht bekommt nur noch ein Vorschaubild statt des vollen
+  // Originals" -- Lightbox lädt weiterhin das Original separat beim Öffnen.
+  const displayByPath = await getPhotoDisplayUrls("documents", photosOfYear.map((p) => p.storage_path), "thumb400");
+  const photosWithUrls = photosOfYear.map((p) => {
+    const resolved = displayByPath.get(p.storage_path) ?? null;
+    return { ...p, url: resolved?.url ?? null, resolvedPath: resolved?.resolvedPath ?? p.storage_path };
+  });
 
   const tripsOfYear = worldStats.timeline.filter((e) => e.kind === "trip" && e.year === year);
   const pastTripsOfYear = worldStats.timeline.filter((e) => e.kind === "past_trip" && e.year === year);
@@ -78,7 +94,7 @@ export default async function YearbookPage({
             {photosWithUrls.map((p) => p.url && (
               <div key={p.id} className="relative rounded-lg overflow-hidden" style={{ aspectRatio: "1/1" }}>
                 <PhotoLightbox url={p.url} alt={p.caption ?? ""}>
-                  <SignedPhoto storagePath={p.storage_path} initialUrl={p.url} alt={p.caption ?? ""} className="absolute inset-0 w-full h-full object-cover" />
+                  <SignedPhoto storagePath={p.resolvedPath} initialUrl={p.url} alt={p.caption ?? ""} loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
                 </PhotoLightbox>
               </div>
             ))}

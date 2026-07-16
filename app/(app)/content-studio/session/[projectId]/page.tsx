@@ -15,6 +15,7 @@ import { DirectPhotoUploadForm } from "@/components/DirectPhotoUploadForm";
 import { ChipToggleGroup } from "@/components/ChipToggleGroup";
 import { SignedPhoto } from "@/components/SignedPhoto";
 import { Banner } from "@/components/Banner";
+import { getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -98,12 +99,12 @@ export default async function ContentSessionPage({
   ]);
 
   const photos = (photosRaw ?? []).filter((p) => !p.is_duplicate_of);
-  const photosWithUrls = await Promise.all(
-    photos.map(async (p) => {
-      const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.storage_path, 3600);
-      return { ...p, url: signed?.signedUrl ?? null };
-    }),
-  );
+  // §"Egress-Analyse 2026-07-16": kleine 3-4-spaltige Vorschau -- Thumbnail statt Original.
+  const displayByPath = await getPhotoDisplayUrls("documents", photos.map((p) => p.storage_path), "thumb400");
+  const photosWithUrls = photos.map((p) => {
+    const resolved = displayByPath.get(p.storage_path) ?? null;
+    return { ...p, url: resolved?.url ?? null, resolvedPath: resolved?.resolvedPath ?? p.storage_path };
+  });
 
   const tripTitle = (project.trips as unknown as { title: string } | null)?.title ?? project.title;
   const hasPhotos = photos.length > 0;
@@ -242,7 +243,7 @@ export default async function ContentSessionPage({
                   {photosWithUrls.map((p) => p.url && (
                     <div key={p.id} className="relative rounded-lg overflow-hidden" style={{ aspectRatio: "1/1" }}>
                       <SignedPhoto
-                        storagePath={p.storage_path} initialUrl={p.url} alt=""
+                        storagePath={p.resolvedPath} initialUrl={p.url} alt=""
                         className="absolute inset-0 w-full h-full object-cover" loading="lazy"
                       />
                       {p.retained_as_memory ? (

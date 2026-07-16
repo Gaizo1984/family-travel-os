@@ -8,6 +8,7 @@ import {
 } from "@/lib/actions/content-ideas";
 import { Banner } from "@/components/Banner";
 import { SignedPhoto } from "@/components/SignedPhoto";
+import { getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
 
 type Suggestion = {
   title: string; format: string; hook: string; angle: string
@@ -63,12 +64,12 @@ export default async function ContentIdeaDetailPage({
         .not("is_duplicate_of", "is", null)
     : { count: 0 };
 
-  const selectedPhotos = await Promise.all(
-    (selectedPhotosRaw ?? []).map(async (p) => {
-      const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.storage_path, 3600);
-      return { id: p.id, url: signed?.signedUrl ?? null, storagePath: p.storage_path, qualityScore: p.quality_score };
-    }),
-  );
+  // §"Egress-Analyse 2026-07-16": 96×96-Vorschau -- Thumbnail statt Original.
+  const displayByPath = await getPhotoDisplayUrls("documents", (selectedPhotosRaw ?? []).map((p) => p.storage_path), "thumb400");
+  const selectedPhotos = (selectedPhotosRaw ?? []).map((p) => {
+    const resolved = displayByPath.get(p.storage_path) ?? null;
+    return { id: p.id, url: resolved?.url ?? null, storagePath: resolved?.resolvedPath ?? p.storage_path, qualityScore: p.quality_score };
+  });
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>

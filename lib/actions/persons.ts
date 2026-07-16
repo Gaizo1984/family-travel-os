@@ -53,7 +53,7 @@ export async function updatePersonProfile(formData: FormData) {
     const { data: existing } = await supabase.from('persons').select('photo_storage_path').eq('id', personId).maybeSingle()
 
     const newPath = buildProfilePhotoPath(personId, file.name)
-    const { error: uploadError } = await supabase.storage.from('documents').upload(newPath, file, { contentType: file.type })
+    const { error: uploadError } = await supabase.storage.from('documents').upload(newPath, file, { contentType: file.type, cacheControl: '31536000' })
     if (uploadError)
       redirect(`${editPath}?error=${encodeURIComponent('Foto-Upload fehlgeschlagen: ' + uploadError.message)}`)
 

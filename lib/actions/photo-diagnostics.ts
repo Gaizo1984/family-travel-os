@@ -1,18 +1,18 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { forceRefreshSignedUrl } from '@/lib/signed-storage-url'
 
 /**
- * TEMPORÄR (Sprint 1.2 — Diagnose des gemeldeten "Broken Image"-Bugs bei
- * Travel Memory, konnte im Code/live nicht reproduziert werden). Generischer
- * Signed-URL-Refresh für jeden storage_path im 'documents'-Bucket — wird von
- * jeder Bild-Renderstelle über components/SignedPhoto.tsx genutzt, nicht nur
- * Travel Memory, damit überall dieselbe Retry-Logik greift.
+ * Generischer Signed-URL-Refresh für jeden storage_path im
+ * 'documents'-Bucket — wird von jeder Bild-Renderstelle über
+ * components/SignedPhoto.tsx genutzt, nicht nur Travel Memory, damit überall
+ * dieselbe Retry-Logik greift. `storagePath` kann ein Original- ODER ein
+ * Thumbnail-Pfad sein (siehe lib/photo-thumbnails.ts) -- erzwingt in beiden
+ * Fällen eine frische Signatur für exakt diesen Pfad und überschreibt den
+ * ggf. selbst kaputten/abgelaufenen Cache-Eintrag.
  */
 export async function refreshSignedUrl(storagePath: string): Promise<string | null> {
-  const supabase = await createClient()
-  const { data } = await supabase.storage.from('documents').createSignedUrl(storagePath, 3600)
-  return data?.signedUrl ?? null
+  return forceRefreshSignedUrl('documents', storagePath)
 }
 
 /**

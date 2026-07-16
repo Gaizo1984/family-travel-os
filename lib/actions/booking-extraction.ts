@@ -161,6 +161,7 @@ export async function extractBookingData(formData: FormData) {
   const storagePath = buildBookingStoragePath(bookingId || 'staging', file.name)
   const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
     contentType: file.type,
+    cacheControl: '31536000',
   })
   if (uploadError)
     fail('Upload fehlgeschlagen: ' + uploadError.message)

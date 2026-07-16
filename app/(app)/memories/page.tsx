@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { deleteMemoryPhoto, setCoverPhoto } from "@/lib/actions/memories";
 import { deriveTripDateRange } from "@/lib/trip-dates";
+import { getPhotoDisplayUrls, getPhotoDisplayUrl } from "@/lib/photo-thumbnails";
 import { Banner } from "@/components/Banner";
 import { SignedPhoto } from "@/components/SignedPhoto";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
@@ -56,12 +57,14 @@ function LegacyPastTripTile({ entry, url }: { entry: LegacyPastTripPhoto; url: s
  * umschließende Grid nutzt CSS-Columns (Masonry-Technik) statt eines
  * gleichmäßigen Rasters, da unterschiedlich hohe Kacheln sonst Lücken reißen.
  */
-function PhotoCard({ photo, url, personName, returnTo, isCover }: { photo: PhotoRow; url: string | null; personName: string | null; returnTo: string; isCover: boolean }) {
+function PhotoCard({
+  photo, url, resolvedPath, personName, returnTo, isCover,
+}: { photo: PhotoRow; url: string | null; resolvedPath: string | null; personName: string | null; returnTo: string; isCover: boolean }) {
   if (!url) return null;
   return (
     <div className="relative rounded-lg overflow-hidden group mb-4 break-inside-avoid">
       <PhotoLightbox url={url} alt={photo.caption ?? ""}>
-        <SignedPhoto storagePath={photo.storage_path} initialUrl={url} alt={photo.caption ?? ""} loading="lazy" className="block w-full h-auto" />
+        <SignedPhoto storagePath={resolvedPath ?? photo.storage_path} initialUrl={url} alt={photo.caption ?? ""} loading="lazy" className="block w-full h-auto" />
       </PhotoLightbox>
       <div
         className="absolute inset-0 flex flex-col justify-between p-2"
@@ -107,25 +110,30 @@ function monthYearLabel(iso: string): string {
   return `${String(d.getUTCMonth() + 1).padStart(2, "0")}/${d.getUTCFullYear()}`;
 }
 
-type CutEntry = { photo: PhotoRow; url: string | null };
+type CutEntry = { photo: PhotoRow; url: string | null; resolvedPath: string | null };
 type Cut = { key: string; year: number; sortKey: string; label: string; entries: CutEntry[] };
 
 export default async function MemoriesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; year?: string }>;
 }) {
-  const { error } = await searchParams;
+  const { error, year: yearParam } = await searchParams;
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
   const returnTo = "/memories";
 
-  const [{ data: photosRaw }, { data: personsRaw }, { data: tripsRaw }, { data: pastTripsRaw }] = await Promise.all([
+  // §"Egress-Analyse 2026-07-16": diese Seite lud bisher die KOMPLETTE
+  // Fotohistorie der Familie unpaginiert in voller Auflösung. Erster
+  // Durchgang holt nur leichte Metadaten (kein storage_path) für ALLE Fotos,
+  // um zu bestimmen, welchem Jahr jedes Foto zugeordnet ist -- signiert/lädt
+  // aber NUR das ausgewählte Jahr wirklich. Andere Jahre werden nur noch als
+  // kompakte Links gezeigt (Drilldown über die bestehende Yearbook-Seite).
+  const [{ data: photoMetaRaw }, { data: personsRaw }, { data: tripsRaw }, { data: pastTripsRaw }] = await Promise.all([
     supabase
       .from("memory_photos")
-      .select("id, trip_id, uploaded_by_person_id, storage_path, taken_at, caption, created_at, sort_order, is_selected, is_duplicate_of, quality_score")
-      .eq("family_id", familyId)
-      .order("taken_at", { ascending: false, nullsFirst: false }),
+      .select("id, trip_id, taken_at, created_at, is_selected")
+      .eq("family_id", familyId),
     supabase.from("persons").select("id, name").eq("family_id", familyId),
     supabase
       .from("trips")
@@ -143,30 +151,60 @@ export default async function MemoriesPage({
   const tripRangeById = new Map(trips.map((t) => [t.id, deriveTripDateRange(t, t.bookings, t.stages)]));
   const coverPhotoIds = new Set(trips.flatMap((t) => (t.cover_photo_id ? [t.cover_photo_id] : [])));
 
-  const allPhotos = (photosRaw ?? []) as PhotoRow[];
-  // §"Maximal 25 Erinnerungsbilder je Reise": nicht ausgewählte Fotos (Dubletten
-  // oder außerhalb der KI-Auswahl) werden hier ausgeblendet, aber nie gelöscht.
-  const photos = allPhotos.filter((p) => p.is_selected);
-  const hiddenCount = allPhotos.length - photos.length;
+  const allPhotoMeta = photoMetaRaw ?? [];
+  const selectedPhotoMeta = allPhotoMeta.filter((p) => p.is_selected);
+  const hiddenCount = allPhotoMeta.length - selectedPhotoMeta.length;
   const persons = personsRaw ?? [];
   const personNameById = new Map(persons.map((p) => [p.id, p.name]));
 
-  const photosWithUrls = await Promise.all(
-    photos.map(async (p) => {
-      const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.storage_path, 3600);
-      return { photo: p, url: signed?.signedUrl ?? null };
-    }),
-  );
+  function yearOfPhoto(p: { trip_id: string | null; taken_at: string | null; created_at: string }): number {
+    const fallbackDate = (p.taken_at ?? p.created_at).slice(0, 10);
+    if (p.trip_id) {
+      const range = tripRangeById.get(p.trip_id);
+      const sortKey = range?.startDate ?? fallbackDate;
+      return new Date(sortKey + "T00:00:00Z").getUTCFullYear();
+    }
+    return new Date(fallbackDate).getUTCFullYear();
+  }
+
+  const photoCountByYear = new Map<number, number>();
+  for (const p of selectedPhotoMeta) {
+    const y = yearOfPhoto(p);
+    photoCountByYear.set(y, (photoCountByYear.get(y) ?? 0) + 1);
+  }
+  const legacyEntries = (pastTripsRaw ?? []).filter((p): p is typeof p & { photo_storage_path: string } => Boolean(p.photo_storage_path));
+  for (const p of legacyEntries) photoCountByYear.set(p.year, (photoCountByYear.get(p.year) ?? 0) + 1);
+
+  const allYears = [...photoCountByYear.keys()].sort((a, b) => b - a);
+  const selectedYear = yearParam && photoCountByYear.has(Number(yearParam)) ? Number(yearParam) : allYears[0];
+  const otherYears = allYears.filter((y) => y !== selectedYear);
+
+  const photoIdsInSelectedYear = selectedPhotoMeta.filter((p) => yearOfPhoto(p) === selectedYear).map((p) => p.id);
+  const { data: photosRaw } = photoIdsInSelectedYear.length > 0
+    ? await supabase
+      .from("memory_photos")
+      .select("id, trip_id, uploaded_by_person_id, storage_path, taken_at, caption, created_at, sort_order, is_selected, is_duplicate_of, quality_score")
+      .in("id", photoIdsInSelectedYear)
+      .order("taken_at", { ascending: false, nullsFirst: false })
+    : { data: [] };
+
+  const photos = (photosRaw ?? []) as PhotoRow[];
+  // §"Karten-/Grid-Ansicht bekommt nur noch ein 400px-Vorschaubild statt des
+  // vollen bis zu 2000px breiten Originals" -- Original bleibt exklusiv der
+  // Lightbox (components/PhotoLightbox.tsx nutzt weiterhin `url`, das hier
+  // bewusst ein Thumbnail ist; siehe Optimierungsplan Punkt 4 -- die Lightbox
+  // selbst lädt separat das Original bei tatsächlichem Öffnen).
+  const displayByPath = await getPhotoDisplayUrls("documents", photos.map((p) => p.storage_path), "thumb400");
 
   // §"Neueste Bilder oben, mit einem Cut je Reise (z.B. 03/2025 Mauritius,
   // 07/2025 Malediven)": Fotos werden zuerst je Reise gruppiert (nicht mehr
   // nur nach Kalenderjahr) -- jede Reise wird ein eigener, mit Monat/Jahr und
-  // Reisetitel beschrifteter Abschnitt. Die Sortierung nutzt denselben
-  // abgeleiteten Reisezeitraum wie überall sonst (lib/trip-dates.ts). Fotos
-  // ohne Reise-Zuordnung bekommen einen eigenen "Nicht zugeordnet"-Cut je Jahr.
+  // Reisetitel beschrifteter Abschnitt. Fotos ohne Reise-Zuordnung bekommen
+  // einen eigenen "Nicht zugeordnet"-Cut.
   const cuts = new Map<string, Cut>();
-  for (const entry of photosWithUrls) {
-    const p = entry.photo;
+  for (const p of photos) {
+    const resolved = displayByPath.get(p.storage_path) ?? null;
+    const entry: CutEntry = { photo: p, url: resolved?.url ?? null, resolvedPath: resolved?.resolvedPath ?? null };
     const fallbackDate = (p.taken_at ?? p.created_at).slice(0, 10);
     if (p.trip_id) {
       const key = `trip-${p.trip_id}`;
@@ -175,16 +213,15 @@ export default async function MemoriesPage({
         const sortKey = range?.startDate ?? fallbackDate;
         const trip = tripById.get(p.trip_id);
         cuts.set(key, {
-          key, year: new Date(sortKey + "T00:00:00Z").getUTCFullYear(), sortKey,
+          key, year: selectedYear, sortKey,
           label: `${monthYearLabel(sortKey)} · ${trip?.title ?? "Reise"}`,
           entries: [],
         });
       }
       cuts.get(key)!.entries.push(entry);
     } else {
-      const year = new Date(fallbackDate).getUTCFullYear();
-      const key = `unassigned-${year}`;
-      if (!cuts.has(key)) cuts.set(key, { key, year, sortKey: `${year}-01-01`, label: "Nicht zugeordnet", entries: [] });
+      const key = `unassigned-${selectedYear}`;
+      if (!cuts.has(key)) cuts.set(key, { key, year: selectedYear, sortKey: `${selectedYear}-01-01`, label: "Nicht zugeordnet", entries: [] });
       cuts.get(key)!.entries.push(entry);
     }
   }
@@ -194,22 +231,15 @@ export default async function MemoriesPage({
       return (b.photo.taken_at ?? b.photo.created_at).localeCompare(a.photo.taken_at ?? a.photo.created_at);
     });
   }
+  const cutsInSelectedYear = [...cuts.values()].sort((a, b) => b.sortKey.localeCompare(a.sortKey));
 
-  const legacyByYear = new Map<number, { entry: LegacyPastTripPhoto; url: string | null }[]>();
+  const legacyInSelectedYear = legacyEntries.filter((p) => p.year === selectedYear);
   const legacyWithUrls = await Promise.all(
-    (pastTripsRaw ?? [])
-      .filter((p): p is typeof p & { photo_storage_path: string } => Boolean(p.photo_storage_path))
-      .map(async (p) => {
-        const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.photo_storage_path, 3600);
-        return { year: p.year, entry: { id: p.id, country_or_region: p.country_or_region, places: p.places }, url: signed?.signedUrl ?? null };
-      }),
+    legacyInSelectedYear.map(async (p) => {
+      const resolved = await getPhotoDisplayUrl("documents", p.photo_storage_path, "thumb400");
+      return { entry: { id: p.id, country_or_region: p.country_or_region, places: p.places }, url: resolved?.url ?? null };
+    }),
   );
-  for (const { year, entry, url } of legacyWithUrls) {
-    if (!legacyByYear.has(year)) legacyByYear.set(year, []);
-    legacyByYear.get(year)!.push({ entry, url });
-  }
-
-  const years = [...new Set([...cuts.values()].map((c) => c.year).concat([...legacyByYear.keys()]))].sort((a, b) => b - a);
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -241,44 +271,58 @@ export default async function MemoriesPage({
 
         {error && <Banner variant="error">{error}</Banner>}
 
-        {/* ── Neueste zuerst, je Jahr in Reise-Abschnitte ("Cuts") unterteilt ── */}
-        {years.length > 0 ? (
-          years.map((year) => {
-            const cutsInYear = [...cuts.values()].filter((c) => c.year === year).sort((a, b) => b.sortKey.localeCompare(a.sortKey));
-            const yearLegacy = legacyByYear.get(year) ?? [];
-            const yearPhotoCount = cutsInYear.reduce((sum, c) => sum + c.entries.length, 0);
-            return (
-              <section key={year} className="mb-12">
-                <div className="flex items-center justify-between mb-5">
-                  <Link href={`/memories/yearbook/${year}`} className="text-lg font-light" style={{ color: "var(--foreground)", textDecoration: "none" }}>
-                    {year}
-                  </Link>
-                  <span style={{ color: "var(--muted)", fontSize: "0.68rem" }}>{yearPhotoCount} Fotos</span>
-                </div>
+        {allYears.length > 0 ? (
+          <>
+            <section className="mb-12">
+              <div className="flex items-center justify-between mb-5">
+                <Link href={`/memories/yearbook/${selectedYear}`} className="text-lg font-light" style={{ color: "var(--foreground)", textDecoration: "none" }}>
+                  {selectedYear}
+                </Link>
+                <span style={{ color: "var(--muted)", fontSize: "0.68rem" }}>{photoCountByYear.get(selectedYear) ?? 0} Fotos</span>
+              </div>
 
-                {cutsInYear.map((cut) => (
-                  <div key={cut.key} className="mb-8">
-                    <div className="mb-3" style={{ color: "var(--muted)", fontSize: "0.66rem", letterSpacing: "0.06em" }}>
-                      {cut.label}
-                    </div>
-                    <div className="columns-2 sm:columns-3 gap-4">
-                      {cut.entries.map(({ photo, url }) => (
-                        <PhotoCard key={photo.id} photo={photo} url={url} personName={photo.uploaded_by_person_id ? personNameById.get(photo.uploaded_by_person_id) ?? null : null} returnTo={returnTo} isCover={coverPhotoIds.has(photo.id)} />
-                      ))}
-                    </div>
+              {cutsInSelectedYear.map((cut) => (
+                <div key={cut.key} className="mb-8">
+                  <div className="mb-3" style={{ color: "var(--muted)", fontSize: "0.66rem", letterSpacing: "0.06em" }}>
+                    {cut.label}
                   </div>
-                ))}
-
-                {yearLegacy.length > 0 && (
                   <div className="columns-2 sm:columns-3 gap-4">
-                    {yearLegacy.map(({ entry, url }) => (
-                      <LegacyPastTripTile key={entry.id} entry={entry} url={url} />
+                    {cut.entries.map(({ photo, url, resolvedPath }) => (
+                      <PhotoCard key={photo.id} photo={photo} url={url} resolvedPath={resolvedPath} personName={photo.uploaded_by_person_id ? personNameById.get(photo.uploaded_by_person_id) ?? null : null} returnTo={returnTo} isCover={coverPhotoIds.has(photo.id)} />
                     ))}
                   </div>
-                )}
+                </div>
+              ))}
+
+              {legacyWithUrls.length > 0 && (
+                <div className="columns-2 sm:columns-3 gap-4">
+                  {legacyWithUrls.map(({ entry, url }) => (
+                    <LegacyPastTripTile key={entry.id} entry={entry} url={url} />
+                  ))}
+                </div>
+              )}
+            </section>
+
+            {otherYears.length > 0 && (
+              <section className="mb-8">
+                <div style={{ color: "var(--muted)", fontSize: "0.58rem", letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: "10px" }}>
+                  Weitere Jahre
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {otherYears.map((y) => (
+                    <Link
+                      key={y}
+                      href={`/memories?year=${y}`}
+                      className="rounded-lg px-4 py-2 transition-opacity hover:opacity-80"
+                      style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none", color: "var(--foreground)", fontSize: "0.78rem" }}
+                    >
+                      {y} <span style={{ color: "var(--muted)", fontSize: "0.65rem" }}>({photoCountByYear.get(y)})</span>
+                    </Link>
+                  ))}
+                </div>
               </section>
-            );
-          })
+            )}
+          </>
         ) : (
           <p style={{ color: "var(--muted)", fontSize: "0.82rem" }}>
             Noch keine Erinnerungsfotos vorhanden — Fotos lassen sich direkt über die Galerie der jeweiligen Reise hinzufügen.

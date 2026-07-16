@@ -93,6 +93,7 @@ export async function createInsurancePolicy(formData: FormData) {
     const storagePath = buildPolicyStoragePath(policy.id, file.name)
     const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
       contentType: file.type,
+      cacheControl: '31536000',
     })
     if (!uploadError)
       await supabase.from('insurance_policies')
@@ -155,6 +156,7 @@ export async function updateInsurancePolicy(formData: FormData) {
     const storagePath = buildPolicyStoragePath(policyId, file.name)
     const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
       contentType: file.type,
+      cacheControl: '31536000',
     })
     if (uploadError)
       redirect(`${editPath}?error=${encodeURIComponent('Upload fehlgeschlagen: ' + uploadError.message)}`)

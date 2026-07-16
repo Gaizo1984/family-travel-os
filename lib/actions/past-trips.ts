@@ -65,7 +65,7 @@ export async function createPastTrip(formData: FormData) {
       redirect(`/family/history/${pastTrip.id}/edit?error=${encodeURIComponent('Die Datei ist zu groß (maximal 10 MB).')}`)
     }
     const photoPath = buildPastTripPhotoPath(pastTrip.id, file.name)
-    const { error: uploadError } = await supabase.storage.from('documents').upload(photoPath, file, { contentType: file.type })
+    const { error: uploadError } = await supabase.storage.from('documents').upload(photoPath, file, { contentType: file.type, cacheControl: '31536000' })
     if (!uploadError) {
       await supabase.from('past_trips').update({ photo_storage_path: photoPath }).eq('id', pastTrip.id)
     }
@@ -115,7 +115,7 @@ export async function updatePastTrip(formData: FormData) {
 
     const { data: existing } = await supabase.from('past_trips').select('photo_storage_path').eq('id', pastTripId).maybeSingle()
     const photoPath = buildPastTripPhotoPath(pastTripId, file.name)
-    const { error: uploadError } = await supabase.storage.from('documents').upload(photoPath, file, { contentType: file.type })
+    const { error: uploadError } = await supabase.storage.from('documents').upload(photoPath, file, { contentType: file.type, cacheControl: '31536000' })
     if (uploadError)
       redirect(`${editPath}?error=${encodeURIComponent('Foto-Upload fehlgeschlagen: ' + uploadError.message)}`)
 

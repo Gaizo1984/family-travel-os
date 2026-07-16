@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { getPhotoDisplayUrl } from "@/lib/photo-thumbnails";
 
 /**
  * Etappen-/Ziel-Bilder über das echte ISO-Länderkürzel (stages.country_code)
@@ -42,9 +43,10 @@ export async function resolveStageImages(
     if (s.cover_photo_id) {
       const storagePath = storagePathByPhotoId.get(s.cover_photo_id)
       if (storagePath) {
-        const { data: signed } = await supabase.storage.from("documents").createSignedUrl(storagePath, 3600)
-        if (signed?.signedUrl) {
-          result.set(s.id, { url: signed.signedUrl, storagePath })
+        // §"Egress-Analyse 2026-07-16": Karten-Vorschau statt volles Original + gecachte Signed URL.
+        const resolved = await getPhotoDisplayUrl("documents", storagePath, "thumb800")
+        if (resolved) {
+          result.set(s.id, { url: resolved.url, storagePath: resolved.resolvedPath })
           return
         }
       }

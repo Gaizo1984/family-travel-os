@@ -14,6 +14,7 @@ import { DirectPhotoUploadForm } from "@/components/DirectPhotoUploadForm";
 import { Banner } from "@/components/Banner";
 import { SignedPhoto } from "@/components/SignedPhoto";
 import { PhotoLightbox, type LightboxPhoto } from "@/components/PhotoLightbox";
+import { getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -73,16 +74,23 @@ export default async function TripGalleryPage({
   const stageById = new Map(stages.map((s) => [s.id, s.title]));
   const personNameById = new Map(persons.map((p) => [p.id, p.name]));
 
-  const photosWithUrls = await Promise.all(
-    photos.map(async (p) => {
-      const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.storage_path, 3600);
-      return { photo: p, url: signed?.signedUrl ?? null };
-    }),
-  );
+  // §"Egress-Analyse 2026-07-16": Grid zeigt nur noch ein 400px-Vorschaubild;
+  // die Lightbox lädt weiterhin das volle Original, aber erst wenn sie
+  // tatsächlich geöffnet wird.
+  const paths = photos.map((p) => p.storage_path);
+  const [thumbByPath, originalByPath] = await Promise.all([
+    getPhotoDisplayUrls("documents", paths, "thumb400"),
+    getPhotoDisplayUrls("documents", paths, "original"),
+  ]);
+  const photosWithUrls = photos.map((p) => {
+    const thumb = thumbByPath.get(p.storage_path) ?? null;
+    const original = originalByPath.get(p.storage_path) ?? null;
+    return { photo: p, url: thumb?.url ?? null, resolvedPath: thumb?.resolvedPath ?? p.storage_path, lightboxUrl: original?.url ?? null };
+  });
 
   const lightboxPhotos: LightboxPhoto[] = photosWithUrls
-    .filter((p): p is typeof p & { url: string } => Boolean(p.url))
-    .map((p) => ({ url: p.url, alt: p.photo.caption ?? "" }));
+    .filter((p): p is typeof p & { lightboxUrl: string } => Boolean(p.lightboxUrl))
+    .map((p) => ({ url: p.lightboxUrl, alt: p.photo.caption ?? "" }));
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -148,14 +156,14 @@ export default async function TripGalleryPage({
         {/* ── Galerie-Grid ── */}
         {photosWithUrls.length > 0 ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-            {photosWithUrls.map(({ photo, url }, idx) => {
+            {photosWithUrls.map(({ photo, url, resolvedPath, lightboxUrl }, idx) => {
               if (!url) return null;
               const isCover = trip.cover_photo_id === photo.id;
-              const lightboxIndex = lightboxPhotos.findIndex((p) => p.url === url);
+              const lightboxIndex = lightboxPhotos.findIndex((p) => p.url === lightboxUrl);
               return (
                 <div key={photo.id} className="relative rounded-lg overflow-hidden group" style={{ aspectRatio: "1/1" }}>
-                  <PhotoLightbox url={url} alt={photo.caption ?? ""} photos={lightboxPhotos} index={lightboxIndex}>
-                    <SignedPhoto storagePath={photo.storage_path} initialUrl={url} alt={photo.caption ?? ""} loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
+                  <PhotoLightbox url={lightboxUrl ?? url} alt={photo.caption ?? ""} photos={lightboxPhotos} index={lightboxIndex}>
+                    <SignedPhoto storagePath={resolvedPath} initialUrl={url} alt={photo.caption ?? ""} loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
                   </PhotoLightbox>
                   <div
                     className="absolute inset-0 flex flex-col justify-between p-2"

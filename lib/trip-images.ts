@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { DESTINATIONS } from "@/lib/data/destination-knowledge";
+import { getPhotoDisplayUrl } from "@/lib/photo-thumbnails";
 
 /**
  * Einzige Quelle der Wahrheit für kuratierte Reisebilder. War zuvor
@@ -88,17 +89,22 @@ export async function getHighlightPhotoByTripId(
   }
 
   // 3) Alle Signaturen (Titelbilder + Highlight-Fallbacks) parallel erzeugen.
+  // §"Egress-Analyse 2026-07-16": Titel-/Highlight-Fotos werden als Karten-
+  // Vorschau angezeigt (Dashboard/Trips-Liste/Reise-Detail-Header) -- 800px-
+  // Thumbnail statt des vollen 2000px-Originals, plus gecachte Signed URL
+  // (siehe lib/photo-thumbnails.ts/lib/signed-storage-url.ts) statt bei
+  // jedem Render neu zu signieren.
   const highlightPhotoByTripId = new Map<string, HighlightPhoto>();
   await Promise.all([
     ...Array.from(coverPhotoIdByTripId.entries()).map(async ([tripId, photoId]) => {
       const storagePath = coverStoragePathByPhotoId.get(photoId);
       if (!storagePath) return;
-      const { data: signed } = await supabase.storage.from("documents").createSignedUrl(storagePath, 3600);
-      if (signed?.signedUrl) highlightPhotoByTripId.set(tripId, { url: signed.signedUrl, storagePath });
+      const resolved = await getPhotoDisplayUrl("documents", storagePath, "thumb800");
+      if (resolved) highlightPhotoByTripId.set(tripId, { url: resolved.url, storagePath: resolved.resolvedPath });
     }),
     ...Array.from(firstHighlightByTripId.entries()).map(async ([tripId, storagePath]) => {
-      const { data: signed } = await supabase.storage.from("documents").createSignedUrl(storagePath, 3600);
-      if (signed?.signedUrl) highlightPhotoByTripId.set(tripId, { url: signed.signedUrl, storagePath });
+      const resolved = await getPhotoDisplayUrl("documents", storagePath, "thumb800");
+      if (resolved) highlightPhotoByTripId.set(tripId, { url: resolved.url, storagePath: resolved.resolvedPath });
     }),
   ]);
   return highlightPhotoByTripId;

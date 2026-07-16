@@ -91,6 +91,7 @@ export async function createDocument(formData: FormData) {
     storagePath = buildStoragePath(f.personId, file.name)
     const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
       contentType: file.type,
+      cacheControl: '31536000',
     })
     if (uploadError)
       redirect(`${newPath}&error=${encodeURIComponent('Upload fehlgeschlagen: ' + uploadError.message)}`)
@@ -185,6 +186,7 @@ export async function updateDocument(formData: FormData) {
     const storagePath = buildStoragePath(f.personId, file.name)
     const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
       contentType: file.type,
+      cacheControl: '31536000',
     })
     if (uploadError)
       redirect(`${editPath}?error=${encodeURIComponent('Upload fehlgeschlagen: ' + uploadError.message)}`)
@@ -261,6 +263,7 @@ export async function uploadBookingDocument(formData: FormData) {
   const storagePath = buildBookingStoragePath(bookingId, file.name)
   const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
     contentType: file.type,
+    cacheControl: '31536000',
   })
   if (uploadError)
     redirect(`${detailPath}?error=${encodeURIComponent('Upload fehlgeschlagen: ' + uploadError.message)}`)
@@ -312,6 +315,7 @@ export async function uploadBoardingPass(formData: FormData) {
   const storagePath = buildStoragePath(personId, file.name)
   const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
     contentType: file.type,
+    cacheControl: '31536000',
   })
   if (uploadError)
     redirect(`${detailPath}?error=${encodeURIComponent('Upload fehlgeschlagen: ' + uploadError.message)}`)
@@ -360,6 +364,7 @@ export async function uploadBaggageTag(formData: FormData) {
   const storagePath = buildStoragePath(personId, file.name)
   const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
     contentType: file.type,
+    cacheControl: '31536000',
   })
   if (uploadError)
     redirect(`${detailPath}?error=${encodeURIComponent('Upload fehlgeschlagen: ' + uploadError.message)}`)

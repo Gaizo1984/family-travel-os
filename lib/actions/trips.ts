@@ -123,7 +123,7 @@ export async function createTrip(formData: FormData) {
         const compressed = await compressImageForStorage(staged.buffer)
         const coverPath = `memories/${family!.id}/${crypto.randomUUID()}.webp`
         const { error: uploadError } = await supabase.storage.from('documents')
-          .upload(coverPath, new Blob([new Uint8Array(compressed)], { type: 'image/webp' }), { contentType: 'image/webp' })
+          .upload(coverPath, new Blob([new Uint8Array(compressed)], { type: 'image/webp' }), { contentType: 'image/webp', cacheControl: '31536000' })
         if (!uploadError) {
           const { data: coverPhoto } = await supabase.from('memory_photos').insert({
             family_id: family!.id, trip_id: trip.id, storage_path: coverPath, is_selected: true,

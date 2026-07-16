@@ -138,7 +138,7 @@ export async function uploadContentSessionPhotos(formData: FormData) {
       const storagePath = `content-session/${project.family_id}/${projectId}/${crypto.randomUUID()}.webp`
 
       const { error: uploadError } = await supabase.storage.from('documents')
-        .upload(storagePath, new Blob([new Uint8Array(compressed)], { type: 'image/webp' }), { contentType: 'image/webp' })
+        .upload(storagePath, new Blob([new Uint8Array(compressed)], { type: 'image/webp' }), { contentType: 'image/webp', cacheControl: '31536000' })
       if (uploadError) { failedCount++; continue }
 
       const phash = await computeDHash(compressed)
@@ -977,7 +977,7 @@ export async function retainContentSessionPhotoAsMemory(formData: FormData) {
   const memoryPath = `memories/${project.family_id}/${crypto.randomUUID()}.webp`
 
   const { error: uploadError } = await supabase.storage.from('documents')
-    .upload(memoryPath, new Blob([new Uint8Array(compressed)], { type: 'image/webp' }), { contentType: 'image/webp' })
+    .upload(memoryPath, new Blob([new Uint8Array(compressed)], { type: 'image/webp' }), { contentType: 'image/webp', cacheControl: '31536000' })
   if (uploadError) redirect(`${returnPath}?error=${encodeURIComponent('Speicherfehler: ' + uploadError.message)}`)
 
   const { data: memoryPhoto, error: insertError } = await supabase.from('memory_photos').insert({

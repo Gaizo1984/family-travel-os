@@ -71,7 +71,7 @@ async function uploadAndVerify(
 
   const blob = new Blob([new Uint8Array(compressed)], { type: 'image/webp' })
   const { error: uploadError } = await supabase.storage.from('documents')
-    .upload(storagePath, blob, { contentType: 'image/webp' })
+    .upload(storagePath, blob, { contentType: 'image/webp', cacheControl: '31536000' })
   if (uploadError) {
     console.error('[Memories][DIAGNOSTIC] Storage-Upload fehlgeschlagen', uploadError)
     return false

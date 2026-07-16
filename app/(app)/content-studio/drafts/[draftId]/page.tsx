@@ -11,6 +11,7 @@ import {
 import { Banner } from "@/components/Banner";
 import { SignedPhoto } from "@/components/SignedPhoto";
 import { CopyTextButton } from "@/components/CopyTextButton";
+import { getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -267,11 +268,15 @@ export default async function ContentDraftPage({
     .order("created_at", { ascending: true });
   const projectPhotos = projectPhotosRaw ?? [];
 
+  // §"Egress-Analyse 2026-07-16": alle Vorschauen hier sind kleine Kacheln
+  // (1/1-Grid oder max. 280px Titelbild) -- Thumbnail statt Original.
+  const displayByPath = await getPhotoDisplayUrls("documents", projectPhotos.map((p) => p.storage_path), "thumb400");
   const urlById = new Map<string, string>();
-  await Promise.all(projectPhotos.map(async (p) => {
-    const { data: signed } = await supabase.storage.from("documents").createSignedUrl(p.storage_path, 3600);
-    if (signed?.signedUrl) urlById.set(p.id, signed.signedUrl);
-  }));
+  const resolvedPathById = new Map<string, string>();
+  for (const p of projectPhotos) {
+    const resolved = displayByPath.get(p.storage_path);
+    if (resolved) { urlById.set(p.id, resolved.url); resolvedPathById.set(p.id, resolved.resolvedPath); }
+  }
 
   const isCarousel = draft.draft_type === "carousel_plan";
   const isStory = draft.draft_type === "story_plan";
@@ -315,7 +320,7 @@ export default async function ContentDraftPage({
           <div className="mb-6">
             <label style={LABEL_STYLE}>Titelbild</label>
             <div className="relative rounded-xl overflow-hidden mb-2" style={{ aspectRatio: "4/5", maxWidth: "280px" }}>
-              <SignedPhoto storagePath={null} initialUrl={urlById.get(coverPhotoId)!} alt="" className="absolute inset-0 w-full h-full object-cover" loading="eager" />
+              <SignedPhoto storagePath={resolvedPathById.get(coverPhotoId) ?? null} initialUrl={urlById.get(coverPhotoId)!} alt="" className="absolute inset-0 w-full h-full object-cover" loading="eager" />
             </div>
             {structure.cover_reasoning && <p style={{ color: "var(--muted)", fontSize: "0.7rem", lineHeight: 1.5 }}>{structure.cover_reasoning}</p>}
           </div>
@@ -332,7 +337,7 @@ export default async function ContentDraftPage({
               <div key={`${item.photo_id}-${i}`} className="rounded-lg overflow-hidden" style={{ border: "1px solid var(--border)" }}>
                 <div className="relative" style={{ aspectRatio: "1/1" }}>
                   {urlById.get(item.photo_id) ? (
-                    <SignedPhoto storagePath={null} initialUrl={urlById.get(item.photo_id)!} alt="" className="absolute inset-0 w-full h-full object-cover" loading="lazy" />
+                    <SignedPhoto storagePath={resolvedPathById.get(item.photo_id) ?? null} initialUrl={urlById.get(item.photo_id)!} alt="" className="absolute inset-0 w-full h-full object-cover" loading="lazy" />
                   ) : (
                     <div className="absolute inset-0 flex items-center justify-center" style={{ background: "var(--background)", color: "var(--muted)", fontSize: "0.6rem", padding: "8px", textAlign: "center" }}>
                       Bild nicht mehr verfügbar
@@ -379,7 +384,7 @@ export default async function ContentDraftPage({
                     <input type="hidden" name="draft_id" value={draft.id} />
                     <input type="hidden" name="photo_id" value={p.id} />
                     {urlById.get(p.id) && (
-                      <SignedPhoto storagePath={null} initialUrl={urlById.get(p.id)!} alt="" className="absolute inset-0 w-full h-full object-cover" loading="lazy" />
+                      <SignedPhoto storagePath={resolvedPathById.get(p.id) ?? null} initialUrl={urlById.get(p.id)!} alt="" className="absolute inset-0 w-full h-full object-cover" loading="lazy" />
                     )}
                     <button type="submit" className="absolute inset-0 w-full h-full" style={{ background: "rgba(10,9,7,0.15)", border: "none", cursor: "pointer" }} title="Hinzufügen" />
                   </form>
