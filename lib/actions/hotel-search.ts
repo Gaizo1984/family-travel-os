@@ -19,6 +19,21 @@ function buildHotelSearchKey(destination: string): string {
   return destination.trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
+/**
+ * §"Automatischer Cache-Ablauf" (Nutzervorgabe, 2026-07-17): ohne Ablauf
+ * blieb ein einmal gespeichertes Suchergebnis für immer bestehen, auch nach
+ * Änderungen an der Qualifikations-/Auswahllogik -- ein manuelles Löschen war
+ * nötig, um eine erneute echte Suche zu erzwingen. 30 Tage, da sich
+ * Bewertungen/Preisniveau/Hotelbestand bei Google Places selten sprunghaft
+ * ändern und ein kürzeres Fenster unnötig oft echte Places-/OpenAI-Aufrufe
+ * (Kosten) auslösen würde.
+ */
+const HOTEL_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000
+
+function isCacheFresh(updatedAt: string): boolean {
+  return Date.now() - new Date(updatedAt).getTime() < HOTEL_CACHE_TTL_MS
+}
+
 export type HotelSearchOutcome =
   | { status: 'ok'; searchKey: string; items: HotelShortlistItem[]; belowStandard: boolean; limitedInventory: boolean; searchedAt: string }
   | { status: 'no_results' }
@@ -50,7 +65,8 @@ export async function getOrSearchHotelOptions(params: {
     .maybeSingle()
 
   const hasCachedResults = Array.isArray(existing?.results) && (existing.results as unknown[]).length > 0
-  if (!params.forceRefresh && hasCachedResults) {
+  const cacheStillFresh = hasCachedResults && existing!.updated_at ? isCacheFresh(existing!.updated_at) : false
+  if (!params.forceRefresh && cacheStillFresh) {
     const cachedItems = existing!.results as unknown as HotelShortlistItem[]
     return {
       status: 'ok',
