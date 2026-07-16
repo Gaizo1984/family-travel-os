@@ -249,7 +249,7 @@ const LODGING_QUERY_TEMPLATES = (locationName: string): string[] => [
   `Luxushotels und 5-Sterne-Resorts in ${locationName}`,
 ]
 
-async function fetchLodgingPage(textQuery: string, lat: number, lng: number, apiKey: string): Promise<LodgingResult[]> {
+async function fetchLodgingPageRaw(textQuery: string, lat: number, lng: number, apiKey: string): Promise<LodgingResult[]> {
   const res = await fetch(PLACES_SEARCH_URL, {
     method: 'POST',
     headers: {
@@ -272,23 +272,43 @@ async function fetchLodgingPage(textQuery: string, lat: number, lng: number, api
   }
   const data = await res.json()
   const places: any[] = data?.places ?? []
-  return places
-    .map((p) => ({
-      id: p.id,
-      name: p.displayName?.text ?? '',
-      formattedAddress: p.formattedAddress ?? '',
-      lat: p.location?.latitude ?? 0,
-      lng: p.location?.longitude ?? 0,
-      rating: p.rating ?? null,
-      userRatingCount: p.userRatingCount ?? null,
-      openNow: p.currentOpeningHours?.openNow ?? null,
-      weekdayDescriptions: p.currentOpeningHours?.weekdayDescriptions ?? null,
-      photoName: p.photos?.[0]?.name ?? null,
-      types: Array.isArray(p.types) ? p.types : [],
-      priceLevel: p.priceLevel ?? null,
-      websiteUri: p.websiteUri ?? null,
-    }))
-    .filter((p) => p.types.includes(LODGING_TYPE))
+  return places.map((p) => ({
+    id: p.id,
+    name: p.displayName?.text ?? '',
+    formattedAddress: p.formattedAddress ?? '',
+    lat: p.location?.latitude ?? 0,
+    lng: p.location?.longitude ?? 0,
+    rating: p.rating ?? null,
+    userRatingCount: p.userRatingCount ?? null,
+    openNow: p.currentOpeningHours?.openNow ?? null,
+    weekdayDescriptions: p.currentOpeningHours?.weekdayDescriptions ?? null,
+    photoName: p.photos?.[0]?.name ?? null,
+    types: Array.isArray(p.types) ? p.types : [],
+    priceLevel: p.priceLevel ?? null,
+    websiteUri: p.websiteUri ?? null,
+  }))
+}
+
+async function fetchLodgingPage(textQuery: string, lat: number, lng: number, apiKey: string): Promise<LodgingResult[]> {
+  const raw = await fetchLodgingPageRaw(textQuery, lat, lng, apiKey)
+  return raw.filter((p) => p.types.includes(LODGING_TYPE))
+}
+
+async function runLodgingQueries(
+  locationName: string, lat: number, lng: number, apiKey: string,
+  fetchPage: typeof fetchLodgingPage,
+): Promise<LodgingResult[]> {
+  const pages = await Promise.all(LODGING_QUERY_TEMPLATES(locationName).map((textQuery) => fetchPage(textQuery, lat, lng, apiKey)))
+  const seenIds = new Set<string>()
+  const merged: LodgingResult[] = []
+  for (const page of pages) {
+    for (const p of page) {
+      if (seenIds.has(p.id)) continue
+      seenIds.add(p.id)
+      merged.push(p)
+    }
+  }
+  return merged
 }
 
 export async function searchLodging(params: { locationName: string; lat?: number; lng?: number }): Promise<LodgingResult[] | null> {
@@ -309,19 +329,42 @@ export async function searchLodging(params: { locationName: string; lat?: number
   }
 
   try {
-    const pages = await Promise.all(
-      LODGING_QUERY_TEMPLATES(params.locationName).map((textQuery) => fetchLodgingPage(textQuery, lat!, lng!, apiKey)),
-    )
-    const seenIds = new Set<string>()
-    const merged: LodgingResult[] = []
-    for (const page of pages) {
-      for (const p of page) {
-        if (seenIds.has(p.id)) continue
-        seenIds.add(p.id)
-        merged.push(p)
-      }
-    }
-    return merged
+    return await runLodgingQueries(params.locationName, lat, lng, apiKey, fetchLodgingPage)
+  } catch (e) {
+    if (e instanceof ProviderConfigError || e instanceof ProviderRequestError) throw e
+    const err = new ProviderRequestError('places', 'lodging_search', 0)
+    logProviderError(err)
+    throw err
+  }
+}
+
+/**
+ * §"Diagnose: fehlen berühmte Einzelhotels wegen des lodging-Typfilters?":
+ * identisch zu `searchLodging`, aber OHNE den `types.includes('lodging')`-
+ * Filter -- nur für den Developer-Testbereich gedacht (nie in der
+ * Produktivsuche verwendet), damit sichtbar wird, ob Google einen Kandidaten
+ * überhaupt findet, aber mit einem anderen Google-Typ (z. B. `tourist_
+ * attraction`) kategorisiert und deshalb bisher stillschweigend verworfen hat.
+ */
+export async function searchLodgingRaw(params: { locationName: string; lat?: number; lng?: number }): Promise<LodgingResult[] | null> {
+  const apiKey = process.env.GOOGLE_PLACES_API_KEY
+  if (!apiKey) {
+    const err = new ProviderConfigError('places', 'lodging_search')
+    logProviderError(err)
+    throw err
+  }
+
+  let lat = params.lat
+  let lng = params.lng
+  if (lat === undefined || lng === undefined) {
+    const geo = await googleGeocode(params.locationName)
+    if (!geo) return null
+    lat = geo.lat
+    lng = geo.lng
+  }
+
+  try {
+    return await runLodgingQueries(params.locationName, lat, lng, apiKey, fetchLodgingPageRaw)
   } catch (e) {
     if (e instanceof ProviderConfigError || e instanceof ProviderRequestError) throw e
     const err = new ProviderRequestError('places', 'lodging_search', 0)

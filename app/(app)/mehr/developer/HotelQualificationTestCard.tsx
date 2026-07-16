@@ -32,13 +32,20 @@ export function HotelQualificationTestCard({ lastRun }: { lastRun: DevTestRun | 
           )}
           <ul className="flex flex-col gap-1.5">
             {result.candidates.map((c, i) => (
-              <li key={i} className="flex items-center gap-2 flex-wrap" style={{ borderTop: i > 0 ? '1px solid #1f2937' : undefined, paddingTop: i > 0 ? '0.35rem' : undefined }}>
-                <span style={{ flex: 1, color: c.qualifies ? '#4ade80' : '#9ca3af' }}>{c.name}{c.isIconic ? ' ✦' : ''}</span>
-                <span style={{ color: '#6b7280' }}>{c.rating != null ? `★ ${c.rating} (${c.userRatingCount ?? 0})` : 'kein Rating'}</span>
-                <span style={{ color: '#6b7280' }}>{c.priceLevel ?? 'kein priceLevel'}</span>
-                <span style={{ color: c.qualifies ? '#4ade80' : '#f87171' }}>
-                  {c.qualifies ? `${c.tier} (${c.tierBasis === 'brand' ? 'Marke' : 'Heuristik'})` : 'nicht qualifiziert'}
-                </span>
+              <li key={i} className="flex flex-col gap-0.5" style={{ borderTop: i > 0 ? '1px solid #1f2937' : undefined, paddingTop: i > 0 ? '0.35rem' : undefined }}>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span style={{ flex: 1, color: c.qualifies ? '#4ade80' : '#9ca3af' }}>{c.name}{c.isIconic ? ' ✦' : ''}</span>
+                  <span style={{ color: '#6b7280' }}>{c.rating != null ? `★ ${c.rating} (${c.userRatingCount ?? 0})` : 'kein Rating'}</span>
+                  <span style={{ color: '#6b7280' }}>{c.priceLevel ?? 'kein priceLevel'}</span>
+                  <span style={{ color: c.qualifies ? '#4ade80' : '#f87171' }}>
+                    {!c.hasLodgingType ? 'kein lodging-Typ' : c.qualifies ? `${c.tier} (${c.tierBasis === 'brand' ? 'Marke' : 'Heuristik'})` : 'nicht qualifiziert'}
+                  </span>
+                </div>
+                {!c.hasLodgingType && (
+                  <div style={{ color: '#f87171', fontSize: '0.65rem' }}>
+                    Von der Produktivsuche ausgeschlossen -- Google-Typen: {c.types.join(', ') || '(keine)'}
+                  </div>
+                )}
               </li>
             ))}
           </ul>
