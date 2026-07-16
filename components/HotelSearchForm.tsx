@@ -50,6 +50,11 @@ export function HotelSearchForm({
         </div>
       </div>
 
+      <label className="flex items-center gap-2 mb-5" style={{ cursor: 'pointer' }}>
+        <input type="checkbox" name="force_refresh" />
+        <span style={{ color: 'var(--muted)', fontSize: '0.72rem' }}>Ergebnisse neu abrufen (ignoriert einen bereits gespeicherten Suchtreffer für dieses Ziel)</span>
+      </label>
+
       <SubmitButtonWithProgress label="Hotels suchen" pendingLabel="Hotels werden gesucht …" />
     </form>
   )
