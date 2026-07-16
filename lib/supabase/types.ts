@@ -889,6 +889,26 @@ export interface Database {
           { foreignKeyName: "flight_search_usage_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }
         ]
       }
+      saved_flight_options: {
+        Row: {
+          id: string; family_id: string; route_key: string; origin_codes: string[]; destination_code: string
+          option_id: string; flight_option: Json; found_departure_date: string; found_return_date: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string; family_id: string; route_key: string; origin_codes: string[]; destination_code: string
+          option_id: string; flight_option: Json; found_departure_date: string; found_return_date?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string; family_id?: string; route_key?: string; origin_codes?: string[]; destination_code?: string
+          option_id?: string; flight_option?: Json; found_departure_date?: string; found_return_date?: string | null
+          created_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "saved_flight_options_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }
+        ]
+      }
       signed_url_cache: {
         Row: {
           id: string; family_id: string; bucket: string; storage_path: string

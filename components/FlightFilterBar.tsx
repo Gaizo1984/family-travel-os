@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { FlightCard, type FlightDateContext } from '@/components/FlightCard'
+import { MAX_SAVED_FLIGHTS_PER_ROUTE } from '@/lib/saved-flights-shared'
 import type { FlightSearchOption } from '@/lib/flight-types'
 
 const CHIP_STYLE = (active: boolean): React.CSSProperties => ({
@@ -20,6 +21,7 @@ const CHIP_STYLE = (active: boolean): React.CSSProperties => ({
  */
 export function FlightFilterBar({
   options, isSandboxData, providerName, searchedAt, dateContextByOptionId,
+  searchKeyByOptionId, savedOptionIds, saveAction, returnTo,
 }: {
   options: FlightSearchOption[]
   isSandboxData: boolean
@@ -28,6 +30,12 @@ export function FlightFilterBar({
   searchedAt: string
   /** Nur bei flexibler Suche gesetzt: zeigt je Karte, aus welcher Datumskombination sie stammt. */
   dateContextByOptionId?: Record<string, FlightDateContext>
+  /** §"Bis zu 3 Flugverbindungen pro Strecke merken": ordnet jeder Karte den search_key ihrer Herkunfts-Suche zu (nötig für den "Merken"-Button, auch im flexiblen Modus mit mehreren Datums-Suchläufen). */
+  searchKeyByOptionId?: Record<string, string>
+  /** Bereits für die aktuelle Strecke gemerkte Angebots-IDs -- steuert Button-Zustand ("Gemerkt" vs. "Merken" vs. "Limit erreicht"). */
+  savedOptionIds?: string[]
+  saveAction?: (formData: FormData) => void | Promise<void>
+  returnTo?: string
 }) {
   const [directOnly, setDirectOnly] = useState(false)
   const [maxOneStop, setMaxOneStop] = useState(false)
@@ -92,7 +100,23 @@ export function FlightFilterBar({
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {filtered.map((o) => <FlightCard key={o.id} option={o} searchedAt={searchedAt} dateContext={dateContextByOptionId?.[o.id]} />)}
+          {filtered.map((o) => {
+            const isSaved = savedOptionIds?.includes(o.id) ?? false
+            const saveDisabled = !isSaved && (savedOptionIds?.length ?? 0) >= MAX_SAVED_FLIGHTS_PER_ROUTE
+            return (
+              <FlightCard
+                key={o.id}
+                option={o}
+                searchedAt={searchedAt}
+                dateContext={dateContextByOptionId?.[o.id]}
+                searchKey={searchKeyByOptionId?.[o.id]}
+                returnTo={returnTo}
+                isSaved={isSaved}
+                saveDisabled={saveDisabled}
+                saveAction={saveAction}
+              />
+            )
+          })}
         </div>
       )}
 

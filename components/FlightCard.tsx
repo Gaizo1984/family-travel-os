@@ -1,4 +1,4 @@
-import { Star, Wallet, Zap, PlaneTakeoff, Luggage, Check, X as XIcon, HelpCircle, CalendarRange } from "lucide-react";
+import { Star, Wallet, Zap, PlaneTakeoff, Luggage, Check, X as XIcon, HelpCircle, CalendarRange, Bookmark } from "lucide-react";
 import { FlightScoringService } from "@/lib/flight-scoring-service";
 import { formatDateDE } from "@/lib/demo-data";
 import type { FlightSearchOption, FlightItinerary, FlightBadge, CheckedBaggageStatus, BaggageEntryStatus } from "@/lib/flight-types";
@@ -106,7 +106,17 @@ function BaggageDetail({ option }: { option: FlightSearchOption }) {
   );
 }
 
-export function FlightCard({ option, searchedAt, dateContext }: { option: FlightSearchOption; searchedAt: string; dateContext?: FlightDateContext }) {
+export function FlightCard({
+  option, searchedAt, dateContext, searchKey, returnTo, isSaved, saveDisabled, saveAction,
+}: {
+  option: FlightSearchOption; searchedAt: string; dateContext?: FlightDateContext
+  /** §"Bis zu 3 Flugverbindungen pro Strecke merken": nur gesetzt, wenn diese Karte aus einer Suche stammt (nicht bei bereits gemerkten Karten -- die haben kein "Merken"-Formular mehr, siehe `isSaved`-Aufrufer in app/(app)/discover/flights/page.tsx). */
+  searchKey?: string
+  returnTo?: string
+  isSaved?: boolean
+  saveDisabled?: boolean
+  saveAction?: (formData: FormData) => void | Promise<void>
+}) {
   const isExpired = FlightScoringService.isExpired(option);
 
   return (
@@ -178,6 +188,36 @@ export function FlightCard({ option, searchedAt, dateContext }: { option: Flight
           {option.comparisonHints.map((hint, i) => (
             <div key={i} style={{ color: "var(--accent)", fontSize: "0.68rem" }}>{hint}</div>
           ))}
+        </div>
+      )}
+
+      {searchKey && saveAction && (
+        <div className="mt-3 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+          {isSaved ? (
+            <span className="inline-flex items-center gap-1.5" style={{ color: "var(--accent)", fontSize: "0.7rem" }}>
+              <Bookmark size={12} strokeWidth={1.8} fill="currentColor" />
+              Gemerkt
+            </span>
+          ) : (
+            <form action={saveAction}>
+              <input type="hidden" name="search_key" value={searchKey} />
+              <input type="hidden" name="option_id" value={option.id} />
+              <input type="hidden" name="return_to" value={returnTo ?? ""} />
+              <button
+                type="submit"
+                disabled={saveDisabled}
+                className="inline-flex items-center gap-1.5"
+                style={{
+                  background: "none", border: "none", padding: 0, fontSize: "0.7rem",
+                  color: saveDisabled ? "var(--muted)" : "var(--accent)",
+                  cursor: saveDisabled ? "not-allowed" : "pointer",
+                }}
+              >
+                <Bookmark size={12} strokeWidth={1.8} />
+                {saveDisabled ? "Limit erreicht (3/3) -- bitte erst eine löschen" : "Diese Verbindung merken"}
+              </button>
+            </form>
+          )}
         </div>
       )}
     </div>

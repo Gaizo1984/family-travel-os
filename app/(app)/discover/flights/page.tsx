@@ -1,12 +1,15 @@
 import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { searchFlightsStandalone } from "@/lib/actions/flight-search";
+import { saveFlightOption, deleteSavedFlightOption } from "@/lib/actions/saved-flights";
+import { buildRouteKey, MAX_SAVED_FLIGHTS_PER_ROUTE } from "@/lib/saved-flights-shared";
 import { getFlightProviderName } from "@/lib/providers/flights-provider";
 import { FlightScoringService } from "@/lib/flight-scoring-service";
 import { FlightSearchForm, type SearchMode } from "@/components/FlightSearchForm";
 import { FlightFilterBar } from "@/components/FlightFilterBar";
+import { FlightCard } from "@/components/FlightCard";
 import { FlightDateComparisonTable, type FlightDateComparisonRow } from "@/components/FlightDateComparisonTable";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
 import { Banner } from "@/components/Banner";
@@ -24,6 +27,16 @@ export const maxDuration = 280;
 
 function nightsBetween(start: string, end: string): number {
   return Math.round((new Date(end).getTime() - new Date(start).getTime()) / 86400000);
+}
+
+/** Rekonstruiert die aktuelle Such-URL (ohne `error`) -- Rücksprungziel für Merken-/Löschen-Formulare, damit nach dem Absenden exakt dieselbe Ansicht wieder erscheint. */
+function buildCurrentFlightsUrl(sp: Record<string, string | undefined>): string {
+  const usp = new URLSearchParams();
+  for (const [key, value] of Object.entries(sp)) {
+    if (value && key !== "error") usp.set(key, value);
+  }
+  const qs = usp.toString();
+  return qs ? `/discover/flights?${qs}` : "/discover/flights";
 }
 
 export default async function DiscoverFlightsPage({
@@ -67,13 +80,15 @@ export default async function DiscoverFlightsPage({
 
   let flightResult: { options: FlightSearchOption[]; isSandboxData: boolean; searchedAt: string } | null = null;
   let dateContextByOptionId: Record<string, FlightDateContext> | undefined;
+  const searchKeyByOptionId: Record<string, string> = {};
   const comparisonRows: FlightDateComparisonRow[] = [];
+  let currentRouteKey: string | null = null;
 
   if (mode === "flexible" && sp.search_keys) {
     const keys = sp.search_keys.split(",").filter(Boolean);
     const { data: cachedRows } = await supabase
       .from("flight_search_cache")
-      .select("search_key, results, is_sandbox_data, updated_at, departure_date, return_date")
+      .select("search_key, results, is_sandbox_data, updated_at, departure_date, return_date, origin_codes, destination_code")
       .eq("family_id", familyId)
       .in("search_key", keys);
 
@@ -91,11 +106,13 @@ export default async function DiscoverFlightsPage({
       for (const o of options) {
         allOptions.push(o);
         dateContextByOptionId[o.id] = dateContext;
+        searchKeyByOptionId[o.id] = row.search_key;
       }
       const minPrice = Math.min(...options.map((o) => o.price));
       comparisonRows.push({ departureDate: row.departure_date, returnDate: row.return_date, nights, minPrice, currency: options[0].currency });
       if (row.is_sandbox_data) anySandbox = true;
       if (row.updated_at > latestUpdatedAt) latestUpdatedAt = row.updated_at;
+      if (!currentRouteKey) currentRouteKey = buildRouteKey(row.origin_codes, row.destination_code);
     }
 
     if (allOptions.length > 0) {
@@ -106,20 +123,40 @@ export default async function DiscoverFlightsPage({
   } else if (sp.search_key) {
     const { data: cached } = await supabase
       .from("flight_search_cache")
-      .select("results, is_sandbox_data, updated_at")
+      .select("results, is_sandbox_data, updated_at, origin_codes, destination_code")
       .eq("family_id", familyId)
       .eq("search_key", sp.search_key)
       .maybeSingle();
     flightResult = cached
       ? { options: cached.results as unknown as FlightSearchOption[], isSandboxData: cached.is_sandbox_data, searchedAt: cached.updated_at }
       : null;
+    if (cached) {
+      currentRouteKey = buildRouteKey(cached.origin_codes, cached.destination_code);
+      for (const o of flightResult!.options) searchKeyByOptionId[o.id] = sp.search_key;
+    }
   }
+
+  // §"Gemerkte Verbindungen direkt auf /discover/flights, gefiltert nach der
+  // aktuell angezeigten Strecke" (Nutzervorgabe): route-basiert, nicht an
+  // den exakten Suchlauf gebunden -- zeigt auch bereits gemerkte
+  // Verbindungen aus früheren Datums-Suchläufen für dieselbe Strecke.
+  const { data: savedRows } = currentRouteKey
+    ? await supabase
+        .from("saved_flight_options")
+        .select("id, option_id, flight_option, found_departure_date, found_return_date, created_at")
+        .eq("family_id", familyId)
+        .eq("route_key", currentRouteKey)
+        .order("created_at", { ascending: true })
+    : { data: null };
+  const savedFlights = savedRows ?? [];
 
   const { total: combosTotal, capped: combosCapped } = mode === "flexible" && sp.window_start_date && sp.window_end_date
     ? countFlexibleDateCombinations(sp.window_start_date, sp.window_end_date, Number(sp.nights_min) || 0, Number(sp.nights_max) || 0)
     : { total: 0, capped: 0 };
   const canSearchMore = mode === "flexible" && combosTotal > combosCapped && sp.search_keys;
   const currentBatch = Number(sp.batch ?? "0") || 0;
+  const returnTo = buildCurrentFlightsUrl(sp);
+  const savedOptionIds = savedFlights.map((s) => s.option_id);
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -162,6 +199,41 @@ export default async function DiscoverFlightsPage({
           />
         </div>
 
+        {savedFlights.length > 0 && (
+          <section className="mb-8">
+            <div style={{ color: "var(--muted)", fontSize: "0.58rem", letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: "10px" }}>
+              Gemerkte Verbindungen für diese Strecke ({savedFlights.length}/{MAX_SAVED_FLIGHTS_PER_ROUTE})
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {savedFlights.map((s) => {
+                const option = s.flight_option as unknown as FlightSearchOption;
+                const nights = s.found_return_date ? nightsBetween(s.found_departure_date, s.found_return_date) : null;
+                return (
+                  <div key={s.id} className="relative">
+                    <FlightCard
+                      option={option}
+                      searchedAt={s.created_at}
+                      dateContext={{ departureDate: s.found_departure_date, returnDate: s.found_return_date, nights }}
+                    />
+                    <form action={deleteSavedFlightOption} className="mt-2">
+                      <input type="hidden" name="id" value={s.id} />
+                      <input type="hidden" name="return_to" value={returnTo} />
+                      <button
+                        type="submit"
+                        className="flex items-center gap-1.5"
+                        style={{ background: "none", border: "none", cursor: "pointer", color: "#B5624A", fontSize: "0.68rem", padding: 0 }}
+                      >
+                        <Trash2 size={12} strokeWidth={1.8} />
+                        Verbindung nicht mehr merken
+                      </button>
+                    </form>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
         {mode === "flexible" && comparisonRows.length > 0 && (
           <>
             <p className="mb-3" style={{ color: "var(--muted)", fontSize: "0.7rem" }}>
@@ -178,6 +250,10 @@ export default async function DiscoverFlightsPage({
             providerName={getFlightProviderName()}
             searchedAt={flightResult.searchedAt}
             dateContextByOptionId={dateContextByOptionId}
+            searchKeyByOptionId={searchKeyByOptionId}
+            savedOptionIds={savedOptionIds}
+            saveAction={saveFlightOption}
+            returnTo={returnTo}
           />
         )}
 
