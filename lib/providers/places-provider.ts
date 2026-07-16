@@ -233,6 +233,64 @@ const LODGING_FIELD_MASK = `${PLACES_FIELD_MASK},places.priceLevel,places.websit
 const LODGING_RADIUS_METERS = 20000
 const LODGING_MAX_RESULT_COUNT = MAX_GOOGLE_RESULT_COUNT
 
+// §Bugfix "Berühmte Einzelhotels (Belmond, Fasano, ...) fehlen in
+// Großstädten": Google Places Text Search liefert maximal 20 Treffer pro
+// Anfrage -- bei einer generischen Anfrage wie "Hotels und Resorts in Rio
+// de Janeiro" können einzelne, namentlich bekannte Luxushotels in einer
+// Millionenstadt aus den Top 20 rausfallen. Zwei unterschiedlich formulierte
+// Anfragen (allgemein + explizit auf Luxus/5-Sterne fokussiert) liefern
+// erfahrungsgemäß unterschiedliche Google-Rankings und werden dedupliziert
+// zusammengeführt -- verdoppelt die Places-Kosten pro NEUER Zielsuche
+// (bleibt durch den bestehenden Cache pro Ziel begrenzt), aber ohne auf ein
+// noch unbestätigtes Paginierungs-/Token-Verhalten der Places API (New)
+// angewiesen zu sein.
+const LODGING_QUERY_TEMPLATES = (locationName: string): string[] => [
+  `Hotels und Resorts in ${locationName}`,
+  `Luxushotels und 5-Sterne-Resorts in ${locationName}`,
+]
+
+async function fetchLodgingPage(textQuery: string, lat: number, lng: number, apiKey: string): Promise<LodgingResult[]> {
+  const res = await fetch(PLACES_SEARCH_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': apiKey,
+      'X-Goog-FieldMask': LODGING_FIELD_MASK,
+    },
+    body: JSON.stringify({
+      textQuery,
+      languageCode: 'de',
+      maxResultCount: LODGING_MAX_RESULT_COUNT,
+      locationBias: { circle: { center: { latitude: lat, longitude: lng }, radius: LODGING_RADIUS_METERS } },
+    }),
+    cache: 'no-store',
+  })
+  if (!res.ok) {
+    const err = new ProviderRequestError('places', 'lodging_search', res.status, await extractGoogleErrorCode(res))
+    logProviderError(err)
+    throw err
+  }
+  const data = await res.json()
+  const places: any[] = data?.places ?? []
+  return places
+    .map((p) => ({
+      id: p.id,
+      name: p.displayName?.text ?? '',
+      formattedAddress: p.formattedAddress ?? '',
+      lat: p.location?.latitude ?? 0,
+      lng: p.location?.longitude ?? 0,
+      rating: p.rating ?? null,
+      userRatingCount: p.userRatingCount ?? null,
+      openNow: p.currentOpeningHours?.openNow ?? null,
+      weekdayDescriptions: p.currentOpeningHours?.weekdayDescriptions ?? null,
+      photoName: p.photos?.[0]?.name ?? null,
+      types: Array.isArray(p.types) ? p.types : [],
+      priceLevel: p.priceLevel ?? null,
+      websiteUri: p.websiteUri ?? null,
+    }))
+    .filter((p) => p.types.includes(LODGING_TYPE))
+}
+
 export async function searchLodging(params: { locationName: string; lat?: number; lng?: number }): Promise<LodgingResult[] | null> {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY
   if (!apiKey) {
@@ -251,45 +309,19 @@ export async function searchLodging(params: { locationName: string; lat?: number
   }
 
   try {
-    const res = await fetch(PLACES_SEARCH_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask': LODGING_FIELD_MASK,
-      },
-      body: JSON.stringify({
-        textQuery: `Hotels und Resorts in ${params.locationName}`,
-        languageCode: 'de',
-        maxResultCount: LODGING_MAX_RESULT_COUNT,
-        locationBias: { circle: { center: { latitude: lat, longitude: lng }, radius: LODGING_RADIUS_METERS } },
-      }),
-      cache: 'no-store',
-    })
-    if (!res.ok) {
-      const err = new ProviderRequestError('places', 'lodging_search', res.status, await extractGoogleErrorCode(res))
-      logProviderError(err)
-      throw err
+    const pages = await Promise.all(
+      LODGING_QUERY_TEMPLATES(params.locationName).map((textQuery) => fetchLodgingPage(textQuery, lat!, lng!, apiKey)),
+    )
+    const seenIds = new Set<string>()
+    const merged: LodgingResult[] = []
+    for (const page of pages) {
+      for (const p of page) {
+        if (seenIds.has(p.id)) continue
+        seenIds.add(p.id)
+        merged.push(p)
+      }
     }
-    const data = await res.json()
-    const places: any[] = data?.places ?? []
-    return places
-      .map((p) => ({
-        id: p.id,
-        name: p.displayName?.text ?? '',
-        formattedAddress: p.formattedAddress ?? '',
-        lat: p.location?.latitude ?? 0,
-        lng: p.location?.longitude ?? 0,
-        rating: p.rating ?? null,
-        userRatingCount: p.userRatingCount ?? null,
-        openNow: p.currentOpeningHours?.openNow ?? null,
-        weekdayDescriptions: p.currentOpeningHours?.weekdayDescriptions ?? null,
-        photoName: p.photos?.[0]?.name ?? null,
-        types: Array.isArray(p.types) ? p.types : [],
-        priceLevel: p.priceLevel ?? null,
-        websiteUri: p.websiteUri ?? null,
-      }))
-      .filter((p) => p.types.includes(LODGING_TYPE))
+    return merged
   } catch (e) {
     if (e instanceof ProviderConfigError || e instanceof ProviderRequestError) throw e
     const err = new ProviderRequestError('places', 'lodging_search', 0)
