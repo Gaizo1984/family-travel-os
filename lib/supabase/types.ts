@@ -22,16 +22,21 @@ export interface Database {
         Row: {
           id: string; name: string; created_at: string
           content_style_preference: Json | null; exceptional_hotel_criteria: string[]
+          last_lumi_trip_id: string | null
         }
         Insert: {
           id?: string; name: string; created_at?: string
           content_style_preference?: Json | null; exceptional_hotel_criteria?: string[]
+          last_lumi_trip_id?: string | null
         }
         Update: {
           id?: string; name?: string; created_at?: string
           content_style_preference?: Json | null; exceptional_hotel_criteria?: string[]
+          last_lumi_trip_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          { foreignKeyName: "families_last_lumi_trip_id_fkey"; columns: ["last_lumi_trip_id"]; isOneToOne: false; referencedRelation: "trips"; referencedColumns: ["id"] }
+        ]
       }
       persons: {
         Row: {

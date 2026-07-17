@@ -8,6 +8,7 @@ import {
 import { normalizeQuestionKey, generateAndCacheConciergeMessage } from '@/lib/concierge-messages'
 import { detectLumiIntent } from '@/lib/today'
 import { detectLumiBrainIntent } from '@/lib/lumi-brain-intent'
+import { listTripsForPicker, matchTripsFromText } from '@/lib/lumi-trip-picker'
 import { buildLumiBrainContext, type LumiBrainScope } from '@/lib/lumi-brain-context'
 import { generateLumiBrainAnswer } from '@/lib/lumi-brain-ai'
 import { isLumiBrainLimitReached, incrementLumiBrainUsage } from '@/lib/lumi-brain-usage'
@@ -175,13 +176,35 @@ export async function askConcierge(formData: FormData) {
         redirect(`${ctx.returnTo}?error=${encodeURIComponent('Monatliches LUMI-Anfragelimit erreicht -- bitte später erneut versuchen.')}`)
       }
 
-      const scope: LumiBrainScope = ctx.tripId ? { mode: 'trip', tripId: ctx.tripId } : { mode: 'general' }
+      // §"Automatische Erkennung aus Fragen" (Nutzervorgabe, wörtlich:
+      // "lib/lumi-trip-picker.ts als einzige zentrale Quelle für Reiseauswahl
+      // und Text-Matching verwenden -- keine parallele Matching-Logik in UI
+      // und askConcierge"): dieselbe Liste/Matching-Funktion wie der Picker
+      // in app/(app)/concierge/page.tsx, kein zweiter KI-Aufruf fürs Matching.
+      const basePath = ctx.returnTo.split('?')[0] || '/concierge'
+      const pickerTrips = await listTripsForPicker(ctx.familyId)
+      const textMatches = matchTripsFromText(questionTextRaw, pickerTrips)
+
+      let scope: LumiBrainScope = ctx.tripId ? { mode: 'trip', tripId: ctx.tripId } : { mode: 'general' }
+      let matchedTrip: { id: string; slug: string } | null = null
+
+      if (textMatches.length === 1 && textMatches[0].id !== ctx.tripId) {
+        scope = { mode: 'trip', tripId: textMatches[0].id }
+        matchedTrip = textMatches[0]
+      } else if (textMatches.length > 1 && !textMatches.some((t) => t.id === ctx.tripId)) {
+        // §"Bei Mehrdeutigkeit eine Auswahl anbieten, nicht raten" (Nutzervorgabe):
+        // kein Rateversuch -- Hinweis, über den Picker die passende Reise zu wählen.
+        const names = textMatches.map((t) => t.title).join(', ')
+        redirect(`${basePath}?notice=${encodeURIComponent(`Mehrere Reisen passen zur Frage (${names}) -- bitte über "Reise auswählen" die passende Reise wählen.`)}`)
+      }
+
       const brainContext = await buildLumiBrainContext(ctx.familyId, scope)
       if (brainContext.ok) {
         const answer = await generateLumiBrainAnswer({ intent: brainIntent, context: brainContext, questionText: questionTextRaw })
         if (answer) {
           await incrementLumiBrainUsage(ctx.familyId)
           const supabase = await createClient()
+          const effectiveTripId = matchedTrip?.id ?? ctx.tripId
           const combinedBody = [
             answer.basisLabel, answer.body,
             answer.recommendation ? `Empfehlung: ${answer.recommendation}` : null,
@@ -189,13 +212,22 @@ export async function askConcierge(formData: FormData) {
           ].filter(Boolean).join('\n\n')
           await supabase.from('concierge_messages').upsert(
             {
-              family_id: ctx.familyId, trip_id: ctx.tripId || null, for_date: ctx.forDate, question_key: effectiveKey,
+              family_id: ctx.familyId, trip_id: effectiveTripId || null, for_date: ctx.forDate, question_key: effectiveKey,
               question_text: questionTextRaw, answer_title: answer.title, answer_body: combinedBody,
               actions: [{ event_title: answer.title, links: answer.links }], context_fingerprint: null,
               created_at: new Date().toISOString(),
             },
             { onConflict: 'family_id,trip_id,for_date,question_key' },
           )
+
+          if (matchedTrip) {
+            // §"Bei eindeutigem Treffer die UI-Auswahl sichtbar auf die
+            // erkannte Reise umstellen" + "nur für diese Familie speichern"
+            // (Nutzervorgabe): dieselbe familiengebundene Persistenz wie die
+            // manuelle Auswahl im Picker (lib/actions/lumi-trip-selection.ts).
+            await supabase.from('families').update({ last_lumi_trip_id: matchedTrip.id }).eq('id', ctx.familyId)
+            redirect(`${basePath}?trip=${encodeURIComponent(matchedTrip.slug)}`)
+          }
           redirect(ctx.returnTo)
         }
       }

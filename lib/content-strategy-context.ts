@@ -54,7 +54,7 @@ type TripRow = {
  * `null` zurück, wenn gerade keine Reise läuft (dann gibt es keinen "heutigen
  * Tag", über den eine Strategie sinnvoll wäre).
  */
-export async function buildContentStrategyContext(familyId: string): Promise<ContentStrategyContext | null> {
+export async function buildContentStrategyContext(familyId: string, tripIdOverride?: string | null): Promise<ContentStrategyContext | null> {
   const supabase = await createClient()
   const todayIso = todayIsoInFamilyTimezone()
 
@@ -70,7 +70,14 @@ export async function buildContentStrategyContext(familyId: string): Promise<Con
     .eq('family_id', familyId)
 
   const tripsWithDerivedDates = ((trips ?? []) as unknown as TripRow[]).map((t) => { const range = deriveTripDateRange(t, t.bookings, t.stages); return { ...t, start_date: range.startDate, end_date: range.endDate } })
-  const activeTrip = tripsWithDerivedDates.find((t) => isTripCurrentlyRunning(t, todayIso))
+  // §"Reiseauswahl in Frag LUMI" (Nutzervorgabe): "heutiger Plan"/Wetter/
+  // `today_important` etc. ergeben nur für eine AKTIV laufende Reise Sinn --
+  // ist die per Override gewählte Reise nicht aktiv, liefert diese Funktion
+  // bewusst weiterhin `null`. Die aufrufende Seite zeigt für diesen Fall
+  // einen eigenen, leichteren Header-Zweig statt dieses reichen Kontexts.
+  const activeTrip = tripIdOverride
+    ? tripsWithDerivedDates.find((t) => t.id === tripIdOverride && isTripCurrentlyRunning(t, todayIso))
+    : tripsWithDerivedDates.find((t) => isTripCurrentlyRunning(t, todayIso))
   if (!activeTrip) return null
 
   const stages = sortStagesChronologically(activeTrip.stages) as StageInput[]

@@ -7,26 +7,23 @@ import { QUICK_ACTIONS, buildConciergeCards } from "@/lib/concierge";
 import { listTodayConciergeMessages, buildContextFingerprint } from "@/lib/concierge-messages";
 import { getCachedTodayRecommendation } from "@/lib/today-recommendation";
 import { askConcierge, refreshConciergeMessage, commitConciergeAction } from "@/lib/actions/concierge-actions";
+import { listTripsForPicker, resolveDefaultTripId, getRememberedTripId } from "@/lib/lumi-trip-picker";
+import type { TripPickerEntry } from "@/lib/lumi-trip-picker";
+import { LumiTripPicker } from "@/components/LumiTripPicker";
+import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
+import { Banner } from "@/components/Banner";
+import { todayIsoInFamilyTimezone } from "@/lib/time";
 
-const RETURN_TO = "/concierge";
-const RETURN_TO_GENERAL = "/concierge?scope=general";
+/** §"Basierend auf..." (Nutzervorgabe) -- rein deterministisch, keine KI-Vorschau; identischer Wortlaut wie lib/lumi-brain-ai.ts::buildBasisLabel, hier nur als UI-Text ohne KI-Aufruf dupliziert. */
+function basisLabelFor(selectedTrip: TripPickerEntry | null): string {
+  return selectedTrip ? `Basierend auf eurer Reise ${selectedTrip.title}` : "Basierend auf euren bisherigen Reisen und euren Präferenzen";
+}
 
-/** §"Auswahl 'Allgemein' oder konkrete Reise" (Nutzervorgabe) -- einfacher Umschalter zwischen zwei Modi, keine volle Reiseliste (v1-Umfang laut Architekturplan). */
-function ScopeSwitch({ isGeneral, tripTitle }: { isGeneral: boolean; tripTitle: string | null }) {
+/** §"Reiseauswahl in Frag LUMI" (Nutzervorgabe): Pill "Reise auswählen"/Titel öffnet den Picker, daneben "Allgemein" -- keine weiteren langen Pill-Reihen. */
+function ModeSwitch({ trips, selectedTripId, familyId, isGeneral }: { trips: TripPickerEntry[]; selectedTripId: string | null; familyId: string; isGeneral: boolean }) {
   return (
-    <div className="flex items-center gap-2 mb-5">
-      <Link
-        href="/concierge"
-        className="px-3 py-1.5 rounded-full"
-        style={{
-          fontSize: "0.68rem", textDecoration: "none",
-          background: !isGeneral ? "rgba(184,154,94,0.14)" : "var(--surface)",
-          border: `1px solid ${!isGeneral ? "rgba(184,154,94,0.4)" : "var(--border)"}`,
-          color: !isGeneral ? "var(--foreground)" : "var(--muted)",
-        }}
-      >
-        {tripTitle ?? "Aktuelle Reise"}
-      </Link>
+    <div className="flex items-center gap-2 mb-2">
+      <LumiTripPicker trips={trips} selectedTripId={selectedTripId} familyId={familyId} returnToBase="/concierge" />
       <Link
         href="/concierge?scope=general"
         className="px-3 py-1.5 rounded-full"
@@ -45,7 +42,7 @@ function ScopeSwitch({ isGeneral, tripTitle }: { isGeneral: boolean; tripTitle: 
 
 type CardData = ReturnType<typeof buildConciergeCards>[number];
 
-function AnswerCard({ card, hiddenFields, returnTo }: { card: CardData; hiddenFields: React.ReactNode; returnTo: string }) {
+function AnswerCard({ card, hiddenFields, allowCommit }: { card: CardData; hiddenFields: React.ReactNode; allowCommit: boolean }) {
   return (
     <div className="rounded-xl p-6 mb-3" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
       <div className="flex items-center gap-2 mb-2">
@@ -90,22 +87,21 @@ function AnswerCard({ card, hiddenFields, returnTo }: { card: CardData; hiddenFi
               {hiddenFields}
               <input type="hidden" name="question_key" value={card.key} />
               <input type="hidden" name="question_text" value={card.questionLabel} />
-              <button
-                type="submit"
-                className="flex items-center gap-1.5"
+              <SubmitButtonWithProgress
+                label={card.stale ? "Empfehlung aktualisieren" : "Änderung prüfen"}
+                pendingLabel="Wird geprüft..."
+                icon={<RefreshCw size={11} strokeWidth={1.6} />}
                 style={{
                   background: card.stale ? "rgba(184,154,94,0.12)" : "transparent",
                   color: card.stale ? "var(--accent)" : "var(--muted)",
                   border: card.stale ? "1px solid rgba(184,154,94,0.35)" : "1px solid var(--border)",
-                  borderRadius: "20px", padding: "6px 12px", fontSize: "0.62rem", cursor: "pointer",
+                  borderRadius: "20px", padding: "6px 12px", fontSize: "0.62rem",
+                  textTransform: "none", letterSpacing: "normal",
                 }}
-              >
-                <RefreshCw size={11} strokeWidth={1.6} />
-                {card.stale ? "Empfehlung aktualisieren" : "Änderung prüfen"}
-              </button>
+              />
             </form>
           )}
-          {card.canCommit && returnTo === RETURN_TO && (
+          {card.canCommit && allowCommit && (
             <form action={commitConciergeAction}>
               {hiddenFields}
               <input type="hidden" name="event_title" value={card.eventTitle} />
@@ -131,26 +127,277 @@ const GENERAL_QUICK_QUESTIONS = [
   "Welche bisherigen Hotels passen am besten zu unseren Vorlieben?",
 ];
 
-/** §"Allgemein"-Modus (Nutzervorgabe): kein tripId, leichterer Kontext (Reisehistorie/Präferenzen statt einer konkreten Reise). */
-async function GeneralConciergeView({ familyId }: { familyId: string }) {
-  const todayIso = new Date().toISOString().slice(0, 10);
-  const messages = await listTodayConciergeMessages(familyId, null, todayIso, "");
-  const cards = buildConciergeCards(null, messages);
+/** §"Kontextbezogene Schnellfragen" (Nutzervorgabe): deckt gezielt die LUMI-Brain-Intents ab (Familienfit/Vergleich/Journey-Lücken), als Freitext vorbelegt statt eigener Buttons/Server-Actions -- funktioniert unabhängig vom Aktiv-Status der Reise. */
+const TRIP_QUICK_QUESTIONS = [
+  "Ist dieser Flug mit unseren Kindern sinnvoll?",
+  "Welches Hotel passt besser zu uns?",
+  "Wo gibt es noch freie Tage?",
+];
 
-  const hiddenFields = (
+function QuickQuestionButtons({ questions, hiddenFields }: { questions: string[]; hiddenFields: React.ReactNode }) {
+  return (
+    <div className="grid grid-cols-1 gap-2">
+      {questions.map((q) => (
+        <form key={q} action={askConcierge}>
+          {hiddenFields}
+          <input type="hidden" name="question_key" value="freetext" />
+          <input type="hidden" name="question_text" value={q} />
+          <SubmitButtonWithProgress
+            label={q}
+            pendingLabel="LUMI denkt nach..."
+            className="w-full text-left"
+            style={{
+              background: "var(--surface)", color: "var(--foreground)", border: "1px dashed var(--border)",
+              borderRadius: "10px", padding: "12px 14px", fontSize: "0.78rem",
+              textTransform: "none", letterSpacing: "normal", justifyContent: "flex-start",
+            }}
+          />
+        </form>
+      ))}
+    </div>
+  );
+}
+
+function FreetextForm({ hiddenFields, placeholder }: { hiddenFields: React.ReactNode; placeholder: string }) {
+  return (
+    <form action={askConcierge} className="rounded-xl overflow-hidden" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+      {hiddenFields}
+      <input type="hidden" name="question_key" value="freetext" />
+      <textarea
+        name="question_text"
+        rows={3}
+        required
+        placeholder={placeholder}
+        style={{ width: "100%", padding: "16px 18px", background: "transparent", border: "none", outline: "none", resize: "none", color: "var(--foreground)", fontSize: "0.85rem", lineHeight: 1.6, fontWeight: 300 }}
+      />
+      <div className="flex items-center justify-end px-4 pb-4">
+        <SubmitButtonWithProgress label="LUMI fragen" pendingLabel="LUMI denkt nach..." />
+      </div>
+    </form>
+  );
+}
+
+function ContextFields({
+  familyId, tripId, tripSlug, forDate, dateLabel, locationLabel, weatherSummary, knownPlanText, highlightTitle, memberNames, returnTo,
+}: {
+  familyId: string; tripId: string; tripSlug: string; forDate: string; dateLabel: string; locationLabel: string
+  weatherSummary: string | null; knownPlanText: string; highlightTitle: string | null; memberNames: string[]; returnTo: string
+}) {
+  return (
     <>
       <input type="hidden" name="family_id" value={familyId} />
-      <input type="hidden" name="trip_id" value="" />
-      <input type="hidden" name="trip_slug" value="" />
-      <input type="hidden" name="for_date" value={todayIso} />
-      <input type="hidden" name="date_label" value={todayIso} />
-      <input type="hidden" name="location_label" value="" />
-      <input type="hidden" name="weather_summary" value="" />
-      <input type="hidden" name="known_plan_text" value="" />
-      <input type="hidden" name="highlight_title" value="" />
-      <input type="hidden" name="member_names" value="" />
-      <input type="hidden" name="return_to" value={RETURN_TO_GENERAL} />
+      <input type="hidden" name="trip_id" value={tripId} />
+      <input type="hidden" name="trip_slug" value={tripSlug} />
+      <input type="hidden" name="for_date" value={forDate} />
+      <input type="hidden" name="date_label" value={dateLabel} />
+      <input type="hidden" name="location_label" value={locationLabel} />
+      <input type="hidden" name="weather_summary" value={weatherSummary ?? ""} />
+      <input type="hidden" name="known_plan_text" value={knownPlanText} />
+      <input type="hidden" name="highlight_title" value={highlightTitle ?? ""} />
+      <input type="hidden" name="member_names" value={memberNames.join(",")} />
+      <input type="hidden" name="return_to" value={returnTo} />
     </>
+  );
+}
+
+function StatusNotices({ sp }: { sp: { error?: string; notice?: string } }) {
+  return (
+    <>
+      {sp.error && <Banner variant="error">{sp.error}</Banner>}
+      {sp.notice && (
+        <div className="mb-6 px-4 py-3 rounded-lg" style={{ background: "rgba(184,154,94,0.08)", border: "1px solid rgba(184,154,94,0.25)", color: "var(--muted)", fontSize: "0.75rem", lineHeight: 1.6 }}>
+          {sp.notice}
+        </div>
+      )}
+    </>
+  );
+}
+
+export default async function ConciergePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ scope?: string; trip?: string; error?: string; notice?: string }>;
+}) {
+  const sp = await searchParams;
+  const { id: familyId } = await getFamily();
+  const todayIso = todayIsoInFamilyTimezone();
+
+  const trips = await listTripsForPicker(familyId);
+  const rememberedTripId = await getRememberedTripId(familyId);
+
+  let selectedTripId: string | null;
+  if (sp.scope === "general") {
+    selectedTripId = null;
+  } else if (sp.trip) {
+    const found = trips.find((t) => t.slug === sp.trip);
+    selectedTripId = found ? found.id : resolveDefaultTripId(trips, rememberedTripId);
+  } else {
+    selectedTripId = resolveDefaultTripId(trips, rememberedTripId);
+  }
+
+  const selectedTrip = selectedTripId ? trips.find((t) => t.id === selectedTripId) ?? null : null;
+  const isGeneral = !selectedTrip;
+  const returnTo = isGeneral ? "/concierge?scope=general" : `/concierge?trip=${selectedTrip.slug}`;
+  const basisLabel = basisLabelFor(selectedTrip);
+
+  const modeSwitch = <ModeSwitch trips={trips} selectedTripId={selectedTripId} familyId={familyId} isGeneral={isGeneral} />;
+  const basisLine = (
+    <div className="mb-6" style={{ color: "var(--muted)", fontSize: "0.68rem" }}>
+      {basisLabel}
+    </div>
+  );
+
+  // ── Allgemein ──────────────────────────────────────────────────────────
+  if (isGeneral) {
+    const messages = await listTodayConciergeMessages(familyId, null, todayIso, "");
+    const cards = buildConciergeCards(null, messages);
+    const hiddenFields = (
+      <ContextFields
+        familyId={familyId} tripId="" tripSlug="" forDate={todayIso} dateLabel={todayIso}
+        locationLabel="" weatherSummary={null} knownPlanText="" highlightTitle={null} memberNames={[]} returnTo={returnTo}
+      />
+    );
+
+    return (
+      <div className="flex-1" style={{ background: "var(--background)" }}>
+        <div className="px-5 md:px-10 py-9" style={{ background: "var(--surface)", borderBottom: "1px solid var(--border)" }}>
+          <div style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "10px" }}>
+            Euer persönlicher Reiseberater
+          </div>
+          <h1 className="font-light mb-3" style={{ color: "var(--foreground)", fontSize: "clamp(1.5rem, 5vw, 2rem)", letterSpacing: "-0.01em" }}>
+            Was sollen wir als Nächstes klären?
+          </h1>
+        </div>
+
+        <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-8">
+          {modeSwitch}
+          {basisLine}
+          <StatusNotices sp={sp} />
+
+          <section className="mb-8">
+            <div style={{ color: "var(--muted)", fontSize: "0.68rem", marginBottom: "10px" }}>
+              Fragen ohne Bezug zu einer bestimmten Reise -- z. B. Inspiration aus euren bisherigen Reisen.
+            </div>
+            <QuickQuestionButtons questions={GENERAL_QUICK_QUESTIONS} hiddenFields={hiddenFields} />
+          </section>
+
+          <section className="mb-10">
+            <FreetextForm hiddenFields={hiddenFields} placeholder="Zum Beispiel: Welche Hotels ähneln One&Only Mandarina?" />
+          </section>
+
+          {cards.length > 0 && (
+            <section>
+              {cards.map((card) => <AnswerCard key={card.key} card={card} hiddenFields={hiddenFields} allowCommit={false} />)}
+            </section>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Konkrete Reise gewählt ───────────────────────────────────────────
+  const ctx: ContentStrategyContext | null = await buildContentStrategyContext(familyId, selectedTrip.id);
+
+  if (ctx) {
+    // Reise ist aktiv gerade laufend -- voller "heutiger" Kontext (unverändert).
+    const fingerprint = buildContextFingerprint(ctx.weatherSummary, ctx.knownPlanText);
+    const [messages, todayRec] = await Promise.all([
+      listTodayConciergeMessages(familyId, ctx.tripId, ctx.forDate, fingerprint),
+      getCachedTodayRecommendation(familyId, ctx.tripId, ctx.forDate),
+    ]);
+    const cards = buildConciergeCards(todayRec, messages);
+    const hiddenFields = (
+      <ContextFields
+        familyId={familyId} tripId={ctx.tripId} tripSlug={ctx.tripSlug} forDate={ctx.forDate} dateLabel={ctx.dateLabel}
+        locationLabel={ctx.locationLabel} weatherSummary={ctx.weatherSummary} knownPlanText={ctx.knownPlanText}
+        highlightTitle={ctx.highlightTitle} memberNames={ctx.memberNames} returnTo={returnTo}
+      />
+    );
+
+    return (
+      <div className="flex-1" style={{ background: "var(--background)" }}>
+        <div className="px-5 md:px-10 py-9" style={{ background: "var(--surface)", borderBottom: "1px solid var(--border)" }}>
+          <div style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "10px" }}>
+            Euer persönlicher Reiseberater
+          </div>
+          <h1 className="font-light mb-3" style={{ color: "var(--foreground)", fontSize: "clamp(1.5rem, 5vw, 2rem)", letterSpacing: "-0.01em" }}>
+            Was sollen wir als Nächstes klären?
+          </h1>
+          <div className="flex items-center gap-4 flex-wrap" style={{ color: "var(--muted)", fontSize: "0.76rem" }}>
+            <span>{ctx.tripTitle}</span>
+            <div className="flex items-center gap-1.5">
+              <MapPin size={12} strokeWidth={1.6} style={{ color: "var(--accent)" }} />
+              {ctx.locationLabel}
+            </div>
+            {ctx.memberNames.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                <Users size={12} strokeWidth={1.6} style={{ color: "var(--accent)" }} />
+                {ctx.memberNames.join(", ")}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-8">
+          {modeSwitch}
+          {basisLine}
+          <StatusNotices sp={sp} />
+
+          <section className="mb-4">
+            <div className="grid grid-cols-2 gap-2">
+              {QUICK_ACTIONS.map((qa) => (
+                <form key={qa.key} action={askConcierge}>
+                  {hiddenFields}
+                  <input type="hidden" name="question_key" value={qa.key} />
+                  <input type="hidden" name="question_text" value={qa.label} />
+                  <SubmitButtonWithProgress
+                    label={qa.label}
+                    pendingLabel="LUMI denkt nach..."
+                    className="w-full text-left"
+                    style={{
+                      background: "var(--surface)", color: "var(--foreground)", border: "1px solid var(--border)",
+                      borderRadius: "10px", padding: "12px 14px", fontSize: "0.78rem",
+                      textTransform: "none", letterSpacing: "normal", justifyContent: "flex-start",
+                    }}
+                  />
+                </form>
+              ))}
+            </div>
+          </section>
+
+          <section className="mb-8">
+            <QuickQuestionButtons questions={TRIP_QUICK_QUESTIONS} hiddenFields={hiddenFields} />
+          </section>
+
+          <section className="mb-10">
+            <FreetextForm hiddenFields={hiddenFields} placeholder="Zum Beispiel: Sollen wir bei diesem Wetter lieber drinnen bleiben?" />
+          </section>
+
+          {cards.length > 0 && (
+            <section>
+              {cards.map((card) => <AnswerCard key={card.key} card={card} hiddenFields={hiddenFields} allowCommit />)}
+            </section>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Konkrete Reise gewählt, aber nicht aktiv laufend (geplant/vergangen) ──
+  // §"Bei ausgewählter Reise muss Frag LUMI den vollständigen vorhandenen
+  // Kontext nutzen" (Nutzervorgabe): "heutiger Plan"/Wetter ergeben hier
+  // keinen Sinn (siehe buildContentStrategyContext), Readiness/Journey/
+  // Dokumente/Flüge/Hotels bleiben über buildLumiBrainContext trotzdem
+  // vollständig nutzbar -- daher bleiben Freitext + Schnellfragen aktiv,
+  // nur die "heute"-QUICK_ACTIONS entfallen (die diesen Kontext brauchen).
+  const messages = await listTodayConciergeMessages(familyId, selectedTrip.id, todayIso, "");
+  const cards = buildConciergeCards(null, messages);
+  const hiddenFields = (
+    <ContextFields
+      familyId={familyId} tripId={selectedTrip.id} tripSlug={selectedTrip.slug} forDate={todayIso} dateLabel={todayIso}
+      locationLabel={selectedTrip.destinationLabel ?? ""} weatherSummary={null} knownPlanText="" highlightTitle={null}
+      memberNames={[]} returnTo={returnTo}
+    />
   );
 
   return (
@@ -162,245 +409,34 @@ async function GeneralConciergeView({ familyId }: { familyId: string }) {
         <h1 className="font-light mb-3" style={{ color: "var(--foreground)", fontSize: "clamp(1.5rem, 5vw, 2rem)", letterSpacing: "-0.01em" }}>
           Was sollen wir als Nächstes klären?
         </h1>
-      </div>
-
-      <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-8">
-        <ScopeSwitch isGeneral tripTitle={null} />
-
-        <section className="mb-8">
-          <div style={{ color: "var(--muted)", fontSize: "0.68rem", marginBottom: "10px" }}>
-            Fragen ohne Bezug zu einer bestimmten Reise -- z. B. Inspiration aus euren bisherigen Reisen.
-          </div>
-          <div className="grid grid-cols-1 gap-2">
-            {GENERAL_QUICK_QUESTIONS.map((q) => (
-              <form key={q} action={askConcierge}>
-                {hiddenFields}
-                <input type="hidden" name="question_key" value="freetext" />
-                <input type="hidden" name="question_text" value={q} />
-                <button
-                  type="submit"
-                  className="w-full text-left"
-                  style={{ background: "var(--surface)", color: "var(--foreground)", border: "1px solid var(--border)", borderRadius: "10px", padding: "12px 14px", fontSize: "0.78rem", cursor: "pointer" }}
-                >
-                  {q}
-                </button>
-              </form>
-            ))}
-          </div>
-        </section>
-
-        <section className="mb-10">
-          <form action={askConcierge} className="rounded-xl overflow-hidden" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-            {hiddenFields}
-            <input type="hidden" name="question_key" value="freetext" />
-            <textarea
-              name="question_text"
-              rows={3}
-              required
-              placeholder="Zum Beispiel: Welche Hotels ähneln One&Only Mandarina?"
-              style={{ width: "100%", padding: "16px 18px", background: "transparent", border: "none", outline: "none", resize: "none", color: "var(--foreground)", fontSize: "0.85rem", lineHeight: 1.6, fontWeight: 300 }}
-            />
-            <div className="flex items-center justify-end px-4 pb-4">
-              <button type="submit" style={{ background: "var(--foreground)", color: "var(--surface)", border: "none", borderRadius: "6px", padding: "10px 20px", fontSize: "0.62rem", letterSpacing: "0.12em", textTransform: "uppercase", cursor: "pointer" }}>
-                LUMI fragen
-              </button>
-            </div>
-          </form>
-        </section>
-
-        {cards.length > 0 && (
-          <section>
-            {cards.map((card) => <AnswerCard key={card.key} card={card} hiddenFields={hiddenFields} returnTo={RETURN_TO_GENERAL} />)}
-          </section>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ContextFields({ familyId, ctx }: { familyId: string; ctx: ContentStrategyContext }) {
-  return (
-    <>
-      <input type="hidden" name="family_id" value={familyId} />
-      <input type="hidden" name="trip_id" value={ctx.tripId} />
-      <input type="hidden" name="trip_slug" value={ctx.tripSlug} />
-      <input type="hidden" name="for_date" value={ctx.forDate} />
-      <input type="hidden" name="date_label" value={ctx.dateLabel} />
-      <input type="hidden" name="location_label" value={ctx.locationLabel} />
-      <input type="hidden" name="weather_summary" value={ctx.weatherSummary ?? ""} />
-      <input type="hidden" name="known_plan_text" value={ctx.knownPlanText} />
-      <input type="hidden" name="highlight_title" value={ctx.highlightTitle ?? ""} />
-      <input type="hidden" name="member_names" value={ctx.memberNames.join(",")} />
-      <input type="hidden" name="return_to" value={RETURN_TO} />
-    </>
-  );
-}
-
-/** §"Kontextbezogene Schnellfragen" (Nutzervorgabe): zusätzlich zu den bestehenden deterministischen QUICK_ACTIONS -- deckt gezielt die neuen LUMI-Brain-Intents ab (Familienfit/Vergleich/Journey-Lücken), als Freitext vorbelegt statt eigener Buttons/Server-Actions. */
-const TRIP_QUICK_QUESTIONS = [
-  "Ist dieser Flug mit unseren Kindern sinnvoll?",
-  "Welches Hotel passt besser zu uns?",
-  "Wo gibt es noch freie Tage?",
-];
-
-export default async function ConciergePage({
-  searchParams,
-}: {
-  searchParams: Promise<{ scope?: string }>;
-}) {
-  const { scope } = await searchParams;
-  const { id: familyId } = await getFamily();
-
-  if (scope === "general") {
-    return <GeneralConciergeView familyId={familyId} />;
-  }
-
-  const ctx = await buildContentStrategyContext(familyId);
-
-  if (!ctx) {
-    return (
-      <div className="flex-1" style={{ background: "var(--background)" }}>
-        <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-9">
-          <div style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "12px" }}>
-            Euer persönlicher Reiseberater
-          </div>
-          <h1 className="font-light mb-6" style={{ color: "var(--foreground)", fontSize: "1.6rem", letterSpacing: "-0.01em" }}>
-            Was sollen wir als Nächstes klären?
-          </h1>
-          <ScopeSwitch isGeneral={false} tripTitle={null} />
-          <div className="rounded-xl p-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-            <p style={{ color: "var(--muted)", fontSize: "0.85rem", lineHeight: 1.6 }}>
-              Aktuell läuft keine Reise. Sobald eine Reise begonnen hat, hilft euch der Concierge hier mit Tagesplanung,
-              offenen Punkten und schnellen Antworten. Allgemeine Fragen (z. B. Inspiration aus euren bisherigen Reisen)
-              gehen auch ohne aktive Reise -- oben "Allgemein" wählen.
-            </p>
-            <Link
-              href="/trips"
-              className="inline-flex items-center gap-1 mt-4"
-              style={{ color: "var(--accent)", fontSize: "0.75rem", letterSpacing: "0.04em", textDecoration: "none" }}
-            >
-              Zu euren Reisen <ChevronRight size={13} strokeWidth={1.6} />
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  const fingerprint = buildContextFingerprint(ctx.weatherSummary, ctx.knownPlanText);
-  const [messages, todayRec] = await Promise.all([
-    listTodayConciergeMessages(familyId, ctx.tripId, ctx.forDate, fingerprint),
-    getCachedTodayRecommendation(familyId, ctx.tripId, ctx.forDate),
-  ]);
-
-  const cards = buildConciergeCards(todayRec, messages);
-  const hiddenFields = <ContextFields familyId={familyId} ctx={ctx} />;
-
-  return (
-    <div className="flex-1" style={{ background: "var(--background)" }}>
-      <div
-        className="px-5 md:px-10 py-9"
-        style={{ background: "var(--surface)", borderBottom: "1px solid var(--border)" }}
-      >
-        <div style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "10px" }}>
-          Euer persönlicher Reiseberater
-        </div>
-        <h1 className="font-light mb-3" style={{ color: "var(--foreground)", fontSize: "clamp(1.5rem, 5vw, 2rem)", letterSpacing: "-0.01em" }}>
-          Was sollen wir als Nächstes klären?
-        </h1>
         <div className="flex items-center gap-4 flex-wrap" style={{ color: "var(--muted)", fontSize: "0.76rem" }}>
-          <span>{ctx.tripTitle}</span>
-          <div className="flex items-center gap-1.5">
-            <MapPin size={12} strokeWidth={1.6} style={{ color: "var(--accent)" }} />
-            {ctx.locationLabel}
-          </div>
-          {ctx.memberNames.length > 0 && (
+          <span>{selectedTrip.title}</span>
+          <span>{selectedTrip.dateRangeLabel}</span>
+          {selectedTrip.destinationLabel && (
             <div className="flex items-center gap-1.5">
-              <Users size={12} strokeWidth={1.6} style={{ color: "var(--accent)" }} />
-              {ctx.memberNames.join(", ")}
+              <MapPin size={12} strokeWidth={1.6} style={{ color: "var(--accent)" }} />
+              {selectedTrip.destinationLabel}
             </div>
           )}
         </div>
       </div>
 
       <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-8">
-        <ScopeSwitch isGeneral={false} tripTitle={ctx.tripTitle} />
-
-        {/* ── Schnellaktionen ── */}
-        <section className="mb-4">
-          <div className="grid grid-cols-2 gap-2">
-            {QUICK_ACTIONS.map((qa) => (
-              <form key={qa.key} action={askConcierge}>
-                {hiddenFields}
-                <input type="hidden" name="question_key" value={qa.key} />
-                <input type="hidden" name="question_text" value={qa.label} />
-                <button
-                  type="submit"
-                  className="w-full text-left"
-                  style={{
-                    background: "var(--surface)", color: "var(--foreground)", border: "1px solid var(--border)",
-                    borderRadius: "10px", padding: "12px 14px", fontSize: "0.78rem", cursor: "pointer",
-                  }}
-                >
-                  {qa.label}
-                </button>
-              </form>
-            ))}
-          </div>
-        </section>
+        {modeSwitch}
+        {basisLine}
+        <StatusNotices sp={sp} />
 
         <section className="mb-8">
-          <div className="grid grid-cols-1 gap-2">
-            {TRIP_QUICK_QUESTIONS.map((q) => (
-              <form key={q} action={askConcierge}>
-                {hiddenFields}
-                <input type="hidden" name="question_key" value="freetext" />
-                <input type="hidden" name="question_text" value={q} />
-                <button
-                  type="submit"
-                  className="w-full text-left"
-                  style={{ background: "var(--surface)", color: "var(--muted)", border: "1px dashed var(--border)", borderRadius: "10px", padding: "12px 14px", fontSize: "0.78rem", cursor: "pointer" }}
-                >
-                  {q}
-                </button>
-              </form>
-            ))}
-          </div>
+          <QuickQuestionButtons questions={TRIP_QUICK_QUESTIONS} hiddenFields={hiddenFields} />
         </section>
 
-        {/* ── Freitextfrage ── */}
         <section className="mb-10">
-          <form action={askConcierge} className="rounded-xl overflow-hidden" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-            {hiddenFields}
-            <input type="hidden" name="question_key" value="freetext" />
-            <textarea
-              name="question_text"
-              rows={3}
-              required
-              placeholder="Zum Beispiel: Sollen wir bei diesem Wetter lieber drinnen bleiben?"
-              style={{
-                width: "100%", padding: "16px 18px", background: "transparent", border: "none", outline: "none",
-                resize: "none", color: "var(--foreground)", fontSize: "0.85rem", lineHeight: 1.6, fontWeight: 300,
-              }}
-            />
-            <div className="flex items-center justify-end px-4 pb-4">
-              <button
-                type="submit"
-                style={{
-                  background: "var(--foreground)", color: "var(--surface)", border: "none", borderRadius: "6px",
-                  padding: "10px 20px", fontSize: "0.62rem", letterSpacing: "0.12em", textTransform: "uppercase", cursor: "pointer",
-                }}
-              >
-                Concierge fragen
-              </button>
-            </div>
-          </form>
+          <FreetextForm hiddenFields={hiddenFields} placeholder="Zum Beispiel: Was fehlt für diese Reise noch?" />
         </section>
 
-        {/* ── Antworten als Karten ── */}
         {cards.length > 0 && (
           <section>
-            {cards.map((card) => <AnswerCard key={card.key} card={card} hiddenFields={hiddenFields} returnTo={RETURN_TO} />)}
+            {cards.map((card) => <AnswerCard key={card.key} card={card} hiddenFields={hiddenFields} allowCommit={false} />)}
           </section>
         )}
       </div>
