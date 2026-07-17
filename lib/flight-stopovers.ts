@@ -18,6 +18,14 @@ function addDaysIso(date: string, delta: number): string {
   return d.toISOString().slice(0, 10)
 }
 
+/** §"Aufenthalte über 72 Stunden nicht automatisch als Flug-Zwischenstopp klassifizieren" (Nutzervorgabe): ein echter Stopover ist per Definition kurz -- alles darüber ist die eigentliche Reise, keine Umsteige-Übernachtung. */
+const MIN_STOPOVER_HOURS = 24
+const MAX_STOPOVER_HOURS = 72
+
+function hoursBetween(startIso: string, endIso: string): number {
+  return (new Date(endIso).getTime() - new Date(startIso).getTime()) / 3_600_000
+}
+
 type FlightRow = {
   id: string
   start_datetime: string | null
@@ -26,6 +34,33 @@ type FlightRow = {
 }
 
 type StageRow = { start_date: string | null; end_date: string | null }
+
+/**
+ * §Bugfix "falscher Liberia-Zwischenstopp über die gesamte Reisedauer": bei
+ * einem mehretappigen Trip deckt oft KEINE einzelne Etappe allein den vollen
+ * Zeitraum zwischen Hin- und Rückflug ab (jede Etappe nur ein Teilstück) --
+ * die vorherige Prüfung "gibt es EINE Etappe, die start..end abdeckt" schlug
+ * dadurch fehl und ließ Hinflug-Ankunft + Rückflug-Abflug (identischer
+ * Zielflughafen bei jedem Rundflug!) fälschlich als tagelangen "Zwischenstopp"
+ * durchgehen. Jetzt zählt die VEREINIGUNG aller Etappen -- deckt die Reise
+ * den Zeitraum lückenlos ab (auch über mehrere aneinandergrenzende Etappen
+ * hinweg), ist es kein unerklärter Zwischenstopp, sondern schlicht die Reise
+ * selbst ("Ziel-/Ankunftsflughafen nicht als Zwischenstopp melden, wenn dort
+ * die eigentliche Reiseetappe beginnt").
+ */
+function isRangeCoveredByStages(stages: StageRow[], startDate: string, endDate: string): boolean {
+  const intervals = stages
+    .filter((s): s is { start_date: string; end_date: string } => Boolean(s.start_date && s.end_date))
+    .sort((a, b) => a.start_date.localeCompare(b.start_date))
+
+  let cursor = startDate
+  for (const iv of intervals) {
+    if (iv.start_date > cursor) break
+    if (iv.end_date > cursor) cursor = iv.end_date
+    if (cursor >= endDate) return true
+  }
+  return cursor >= endDate
+}
 
 /**
  * Erkennt Zwischenstopps mit nötiger Übernachtung zwischen zwei Flügen derselben
@@ -64,15 +99,23 @@ export async function detectFlightStopoverSuggestions(tripId: string): Promise<F
     if (!arrivalLocation || !departureLocation) continue
     if (arrivalLocation.toLowerCase() !== departureLocation.toLowerCase()) continue
 
-    const arrivalDate = dateOnly(arriving.end_datetime ?? arriving.start_datetime)
-    const nextDepartureDate = dateOnly(departing.start_datetime)
-    if (!arrivalDate || !nextDepartureDate) continue
-    if (nextDepartureDate <= addDaysIso(arrivalDate, 1)) continue // Umsteigen am selben/nächsten Tag ohne Übernachtungslücke
+    const arrivalTimestamp = arriving.end_datetime ?? arriving.start_datetime
+    const departureTimestamp = departing.start_datetime
+    if (!arrivalTimestamp || !departureTimestamp) continue
 
-    const alreadyCovered = stages.some(
-      (s) => s.start_date && s.end_date && s.start_date <= arrivalDate && s.end_date >= nextDepartureDate,
-    )
-    if (alreadyCovered) continue
+    // §"Aufenthaltsdauer realistisch für einen Stopover" + "über 72 Stunden
+    // nicht automatisch als Flug-Zwischenstopp klassifizieren" (Nutzervorgabe):
+    // präzise Stunden aus den echten Zeitstempeln statt grober Datums-Rundung
+    // -- ein Zeitraum über mehrere Reisetage/fast die gesamte Reise fällt
+    // hierdurch strukturell heraus, unabhängig von der Tripdauer.
+    const gapHours = hoursBetween(arrivalTimestamp, departureTimestamp)
+    if (gapHours < MIN_STOPOVER_HOURS || gapHours > MAX_STOPOVER_HOURS) continue
+
+    const arrivalDate = dateOnly(arrivalTimestamp)
+    const nextDepartureDate = dateOnly(departureTimestamp)
+    if (!arrivalDate || !nextDepartureDate) continue
+
+    if (isRangeCoveredByStages(stages, arrivalDate, nextDepartureDate)) continue
 
     suggestions.push({
       location: arrivalLocation,
@@ -125,16 +168,17 @@ export async function detectSingleFlightLayoverSuggestions(tripId: string): Prom
   for (const flight of flights) {
     const airport = flight.details?.layover_airport?.trim()
     const nights = Number(flight.details?.layover_nights)
-    if (!airport || flight.details?.layover_overnight !== 'ja' || !Number.isFinite(nights) || nights <= 0) continue
+    // §"Aufenthalte über 72 Stunden nicht automatisch als Flug-Zwischenstopp
+    // klassifizieren" (Nutzervorgabe): 3 Nächte ≈ 72 Std. -- auch bei einer
+    // manuell im Formular eingetragenen Übernachtung bleibt das die Obergrenze
+    // für einen echten Stopover, nicht für einen mehrtägigen Reiseabschnitt.
+    if (!airport || flight.details?.layover_overnight !== 'ja' || !Number.isFinite(nights) || nights <= 0 || nights > 3) continue
 
     const startDate = dateOnly(flight.start_datetime)
     if (!startDate) continue
     const endDate = addDaysIso(startDate, nights)
 
-    const alreadyCovered = stages.some(
-      (s) => s.start_date && s.end_date && s.start_date <= startDate && s.end_date >= endDate,
-    )
-    if (alreadyCovered) continue
+    if (isRangeCoveredByStages(stages, startDate, endDate)) continue
 
     suggestions.push({
       location: airport,

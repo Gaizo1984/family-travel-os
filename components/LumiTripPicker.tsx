@@ -50,14 +50,20 @@ export function LumiTripPicker({
 
       {open && (
         <>
+          {/* §Bugfix "Picker-Einträge nicht anklickbar": app/(app)/layout.tsx
+             rendert die mobile Bottom-Nav ebenfalls `fixed ... z-50`, aber
+             NACH {children} im DOM -- bei gleichem z-index gewinnt bei
+             position:fixed-Geschwistern die spätere DOM-Reihenfolge, die Nav
+             lag dadurch (unsichtbar) ÜBER dem Sheet und fing Taps auf den
+             unteren Einträgen ab. Sheet/Backdrop müssen über z-50 liegen. */}
           <div
-            className="fixed inset-0 z-40"
+            className="fixed inset-0 z-[60]"
             style={{ background: 'rgba(0,0,0,0.35)' }}
             onClick={() => setOpen(false)}
           />
           <div
-            className="fixed inset-x-0 bottom-0 z-50 md:absolute md:inset-x-auto md:bottom-auto md:top-full md:mt-2 md:w-80 rounded-t-2xl md:rounded-xl overflow-hidden"
-            style={{ background: 'var(--surface)', border: '1px solid var(--border)', maxHeight: '70vh' }}
+            className="fixed inset-x-0 bottom-0 z-[70] md:absolute md:inset-x-auto md:bottom-auto md:top-full md:mt-2 md:w-80 rounded-t-2xl md:rounded-xl overflow-hidden"
+            style={{ background: 'var(--surface)', border: '1px solid var(--border)', maxHeight: '70vh', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
           >
             <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
               <span style={{ color: 'var(--foreground)', fontSize: '0.78rem' }}>Reise auswählen</span>

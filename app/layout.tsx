@@ -6,11 +6,11 @@ import "./globals.css";
 const geist = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "LUMI",
+  title: "Lumi Travel",
   description: "Family Travel OS – eure private Familien-Reise-App",
   appleWebApp: {
     capable: true,
-    title: "LUMI",
+    title: "Lumi Travel",
     statusBarStyle: "black-translucent",
   },
   icons: {
