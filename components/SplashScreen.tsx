@@ -23,6 +23,14 @@ const HOLD_PERCENT = Math.round((HOLD_MS / TOTAL_MS) * 100)
  * hydriert. Der verbleibende `useEffect` entfernt den (dann bereits
  * unsichtbaren) Knoten nur noch der Sauberkeit halber aus dem DOM.
  * Gleichzeitig Gesamtdauer von 2,7s auf 1,35s verkürzt.
+ *
+ * §Bugfix "Splashscreen lädt auf dem Handy weiterhin nicht": die PNG-Datei
+ * war mit 4,8 MB unkomprimiert (Foto als verlustfreies PNG) -- auf
+ * Mobilfunk konnte das Bild oft nicht rechtzeitig laden, bevor die
+ * CSS-Animation bereits durchgelaufen war. Jetzt als optimiertes JPEG
+ * (~240 KB statt 4,8 MB). Zusätzlich `background` auf der Marken-Hintergrund-
+ * farbe, damit auch im kurzen Ladefenster kein weißer/transparenter Blitz
+ * sichtbar ist.
  */
 export function SplashScreen() {
   const [removed, setRemoved] = useState(false)
@@ -47,12 +55,13 @@ export function SplashScreen() {
           position: fixed;
           inset: 0;
           z-index: 9999;
+          background: #E8E3DA;
           animation: lumi-splash-fade ${TOTAL_MS}ms ease forwards;
         }
       `}</style>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src="/splash/splash-1170x2532.png"
+        src="/splash/splash-1170x2532.jpg"
         alt=""
         fetchPriority="high"
         className="absolute inset-0 w-full h-full object-cover"

@@ -18,17 +18,17 @@ export const metadata: Metadata = {
     other: [
       {
         rel: "apple-touch-startup-image",
-        url: "/splash/splash-1170x2532.png",
+        url: "/splash/splash-1170x2532.jpg",
         media: "(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3)",
       },
       {
         rel: "apple-touch-startup-image",
-        url: "/splash/splash-1668x2388.png",
+        url: "/splash/splash-1668x2388.jpg",
         media: "(device-width: 834px) and (device-height: 1194px) and (-webkit-device-pixel-ratio: 2)",
       },
       {
         rel: "apple-touch-startup-image",
-        url: "/splash/splash-1170x2532.png",
+        url: "/splash/splash-1170x2532.jpg",
       },
     ],
   },
