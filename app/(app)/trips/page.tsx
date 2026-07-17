@@ -146,7 +146,7 @@ function PlannedCard({ trip, img }: { trip: TripRow; img: ResolvedTripImage | nu
 
       <div className="absolute top-6 left-7">
         <span style={{ color: "#C8A96E", fontSize: "0.6rem", letterSpacing: "0.22em", textTransform: "uppercase" }}>
-          {isTripCurrentlyRunning({ ...trip, start_date: range.startDate, end_date: range.endDate }) ? "Aktive Reise" : "In Planung"}
+          {isTripCurrentlyRunning({ ...trip, start_date: range.startDate, end_date: range.endDate }) ? "Aktive Reise" : "Bevorstehend"}
         </span>
       </div>
 

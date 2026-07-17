@@ -103,14 +103,20 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
  * berücksichtigt. Jetzt datumsbasiert wie überall sonst (lib/trip-status.ts):
  * eine historische Reise (Status/Enddatum in der Vergangenheit) zeigt IMMER
  * "Abgeschlossen", unabhängig vom eigenen Etappendatum; sonst entscheidet das
- * Etappendatum selbst zwischen "Läuft" und "In Planung".
+ * Etappendatum selbst zwischen "Läuft" und "Bevorstehend".
+ *
+ * §Wortlaut-Fix (Nutzervorgabe): "In Planung" klang nach Buchungs-/
+ * Zahlungsstatus, meinte aber ausschließlich den datumsbasierten
+ * Etappenstatus -- umbenannt in "Bevorstehend", Logik unverändert. Ein
+ * separater Zahlungsstatus ist bewusst NICHT Teil dieser Funktion (kommt
+ * erst im Sprint "Buchungen 2.0").
  */
 function stageStatusLabel(stage: { start_date: string | null; end_date: string | null }, tripHistorical: boolean): string {
   if (tripHistorical || isTripPastEnd({ status: '', start_date: stage.start_date, end_date: stage.end_date }))
     return "Abgeschlossen";
   if (isTripCurrentlyRunning({ status: '', start_date: stage.start_date, end_date: stage.end_date }))
     return "Läuft";
-  return "In Planung";
+  return "Bevorstehend";
 }
 
 function StageCard({ stage, idx, slug, img, tripHistorical }: { stage: StageRow; idx: number; slug: string; img: ResolvedStageImage; tripHistorical: boolean }) {
