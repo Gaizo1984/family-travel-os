@@ -19,6 +19,10 @@ import { isTripHistorical, isTripCurrentlyRunning, isTripPastEnd } from "@/lib/t
 import { resolveStageImages, FALLBACK_STAGE_IMAGE, type ResolvedStageImage } from "@/lib/stage-images";
 import { resolveTripImage, getHighlightPhotoByTripId } from "@/lib/trip-images";
 import { SignedPhoto } from "@/components/SignedPhoto";
+import { resolveCurrentLocation, nearbyStageGeocodeCandidates } from "@/lib/today";
+import { getWeatherForLocation, describeWeatherCode } from "@/lib/weather";
+import { COUNTRY_NAMES } from "@/lib/geo-suggestions";
+import { todayIsoInFamilyTimezone } from "@/lib/time";
 
 const H_FG    = "#F0EBE3";
 const H_MUTED = "#A89880";
@@ -375,13 +379,30 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
   // brauchen nur stages, Highlight-Foto nur familyId/trip.id, Readiness nur
   // trip.id) — resolveStageImages lief bisher separat davor statt in
   // derselben Parallel-Ladung.
-  const [stageImages, highlightPhotoByTripId, readiness] = await Promise.all([
+  // §"Tageswetter auf dem Cover der Reise" (Nutzervorgabe): gleiche
+  // Standort-/Wetter-Auflösung wie /today (lib/today.ts::resolveCurrentLocation
+  // + nearbyStageGeocodeCandidates, lib/weather.ts::getWeatherForLocation) --
+  // keine zweite Wetterlogik, nur an einer weiteren Stelle angezeigt.
+  const todayIso = todayIsoInFamilyTimezone();
+  const currentLocation = resolveCurrentLocation(trip, stages, bookings, todayIso);
+  const countryName = currentLocation.countryCode ? COUNTRY_NAMES[currentLocation.countryCode] ?? null : null;
+  const weatherCandidates = [
+    { query: currentLocation.label, countryCode: currentLocation.countryCode },
+    ...nearbyStageGeocodeCandidates(stages, currentLocation.label, currentLocation.countryCode, todayIso),
+    ...(countryName && countryName !== currentLocation.label ? [{ query: countryName }] : []),
+  ];
+
+  const [stageImages, highlightPhotoByTripId, readiness, heroWeather] = await Promise.all([
     resolveStageImages(supabase, stages),
     getHighlightPhotoByTripId(supabase, familyId, [trip.id]),
     historical ? Promise.resolve(null) : computeTripReadiness(trip.id),
+    getWeatherForLocation(weatherCandidates),
   ]);
   const heroImage = resolveTripImage(trip, highlightPhotoByTripId.get(trip.id) ?? null);
   const groupedFindings = readiness ? groupReadinessFindings(readiness.findings) : [];
+  const heroWeatherInfo = heroWeather ? describeWeatherCode(heroWeather.currentCode) : null;
+  const heroTodayForecast = heroWeather?.daily.find((d) => d.date === todayIso) ?? heroWeather?.daily[0] ?? null;
+  const heroPrecipitation = heroTodayForecast?.precipitationProbability ?? null;
 
   // "Aktive Reise" nur, wenn die Reise anhand der echten Daten gerade läuft —
   // nicht allein anhand des manuell gesetzten Status. Zukünftige Reisen zeigen
@@ -563,6 +584,15 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
             >
               {trip.title}
             </h1>
+            {heroWeather && (
+              <div className="flex items-center gap-1.5 mt-1.5" style={{ color: H_FG, fontSize: "0.8rem" }}>
+                {heroWeatherInfo && <heroWeatherInfo.icon size={15} strokeWidth={1.6} />}
+                {heroWeather.currentTemp}°C · {heroWeatherInfo?.label}
+                {heroWeather.rainStartsAt
+                  ? ` · Regen ab ${heroWeather.rainStartsAt} Uhr`
+                  : heroPrecipitation !== null && ` · ${heroPrecipitation}% Regen`}
+              </div>
+            )}
           </div>
 
           <div className="flex flex-col gap-2">

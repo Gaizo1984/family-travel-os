@@ -11,6 +11,11 @@ import { computeTripReadiness, type ReadinessResult } from "@/lib/readiness";
 import { SignedPhoto } from "@/components/SignedPhoto";
 import { WorldMap } from "@/components/WorldMap";
 import { WorldMapCarousel, type WorldMapPanel } from "@/components/WorldMapCarousel";
+import { resolveCurrentLocation, nearbyStageGeocodeCandidates } from "@/lib/today";
+import { getWeatherForLocation, describeWeatherCode, type WeatherResult } from "@/lib/weather";
+import { COUNTRY_NAMES } from "@/lib/geo-suggestions";
+import { todayIsoInFamilyTimezone } from "@/lib/time";
+import type { StageInput, TimelineBooking } from "@/lib/journey";
 
 type PersonRow = { id: string; name: string; initials: string; color: string };
 type TripRow = {
@@ -34,12 +39,20 @@ function readinessPill(readiness: ReadinessResult): { label: string; color: stri
   return { label, color };
 }
 
-function HeroTrip({ trip, img, readiness }: { trip: TripRow; img: ResolvedTripImage | null; readiness: ReadinessResult | null }) {
+function HeroTrip({
+  trip, img, readiness, weather,
+}: {
+  trip: TripRow; img: ResolvedTripImage | null; readiness: ReadinessResult | null
+  /** §"Tageswetter auf dem Cover" (Nutzervorgabe) -- null, solange sich kein Standort geokodieren lässt. */
+  weather: WeatherResult | null
+}) {
   const range = deriveTripDateRange(trip, trip.bookings, trip.stages);
   const duration = tripDurationDays(range);
   const countdown = tripCountdownDisplay({ ...trip, start_date: range.startDate, end_date: range.endDate }, duration);
   const members = trip.trip_members.flatMap((tm) => (tm.persons ? [tm.persons] : []));
   const todo = readiness && readiness.status !== "ready" ? readinessPill(readiness) : null;
+  const weatherInfo = weather ? describeWeatherCode(weather.currentCode) : null;
+  const weatherPrecipitation = weather?.daily[0]?.precipitationProbability ?? null;
 
   return (
     <div className="group relative overflow-hidden rounded-xl" style={{ height: "340px" }}>
@@ -76,6 +89,15 @@ function HeroTrip({ trip, img, readiness }: { trip: TripRow; img: ResolvedTripIm
           <p className="text-[11px] md:text-xs mt-1.5" style={{ color: "#C9BFAE", letterSpacing: "0.14em", textTransform: "uppercase" }}>
             {trip.subtitle}
           </p>
+        )}
+        {weather && (
+          <div className="flex items-center gap-1.5 mt-1.5" style={{ color: "#F0EBE3", fontSize: "0.78rem" }}>
+            {weatherInfo && <weatherInfo.icon size={14} strokeWidth={1.6} />}
+            {weather.currentTemp}°C
+            {weather.rainStartsAt
+              ? ` · Regen ab ${weather.rainStartsAt} Uhr`
+              : weatherPrecipitation !== null ? ` · ${weatherPrecipitation}% Regen` : ""}
+          </div>
         )}
       </div>
 
@@ -261,12 +283,37 @@ export default async function Dashboard() {
     );
   }
 
+  // §"Tageswetter auf dem Cover der Reise" (Nutzervorgabe): die eingangs
+  // geladenen Trip-Felder reichen für die Datumsableitung, aber nicht für die
+  // Standort-Auflösung (resolveCurrentLocation braucht location/country_code
+  // je Etappe) -- gezielter Zusatz-Query nur für die eine angezeigte Reise,
+  // statt die Haupt-Query für alle Reisen unnötig zu vergrößern.
+  const { data: nextTripDetailRaw } = await supabase
+    .from("trips")
+    .select(`
+      stages ( id, title, location, start_date, end_date, nights, accommodation, sort_order, country_code ),
+      bookings ( id, type, title, provider, status, start_datetime, end_datetime, stage_id, details )
+    `)
+    .eq("id", nextTrip.id)
+    .maybeSingle();
+  const nextTripStages = (nextTripDetailRaw?.stages ?? []) as StageInput[];
+  const nextTripBookings = (nextTripDetailRaw?.bookings ?? []) as TimelineBooking[];
+  const todayIso = todayIsoInFamilyTimezone();
+  const currentLocation = resolveCurrentLocation(nextTrip, nextTripStages, nextTripBookings, todayIso);
+  const countryName = currentLocation.countryCode ? COUNTRY_NAMES[currentLocation.countryCode] ?? null : null;
+  const weatherCandidates = [
+    { query: currentLocation.label, countryCode: currentLocation.countryCode },
+    ...nearbyStageGeocodeCandidates(nextTripStages, currentLocation.label, currentLocation.countryCode, todayIso),
+    ...(countryName && countryName !== currentLocation.label ? [{ query: countryName }] : []),
+  ];
+
   // §"Weltkarte von Familie aufs Hauptdashboard": erst Gesamtkarte, danach
   // per Swipe/Dots eine Karte je Familienmitglied -- alle aus derselben
   // buildTravelWorld-Quelle wie /family/world, keine eigene Aggregation.
-  const [perPersonWorlds, nextTripReadiness] = await Promise.all([
+  const [perPersonWorlds, nextTripReadiness, nextTripWeather] = await Promise.all([
     Promise.all(persons.map((p) => buildTravelWorld({ familyId, personId: p.id }))),
     computeTripReadiness(nextTrip.id),
+    getWeatherForLocation(weatherCandidates),
   ]);
   const mapPanels: WorldMapPanel[] = [
     {
@@ -310,7 +357,7 @@ export default async function Dashboard() {
       </header>
 
       <div className="flex-1 px-5 md:px-8 pb-10 space-y-7">
-        <HeroTrip trip={nextTrip} img={tripImageById.get(nextTrip.id) ?? null} readiness={nextTripReadiness} />
+        <HeroTrip trip={nextTrip} img={tripImageById.get(nextTrip.id) ?? null} readiness={nextTripReadiness} weather={nextTripWeather} />
 
         <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <StatTile value={worldStats.tripsCount} label="Reisen gesamt" Icon={MapIcon} href="/trips" />
