@@ -2,45 +2,54 @@
 
 import { useEffect, useState } from 'react'
 
-const SPLASH_DURATION_MS = 2200
-const FADE_DURATION_MS = 500
+const HOLD_MS = 900
+const FADE_MS = 450
+const TOTAL_MS = HOLD_MS + FADE_MS
+const HOLD_PERCENT = Math.round((HOLD_MS / TOTAL_MS) * 100)
 
 /**
- * Eigener In-App-Splash direkt nach dem schnellen nativen OS-Start: zeigt das
- * freigegebene Marken-Motiv (dasselbe wie die apple-touch-startup-image-PNGs,
- * damit der Übergang nahtlos wirkt) für ~2,2s, blendet dann weich aus. Kein
- * Ladebalken/Spinner — die dahinterliegende Seite ist als Server Component
- * ohnehin bereits parallel am Laden/Rendern. Rein Client-State: Next.js'
- * Root-Layout wird bei clientseitiger Navigation nicht neu gemountet, der
- * Overlay erscheint also nur beim echten Laden/Öffnen der App.
+ * §Bugfix "Splashscreen bleibt hängen, man sieht die volle Zeit nur das
+ * Logo": die vorherige Version blendete ausschließlich über einen
+ * `useEffect`-`setTimeout` aus -- das serverseitig gerenderte HTML zeigt
+ * das Overlay aber standardmäßig voll sichtbar UND klickblockierend
+ * (`mounted=true, fading=false` sind die React-Default-Werte vor jeder
+ * Hydration). Läuft die Hydration auf einem echten Handy langsam an
+ * (großes JS-Bundle über Mobilfunk) oder überhaupt nicht durch (jeder
+ * andere Hydration-Fehler auf der Seite), feuert der Timer nie -- der
+ * Nutzer sieht dauerhaft ein eingefrorenes, nicht klickbares Logo, exakt
+ * das gemeldete Verhalten. Die Ausblendung läuft jetzt über eine reine
+ * CSS-Animation (inline `<style>`, kein styled-jsx), die der Browser beim
+ * HTML-Parsing sofort ausführt -- unabhängig davon, ob/wann React
+ * hydriert. Der verbleibende `useEffect` entfernt den (dann bereits
+ * unsichtbaren) Knoten nur noch der Sauberkeit halber aus dem DOM.
+ * Gleichzeitig Gesamtdauer von 2,7s auf 1,35s verkürzt.
  */
 export function SplashScreen() {
-  const [mounted, setMounted] = useState(true)
-  const [fading, setFading] = useState(false)
+  const [removed, setRemoved] = useState(false)
 
   useEffect(() => {
-    const fadeTimer = setTimeout(() => setFading(true), SPLASH_DURATION_MS)
-    const removeTimer = setTimeout(() => setMounted(false), SPLASH_DURATION_MS + FADE_DURATION_MS)
-    return () => {
-      clearTimeout(fadeTimer)
-      clearTimeout(removeTimer)
-    }
+    const timer = setTimeout(() => setRemoved(true), TOTAL_MS + 100)
+    return () => clearTimeout(timer)
   }, [])
 
-  if (!mounted) return null
+  if (removed) return null
 
   return (
-    <div
-      aria-hidden="true"
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 9999,
-        opacity: fading ? 0 : 1,
-        transition: `opacity ${FADE_DURATION_MS}ms ease`,
-        pointerEvents: fading ? 'none' : 'auto',
-      }}
-    >
+    <div aria-hidden="true" className="lumi-splash-overlay">
+      <style>{`
+        @keyframes lumi-splash-fade {
+          0% { opacity: 1; pointer-events: auto; }
+          ${HOLD_PERCENT}% { opacity: 1; pointer-events: auto; }
+          ${Math.min(HOLD_PERCENT + 1, 100)}% { pointer-events: none; }
+          100% { opacity: 0; pointer-events: none; }
+        }
+        .lumi-splash-overlay {
+          position: fixed;
+          inset: 0;
+          z-index: 9999;
+          animation: lumi-splash-fade ${TOTAL_MS}ms ease forwards;
+        }
+      `}</style>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src="/splash/splash-1170x2532.png"
