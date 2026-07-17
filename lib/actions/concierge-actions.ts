@@ -12,6 +12,7 @@ import { listTripsForPicker, matchTripsFromText } from '@/lib/lumi-trip-picker'
 import { buildLumiBrainContext, type LumiBrainScope } from '@/lib/lumi-brain-context'
 import { generateLumiBrainAnswer } from '@/lib/lumi-brain-ai'
 import { isLumiBrainLimitReached, incrementLumiBrainUsage } from '@/lib/lumi-brain-usage'
+import { createPendingMemoryCandidate, hasDeclinedSimilarMemory } from '@/lib/family-memories'
 import { getCachedTodayRecommendation, generateAndCacheTodayRecommendation } from '@/lib/today-recommendation'
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt } from '@/lib/family-dna'
 import { sortStagesChronologically, buildJourneyTimeline } from '@/lib/journey'
@@ -23,6 +24,12 @@ function addDaysIso(date: string, delta: number): string {
   const d = new Date(date + 'T00:00:00Z')
   d.setUTCDate(d.getUTCDate() + delta)
   return d.toISOString().slice(0, 10)
+}
+
+/** Hängt einen Query-Parameter an eine Redirect-Ziel-URL an, egal ob sie bereits eine Query-String hat (z.B. `/concierge?trip=x`). */
+function appendQueryParam(url: string, key: string, value: string): string {
+  const separator = url.includes('?') ? '&' : '?'
+  return `${url}${separator}${key}=${encodeURIComponent(value)}`
 }
 
 type StageRow = {
@@ -198,7 +205,14 @@ export async function askConcierge(formData: FormData) {
         redirect(`${basePath}?notice=${encodeURIComponent(`Mehrere Reisen passen zur Frage (${names}) -- bitte über "Reise auswählen" die passende Reise wählen.`)}`)
       }
 
-      const brainContext = await buildLumiBrainContext(ctx.familyId, scope)
+      const brainContext = await buildLumiBrainContext(ctx.familyId, scope, brainIntent)
+      // §"OpenAI-Ausfall erzeugt verständliche Fehlermeldung" (Nutzervorgabe):
+      // vorher fiel ein Kontext-/Antwortfehler kommentarlos auf den
+      // generischen Freitext-Pfad zurück -- der Nutzer bekam eine andere
+      // Antwortqualität ohne erkennbaren Grund. Jetzt wird das ehrlich
+      // benannt (bestehender ?notice=-Banner-Mechanismus), der Fallback
+      // selbst bleibt unverändert bestehen.
+      let fallbackNotice: string | null = null
       if (brainContext.ok) {
         const answer = await generateLumiBrainAnswer({ intent: brainIntent, context: brainContext, questionText: questionTextRaw })
         if (answer) {
@@ -220,6 +234,23 @@ export async function askConcierge(formData: FormData) {
             { onConflict: 'family_id,trip_id,for_date,question_key' },
           )
 
+          // §"Frag LUMI darf eine mögliche Erinnerung erkennen, aber nicht
+          // ungefragt speichern" (Nutzervorgabe): legt NUR einen 'pending'-
+          // Kandidaten an, niemals 'confirmed' -- die Seite zeigt ihn als
+          // eigene Bestätigungskarte. "Ablehnung wird respektiert": vor dem
+          // erneuten Vorschlagen wird auf einen bereits abgelehnten,
+          // gleichartigen Kandidaten geprüft.
+          if (answer.memoryCandidate) {
+            const { memoryType, category, summary } = answer.memoryCandidate
+            const alreadyDeclined = await hasDeclinedSimilarMemory(ctx.familyId, category, summary)
+            if (!alreadyDeclined) {
+              await createPendingMemoryCandidate({
+                familyId: ctx.familyId, tripId: effectiveTripId || null,
+                memoryType, category, summary, source: 'concierge_chat',
+              })
+            }
+          }
+
           if (matchedTrip) {
             // §"Bei eindeutigem Treffer die UI-Auswahl sichtbar auf die
             // erkannte Reise umstellen" + "nur für diese Familie speichern"
@@ -230,10 +261,23 @@ export async function askConcierge(formData: FormData) {
           }
           redirect(ctx.returnTo)
         }
+        fallbackNotice = 'Die spezialisierte LUMI-Antwort war gerade nicht verfügbar -- hier eine allgemeine Einschätzung.'
+      } else {
+        fallbackNotice = brainContext.message
       }
       // §"Bei Fehlern immer ehrlich zurückfallen, nie abstürzen": Kontext-/
       // Antwortfehler fallen bewusst durch auf den bestehenden freien
-      // Fließtext-Pfad unten, statt die Seite scheitern zu lassen.
+      // Fließtext-Pfad unten, statt die Seite scheitern zu lassen -- aber
+      // mit sichtbarem Hinweis statt stillschweigend anderer Antwortqualität.
+      await generateAndCacheConciergeMessage(
+        ctx.familyId, ctx.tripId || null, ctx.forDate, effectiveKey, questionTextRaw,
+        {
+          dateLabel: ctx.dateLabel, locationLabel: ctx.locationLabel, weatherSummary: ctx.weatherSummary,
+          knownPlanText: ctx.knownPlanText, highlightTitle: ctx.highlightTitle, memberNames: ctx.memberNames,
+        },
+        false,
+      )
+      redirect(appendQueryParam(ctx.returnTo, 'notice', fallbackNotice))
     }
   }
 

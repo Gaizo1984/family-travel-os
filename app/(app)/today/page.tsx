@@ -1,7 +1,7 @@
 import Link from "next/link";
 import {
   Clock, ArrowRight, Ticket, Car, ChevronRight, Sparkles, Compass, MessageSquare,
-  FileQuestion, CloudSun, Shuffle, AlertTriangle, RefreshCw, Route, Plane, Hotel,
+  FileQuestion, CloudSun, Shuffle, AlertTriangle, RefreshCw, Route, Plane, Hotel, Heart,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
@@ -254,6 +254,7 @@ const LUMI_SHORTCUTS: Array<{ href: string; label: string; Icon: LucideIcon }> =
   { href: "/hotels", label: "Hotelvergleich", Icon: Hotel },
   { href: "/discover", label: "Neue Reiseideen", Icon: Compass },
   { href: "/concierge", label: "Frag LUMI", Icon: MessageSquare },
+  { href: "/today/preferences", label: "Unsere Vorlieben", Icon: Heart },
 ];
 
 function CategoryGrid() {

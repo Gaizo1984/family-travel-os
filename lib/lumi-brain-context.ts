@@ -7,6 +7,8 @@ import { deriveTripDateRange } from './trip-dates'
 import { computeTripReadiness, type ReadinessStatus } from './readiness'
 import type { HotelShortlistItem } from './trip-idea-hotel-types'
 import type { FlightSearchOption } from './flight-types'
+import { loadRelevantMemories, memoryCategoriesForIntent, type FamilyMemory } from './family-memories'
+import type { LumiBrainIntent } from './lumi-brain-intent'
 
 /**
  * §"LUMI Brain -- zentrale Kontextstruktur" (Nutzervorgabe, wörtlich: "keine
@@ -33,6 +35,8 @@ export type LumiBrainTripContext = {
   hotelOptions: HotelShortlistItem[] | null
   /** Nur befüllt, wenn ein passender Flugsuchlauf existiert (flight_search_cache) -- kein neuer Suchlauf wird ausgelöst. */
   flightOptions: FlightSearchOption[] | null
+  /** §"Kontrolliertes LUMI Memory" (Nutzervorgabe): nur bestätigte, für den Intent relevante Einträge -- niemals der volle Bestand. */
+  relevantMemories: FamilyMemory[]
 }
 
 export type LumiBrainGeneralContext = {
@@ -41,6 +45,7 @@ export type LumiBrainGeneralContext = {
   upcomingTrips: Array<{ title: string; slug: string; startDate: string | null; readinessStatus: ReadinessStatus }>
   travelWorldSummary: { tripsCount: number; countryCount: number; travelDays: number }
   pastAccommodationTitles: string[]
+  relevantMemories: FamilyMemory[]
 }
 
 export type LumiBrainContextResult =
@@ -86,7 +91,7 @@ async function findMatchingFlightOptions(familyId: string, destinationCode: stri
   return (data.results as unknown as FlightSearchOption[]) ?? null
 }
 
-async function buildGeneralContext(familyId: string): Promise<LumiBrainGeneralContext> {
+async function buildGeneralContext(familyId: string): Promise<Omit<LumiBrainGeneralContext, 'relevantMemories'>> {
   const supabase = await createClient()
   const todayIso = new Date().toISOString().slice(0, 10)
 
@@ -142,10 +147,12 @@ async function buildGeneralContext(familyId: string): Promise<LumiBrainGeneralCo
  * KEINE zweite Reise-/Readiness-/Familienlogik. Vergleichsdaten (Hotel/Flug)
  * werden nur gelesen, nie neu gesucht.
  */
-export async function buildLumiBrainContext(familyId: string, scope: LumiBrainScope): Promise<LumiBrainContextResult> {
+export async function buildLumiBrainContext(familyId: string, scope: LumiBrainScope, intent: LumiBrainIntent): Promise<LumiBrainContextResult> {
+  const relevantMemories = await loadRelevantMemories(familyId, memoryCategoriesForIntent(intent))
+
   if (scope.mode === 'general') {
     const general = await buildGeneralContext(familyId)
-    return { ok: true, scope, trip: null, general }
+    return { ok: true, scope, trip: null, general: { ...general, relevantMemories } }
   }
 
   const todayIso = new Date().toISOString().slice(0, 10)
@@ -177,7 +184,7 @@ export async function buildLumiBrainContext(familyId: string, scope: LumiBrainSc
       tripId: lumi.tripId, slug: lumi.tripSlug, title: lumi.tripTitle,
       isActive: lumi.isActive,
       isHistorical,
-      lumi, hotelOptions, flightOptions,
+      lumi, hotelOptions, flightOptions, relevantMemories,
     },
   }
 }

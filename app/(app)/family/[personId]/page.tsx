@@ -7,9 +7,11 @@ import {
   getPassportValidity, formatExpiresAt,
 } from "@/lib/documents";
 import type { DocumentType, DocumentDetails } from "@/lib/documents";
-import { TRAVEL_NEED_OPTIONS } from "@/lib/family-dna";
+import { TRAVEL_NEED_OPTIONS, ageAtDate } from "@/lib/family-dna";
 import { buildTravelWorld } from "@/lib/travel-world";
 import { getFamily } from "@/lib/family";
+import { listTripsForPicker } from "@/lib/lumi-trip-picker";
+import { todayIsoInFamilyTimezone } from "@/lib/time";
 import { getPhotoDisplayUrl, getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
 import { WorldMap } from "@/components/WorldMap";
 import { Map as MapIcon, Globe } from "lucide-react";
@@ -71,7 +73,7 @@ export default async function PersonDetailPage({
   const supabase = await createClient();
   const { data: person } = await supabase
     .from("persons")
-    .select("id, name, initials, color, role_label, description, interest_tags, travel_needs, photo_storage_path")
+    .select("id, name, initials, color, role_label, description, interest_tags, travel_needs, photo_storage_path, birth_date")
     .eq("id", personId)
     .maybeSingle();
 
@@ -82,16 +84,26 @@ export default async function PersonDetailPage({
   // §Performance-Audit: vier voneinander unabhängige Ladevorgänge (alle
   // brauchen nur person.id/photo_storage_path) liefen bisher seriell.
   // §"Egress-Analyse 2026-07-16": 40px-Avatar + 1/1-Grid -- Thumbnails statt Originale, gecachte Signed URLs.
-  const [resolvedPhoto, { data: documents }, personWorldStats, { data: memoryPhotosRaw }] = await Promise.all([
+  const [resolvedPhoto, { data: documents }, personWorldStats, { data: memoryPhotosRaw }, trips] = await Promise.all([
     person.photo_storage_path
       ? getPhotoDisplayUrl("documents", person.photo_storage_path, "thumb400")
       : Promise.resolve(null),
     supabase.from("documents").select("id, doc_type, label, expires_at, details").eq("person_id", person.id).order("created_at", { ascending: true }),
     buildTravelWorld({ familyId, personId: person.id }),
     supabase.from("memory_photos").select("id, storage_path, caption, taken_at, created_at").eq("uploaded_by_person_id", person.id).order("taken_at", { ascending: false, nullsFirst: false }).limit(12),
+    listTripsForPicker(familyId),
   ]);
   const photoUrl = resolvedPhoto?.url ?? null;
   const docs = (documents ?? []) as unknown as DocumentRow[];
+
+  // §"Automatisch berechnetes aktuelles Alter, optional Alter bei der
+  // nächsten Reise" (Nutzervorgabe): ageAtDate() bleibt die einzige Quelle --
+  // hier nur zweimal mit unterschiedlichem Stichtag aufgerufen. Nächste
+  // Reise wiederverwendet den bereits familienweit sortierten Trip-Picker
+  // (aktiv laufende Reise zählt als "nächste", genau wie dort).
+  const currentAge = ageAtDate(person.birth_date, todayIsoInFamilyTimezone());
+  const nextTrip = trips.find((t) => t.status === "active" || t.status === "upcoming") ?? null;
+  const ageAtNextTrip = nextTrip?.startDate ? ageAtDate(person.birth_date, nextTrip.startDate) : null;
 
   const memoryPhotosDisplayByPath = await getPhotoDisplayUrls("documents", (memoryPhotosRaw ?? []).map((p) => p.storage_path), "thumb400");
   const memoryPhotos = (memoryPhotosRaw ?? []).map((p) => ({ ...p, url: memoryPhotosDisplayByPath.get(p.storage_path)?.url ?? null }));
@@ -128,6 +140,14 @@ export default async function PersonDetailPage({
               </h1>
               {person.role_label && (
                 <p style={{ color: "var(--muted)", fontSize: "0.72rem", letterSpacing: "0.04em" }}>{person.role_label}</p>
+              )}
+              {currentAge !== null && (
+                <p style={{ color: "var(--muted)", fontSize: "0.72rem", letterSpacing: "0.04em" }}>
+                  {currentAge} Jahre
+                  {ageAtNextTrip !== null && ageAtNextTrip !== currentAge && nextTrip && (
+                    <> · {ageAtNextTrip} bei {nextTrip.title}</>
+                  )}
+                </p>
               )}
             </div>
           </div>

@@ -3,10 +3,11 @@ import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { updatePersonProfile } from "@/lib/actions/persons";
-import { TRAVEL_NEED_OPTIONS } from "@/lib/family-dna";
+import { TRAVEL_NEED_OPTIONS, ageAtDate } from "@/lib/family-dna";
 import { PhotoCropInput } from "@/components/PhotoCropInput";
 import { Banner } from "@/components/Banner";
 import { getPhotoDisplayUrl } from "@/lib/photo-thumbnails";
+import { todayIsoInFamilyTimezone } from "@/lib/time";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -31,7 +32,7 @@ export default async function EditPersonPage({
   const supabase = await createClient();
   const { data: person } = await supabase
     .from("persons")
-    .select("id, name, role_label, description, interest_tags, travel_needs, photo_storage_path")
+    .select("id, name, role_label, description, interest_tags, travel_needs, photo_storage_path, birth_date, is_minor")
     .eq("id", personId)
     .maybeSingle();
 
@@ -42,6 +43,7 @@ export default async function EditPersonPage({
     : null;
 
   const cancelHref = return_to || `/family/${person.id}`;
+  const currentAge = ageAtDate(person.birth_date, todayIsoInFamilyTimezone());
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -79,6 +81,26 @@ export default async function EditPersonPage({
             <div className="mb-5">
               <label htmlFor="p-name" style={LABEL_STYLE}>Name *</label>
               <input id="p-name" name="name" type="text" required defaultValue={person.name} style={FIELD_STYLE} />
+            </div>
+
+            <div className="mb-5 grid grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="p-birth-date" style={LABEL_STYLE}>Geburtsdatum</label>
+                <input id="p-birth-date" name="birth_date" type="date" defaultValue={person.birth_date ?? ""} style={FIELD_STYLE} />
+                {currentAge !== null && (
+                  <div style={{ color: "var(--muted)", fontSize: "0.68rem", marginTop: "6px" }}>Aktuell {currentAge} Jahre</div>
+                )}
+              </div>
+              <div className="flex flex-col justify-end pb-3">
+                <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+                  <input
+                    type="checkbox" name="is_minor"
+                    defaultChecked={person.is_minor}
+                    style={{ accentColor: "var(--accent)", width: "14px", height: "14px", cursor: "pointer" }}
+                  />
+                  <span style={{ color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 300 }}>Minderjährig</span>
+                </label>
+              </div>
             </div>
 
             <div className="mb-5">

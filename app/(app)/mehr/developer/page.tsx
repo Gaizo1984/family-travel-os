@@ -11,6 +11,8 @@ import { OpenAiTestCard } from './OpenAiTestCard'
 import { FlightSearchTestCard } from './FlightSearchTestCard'
 import { HotelQualificationTestCard } from './HotelQualificationTestCard'
 import { FlightUsageCard } from './FlightUsageCard'
+import { LumiBrainUsageCard } from './LumiBrainUsageCard'
+import { LumiBrainTestCard } from './LumiBrainTestCard'
 
 // §"Duffel-Testaufruf kann mehrere Sekunden dauern": höher als die
 // Plattform-Standardlaufzeit, damit der Flugsuche-Testcard-Button nicht
@@ -70,7 +72,9 @@ export default async function DeveloperPage() {
           <OpenAiTestCard lastRun={runs.openai_recommendations ?? null} placesAvailable={runs.places?.success === true} />
           <FlightSearchTestCard lastRun={runs.flight_search ?? null} />
           <HotelQualificationTestCard lastRun={runs.hotel_qualification ?? null} />
+          <LumiBrainTestCard lastRun={runs.lumi_brain ?? null} />
           <FlightUsageCard />
+          <LumiBrainUsageCard />
         </div>
       </div>
     </div>

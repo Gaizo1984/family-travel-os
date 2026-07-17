@@ -5,6 +5,7 @@ import type { LumiBrainIntent } from './lumi-brain-intent'
 import { extractMentionedDayMonth } from './lumi-brain-intent'
 import { formatDateDE } from './demo-data'
 import { splitDateTime } from './bookings'
+import { formatMemoriesForPrompt } from './family-memories'
 
 const OPENAI_MODEL = 'gpt-5.4'
 
@@ -17,6 +18,12 @@ const OPENAI_MODEL = 'gpt-5.4'
  * `buildBasisLabel` unten) -- deterministisch, damit die Datenbasis-Angabe
  * nie erfunden werden kann.
  */
+export type LumiBrainMemoryCandidate = {
+  memoryType: 'confirmed_preference' | 'observed_pattern' | 'trip_specific_preference' | 'family_member_preference' | 'experience'
+  category: string
+  summary: string
+}
+
 export type LumiBrainAnswer = {
   title: string
   body: string
@@ -24,6 +31,8 @@ export type LumiBrainAnswer = {
   missingInfo: string | null
   basisLabel: string
   links: Array<{ label: string; href: string }>
+  /** §"Frag LUMI darf eine mögliche Erinnerung erkennen, aber nicht ungefragt speichern" (Nutzervorgabe) -- nur ein VORSCHLAG, wird als 'pending' angelegt, nie automatisch bestätigt. */
+  memoryCandidate: LumiBrainMemoryCandidate | null
 }
 
 const LUMI_BRAIN_SCHEMA = {
@@ -33,8 +42,19 @@ const LUMI_BRAIN_SCHEMA = {
     body: { type: 'string', description: 'Kurze, strukturierte Antwort (max. 80 Wörter) -- Stichpunkte statt langer Fließtext-Absätze, wo sinnvoll. Nutzt AUSSCHLIESSLICH die im Kontext gelieferten Fakten, erfindet nichts.' },
     recommendation: { type: ['string', 'null'], description: 'Kurze, konkrete Empfehlung mit Begründung (max. 40 Wörter) -- null, wenn keine sinnvolle Empfehlung möglich ist.' },
     missing_info: { type: ['string', 'null'], description: 'Explizit benannte fehlende/unbekannte Information, falls die Frage nicht vollständig aus dem Kontext beantwortbar ist -- null, wenn nichts fehlt. NIEMALS eine fehlende Angabe erfinden/schätzen, stattdessen hier benennen.' },
+    memory_candidate: {
+      type: ['object', 'null'],
+      description: 'NUR befüllen, wenn der NUTZER im Fragetext selbst eine dauerhafte, wiederholbare Vorliebe oder Erfahrung ausdrückt (nicht die Antwort selbst) -- sonst null. Niemals eine Vorliebe erfinden, die nicht im Fragetext steht.',
+      properties: {
+        memory_type: { type: 'string', enum: ['confirmed_preference', 'observed_pattern', 'trip_specific_preference', 'family_member_preference', 'experience'] },
+        category: { type: 'string', description: 'z.B. hotel, flight, pace, activity, destination, interest' },
+        summary: { type: 'string', description: 'Kurze, menschenlesbare Zusammenfassung (max. 20 Wörter), z.B. "Kleinere, individuellere Resorts bevorzugt".' },
+      },
+      required: ['memory_type', 'category', 'summary'],
+      additionalProperties: false,
+    },
   },
-  required: ['title', 'body', 'recommendation', 'missing_info'],
+  required: ['title', 'body', 'recommendation', 'missing_info', 'memory_candidate'],
   additionalProperties: false,
 }
 
@@ -185,7 +205,7 @@ Erklärte Hotelkriterien: ${criteriaText}
 Beantworte die Frage auf Basis dieser Fakten. WICHTIG: es gibt keine gespeicherten Bewertungen/Sterne zu den bisherigen Hotels -- benenne das explizit als fehlende Information (missing_info), erfinde keine Bewertung. Nutze die erklärten Kriterien für eine sinnvolle, ehrliche Einschätzung/Empfehlung.`
 }
 
-function buildPrompt(intent: LumiBrainIntent, result: Extract<LumiBrainContextResult, { ok: true }>, questionText: string): string {
+function buildCorePrompt(intent: LumiBrainIntent, result: Extract<LumiBrainContextResult, { ok: true }>, questionText: string): string {
   if (intent.type === 'inspiration') return buildInspirationPrompt(questionText, result.general, result.trip?.lumi.dnaText ?? result.general?.dnaText ?? '')
   if (!result.trip) {
     // Alle anderen Intents brauchen eine ausgewählte Reise -- im Allgemein-Modus ehrlich benennen statt zu raten.
@@ -201,6 +221,23 @@ Diese Frage bezieht sich vermutlich auf eine konkrete Reise, aber es ist "Allgem
     case 'vergleich': return buildVergleichPrompt(result.trip, questionText, intent.subject)
     case 'journey_support': return buildJourneySupportPrompt(result.trip, questionText, intent.subject)
   }
+}
+
+/**
+ * §"Kontrolliertes LUMI Memory ... bei jeder Anfrage nur relevante
+ * Memory-Einträge laden" (Nutzervorgabe): EINE Einspeisestelle für alle
+ * Intents, statt jeden der 5 Prompt-Builder oben einzeln anzufassen --
+ * `result.trip.relevantMemories`/`result.general.relevantMemories` sind
+ * bereits intent-gefiltert (siehe lib/lumi-brain-context.ts), hier nur noch
+ * als kurzer Fließtext angehängt.
+ */
+const MEMORY_CANDIDATE_INSTRUCTION = 'Prüfe zusätzlich: drückt der NUTZER im Fragetext selbst eine dauerhafte, wiederholbare Vorliebe oder Erfahrung aus (z.B. "wir mögen kleinere, individuellere Resorts", "Direktflug ist uns einen Mehrpreis wert")? Falls ja, fülle memory_candidate strukturiert aus. Falls die Frage nur eine normale Sachfrage ohne eine solche Aussage ist, setze memory_candidate auf null -- niemals eine Vorliebe erfinden, die nicht im Fragetext steht.'
+
+function buildPrompt(intent: LumiBrainIntent, result: Extract<LumiBrainContextResult, { ok: true }>, questionText: string): string {
+  const corePrompt = buildCorePrompt(intent, result, questionText)
+  const memoriesText = formatMemoriesForPrompt(result.trip?.relevantMemories ?? result.general?.relevantMemories ?? [])
+  const memoriesPart = memoriesText ? `${memoriesText} Berücksichtige dies nur, wenn es zur Frage passt -- erfinde keine weiteren Vorlieben/Erfahrungen über die genannten hinaus.` : ''
+  return [corePrompt, memoriesPart, MEMORY_CANDIDATE_INSTRUCTION].filter(Boolean).join('\n\n')
 }
 
 function buildLinks(intent: LumiBrainIntent, result: Extract<LumiBrainContextResult, { ok: true }>): Array<{ label: string; href: string }> {
@@ -243,11 +280,15 @@ export async function generateLumiBrainAnswer(params: {
       text: { format: { type: 'json_schema', name: 'lumi_brain_answer', schema: LUMI_BRAIN_SCHEMA, strict: true } },
     })
     const parsed = JSON.parse(response.output_text)
+    const memoryCandidate: LumiBrainMemoryCandidate | null = parsed.memory_candidate
+      ? { memoryType: parsed.memory_candidate.memory_type, category: parsed.memory_candidate.category, summary: parsed.memory_candidate.summary }
+      : null
     return {
       title: parsed.title, body: parsed.body,
       recommendation: parsed.recommendation, missingInfo: parsed.missing_info,
       basisLabel: buildBasisLabel(params.intent, params.context),
       links: buildLinks(params.intent, params.context),
+      memoryCandidate,
     }
   } catch (e) {
     console.error('[provider:request-failed]', { provider: 'openai', requestType: 'lumi_brain_answer', httpStatus: (e as { status?: number })?.status ?? 0 })

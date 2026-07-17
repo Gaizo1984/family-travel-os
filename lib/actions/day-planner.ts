@@ -9,6 +9,13 @@ import { generateFiveRecommendations } from '@/lib/concierge-ai'
 import { buildLumiContext, lumiContextErrorMessage } from '@/lib/lumi-context'
 import { describeWeatherCode } from '@/lib/weather'
 import { MAX_LEG_MINUTES } from '@/lib/dev-test-config'
+import { ageAtDate } from '@/lib/family-dna'
+
+function addDaysIso(date: string, delta: number): string {
+  const d = new Date(date + 'T00:00:00Z')
+  d.setUTCDate(d.getUTCDate() + delta)
+  return d.toISOString().slice(0, 10)
+}
 
 export type DayPlanMode = 'today' | 'tomorrow' | 'bad_weather' | 'morning' | 'afternoon' | 'dinner' | 'custom'
 
@@ -92,6 +99,10 @@ export async function generateDayPlan(formData: FormData) {
   const contextResult = await buildLumiContext(familyId, tripId, new Date().toISOString().slice(0, 10))
   if (!contextResult.ok) redirect(`${returnTo}?error=${encodeURIComponent(lumiContextErrorMessage(contextResult.reason))}`)
   const context = contextResult.context
+  // §"Alter am relevanten Reise- oder Aktivitätsdatum berechnen" (Nutzervorgabe):
+  // "Morgen"-Tagesplan betrifft echt den Folgetag, alle anderen Modi (Vormittag/
+  // Nachmittag/Schlechtwetter/individuell) beziehen sich auf denselben Tag wie "Heute".
+  const planDateIso = mode === 'tomorrow' ? addDaysIso(context.todayIso, 1) : context.todayIso
 
   const origin = context.origin
   const categories = MODE_CATEGORIES[mode] ?? MODE_CATEGORIES.today
@@ -161,7 +172,7 @@ export async function generateDayPlan(formData: FormData) {
       distanceKm: Math.round((r.matrixEl.distanceMeters ?? 0) / 100) / 10,
     })),
     familyDnaText: context.dnaText,
-    members: context.dna.persons.map((p) => ({ name: p.name, age: null, isMinor: p.is_minor })),
+    members: context.dna.persons.map((p) => ({ name: p.name, age: ageAtDate(p.birth_date, planDateIso), isMinor: p.is_minor })),
     weatherSummary: context.weather ? `${context.weather.currentTemp}°C, ${describeWeatherCode(context.weather.currentCode).label}` : null,
   })
 

@@ -16,6 +16,8 @@ export async function updatePersonProfile(formData: FormData) {
   const roleLabel   = String(formData.get('role_label') ?? '').trim()
   const description = String(formData.get('description') ?? '').trim()
   const tagsRaw      = String(formData.get('interest_tags') ?? '').trim()
+  const birthDateRaw = String(formData.get('birth_date') ?? '').trim()
+  const isMinor     = formData.get('is_minor') === 'on'
   const returnTo    = String(formData.get('return_to') ?? '').trim()
   const editPath    = `/family/${personId}/edit`
 
@@ -35,12 +37,15 @@ export async function updatePersonProfile(formData: FormData) {
   const update: {
     name: string; role_label: string | null; description: string | null
     interest_tags: string[]; travel_needs: string[]; photo_storage_path?: string
+    birth_date: string | null; is_minor: boolean
   } = {
     name,
     role_label: roleLabel || null,
     description: description || null,
     interest_tags: interestTags,
     travel_needs: travelNeeds,
+    birth_date: birthDateRaw || null,
+    is_minor: isMinor,
   }
 
   const file = formData.get('file')

@@ -7,6 +7,7 @@ import { computeRouteMatrix, type RouteMatrixElement } from '@/lib/providers/rou
 import { ProviderConfigError } from '@/lib/providers/provider-errors'
 import { generateFiveRecommendations } from '@/lib/concierge-ai'
 import { buildLumiContext, lumiContextErrorMessage, type LumiContext } from '@/lib/lumi-context'
+import { ageAtDate } from '@/lib/family-dna'
 import { getTodayCategoryConfig, type TodayCategoryKey } from '@/lib/today-categories'
 
 export type CategoryPlaceItem = {
@@ -149,7 +150,10 @@ export async function loadCategoryPlaces(formData: FormData) {
       durationMinutes: r.durationMinutes, distanceKm: r.distanceKm,
     })),
     familyDnaText: context.dnaText,
-    members: context.dna.persons.map((p) => ({ name: p.name, age: null, isMinor: p.is_minor })),
+    // §Bugfix "Alter fälschlich hart auf null gesetzt" (Nutzervorgabe, Familienprofil):
+    // Kategorien-Empfehlungen gelten für HEUTE -- Alter zum heutigen Datum berechnen,
+    // nicht erfinden/weglassen, wo birth_date längst geladen ist.
+    members: context.dna.persons.map((p) => ({ name: p.name, age: ageAtDate(p.birth_date, context.todayIso), isMinor: p.is_minor })),
     weatherSummary: context.weather ? `${context.weather.currentTemp}°C, ${context.weather.daily[0]?.tempMin}-${context.weather.daily[0]?.tempMax}°C` : null,
   })
 

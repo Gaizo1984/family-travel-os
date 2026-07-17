@@ -15,7 +15,23 @@ function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`))
 }
 
+/**
+ * §Bugfix "Cron-Routen wurden von der Login-Weiterleitung abgefangen":
+ * Vercel Cron ruft `/api/cron/*` ohne Browser-Session auf (kein `user`) --
+ * die Session-Weiterleitung unten hätte das mit 307 auf /login umgebogen,
+ * BEVOR die route-eigene CRON_SECRET-Prüfung (app/api/cron/.../route.ts)
+ * überhaupt lief. Betraf vermutlich auch den bereits bestehenden
+ * cleanup-content-sessions-Cron. Cron-Routen sichern sich vollständig
+ * selbst (Bearer-Header-Vergleich) -- andere `/api/*`-Routen (z. B.
+ * places-photo) bleiben bewusst weiterhin hinter der Session-Gate.
+ */
+function isCronPath(pathname: string): boolean {
+  return pathname.startsWith('/api/cron/')
+}
+
 export async function proxy(request: NextRequest) {
+  if (isCronPath(request.nextUrl.pathname)) return NextResponse.next()
+
   let response = NextResponse.next({ request })
 
   const supabase = createServerClient(

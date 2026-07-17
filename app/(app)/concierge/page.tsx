@@ -13,6 +13,9 @@ import { LumiTripPicker } from "@/components/LumiTripPicker";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
 import { Banner } from "@/components/Banner";
 import { todayIsoInFamilyTimezone } from "@/lib/time";
+import { listFamilyMemories } from "@/lib/family-memories";
+import type { FamilyMemory } from "@/lib/family-memories";
+import { MemoryCandidateCard } from "@/components/MemoryCandidateCard";
 
 /** §"Basierend auf..." (Nutzervorgabe) -- rein deterministisch, keine KI-Vorschau; identischer Wortlaut wie lib/lumi-brain-ai.ts::buildBasisLabel, hier nur als UI-Text ohne KI-Aufruf dupliziert. */
 function basisLabelFor(selectedTrip: TripPickerEntry | null): string {
@@ -247,6 +250,19 @@ export default async function ConciergePage({
     </div>
   );
 
+  // §"Memory-Vorschläge in Frag LUMI als kleine Bestätigungskarte anzeigen"
+  // (Nutzervorgabe): familienweite Kandidaten (kein trip_id) erscheinen in
+  // jedem Modus, reisegebundene Kandidaten nur bei der passenden Reise.
+  const allPendingMemories = await listFamilyMemories(familyId, "pending");
+  const pendingMemories: FamilyMemory[] = allPendingMemories.filter(
+    (m) => m.tripId === null || m.tripId === selectedTrip?.id,
+  );
+  const memoryCandidatesSection = pendingMemories.length > 0 && (
+    <section className="mb-6">
+      {pendingMemories.map((m) => <MemoryCandidateCard key={m.id} memory={m} returnTo={returnTo} />)}
+    </section>
+  );
+
   // ── Allgemein ──────────────────────────────────────────────────────────
   if (isGeneral) {
     const messages = await listTodayConciergeMessages(familyId, null, todayIso, "");
@@ -273,6 +289,7 @@ export default async function ConciergePage({
           {modeSwitch}
           {basisLine}
           <StatusNotices sp={sp} />
+          {memoryCandidatesSection}
 
           <section className="mb-8">
             <div style={{ color: "var(--muted)", fontSize: "0.68rem", marginBottom: "10px" }}>
@@ -342,6 +359,7 @@ export default async function ConciergePage({
           {modeSwitch}
           {basisLine}
           <StatusNotices sp={sp} />
+          {memoryCandidatesSection}
 
           <section className="mb-4">
             <div className="grid grid-cols-2 gap-2">
@@ -425,6 +443,7 @@ export default async function ConciergePage({
         {modeSwitch}
         {basisLine}
         <StatusNotices sp={sp} />
+        {memoryCandidatesSection}
 
         <section className="mb-8">
           <QuickQuestionButtons questions={TRIP_QUICK_QUESTIONS} hiddenFields={hiddenFields} />

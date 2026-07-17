@@ -2,13 +2,15 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
-import { COMPASS_CATEGORY_ORDER, COMPASS_CATEGORY_LABELS } from "@/lib/family-dna";
+import { COMPASS_CATEGORY_ORDER, COMPASS_CATEGORY_LABELS, ageAtDate } from "@/lib/family-dna";
 import { getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
+import { todayIsoInFamilyTimezone } from "@/lib/time";
 
 type PersonRow = {
   id: string; name: string; initials: string; is_minor: boolean
   role_label: string | null; description: string | null
   interest_tags: string[]; travel_needs: string[]; photo_storage_path: string | null
+  birth_date: string | null;
 };
 
 /**
@@ -20,7 +22,9 @@ type PersonRow = {
  * unveränderten Profil-Detailseite (/family/[personId]).
  */
 function PersonCard({ person, photoUrl }: { person: PersonRow; photoUrl: string | null }) {
-  const summaryLine = person.interest_tags.slice(0, 3).join(" · ") || person.role_label;
+  const age = ageAtDate(person.birth_date, todayIsoInFamilyTimezone());
+  const detailLine = person.interest_tags.slice(0, 3).join(" · ") || person.role_label;
+  const summaryLine = age !== null && detailLine ? `${age} Jahre · ${detailLine}` : age !== null ? `${age} Jahre` : detailLine;
   return (
     <Link href={`/family/${person.id}`} className="block overflow-hidden rounded-xl" style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}>
       <div className="relative overflow-hidden" style={{ height: 175 }}>
@@ -53,7 +57,7 @@ export default async function FamilyPage() {
   const { id: familyId } = await getFamily();
 
   const [{ data: personsRaw }, { data: preferences }] = await Promise.all([
-    supabase.from("persons").select("id, name, initials, is_minor, role_label, description, interest_tags, travel_needs, photo_storage_path").eq("family_id", familyId).order("is_minor"),
+    supabase.from("persons").select("id, name, initials, is_minor, role_label, description, interest_tags, travel_needs, photo_storage_path, birth_date").eq("family_id", familyId).order("is_minor"),
     supabase.from("family_preference_categories").select("category_key, weight, note").eq("family_id", familyId),
   ]);
 

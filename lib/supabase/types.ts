@@ -922,6 +922,31 @@ export interface Database {
           { foreignKeyName: "lumi_brain_usage_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }
         ]
       }
+      family_memories: {
+        Row: {
+          id: string; family_id: string; person_id: string | null; trip_id: string | null
+          memory_type: string; category: string; structured_value: Json; summary: string
+          source: string; status: string; priority: number | null; valid_until: string | null
+          created_at: string; updated_at: string
+        }
+        Insert: {
+          id?: string; family_id: string; person_id?: string | null; trip_id?: string | null
+          memory_type: string; category: string; structured_value?: Json; summary: string
+          source: string; status?: string; priority?: number | null; valid_until?: string | null
+          created_at?: string; updated_at?: string
+        }
+        Update: {
+          id?: string; family_id?: string; person_id?: string | null; trip_id?: string | null
+          memory_type?: string; category?: string; structured_value?: Json; summary?: string
+          source?: string; status?: string; priority?: number | null; valid_until?: string | null
+          created_at?: string; updated_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "family_memories_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] },
+          { foreignKeyName: "family_memories_person_id_fkey"; columns: ["person_id"]; isOneToOne: false; referencedRelation: "persons"; referencedColumns: ["id"] },
+          { foreignKeyName: "family_memories_trip_id_fkey"; columns: ["trip_id"]; isOneToOne: false; referencedRelation: "trips"; referencedColumns: ["id"] }
+        ]
+      }
       signed_url_cache: {
         Row: {
           id: string; family_id: string; bucket: string; storage_path: string

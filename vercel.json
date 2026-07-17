@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/cleanup-content-sessions",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/cleanup-caches",
+      "schedule": "0 4 * * *"
     }
   ]
 }

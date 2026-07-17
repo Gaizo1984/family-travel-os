@@ -20,6 +20,14 @@ export type LumiBrainIntent =
 
 const REISE_CHECK_KEYWORDS = ['was fehlt', 'fehlt noch', 'reisebereit', 'bereit für die reise', 'noch offen', 'was ist offen', 'checkliste']
 
+// §Bekannte, akzeptierte Grenze (Qualitätsabschluss LUMI Brain v1, dokumentiert
+// statt mit einem Scoring-System gelöst): eine Frage, die sowohl Familienfit-
+// als auch Journey-Support-Formulierungen mischt (z.B. "können wir das
+// verbinden, weil es zu viel für die Kinder ist?") wird wegen der Prüfreihen-
+// folge unten als `familienfit` erkannt, nicht als `journey_support`. Die
+// resultierende Antwort bleibt inhaltlich sinnvoll (Familienfit ist Teil der
+// Frage), nur nicht die primär erwartete Journey-Perspektive -- kein
+// Fehlverhalten, nur eine dokumentierte Priorität.
 const FAMILIENFIT_KEYWORDS = [
   'sinnvoll mit', 'mit unseren kindern', 'mit den kindern', 'für die kinder', 'realistisch',
   'zu voll', 'zu anstrengend', 'familiengerecht', 'schlafzeiten', 'transferzeit', 'zu viel für',
@@ -27,7 +35,13 @@ const FAMILIENFIT_KEYWORDS = [
 
 const VERGLEICH_HOTEL_KEYWORDS = ['welches hotel', 'hotel passt besser', 'hotel vergleich', 'besseres hotel']
 const VERGLEICH_FLIGHT_KEYWORDS = ['welche flugverbindung', 'welcher flug', 'flug passt besser', 'flug vergleich', 'bessere flugverbindung']
-const VERGLEICH_GENERAL_KEYWORDS = ['beste verhältnis', 'komfort, reisezeit', 'preis-leistung', 'was passt besser']
+// §Bugfix "bestes Verhältnis"/"Komfort und Reisezeit" matchten nicht (Nutzervorgabe,
+// Qualitätsabschluss LUMI Brain v1): reines includes() ohne Wortgrenzen -- übliche
+// Flexionsformen/Verbindungswörter ergänzt, keine Grammatik-Normalisierung nötig.
+const VERGLEICH_GENERAL_KEYWORDS = [
+  'beste verhältnis', 'bestes verhältnis', 'komfort, reisezeit', 'komfort und reisezeit',
+  'preis-leistung', 'was passt besser',
+]
 
 const JOURNEY_PLAN_DAY_KEYWORDS = ['plane', 'planen', 'tag planen', 'tagesplan']
 const JOURNEY_TODAY_KEYWORDS = ['heute wichtig', 'was ist heute', 'was steht heute an']
