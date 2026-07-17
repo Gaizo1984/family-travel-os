@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { ALLOWED_DOCUMENT_MIME_TYPES, MAX_DOCUMENT_FILE_SIZE } from '@/lib/documents'
+import { ALLOWED_DOCUMENT_MIME_TYPES, MAX_DOCUMENT_FILE_SIZE, readDateGroupFromFormData } from '@/lib/documents'
 import { TRAVEL_NEED_OPTIONS } from '@/lib/family-dna'
 
 function buildProfilePhotoPath(personId: string, fileName: string): string {
@@ -16,10 +16,20 @@ export async function updatePersonProfile(formData: FormData) {
   const roleLabel   = String(formData.get('role_label') ?? '').trim()
   const description = String(formData.get('description') ?? '').trim()
   const tagsRaw      = String(formData.get('interest_tags') ?? '').trim()
-  const birthDateRaw = String(formData.get('birth_date') ?? '').trim()
   const isMinor     = formData.get('is_minor') === 'on'
   const returnTo    = String(formData.get('return_to') ?? '').trim()
   const editPath    = `/family/${personId}/edit`
+
+  // §"Identische Datumsmatrix wie z.B. beim Flugvergleich verwenden"
+  // (Nutzervorgabe): DateSelectFields liefert drei Felder (_day/_month/_year)
+  // statt eines einzelnen `birth_date`-Werts -- readDateGroupFromFormData ist
+  // dieselbe Hilfsfunktion, die auch Dokumente/Reisen/Etappen nutzen.
+  let birthDate: string | null
+  try {
+    birthDate = readDateGroupFromFormData(formData, 'birth_date', 'Geburtsdatum')
+  } catch (e) {
+    redirect(`${editPath}?error=${encodeURIComponent(e instanceof Error ? e.message : 'Ungültiges Geburtsdatum')}`)
+  }
 
   const travelNeeds = TRAVEL_NEED_OPTIONS
     .map((o) => o.key)
@@ -44,7 +54,7 @@ export async function updatePersonProfile(formData: FormData) {
     description: description || null,
     interest_tags: interestTags,
     travel_needs: travelNeeds,
-    birth_date: birthDateRaw || null,
+    birth_date: birthDate,
     is_minor: isMinor,
   }
 

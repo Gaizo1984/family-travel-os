@@ -8,6 +8,8 @@ import { PhotoCropInput } from "@/components/PhotoCropInput";
 import { Banner } from "@/components/Banner";
 import { getPhotoDisplayUrl } from "@/lib/photo-thumbnails";
 import { todayIsoInFamilyTimezone } from "@/lib/time";
+import { DateSelectFields } from "@/components/DateSelectFields";
+import { getDateFieldRange } from "@/lib/documents";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -83,24 +85,29 @@ export default async function EditPersonPage({
               <input id="p-name" name="name" type="text" required defaultValue={person.name} style={FIELD_STYLE} />
             </div>
 
-            <div className="mb-5 grid grid-cols-2 gap-3">
-              <div>
-                <label htmlFor="p-birth-date" style={LABEL_STYLE}>Geburtsdatum</label>
-                <input id="p-birth-date" name="birth_date" type="date" defaultValue={person.birth_date ?? ""} style={FIELD_STYLE} />
-                {currentAge !== null && (
-                  <div style={{ color: "var(--muted)", fontSize: "0.68rem", marginTop: "6px" }}>Aktuell {currentAge} Jahre</div>
-                )}
-              </div>
-              <div className="flex flex-col justify-end pb-3">
-                <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
-                  <input
-                    type="checkbox" name="is_minor"
-                    defaultChecked={person.is_minor}
-                    style={{ accentColor: "var(--accent)", width: "14px", height: "14px", cursor: "pointer" }}
-                  />
-                  <span style={{ color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 300 }}>Minderjährig</span>
-                </label>
-              </div>
+            {/* §Bugfix "jeden Monat manuell zurückklicken" (Nutzervorgabe): natives
+                `type="date"` durch die gemeinsame DateSelectFields-Komponente ersetzt
+                -- exakt dasselbe Muster wie beim Flugvergleich/bei Ausweisdokumenten,
+                Jahr sofort per Dropdown wählbar statt monatsweise zu blättern. */}
+            <DateSelectFields
+              label="Geburtsdatum"
+              namePrefix="birth_date"
+              defaultIso={person.birth_date}
+              range={getDateFieldRange("birth")}
+            />
+            {currentAge !== null && (
+              <div style={{ color: "var(--muted)", fontSize: "0.68rem", marginTop: "-12px", marginBottom: "20px" }}>Aktuell {currentAge} Jahre</div>
+            )}
+
+            <div className="mb-5">
+              <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+                <input
+                  type="checkbox" name="is_minor"
+                  defaultChecked={person.is_minor}
+                  style={{ accentColor: "var(--accent)", width: "14px", height: "14px", cursor: "pointer" }}
+                />
+                <span style={{ color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 300 }}>Minderjährig</span>
+              </label>
             </div>
 
             <div className="mb-5">
