@@ -58,24 +58,32 @@ export type MemoryPhotoInput = {
 /** §"Ein Flug/Mietwagen/... erzeugt ggf. zwei Tages-Vorkommnisse" (bereits etablierte Regel, siehe lib/journey.ts::expandBookingOccurrences) -- hier eins zu eins auf JourneyEvent übertragen, keine zweite Expansions-Logik. */
 const HIGH_PRIORITY_BOOKING_TYPES = new Set<BookingType>(['flight', 'transfer', 'train', 'ferry'])
 
-function bookingStatusToUnified(status: string): JourneyEventStatusUnified {
-  return status === 'cancelled' ? 'missing' : 'confirmed'
-}
-
+/**
+ * §Bugfix "Hotel-Eintrag fälschlich mit 'Fehlt' markiert": stornierte
+ * Buchungen wurden bisher trotzdem angezeigt, nur mit `status:'missing'`
+ * ("Fehlt") -- das ist nicht die etablierte Konvention. Überall sonst
+ * (lib/today.ts::buildTodayTimelineItems, JourneyDayRow.tsx::renderDayItems)
+ * werden stornierte Buchungen komplett aus der Anzeige gefiltert, nie mit
+ * einem Fehler-Badge gezeigt. Für `accommodation`-Buchungen ist das Status-
+ * Feld im Bearbeitungsformular zudem gar nicht sichtbar (siehe
+ * BOOKING_TYPE_CONFIG.accommodation.visibleFields.status=false) -- ein
+ * "Fehlt"-Badge wäre für den Nutzer ohnehin nicht behebbar gewesen.
+ */
 export function bookingsToJourneyEvents(
   bookings: TimelineBooking[],
   slug: string,
 ): JourneyEvent[] {
-  return expandBookingOccurrences(bookings).map(({ date, booking }) => ({
+  const activeBookings = bookings.filter((b) => b.status !== 'cancelled')
+  return expandBookingOccurrences(activeBookings).map(({ date, booking }) => ({
     id: `booking-${booking.id}-${date}`,
     source: 'booking',
     sourceId: booking.id,
     date,
-    time: booking.isEndOccurrence ? (booking.start_datetime?.slice(11, 16) ?? null) : (booking.start_datetime?.slice(11, 16) ?? null),
+    time: booking.start_datetime?.slice(11, 16) ?? null,
     title: booking.isEndOccurrence ? booking.title : (booking.provider ? `${booking.provider} · ${booking.title}` : booking.title),
     subtitle: booking.provider,
     category: booking.type,
-    status: bookingStatusToUnified(booking.status),
+    status: 'confirmed',
     priority: HIGH_PRIORITY_BOOKING_TYPES.has(booking.type) ? 'high' : 'normal',
     location: null,
     stageId: booking.stage_id ?? null,
@@ -179,9 +187,13 @@ export type JourneyOverview = {
 function sortEventsWithinDay(events: JourneyEvent[]): JourneyEvent[] {
   return [...events].sort((a, b) => {
     // Flug immer vor Hotel-Check-in am selben Tag, außer als End-Vorkommnis (Check-out schließt vor dem Rückflug ab) --
-    // gleiche Regel wie bisher in JourneyDayRow.tsx::compareDayItems, hier zentral statt in der Komponente.
-    if (a.category === 'flight' && b.category === 'accommodation') return b.isEndOccurrence ? -1 : 1
-    if (a.category === 'accommodation' && b.category === 'flight') return a.isEndOccurrence ? 1 : -1
+    // §Bugfix "Springhill-Hotel-Check-in erscheint vor dem Abflug, Check-out
+    // nach statt vor dem Rückflug": die aus JourneyDayRow.tsx übernommene
+    // Regel war invertiert. Korrekt: ein Check-out (End-Vorkommnis) schließt
+    // IMMER vor einem Flug ab (man reist ab, dann geht's zum Flughafen); ein
+    // Check-in folgt IMMER auf einen Flug (man landet, dann checkt man ein).
+    if (a.category === 'flight' && b.category === 'accommodation') return b.isEndOccurrence ? 1 : -1
+    if (a.category === 'accommodation' && b.category === 'flight') return a.isEndOccurrence ? -1 : 1
     return (a.time ?? '99:99').localeCompare(b.time ?? '99:99')
   })
 }

@@ -31,6 +31,9 @@ function WeatherOutlookStrip({ daily }: { daily: DailyForecast[] }) {
             <span style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.06em" }}>{formatDateDE(d.date).slice(0, 5)}</span>
             <info.icon size={16} strokeWidth={1.6} style={{ color: "var(--accent)" }} />
             <span style={{ color: "var(--foreground)", fontSize: "0.72rem" }}>{d.tempMax}°</span>
+            {d.precipitationProbability !== null && (
+              <span style={{ color: "var(--muted)", fontSize: "0.58rem" }}>{d.precipitationProbability}%</span>
+            )}
           </div>
         );
       })}

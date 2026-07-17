@@ -87,6 +87,7 @@ export function JourneyDayCard({ day, photoUrlByPhotoId }: { day: JourneyDayBuck
           <span className="inline-flex items-center gap-1" style={{ color: "var(--muted)", fontSize: "0.68rem" }}>
             <weather.icon size={13} strokeWidth={1.6} />
             {day.weather!.tempMax}°/{day.weather!.tempMin}°
+            {day.weather!.precipitationProbability !== null && ` · ${day.weather!.precipitationProbability}% Regen`}
           </span>
         )}
       </div>

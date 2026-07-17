@@ -20,8 +20,8 @@ import { formatDateDE } from "@/lib/demo-data";
  * behalten ihre normale Uhrzeit-Sortierung.
  */
 function compareDayItems(a: Item, b: Item): number {
-  if (a.type === "flight" && b.type === "accommodation") return b.isEnd ? -1 : 1;
-  if (a.type === "accommodation" && b.type === "flight") return a.isEnd ? 1 : -1;
+  if (a.type === "flight" && b.type === "accommodation") return b.isEnd ? 1 : -1;
+  if (a.type === "accommodation" && b.type === "flight") return a.isEnd ? -1 : 1;
   return a.sortKey.localeCompare(b.sortKey);
 }
 
