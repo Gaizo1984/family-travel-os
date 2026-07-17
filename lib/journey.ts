@@ -74,7 +74,7 @@ export type TimelineBooking = {
  * als solcher beschrifteter Eintrag am End-Datum in die Journey einsortiert.
  * Dieselbe zugrunde liegende Buchung (gleiche id), kein zweiter Datensatz.
  */
-function expandBookingOccurrences(bookings: TimelineBooking[]): Array<{ date: string; booking: TimelineBooking }> {
+export function expandBookingOccurrences(bookings: TimelineBooking[]): Array<{ date: string; booking: TimelineBooking }> {
   const occurrences: Array<{ date: string; booking: TimelineBooking }> = []
   for (const b of bookings) {
     const startDate = dateOnly(b.start_datetime)

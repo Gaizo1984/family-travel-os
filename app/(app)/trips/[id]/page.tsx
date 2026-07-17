@@ -7,7 +7,6 @@ import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { sortBookingsChronologically, BOOKING_CATEGORIES, BOOKING_CATEGORY_ORDER } from "@/lib/bookings";
 import type { BookingType, BookingStatus } from "@/lib/supabase/types";
-import { DayRow } from "./JourneyDayRow";
 import {
   sortStagesChronologically, buildJourneyTimeline, buildRouteChips,
   type TimelineSegment, type TimelineDay,
@@ -211,71 +210,6 @@ function RouteChips({ chips }: { chips: string[] }) {
           </div>
         ))}
       </div>
-    </div>
-  );
-}
-
-function StaySegmentCard({ segment, slug }: { segment: Extract<TimelineSegment, { kind: "stay" }>; slug: string }) {
-  const { stage, days } = segment;
-  const dateRange = stage.start_date && stage.end_date
-    ? `${formatDateDE(stage.start_date)} – ${formatDateDE(stage.end_date)}`
-    : "—";
-
-  const importantDays = days.filter((d) => d.isStageStart || d.isStageEnd || d.bookings.length + d.events.length > 0);
-  const quietDays = days.filter((d) => !d.isStageStart && !d.isStageEnd && d.bookings.length + d.events.length === 0);
-
-  return (
-    <div className="rounded-xl overflow-hidden" style={{ border: "1px solid var(--border)" }}>
-      <div className="p-5" style={{ background: "var(--surface)" }}>
-        <div className="flex items-center justify-between flex-wrap gap-3 mb-1">
-          <div className="text-sm font-medium" style={{ color: "var(--foreground)" }}>
-            {stage.accommodation || stage.title}
-          </div>
-          <Link href={`/trips/${slug}/stages/${stage.id}`} style={{ color: "var(--accent)", fontSize: "0.65rem", letterSpacing: "0.08em", textDecoration: "none" }}>
-            Aufenthalt planen →
-          </Link>
-        </div>
-        <div style={{ color: "var(--muted)", fontSize: "0.72rem" }}>
-          {(stage.location ?? stage.title)} · {dateRange} · {stage.nights} {stage.nights === 1 ? "Nacht" : "Nächte"}
-        </div>
-      </div>
-      <div className="px-5" style={{ background: "var(--background)" }}>
-        {importantDays.map((day) => (
-          <DayRow key={day.date} day={day} slug={slug} />
-        ))}
-        {quietDays.length > 0 && (
-          <details className="py-2">
-            <summary style={{ cursor: "pointer", color: "var(--muted)", fontSize: "0.68rem", letterSpacing: "0.04em" }}>
-              {quietDays.length} ruhige {quietDays.length === 1 ? "Tag" : "Tage"} ohne Programm
-            </summary>
-            <div className="pt-2">
-              {quietDays.map((day) => (
-                <DayRow key={day.date} day={day} slug={slug} />
-              ))}
-            </div>
-          </details>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/** Kompakte Zusammenfassung aufeinanderfolgender kurzer Tages-Segmente (0–1-Nacht-
- * Stopps, etappenlose Tage) in einer einzigen Karte statt einer Karte pro Tag —
- * Aufenthalte/Hotels bleiben dadurch die visuell stärkeren Ankerpunkte. */
-function DayGroupCard({ days, slug }: { days: TimelineDay[]; slug: string }) {
-  return (
-    <div className="rounded-xl overflow-hidden px-5" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-      {days.map((day) => (
-        <div key={day.date}>
-          {day.stage && (
-            <div className="pt-2.5" style={{ color: "var(--muted)", fontSize: "0.64rem", letterSpacing: "0.04em" }}>
-              {day.stage.location ?? day.stage.title}
-            </div>
-          )}
-          <DayRow day={day} slug={slug} />
-        </div>
-      ))}
     </div>
   );
 }
@@ -691,10 +625,6 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
                 >
                   Journey
                 </h2>
-                {/* §Punkt 4 "Nach der Reise zeigt Journey den tatsächlich erlebten
-                    Ablauf": reine Darstellungs-Ergänzung auf Basis der bereits
-                    vorhandenen datumsbasierten Reise-Historie (lib/trip-status.ts),
-                    kein neues journey_events-Statusfeld. */}
                 {isTripHistorical(trip) && (
                   <span
                     style={{
@@ -707,34 +637,33 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
                   </span>
                 )}
               </div>
-              <Link
-                href={`/trips/${trip.slug}/journey-events/new`}
-                style={{ color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.08em", textDecoration: "none" }}
-              >
-                + Journey-Termin
-              </Link>
             </div>
 
-            {journeyBlocks.length > 0 ? (
-              <div className="space-y-2.5">
-                {journeyBlocks.map((block) =>
-                  block.kind === "stay" ? (
-                    <StaySegmentCard key={block.segment.stage.id} segment={block.segment} slug={trip.slug} />
-                  ) : (
-                    <DayGroupCard key={block.days[0].date} days={block.days} slug={trip.slug} />
-                  )
-                )}
-              </div>
-            ) : (
-              <div
-                className="rounded-xl p-6"
-                style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
-              >
+            {/* §"Journey 2.0": die vollständige Tages-Timeline lebt jetzt auf
+                einer eigenen Seite (/trips/[id]/journey) mit Vor-/Heute-/
+                Während-/Nach-der-Reise-Gliederung -- hier nur noch eine
+                kompakte Vorschau plus Link, keine doppelte Timeline-Logik. */}
+            <Link
+              href={`/trips/${trip.slug}/journey`}
+              className="block rounded-xl p-5 transition-opacity hover:opacity-80"
+              style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}
+            >
+              {journeyBlocks.length > 0 ? (
+                <p style={{ color: "var(--foreground)", fontSize: "0.85rem" }}>
+                  {duration} {duration === 1 ? "Tag" : "Tage"} · {stages.length} {stages.length === 1 ? "Etappe" : "Etappen"}
+                  {readiness && readiness.conflictCount + readiness.hintCount > 0
+                    ? ` · ${readiness.conflictCount + readiness.hintCount} offene ${readiness.conflictCount + readiness.hintCount === 1 ? "Punkt" : "Punkte"}`
+                    : ""}
+                </p>
+              ) : (
                 <p style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
                   Sobald Reisedaten und Etappen feststehen, entsteht hier automatisch eure Reiseerzählung.
                 </p>
-              </div>
-            )}
+              )}
+              <p className="mt-2" style={{ color: "var(--accent)", fontSize: "0.7rem", letterSpacing: "0.04em" }}>
+                Journey öffnen →
+              </p>
+            </Link>
           </section>
 
           <section id="merkliste">

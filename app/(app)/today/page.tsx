@@ -701,6 +701,13 @@ export default async function TodayPage({
               <p style={{ color: "var(--muted)", fontSize: "0.82rem" }}>Noch keine Programmpunkte für heute geplant.</p>
             </Card>
           )}
+          <Link
+            href={`/trips/${activeTrip.slug}/journey`}
+            className="inline-block mt-3"
+            style={{ color: "var(--accent)", fontSize: "0.7rem", letterSpacing: "0.04em", textDecoration: "none" }}
+          >
+            Vollständige Journey ansehen →
+          </Link>
         </section>
 
         {/* ── "Heute empfiehlt LUMI": nur auf Klick, max. 1x täglich aus Cache ── */}

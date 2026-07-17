@@ -96,7 +96,12 @@ async function openMeteoForecast(lat: number, lon: number): Promise<ForecastResu
       temperature_unit: 'celsius',
       forecast_days: '5',
     })
-    const res = await fetch(`${FORECAST_URL}?${params.toString()}`, { cache: 'no-store' })
+    // §"API-Aufrufe und Wetterdaten cachen" (Journey-2.0-Leitplanke): Wetter
+    // ändert sich nicht minütlich -- eine Stunde Next.js-Fetch-Cache statt
+    // `no-store` erspart wiederholte Anfragen für dieselben Koordinaten
+    // (z. B. mehrere Etappen/Tage derselben Reise am selben Ort), ohne eine
+    // neue Cache-Tabelle zu brauchen.
+    const res = await fetch(`${FORECAST_URL}?${params.toString()}`, { next: { revalidate: 3600 } })
     if (!res.ok) return null
     const data = await res.json()
 
