@@ -909,6 +909,14 @@ export interface Database {
           { foreignKeyName: "saved_flight_options_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }
         ]
       }
+      lumi_brain_usage: {
+        Row: { id: string; family_id: string; month_key: string; question_count: number; updated_at: string }
+        Insert: { id?: string; family_id: string; month_key: string; question_count?: number; updated_at?: string }
+        Update: { id?: string; family_id?: string; month_key?: string; question_count?: number; updated_at?: string }
+        Relationships: [
+          { foreignKeyName: "lumi_brain_usage_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }
+        ]
+      }
       signed_url_cache: {
         Row: {
           id: string; family_id: string; bucket: string; storage_path: string

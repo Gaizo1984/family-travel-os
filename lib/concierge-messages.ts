@@ -25,21 +25,21 @@ export function buildContextFingerprint(weatherSummary: string | null, knownPlan
   return `${weatherSummary ?? ''}||${knownPlanText}`
 }
 
-/** Liest alle heutigen Concierge-Nachrichten dieser Reise, neueste zuerst — inkl. Stale-Markierung bei geänderten Rahmenbedingungen. */
+/** Liest alle heutigen Concierge-Nachrichten dieser Reise (oder, bei `tripId=null`, des Allgemein-Modus), neueste zuerst — inkl. Stale-Markierung bei geänderten Rahmenbedingungen. */
 export async function listTodayConciergeMessages(
   familyId: string,
-  tripId: string,
+  tripId: string | null,
   forDate: string,
   currentFingerprint: string,
 ): Promise<CachedConciergeMessage[]> {
   const supabase = await createClient()
-  const { data } = await supabase
+  let query = supabase
     .from('concierge_messages')
     .select('question_key, question_text, answer_title, answer_body, actions, context_fingerprint, created_at')
     .eq('family_id', familyId)
-    .eq('trip_id', tripId)
     .eq('for_date', forDate)
-    .order('created_at', { ascending: false })
+  query = tripId ? query.eq('trip_id', tripId) : query.is('trip_id', null)
+  const { data } = await query.order('created_at', { ascending: false })
 
   return (data ?? []).map((row) => {
     const actions = (row.actions as unknown as StoredActions) ?? []
@@ -83,7 +83,7 @@ export async function getCachedConciergeMessage(
 /** Generiert (KI) und speichert (upsert) — für die erste Antwort auf eine Frage und für "Änderung prüfen"/Regenerieren gleichermaßen. */
 export async function generateAndCacheConciergeMessage(
   familyId: string,
-  tripId: string,
+  tripId: string | null,
   forDate: string,
   questionKey: string,
   questionText: string,

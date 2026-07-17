@@ -7,7 +7,7 @@ import { resolveTripAiContext } from './today-trip-context'
 import { computeTripReadiness, type ReadinessFinding } from './readiness'
 import { isTripCurrentlyRunning } from './trip-status'
 import { deriveTripDateRange } from './trip-dates'
-import type { StageInput, TimelineBooking } from './journey'
+import type { StageInput, TimelineBooking, TimelineEvent } from './journey'
 
 export type LumiJourneyItem = { id: string; date: string; title: string; category: string }
 
@@ -18,6 +18,8 @@ export type LumiContext = {
   tripTitle: string
   isActive: boolean
   todayIso: string
+  startDate: string | null
+  endDate: string | null
   /** 1-basiert, nur gesetzt wenn die Reise heute läuft. */
   currentTripDay: number | null
   tripDurationDays: number
@@ -33,6 +35,13 @@ export type LumiContext = {
   upcomingBookings: TimelineBooking[]
   plannedActivities: LumiJourneyItem[]
   readinessFindings: ReadinessFinding[]
+  /** §"LUMI Brain, keine zweite Journey-Logik": rohe Etappen/Buchungen/Termine
+   * dieser Reise -- bereits Teil dieser Abfrage, hier nur zusätzlich
+   * exponiert, damit Aufrufer (lib/lumi-brain-context.ts) `buildJourneyTimeline`
+   * direkt selbst aufrufen können, statt eine zweite Abfrage zu bauen. */
+  stages: StageInput[]
+  allBookings: TimelineBooking[]
+  allEvents: TimelineEvent[]
 }
 
 export type LumiContextResult =
@@ -51,7 +60,7 @@ type TripRow = {
   trip_members: Array<{ persons: { name: string } | null }>
   stages: StageInput[]
   bookings: TimelineBooking[]
-  journey_events: LumiJourneyItem[]
+  journey_events: TimelineEvent[]
 }
 
 function daysBetween(startIso: string, endIso: string): number {
@@ -97,7 +106,7 @@ export async function buildLumiContext(familyId: string, tripId: string, todayIs
       trip_members ( persons ( name ) ),
       stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code, cover_photo_id ),
       bookings ( id, type, title, provider, status, start_datetime, end_datetime, stage_id, details ),
-      journey_events ( id, date, title, category )
+      journey_events ( id, date, time, category, title, location, status )
     `).eq('id', tripId).maybeSingle(),
     buildFamilyDnaSummary(familyId),
   ])
@@ -144,11 +153,13 @@ export async function buildLumiContext(familyId: string, tripId: string, todayIs
 
   return { ok: true, context: {
     familyId, tripId: trip.id, tripSlug: trip.slug, tripTitle: trip.title, isActive, todayIso,
+    startDate: trip.start_date, endDate: trip.end_date,
     currentTripDay, tripDurationDays,
     origin, countryCode: aiContext.countryCode, weather: aiContext.weather,
     dna, dnaText: formatFamilyDnaForPrompt(dna, todayIso), memberNames: aiContext.memberNames,
     hasRentalCar, todaysBookings, upcomingBookings,
     plannedActivities: trip.journey_events,
     readinessFindings: readiness.findings,
+    stages: trip.stages, allBookings: trip.bookings, allEvents: trip.journey_events,
   } }
 }

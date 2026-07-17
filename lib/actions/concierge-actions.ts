@@ -7,6 +7,10 @@ import {
 } from '@/lib/concierge'
 import { normalizeQuestionKey, generateAndCacheConciergeMessage } from '@/lib/concierge-messages'
 import { detectLumiIntent } from '@/lib/today'
+import { detectLumiBrainIntent } from '@/lib/lumi-brain-intent'
+import { buildLumiBrainContext, type LumiBrainScope } from '@/lib/lumi-brain-context'
+import { generateLumiBrainAnswer } from '@/lib/lumi-brain-ai'
+import { isLumiBrainLimitReached, incrementLumiBrainUsage } from '@/lib/lumi-brain-usage'
 import { getCachedTodayRecommendation, generateAndCacheTodayRecommendation } from '@/lib/today-recommendation'
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt } from '@/lib/family-dna'
 import { sortStagesChronologically, buildJourneyTimeline } from '@/lib/journey'
@@ -63,7 +67,13 @@ export async function askConcierge(formData: FormData) {
   const questionKey = String(formData.get('question_key') ?? '')
   const questionTextRaw = String(formData.get('question_text') ?? '').trim()
 
-  if (!ctx.familyId || !ctx.tripId || !ctx.forDate) redirect(ctx.returnTo)
+  // §"Allgemein"-Modus (Nutzervorgabe): kein tripId mehr zwingend erforderlich
+  // -- nur die deterministischen, trip-gebundenen Schnellaktionen unten
+  // brauchen weiterhin zwingend eine Reise (die UI zeigt sie im
+  // Allgemein-Modus ohnehin nicht an).
+  if (!ctx.familyId || !ctx.forDate) redirect(ctx.returnTo)
+  const tripBoundKeys = ['today_important', 'plan_tomorrow', 'whats_missing', 'explain_conflict']
+  if (tripBoundKeys.includes(questionKey) && !ctx.tripId) redirect(ctx.returnTo)
 
   if (questionKey === 'today_important') {
     let rec = await getCachedTodayRecommendation(ctx.familyId, ctx.tripId, ctx.forDate)
@@ -152,10 +162,51 @@ export async function askConcierge(formData: FormData) {
     const intent = detectLumiIntent(questionTextRaw)
     if (intent?.type === 'category') redirect(`/today/category/${intent.category}`)
     if (intent?.type === 'day_plan') redirect('/today/plan')
+
+    // §"LUMI Brain / Frag LUMI" (Nutzervorgabe): Erklärung/Priorisierung/
+    // Vergleich/Empfehlung auf Basis bereits bestehender Readiness-/Journey-/
+    // Hotel-/Flug-Ergebnisse -- kein zweiter, paralleler Kontext- oder
+    // Readiness-Aufbau (siehe lib/lumi-brain-context.ts::buildLumiBrainContext,
+    // die ausschließlich buildLumiContext/buildTravelWorld wiederverwendet).
+    const brainIntent = detectLumiBrainIntent(questionTextRaw)
+    if (brainIntent) {
+      const limitReached = await isLumiBrainLimitReached(ctx.familyId)
+      if (limitReached) {
+        redirect(`${ctx.returnTo}?error=${encodeURIComponent('Monatliches LUMI-Anfragelimit erreicht -- bitte später erneut versuchen.')}`)
+      }
+
+      const scope: LumiBrainScope = ctx.tripId ? { mode: 'trip', tripId: ctx.tripId } : { mode: 'general' }
+      const brainContext = await buildLumiBrainContext(ctx.familyId, scope)
+      if (brainContext.ok) {
+        const answer = await generateLumiBrainAnswer({ intent: brainIntent, context: brainContext, questionText: questionTextRaw })
+        if (answer) {
+          await incrementLumiBrainUsage(ctx.familyId)
+          const supabase = await createClient()
+          const combinedBody = [
+            answer.basisLabel, answer.body,
+            answer.recommendation ? `Empfehlung: ${answer.recommendation}` : null,
+            answer.missingInfo ? `Fehlende Angabe: ${answer.missingInfo}` : null,
+          ].filter(Boolean).join('\n\n')
+          await supabase.from('concierge_messages').upsert(
+            {
+              family_id: ctx.familyId, trip_id: ctx.tripId || null, for_date: ctx.forDate, question_key: effectiveKey,
+              question_text: questionTextRaw, answer_title: answer.title, answer_body: combinedBody,
+              actions: [{ event_title: answer.title, links: answer.links }], context_fingerprint: null,
+              created_at: new Date().toISOString(),
+            },
+            { onConflict: 'family_id,trip_id,for_date,question_key' },
+          )
+          redirect(ctx.returnTo)
+        }
+      }
+      // §"Bei Fehlern immer ehrlich zurückfallen, nie abstürzen": Kontext-/
+      // Antwortfehler fallen bewusst durch auf den bestehenden freien
+      // Fließtext-Pfad unten, statt die Seite scheitern zu lassen.
+    }
   }
 
   await generateAndCacheConciergeMessage(
-    ctx.familyId, ctx.tripId, ctx.forDate, effectiveKey, questionTextRaw,
+    ctx.familyId, ctx.tripId || null, ctx.forDate, effectiveKey, questionTextRaw,
     {
       dateLabel: ctx.dateLabel, locationLabel: ctx.locationLabel, weatherSummary: ctx.weatherSummary,
       knownPlanText: ctx.knownPlanText, highlightTitle: ctx.highlightTitle, memberNames: ctx.memberNames,
