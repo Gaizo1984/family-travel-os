@@ -2,77 +2,73 @@
 
 import { useEffect, useState } from 'react'
 
-const HOLD_MS = 900
-const FADE_MS = 450
-const TOTAL_MS = HOLD_MS + FADE_MS
-const HOLD_PERCENT = Math.round((HOLD_MS / TOTAL_MS) * 100)
+const HOLD_MS_BROWSER = 900
+const FADE_MS_BROWSER = 450
+
+const HOLD_MS_STANDALONE = 2700
+const FADE_MS_STANDALONE = 500
 
 /**
  * §Bugfix "Eigener Splash wird in der installierten Android-PWA übersprungen":
- * Android zeigt beim App-Start zuerst seinen eigenen nativen Splash (aus dem
- * Manifest generiert) und blendet ihn erst aus, wenn diese Seite ihren ersten
- * Paint liefert -- das dauert in `display-mode: standalone` durch den
- * serverseitigen Supabase-Auth-Check (proxy.ts, läuft VOR jeder Response) und
- * den JS-Boot spürbar länger als im normalen Browser-Tab, wo der Nutzer den
- * Ladevorgang direkt sieht. Die CSS-Animation unten startet ihre Uhr aber
- * exakt bei diesem ersten Paint -- im Standalone-Fall lief die kurze
- * Browser-Dauer (1,35s) dadurch oft schon vollständig durch (und der Knoten
- * war per JS-Cleanup-Timer bereits aus dem DOM entfernt), BEVOR der native
- * Splash überhaupt wich: für den Nutzer wirkte das wie ein übersprungener
- * eigener Splash. Fix: eine media-query-gescopte zweite `@keyframes`-Variante
- * mit deutlich längerer Haltezeit für `display-mode: standalone` -- weiterhin
- * rein CSS-getrieben (keine `matchMedia`/JS-Erkennung, kein zusätzliches
- * Hydration-Risiko). Der JS-Cleanup-Timer unten muss die längere Variante
- * abdecken, sonst würde React den Knoten im Standalone-Fall vorzeitig aus dem
- * DOM werfen, während die CSS-Animation dort noch sichtbar sein soll.
- */
-const HOLD_MS_STANDALONE = 2700
-const FADE_MS_STANDALONE = 500
-const TOTAL_MS_STANDALONE = HOLD_MS_STANDALONE + FADE_MS_STANDALONE
-const HOLD_PERCENT_STANDALONE = Math.round((HOLD_MS_STANDALONE / TOTAL_MS_STANDALONE) * 100)
-
-/**
- * §Bugfix "Splashscreen bleibt hängen, man sieht die volle Zeit nur das
- * Logo": die vorherige Version blendete ausschließlich über einen
- * `useEffect`-`setTimeout` aus -- das serverseitig gerenderte HTML zeigt
- * das Overlay aber standardmäßig voll sichtbar UND klickblockierend
- * (`mounted=true, fading=false` sind die React-Default-Werte vor jeder
- * Hydration). Läuft die Hydration auf einem echten Handy langsam an
- * (großes JS-Bundle über Mobilfunk) oder überhaupt nicht durch (jeder
- * andere Hydration-Fehler auf der Seite), feuert der Timer nie -- der
- * Nutzer sieht dauerhaft ein eingefrorenes, nicht klickbares Logo, exakt
- * das gemeldete Verhalten. Die Ausblendung läuft jetzt über eine reine
- * CSS-Animation (inline `<style>`, kein styled-jsx), die der Browser beim
- * HTML-Parsing sofort ausführt -- unabhängig davon, ob/wann React
- * hydriert. Der verbleibende `useEffect` entfernt den (dann bereits
- * unsichtbaren) Knoten nur noch der Sauberkeit halber aus dem DOM.
- * Gleichzeitig Gesamtdauer von 2,7s auf 1,35s verkürzt.
+ * Android zeigt beim App-Start zuerst seinen nativen Splash und blendet ihn
+ * erst aus, wenn diese Seite ihren ersten Paint liefert -- das dauert in
+ * `display-mode: standalone` durch den serverseitigen Supabase-Auth-Check
+ * (proxy.ts, läuft VOR jeder Response) und den JS-Boot spürbar länger als im
+ * normalen Browser-Tab. Ein erster Versuch, das rein per
+ * `@media (display-mode: standalone) { @keyframes ... }` zu lösen (nur CSS,
+ * keine JS-Erkennung), blieb auf dem Testgerät wirkungslos -- vermutlich ein
+ * Edge-Case, wie genau Android-Chrome media-query-gescopte @keyframes-
+ * Overrides für ein bereits laufendes `animation`-Shorthand auflöst. Jetzt
+ * stattdessen `window.matchMedia('(display-mode: standalone)')` (JS, nach
+ * Mount) -- deutlich robuster/etablierter für genau diese Erkennung.
  *
- * §Bugfix "Splashscreen lädt auf dem Handy weiterhin nicht": die PNG-Datei
- * war mit 4,8 MB unkomprimiert (Foto als verlustfreies PNG) -- auf
- * Mobilfunk konnte das Bild oft nicht rechtzeitig laden, bevor die
- * CSS-Animation bereits durchgelaufen war. Jetzt als optimiertes JPEG
- * (~240 KB statt 4,8 MB). Zusätzlich `background` auf der Marken-Hintergrund-
- * farbe, damit auch im kurzen Ladefenster kein weißer/transparenter Blitz
- * sichtbar ist.
+ * Damit das NICHT die alte §Bugfix-Eigenschaft "friert bei gescheiterter/zu
+ * langsamer Hydration ein" reproduziert: die eigentliche Sichtbarkeits-Uhr
+ * (`fading`/`removed`) ist zwar jetzt JS-getrieben, aber die Standard-CSS-
+ * Klasse (ohne Inline-Style-Override) trägt zusätzlich eine unabhängige,
+ * grosszügig lange reine CSS-Animation (`CSS_FALLBACK_MS`) als Notnetz --
+ * blendet auch ganz ohne JE laufendes JS irgendwann aus. Läuft Hydration
+ * normal durch, übernimmt der `useEffect` unten via `animation: 'none'`
+ * lange bevor dieses Notnetz greifen würde.
  */
+const CSS_FALLBACK_MS = 6000
+const CSS_FALLBACK_HOLD_PERCENT = 92
+
 export function SplashScreen() {
+  const [fading, setFading] = useState(false)
+  const [fadeMs, setFadeMs] = useState(FADE_MS_BROWSER)
   const [removed, setRemoved] = useState(false)
 
   useEffect(() => {
-    const timer = setTimeout(() => setRemoved(true), TOTAL_MS_STANDALONE + 100)
-    return () => clearTimeout(timer)
+    const standalone = window.matchMedia('(display-mode: standalone)').matches
+    const hold = standalone ? HOLD_MS_STANDALONE : HOLD_MS_BROWSER
+    const fade = standalone ? FADE_MS_STANDALONE : FADE_MS_BROWSER
+    setFadeMs(fade)
+    const fadeTimer = setTimeout(() => setFading(true), hold)
+    const removeTimer = setTimeout(() => setRemoved(true), hold + fade + 50)
+    return () => {
+      clearTimeout(fadeTimer)
+      clearTimeout(removeTimer)
+    }
   }, [])
 
   if (removed) return null
 
   return (
-    <div aria-hidden="true" className="lumi-splash-overlay">
+    <div
+      aria-hidden="true"
+      className="lumi-splash-overlay"
+      style={
+        fading
+          ? { animation: 'none', transition: `opacity ${fadeMs}ms ease`, opacity: 0, pointerEvents: 'none' }
+          : undefined
+      }
+    >
       <style>{`
-        @keyframes lumi-splash-fade {
+        @keyframes lumi-splash-fallback {
           0% { opacity: 1; pointer-events: auto; }
-          ${HOLD_PERCENT}% { opacity: 1; pointer-events: auto; }
-          ${Math.min(HOLD_PERCENT + 1, 100)}% { pointer-events: none; }
+          ${CSS_FALLBACK_HOLD_PERCENT}% { opacity: 1; pointer-events: auto; }
+          ${Math.min(CSS_FALLBACK_HOLD_PERCENT + 1, 100)}% { pointer-events: none; }
           100% { opacity: 0; pointer-events: none; }
         }
         .lumi-splash-overlay {
@@ -80,18 +76,7 @@ export function SplashScreen() {
           inset: 0;
           z-index: 9999;
           background: #E8E3DA;
-          animation: lumi-splash-fade ${TOTAL_MS}ms ease forwards;
-        }
-        @media (display-mode: standalone) {
-          @keyframes lumi-splash-fade {
-            0% { opacity: 1; pointer-events: auto; }
-            ${HOLD_PERCENT_STANDALONE}% { opacity: 1; pointer-events: auto; }
-            ${Math.min(HOLD_PERCENT_STANDALONE + 1, 100)}% { pointer-events: none; }
-            100% { opacity: 0; pointer-events: none; }
-          }
-          .lumi-splash-overlay {
-            animation-duration: ${TOTAL_MS_STANDALONE}ms;
-          }
+          animation: lumi-splash-fallback ${CSS_FALLBACK_MS}ms ease forwards;
         }
       `}</style>
       {/* eslint-disable-next-line @next/next/no-img-element */}
