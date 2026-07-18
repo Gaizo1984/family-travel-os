@@ -1,5 +1,5 @@
 /**
- * §8 Offline-Verfügbarkeit für Boardingpässe/Gepäckbelege.
+ * §8 Offline-Verfügbarkeit für Boardingpässe/Gepäckbelege, §9 ESTA/ETA (verschärft).
  *
  * Bewusste Architektur-Entscheidung: Die gesamte Offline-Logik lebt NUR auf dem
  * Gerät (IndexedDB im Browser) — es gibt keine neue DB-Tabelle/Spalte dafür.
@@ -13,16 +13,37 @@
  * verschlüsselt — wer physischen/Browser-Zugriff auf das entsperrte Gerät hat,
  * kann die zwischengespeicherten Dateien grundsätzlich auslesen. Eine echte
  * Verschlüsselung würde eine Passphrase-/Schlüssel-UX erfordern, die außerhalb
- * des Rahmens dieser Phase liegt. Für ein Familien-eigenes Gerät ist das
- * Restrisiko vertretbar, für ein häufig geteiltes Gerät nicht — deshalb bewusst
- * als Opt-in-Cache (erst beim ersten Ansehen) und mit klarer Lösch-Möglichkeit
- * umgesetzt, nicht als automatischer Hintergrund-Download aller Dokumente.
+ * des Rahmens dieser Phase liegt.
+ *
+ * §"Zwei Sicherheitsstufen" (Nutzervorgabe, Frag-LUMI-Offline-Sprint): dieselbe
+ * IndexedDB-Architektur bedient jetzt zwei Policies statt einer, KEINE zweite
+ * Speicherlösung:
+ * - `'standard'` (Boardingpass, Gepäckbeleg): unverändertes bisheriges
+ *   Verhalten -- Opt-in-Cache erst beim ersten Ansehen, 7 Tage ab Referenz-
+ *   datum (z. B. Flugtag), "länger behalten" verfügbar. Für ein Familien-
+ *   eigenes Gerät vertretbares Restrisiko.
+ * - `'sensitive'` (ausschließlich ESTA/ETA -- Reisepass/Personalausweis
+ *   bekommen bewusst GAR KEINE Offline-Funktion, siehe Aufrufstellen): kein
+ *   Auto-Cache, nur nach expliziter Zustimmung (siehe OfflineDocumentViewer),
+ *   feste 24h-TTL ab Speicherzeitpunkt (nie ab einem Referenzdatum, nie
+ *   verlängerbar), kein "länger behalten". Wird zusätzlich aktiv geleert bei
+ *   Logout und beim endgültigen Löschen der zugehörigen Reise (siehe
+ *   purgeSensitiveOfflineDocuments, aufgerufen aus components/LogoutButton.tsx
+ *   und app/(app)/trips/[id]/delete/page.tsx).
+ *
+ * Weder Reisepass- noch ESTA/ETA-Daten dürfen künftig in eine etwaige
+ * Reise-Snapshot-/Export-Funktion einfließen, falls eine solche einmal gebaut
+ * wird -- diese Datei bleibt die einzige Stelle, die Passagier-/Einreise-
+ * dokumente geräte-lokal vorhält.
  */
 
 const DB_NAME = 'family-travel-os-offline-cache'
 const STORE_NAME = 'documents'
 const DB_VERSION = 1
 const CACHE_DURATION_DAYS = 7
+const SENSITIVE_CACHE_DURATION_HOURS = 24
+
+export type OfflineCachePolicy = 'standard' | 'sensitive'
 
 export type CachedDocumentMeta = {
   documentId: string
@@ -31,6 +52,8 @@ export type CachedDocumentMeta = {
   cachedAt: string
   expiresAt: string
   keepLonger: boolean
+  policy: OfflineCachePolicy
+  tripId: string | null
 }
 
 type CachedDocumentRecord = CachedDocumentMeta & { blob: Blob }
@@ -55,18 +78,41 @@ function addDaysIso(fromIso: string, days: number): string {
   return d.toISOString()
 }
 
-/** Speichert die Datei lokal — Ablaufdatum: 7 Tage ab jetzt (Referenzpunkt Flugtag wird beim Aufruf übergeben, falls bekannt). */
+function addHoursIso(fromIso: string, hours: number): string {
+  const d = new Date(fromIso)
+  d.setHours(d.getHours() + hours)
+  return d.toISOString()
+}
+
+export type CacheDocumentOptions = {
+  policy: OfflineCachePolicy
+  /** Nur für `policy: 'standard'` relevant (z. B. Flug-/Buchungsdatum) -- bei `'sensitive'` immer ignoriert, TTL zählt dort ausschließlich ab Speicherzeitpunkt. */
+  referenceDateIso?: string
+  /** Nur für `policy: 'sensitive'` genutzt (siehe purgeSensitiveOfflineDocuments) -- bei `'standard'` unbenutzt. */
+  tripId?: string | null
+}
+
+/**
+ * Speichert die Datei lokal. `'standard'`: Ablaufdatum 7 Tage ab `referenceDateIso`
+ * (Flugtag), falls angegeben, sonst ab jetzt. `'sensitive'`: immer fix 24h ab
+ * jetzt, `referenceDateIso` wird bewusst nicht berücksichtigt.
+ */
 export async function cacheDocument(
   documentId: string,
   blob: Blob,
   fileName: string,
   mimeType: string,
-  referenceDateIso?: string,
+  options: CacheDocumentOptions,
 ): Promise<CachedDocumentMeta> {
   const db = await openDb()
   const now = new Date().toISOString()
-  const expiresAt = addDaysIso(referenceDateIso ?? now, CACHE_DURATION_DAYS)
-  const record: CachedDocumentRecord = { documentId, blob, fileName, mimeType, cachedAt: now, expiresAt, keepLonger: false }
+  const expiresAt = options.policy === 'sensitive'
+    ? addHoursIso(now, SENSITIVE_CACHE_DURATION_HOURS)
+    : addDaysIso(options.referenceDateIso ?? now, CACHE_DURATION_DAYS)
+  const record: CachedDocumentRecord = {
+    documentId, blob, fileName, mimeType, cachedAt: now, expiresAt,
+    keepLonger: false, policy: options.policy, tripId: options.tripId ?? null,
+  }
 
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite')
@@ -102,10 +148,20 @@ export async function removeCachedDocument(documentId: string): Promise<void> {
   db.close()
 }
 
-/** "Offline länger behalten": überschreibt das automatische Löschdatum, indem die Auto-Bereinigung für dieses Dokument ausgesetzt wird. */
+/**
+ * "Offline länger behalten": überschreibt das automatische Löschdatum, indem die
+ * Auto-Bereinigung für dieses Dokument ausgesetzt wird. Nur für `'standard'`-
+ * Dokumente (Boardingpass/Gepäckbeleg) -- für `'sensitive'` (ESTA/ETA) bewusst
+ * ausgeschlossen (Nutzervorgabe: keine Verlängerung), zusätzlich zur UI (die den
+ * Button dort gar nicht erst zeigt) auch hier auf Datenebene abgesichert.
+ */
 export async function keepCachedDocumentLonger(documentId: string): Promise<void> {
   const existing = await getCachedDocument(documentId)
   if (!existing) return
+  if (existing.policy === 'sensitive') {
+    console.warn('[offline-document-cache] "länger behalten" ist für sensitive Dokumente (ESTA/ETA) nicht erlaubt.')
+    return
+  }
   const db = await openDb()
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite')
@@ -134,6 +190,34 @@ export async function pruneExpiredDocuments(): Promise<void> {
       if (!cursor) return
       const record = cursor.value as CachedDocumentRecord
       if (!record.keepLonger && record.expiresAt < now) cursor.delete()
+      cursor.continue()
+    }
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+  db.close()
+}
+
+/**
+ * §"Löschung bei Logout und bei Reise-Löschung" (Nutzervorgabe, ESTA/ETA-
+ * Sonderregeln): entfernt alle `'sensitive'`-Einträge (ESTA/ETA) -- ohne
+ * `tripId` global (Logout, siehe components/LogoutButton.tsx), mit `tripId`
+ * nur die dieser einen Reise (endgültiges Löschen einer Reise, siehe
+ * app/(app)/trips/[id]/delete/page.tsx). Boardingpässe/Gepäckbelege
+ * (`'standard'`) bleiben davon unberührt -- deren TTL/"länger behalten"
+ * funktioniert unverändert weiter.
+ */
+export async function purgeSensitiveOfflineDocuments(tripId?: string): Promise<void> {
+  const db = await openDb()
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite')
+    const store = tx.objectStore(STORE_NAME)
+    const req = store.openCursor()
+    req.onsuccess = () => {
+      const cursor = req.result
+      if (!cursor) return
+      const record = cursor.value as CachedDocumentRecord
+      if (record.policy === 'sensitive' && (!tripId || record.tripId === tripId)) cursor.delete()
       cursor.continue()
     }
     tx.oncomplete = () => resolve()

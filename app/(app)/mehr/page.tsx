@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { Users, BookOpenCheck, Images, Fingerprint, LogOut, ChevronRight, TerminalSquare, type LucideIcon } from "lucide-react";
-import { logout } from "@/lib/actions/auth";
+import { Users, BookOpenCheck, Images, Fingerprint, ChevronRight, TerminalSquare, type LucideIcon } from "lucide-react";
+import { LogoutButton } from "@/components/LogoutButton";
 
 interface MoreLink {
   href: string;
@@ -39,19 +39,7 @@ export default function MehrPage() {
               Weitere Bereiche von LUMI
             </p>
           </div>
-          <form action={logout} style={{ flexShrink: 0 }}>
-            <button
-              type="submit"
-              aria-label="Abmelden"
-              style={{
-                width: "44px", height: "44px", display: "flex", alignItems: "center", justifyContent: "center",
-                background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "50%",
-                color: "var(--muted)", cursor: "pointer", WebkitAppearance: "none", appearance: "none",
-              }}
-            >
-              <LogOut size={16} strokeWidth={1.6} />
-            </button>
-          </form>
+          <LogoutButton />
         </header>
 
         <div className="flex flex-col gap-3">

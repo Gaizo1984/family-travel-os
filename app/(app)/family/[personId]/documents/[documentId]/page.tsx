@@ -10,6 +10,7 @@ import type { DocumentType, DocumentDetails } from "@/lib/documents";
 import { assignDocumentToTrip, unassignDocumentFromTrip } from "@/lib/actions/documents";
 import { Banner } from "@/components/Banner";
 import { getCachedSignedUrl } from "@/lib/signed-storage-url";
+import { OfflineDocumentViewer } from "@/components/OfflineDocumentViewer";
 
 type DocumentDetail = {
   id: string;
@@ -67,7 +68,11 @@ export default async function DocumentDetailPage({
   const signedDocUrl = await getCachedSignedUrl("documents", doc.storage_path);
 
   const isImage = /\.(jpe?g|png|webp)$/i.test(doc.storage_path);
+  const isPdf = doc.storage_path.toLowerCase().endsWith(".pdf");
   const validity = getDocumentValidity(doc);
+  // §"nur ESTA/ETA, sonst keine Offline-Funktion" (Nutzervorgabe, Frag-LUMI-Offline-Sprint):
+  // Reisepass/Personalausweis/Visum/Einreiseerlaubnis bleiben bewusst reine Online-Anzeige.
+  const isOfflineEligible = doc.doc_type === "esta" || doc.doc_type === "eta";
 
   const isInsurance = doc.doc_type === "insurance";
 
@@ -198,7 +203,21 @@ export default async function DocumentDetailPage({
           <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: "12px" }}>
             Hinterlegte Datei
           </div>
-          {signedDocUrl ? (
+          {isOfflineEligible ? (
+            <div className="rounded-lg p-6 flex justify-center" style={{ background: "#1a1714" }}>
+              <OfflineDocumentViewer
+                documentId={doc.id}
+                sourceUrl={signedDocUrl}
+                fileName={`${doc.doc_type}-${doc.label}${isPdf ? ".pdf" : ""}`}
+                mimeType={isPdf ? "application/pdf" : "image/jpeg"}
+                isPdf={isPdf}
+                referenceDateIso={doc.expires_at ?? new Date().toISOString()}
+                altText={doc.label}
+                policy="sensitive"
+                tripId={assignedTrips[0]?.id ?? null}
+              />
+            </div>
+          ) : signedDocUrl ? (
             isImage ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img

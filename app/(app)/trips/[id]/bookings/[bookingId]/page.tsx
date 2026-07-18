@@ -277,8 +277,21 @@ export default async function BookingDetailPage({
 
         {b.type === "flight" && (
           <div className="rounded-xl p-6 mb-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-            <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: "12px" }}>
-              Gepäckbelege
+            <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+              <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase" }}>
+                Gepäckbelege
+              </div>
+              {baggageTagDocs.length > 0 && (
+                <Link
+                  href={`/trips/${trip.slug}/bookings/${b.id}/baggage-tags`}
+                  style={{
+                    fontSize: "0.62rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--accent)",
+                    border: "1px solid rgba(184,154,94,0.3)", padding: "7px 14px", borderRadius: "20px", textDecoration: "none",
+                  }}
+                >
+                  Alle Gepäckbelege anzeigen
+                </Link>
+              )}
             </div>
 
             {baggageTagDocs.length > 0 ? (

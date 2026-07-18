@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { deleteTripPermanently } from "@/lib/actions/trips";
+import { DeleteTripSubmitButton } from "@/components/DeleteTripSubmitButton";
 
 export default async function DeleteTripPage({
   params,
@@ -80,17 +81,7 @@ export default async function DeleteTripPage({
             {!notArchived && (
               <form action={deleteTripPermanently}>
                 <input type="hidden" name="trip_id" value={trip.id} />
-                <button
-                  type="submit"
-                  style={{
-                    background: "#B5624A", color: "#F0EBE3", border: "none",
-                    borderRadius: "6px", padding: "11px 20px", fontSize: "0.65rem",
-                    letterSpacing: "0.16em", textTransform: "uppercase", cursor: "pointer",
-                    whiteSpace: "nowrap", WebkitAppearance: "none", appearance: "none",
-                  }}
-                >
-                  Ja, endgültig löschen
-                </button>
+                <DeleteTripSubmitButton tripId={trip.id} />
               </form>
             )}
           </div>
