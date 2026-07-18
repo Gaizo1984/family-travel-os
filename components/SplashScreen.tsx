@@ -8,6 +8,30 @@ const TOTAL_MS = HOLD_MS + FADE_MS
 const HOLD_PERCENT = Math.round((HOLD_MS / TOTAL_MS) * 100)
 
 /**
+ * §Bugfix "Eigener Splash wird in der installierten Android-PWA übersprungen":
+ * Android zeigt beim App-Start zuerst seinen eigenen nativen Splash (aus dem
+ * Manifest generiert) und blendet ihn erst aus, wenn diese Seite ihren ersten
+ * Paint liefert -- das dauert in `display-mode: standalone` durch den
+ * serverseitigen Supabase-Auth-Check (proxy.ts, läuft VOR jeder Response) und
+ * den JS-Boot spürbar länger als im normalen Browser-Tab, wo der Nutzer den
+ * Ladevorgang direkt sieht. Die CSS-Animation unten startet ihre Uhr aber
+ * exakt bei diesem ersten Paint -- im Standalone-Fall lief die kurze
+ * Browser-Dauer (1,35s) dadurch oft schon vollständig durch (und der Knoten
+ * war per JS-Cleanup-Timer bereits aus dem DOM entfernt), BEVOR der native
+ * Splash überhaupt wich: für den Nutzer wirkte das wie ein übersprungener
+ * eigener Splash. Fix: eine media-query-gescopte zweite `@keyframes`-Variante
+ * mit deutlich längerer Haltezeit für `display-mode: standalone` -- weiterhin
+ * rein CSS-getrieben (keine `matchMedia`/JS-Erkennung, kein zusätzliches
+ * Hydration-Risiko). Der JS-Cleanup-Timer unten muss die längere Variante
+ * abdecken, sonst würde React den Knoten im Standalone-Fall vorzeitig aus dem
+ * DOM werfen, während die CSS-Animation dort noch sichtbar sein soll.
+ */
+const HOLD_MS_STANDALONE = 2700
+const FADE_MS_STANDALONE = 500
+const TOTAL_MS_STANDALONE = HOLD_MS_STANDALONE + FADE_MS_STANDALONE
+const HOLD_PERCENT_STANDALONE = Math.round((HOLD_MS_STANDALONE / TOTAL_MS_STANDALONE) * 100)
+
+/**
  * §Bugfix "Splashscreen bleibt hängen, man sieht die volle Zeit nur das
  * Logo": die vorherige Version blendete ausschließlich über einen
  * `useEffect`-`setTimeout` aus -- das serverseitig gerenderte HTML zeigt
@@ -36,7 +60,7 @@ export function SplashScreen() {
   const [removed, setRemoved] = useState(false)
 
   useEffect(() => {
-    const timer = setTimeout(() => setRemoved(true), TOTAL_MS + 100)
+    const timer = setTimeout(() => setRemoved(true), TOTAL_MS_STANDALONE + 100)
     return () => clearTimeout(timer)
   }, [])
 
@@ -57,6 +81,17 @@ export function SplashScreen() {
           z-index: 9999;
           background: #E8E3DA;
           animation: lumi-splash-fade ${TOTAL_MS}ms ease forwards;
+        }
+        @media (display-mode: standalone) {
+          @keyframes lumi-splash-fade {
+            0% { opacity: 1; pointer-events: auto; }
+            ${HOLD_PERCENT_STANDALONE}% { opacity: 1; pointer-events: auto; }
+            ${Math.min(HOLD_PERCENT_STANDALONE + 1, 100)}% { pointer-events: none; }
+            100% { opacity: 0; pointer-events: none; }
+          }
+          .lumi-splash-overlay {
+            animation-duration: ${TOTAL_MS_STANDALONE}ms;
+          }
         }
       `}</style>
       {/* eslint-disable-next-line @next/next/no-img-element */}
