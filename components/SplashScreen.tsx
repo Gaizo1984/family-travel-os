@@ -5,34 +5,43 @@ import { useEffect, useState } from 'react'
 const HOLD_MS_BROWSER = 900
 const FADE_MS_BROWSER = 450
 
-const HOLD_MS_STANDALONE = 2700
+const MIN_HOLD_MS_STANDALONE = 2600
 const FADE_MS_STANDALONE = 500
 
 /**
- * §Bugfix "Eigener Splash wird in der installierten Android-PWA übersprungen":
- * Android zeigt beim App-Start zuerst seinen nativen Splash und blendet ihn
- * erst aus, wenn diese Seite ihren ersten Paint liefert -- das dauert in
- * `display-mode: standalone` durch den serverseitigen Supabase-Auth-Check
- * (proxy.ts, läuft VOR jeder Response) und den JS-Boot spürbar länger als im
- * normalen Browser-Tab. Ein erster Versuch, das rein per
- * `@media (display-mode: standalone) { @keyframes ... }` zu lösen (nur CSS,
- * keine JS-Erkennung), blieb auf dem Testgerät wirkungslos -- vermutlich ein
- * Edge-Case, wie genau Android-Chrome media-query-gescopte @keyframes-
- * Overrides für ein bereits laufendes `animation`-Shorthand auflöst. Jetzt
- * stattdessen `window.matchMedia('(display-mode: standalone)')` (JS, nach
- * Mount) -- deutlich robuster/etablierter für genau diese Erkennung.
+ * §Bugfix "Eigener Splash wird in der installierten Android-PWA übersprungen",
+ * dritter Anlauf: die ersten beiden Versuche banden die Sichtdauer an eine
+ * FEST GERATENE Zeitspanne ab Mount (1,35s, dann 3,2s) -- beide blieben laut
+ * Nutzer-Test wirkungslos. Das deutet darauf hin, dass der tatsächliche
+ * Seitenaufbau in `display-mode: standalone` (Supabase-Auth-Check in
+ * proxy.ts + teils datenintensive Server Components, z. B. das Hauptdashboard
+ * app/(app)/page.tsx mit mehreren parallelen Supabase-/Wetter-Abfragen)
+ * länger dauert als jede bisher geratene Zahl -- Android hält seinen eigenen
+ * Splash entsprechend länger, unser Overlay war da längst schon
+ * ausgeblendet.
  *
- * Damit das NICHT die alte §Bugfix-Eigenschaft "friert bei gescheiterter/zu
- * langsamer Hydration ein" reproduziert: die eigentliche Sichtbarkeits-Uhr
- * (`fading`/`removed`) ist zwar jetzt JS-getrieben, aber die Standard-CSS-
- * Klasse (ohne Inline-Style-Override) trägt zusätzlich eine unabhängige,
- * grosszügig lange reine CSS-Animation (`CSS_FALLBACK_MS`) als Notnetz --
- * blendet auch ganz ohne JE laufendes JS irgendwann aus. Läuft Hydration
- * normal durch, übernimmt der `useEffect` unten via `animation: 'none'`
- * lange bevor dieses Notnetz greifen würde.
+ * Statt weiter eine Zahl zu raten, jetzt ein echtes Bereitschaftssignal:
+ * `window.load` feuert erst, wenn das Dokument INKLUSIVE aller Ressourcen --
+ * auch unser eigenes Splash-Bild -- tatsächlich fertig geladen ist. Die
+ * Mindest-Sichtdauer (`MIN_HOLD_MS_STANDALONE`) zählt in Standalone daher erst
+ * AB diesem Zeitpunkt, nicht ab Mount. `LOAD_WAIT_CAP_MS` verhindert, dass ein
+ * hängender Request (load feuert pathologisch spät/nie) die Sichtdauer
+ * unbegrenzt verzögert.
+ *
+ * Der Browser-Tab (bereits vom Nutzer bestätigt korrekt) bleibt unverändert
+ * auf der schnellen, mount-basierten Logik.
  */
-const CSS_FALLBACK_MS = 6000
-const CSS_FALLBACK_HOLD_PERCENT = 92
+const LOAD_WAIT_CAP_MS = 4000
+
+/**
+ * §Bugfix "friert bei gescheiterter/zu langsamer Hydration ein": rein
+ * CSS-getriebenes Notnetz, unabhängig vom JS-State oben -- blendet auch ganz
+ * ohne je laufendes JS irgendwann aus. Bewusst über dem realistischen
+ * JS-Worst-Case (LOAD_WAIT_CAP_MS + MIN_HOLD_MS_STANDALONE + FADE_MS_STANDALONE
+ * = 7100ms), damit sie im Erfolgsfall nie sichtbar eingreift.
+ */
+const CSS_FALLBACK_MS = 8000
+const CSS_FALLBACK_HOLD_PERCENT = 94
 
 export function SplashScreen() {
   const [fading, setFading] = useState(false)
@@ -41,12 +50,38 @@ export function SplashScreen() {
 
   useEffect(() => {
     const standalone = window.matchMedia('(display-mode: standalone)').matches
-    const hold = standalone ? HOLD_MS_STANDALONE : HOLD_MS_BROWSER
-    const fade = standalone ? FADE_MS_STANDALONE : FADE_MS_BROWSER
-    setFadeMs(fade)
-    const fadeTimer = setTimeout(() => setFading(true), hold)
-    const removeTimer = setTimeout(() => setRemoved(true), hold + fade + 50)
+    let fadeTimer: ReturnType<typeof setTimeout>
+    let removeTimer: ReturnType<typeof setTimeout>
+
+    if (!standalone) {
+      setFadeMs(FADE_MS_BROWSER)
+      fadeTimer = setTimeout(() => setFading(true), HOLD_MS_BROWSER)
+      removeTimer = setTimeout(() => setRemoved(true), HOLD_MS_BROWSER + FADE_MS_BROWSER + 50)
+      return () => {
+        clearTimeout(fadeTimer)
+        clearTimeout(removeTimer)
+      }
+    }
+
+    setFadeMs(FADE_MS_STANDALONE)
+    let started = false
+    const startHold = () => {
+      if (started) return
+      started = true
+      fadeTimer = setTimeout(() => setFading(true), MIN_HOLD_MS_STANDALONE)
+      removeTimer = setTimeout(() => setRemoved(true), MIN_HOLD_MS_STANDALONE + FADE_MS_STANDALONE + 50)
+    }
+
+    if (document.readyState === 'complete') {
+      startHold()
+    } else {
+      window.addEventListener('load', startHold, { once: true })
+    }
+    const capTimer = setTimeout(startHold, LOAD_WAIT_CAP_MS)
+
     return () => {
+      window.removeEventListener('load', startHold)
+      clearTimeout(capTimer)
       clearTimeout(fadeTimer)
       clearTimeout(removeTimer)
     }
