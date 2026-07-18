@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 import { Image as ImageIcon, ListChecks } from "lucide-react";
 import { formatDateDE } from "@/lib/demo-data";
-import { BOOKING_TYPE_CONFIG } from "@/lib/bookings";
+import { BOOKING_TYPE_CONFIG, hasRealTime } from "@/lib/bookings";
 import { JOURNEY_EVENT_CATEGORIES } from "@/lib/journey-events";
 import { describeWeatherCode } from "@/lib/weather";
 import type { JourneyDayBucket, JourneyEvent, JourneyEventCategory, JourneyEventStatusUnified } from "@/lib/journey-events-model";
@@ -25,13 +25,23 @@ const STATUS_COLOR: Record<JourneyEventStatusUnified, string> = {
   confirmed: "var(--foreground)", planned: "#B89A5E", idea: "var(--muted)", missing: "#B5624A", info: "var(--muted)",
 };
 
-function EventRow({ event }: { event: JourneyEvent }) {
+/**
+ * §"Aufklappbare Einträge und gute mobile Touch-Flächen" (Nutzervorgabe):
+ * `minHeight: 44px` auf jeder Zeile (bestehende App-Konvention, siehe
+ * Bottom-Nav) -- Einträge mit Zusatzinfo (bisher ungenutztes
+ * JourneyEvent.subtitle, z. B. Fluggesellschaft/Hotelname) bekommen ein
+ * natives `<details>`-Aufklappelement, kein Client-JS nötig.
+ * §"Aktuellen Reisetag und nächstes Ereignis stärker hervorheben": `isNext`
+ * hebt den chronologisch nächsten Eintrag zusätzlich zum Prioritäts-Akzent hervor.
+ */
+function EventRow({ event, isNext }: { event: JourneyEvent; isNext: boolean }) {
   const Icon = resolveIcon(event.category);
   const statusLabel = STATUS_LABEL[event.status];
-  const content = (
-    <div className="flex items-center gap-3 py-2">
-      <Icon size={13} strokeWidth={1.4} style={{ color: event.priority === "high" ? "var(--accent)" : "var(--muted)", flexShrink: 0 }} />
-      <span className="flex-1 min-w-0 truncate" style={{ color: STATUS_COLOR[event.status], fontSize: "0.82rem", fontWeight: event.priority === "high" ? 500 : 400 }}>
+  const emphasize = event.priority === "high" || isNext;
+  const rowContent = (
+    <div className="flex items-center gap-3" style={{ minHeight: "44px" }}>
+      <Icon size={13} strokeWidth={1.4} style={{ color: emphasize ? "var(--accent)" : "var(--muted)", flexShrink: 0 }} />
+      <span className="flex-1 min-w-0 truncate" style={{ color: STATUS_COLOR[event.status], fontSize: "0.82rem", fontWeight: emphasize ? 600 : 400 }}>
         {event.title}
       </span>
       {statusLabel && (
@@ -39,13 +49,28 @@ function EventRow({ event }: { event: JourneyEvent }) {
           {statusLabel}
         </span>
       )}
-      {event.time && <span style={{ color: "var(--muted)", fontSize: "0.68rem", flexShrink: 0 }}>{event.time}</span>}
+      {hasRealTime(event.time) && <span style={{ color: "var(--muted)", fontSize: "0.68rem", flexShrink: 0 }}>{event.time}</span>}
     </div>
   );
-  if (!event.linkHref) return content;
+
+  if (event.subtitle) {
+    return (
+      <details>
+        <summary className="cursor-pointer" style={{ listStyle: "none" }}>{rowContent}</summary>
+        <div className="pl-6 pb-2 flex items-center justify-between gap-3">
+          <span style={{ color: "var(--muted)", fontSize: "0.75rem" }}>{event.subtitle}</span>
+          {event.linkHref && (
+            <Link href={event.linkHref} style={{ color: "var(--accent)", fontSize: "0.68rem", textDecoration: "none" }}>Details →</Link>
+          )}
+        </div>
+      </details>
+    );
+  }
+
+  if (!event.linkHref) return <div>{rowContent}</div>;
   return (
-    <Link href={event.linkHref} style={{ textDecoration: "none" }}>
-      {content}
+    <Link href={event.linkHref} className="block" style={{ textDecoration: "none" }}>
+      {rowContent}
     </Link>
   );
 }
@@ -56,7 +81,7 @@ function EventRow({ event }: { event: JourneyEvent }) {
  * auf dem Dashboard), `isPast` wird gedimmt (gleiche `opacity:0.45`-Konvention
  * wie bisher auf /today).
  */
-export function JourneyDayCard({ day, photoUrlByPhotoId }: { day: JourneyDayBucket; photoUrlByPhotoId: Map<string, string> }) {
+export function JourneyDayCard({ day, photoUrlByPhotoId, nextEventId }: { day: JourneyDayBucket; photoUrlByPhotoId: Map<string, string>; nextEventId: string | null }) {
   const weather = day.weather ? describeWeatherCode(day.weather.code) : null;
   const dayLabel = day.stage?.location ?? day.stage?.title ?? null;
 
@@ -94,12 +119,24 @@ export function JourneyDayCard({ day, photoUrlByPhotoId }: { day: JourneyDayBuck
 
       {day.events.length > 0 ? (
         <div className="rounded-xl px-4" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-          {day.events.map((e) => <EventRow key={e.id} event={e} />)}
+          {day.events.map((e) => <EventRow key={e.id} event={e} isNext={e.id === nextEventId} />)}
         </div>
-      ) : (
+      ) : day.isPast ? (
         <div className="rounded-xl px-4 py-2" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
           <span style={{ color: "var(--muted)", fontSize: "0.72rem" }}>Kein Programm</span>
         </div>
+      ) : (
+        // §"Freien Tag direkt im Tagesplaner öffnen" (Nutzervorgabe): nur für
+        // heutige/künftige freie Tage -- ein vergangener Tag lässt sich nicht
+        // mehr planen.
+        <Link
+          href={`/today/plan?date=${day.date}`}
+          className="flex items-center justify-between rounded-xl px-4 py-3 transition-opacity hover:opacity-80"
+          style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none", minHeight: "44px" }}
+        >
+          <span style={{ color: "var(--muted)", fontSize: "0.72rem" }}>Kein Programm</span>
+          <span style={{ color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.04em" }}>Tagesplan erstellen →</span>
+        </Link>
       )}
 
       {day.photos.length > 0 && (

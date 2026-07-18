@@ -269,6 +269,20 @@ export function splitDateTime(iso: string | null): { date: string; time: string 
   return { date, time: time === '00:00' ? '' : time }
 }
 
+/**
+ * §"00:00 nur ausblenden, wenn technisch keine echte Uhrzeit gespeichert
+ * wurde" (Nutzervorgabe, wörtlich): `combineDateTime`/`splitDateTime` oben
+ * etablieren bereits die Konvention, dass eine gespeicherte Uhrzeit von
+ * genau "00:00" technisch "keine Uhrzeit eingegeben" bedeutet, nie echte
+ * Mitternacht. Einzige Stelle, die das prüft -- von der Journey-Anzeige
+ * (JourneyDayCard/journey-events-model) UND vom Tagesplaner (Zeitfenster-
+ * Berechnung) geteilt, keine zweite Definition derselben Regel.
+ */
+export function hasRealTime(time: string | null | undefined): boolean {
+  if (!time) return false
+  return time.slice(0, 5) !== '00:00'
+}
+
 export function formatDateTimeDE(iso: string | null): string {
   if (!iso) return '—'
   const { date, time } = splitDateTime(iso)

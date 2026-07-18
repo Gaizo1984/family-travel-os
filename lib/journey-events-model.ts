@@ -6,6 +6,7 @@ import type { ReadinessFinding } from './readiness'
 import type { TripDateRange } from './trip-dates'
 import type { DailyForecast } from './weather'
 import { resolveTimezone } from './country-timezones'
+import { hasRealTime } from './bookings'
 
 /**
  * §"Journey 2.0 -- zentrale Normalisierungsschicht" (Nutzervorgabe, wörtlich:
@@ -74,12 +75,20 @@ export function bookingsToJourneyEvents(
   slug: string,
 ): JourneyEvent[] {
   const activeBookings = bookings.filter((b) => b.status !== 'cancelled')
-  return expandBookingOccurrences(activeBookings).map(({ date, booking }) => ({
+  return expandBookingOccurrences(activeBookings).map(({ date, booking }) => {
+    // §"00:00 nur ausblenden, wenn technisch keine echte Uhrzeit gespeichert
+    // wurde": ein Buchungs-Zeitstempel ohne echte Uhrzeit trägt technisch
+    // "T00:00:00" (siehe lib/bookings.ts::combineDateTime) -- das direkt als
+    // JourneyEvent.time zu übernehmen würde ihn wie eine echte Mitternacht
+    // behandeln. hasRealTime() ist die einzige Stelle, die diese Konvention
+    // kennt, hier direkt an der Quelle angewendet statt nur beim Rendern.
+    const rawTime = booking.start_datetime?.slice(11, 16) ?? null
+    return {
     id: `booking-${booking.id}-${date}`,
     source: 'booking',
     sourceId: booking.id,
     date,
-    time: booking.start_datetime?.slice(11, 16) ?? null,
+    time: hasRealTime(rawTime) ? rawTime : null,
     title: booking.isEndOccurrence ? booking.title : (booking.provider ? `${booking.provider} · ${booking.title}` : booking.title),
     subtitle: booking.provider,
     category: booking.type,
@@ -89,7 +98,8 @@ export function bookingsToJourneyEvents(
     stageId: booking.stage_id ?? null,
     linkHref: `/trips/${slug}/bookings/${booking.id}`,
     isEndOccurrence: booking.isEndOccurrence ?? false,
-  }))
+    }
+  })
 }
 
 function journeyEventStatusToUnified(status: JourneyEventStatus): JourneyEventStatusUnified {
@@ -194,7 +204,13 @@ function sortEventsWithinDay(events: JourneyEvent[]): JourneyEvent[] {
     // Check-in folgt IMMER auf einen Flug (man landet, dann checkt man ein).
     if (a.category === 'flight' && b.category === 'accommodation') return b.isEndOccurrence ? 1 : -1
     if (a.category === 'accommodation' && b.category === 'flight') return a.isEndOccurrence ? -1 : 1
-    return (a.time ?? '99:99').localeCompare(b.time ?? '99:99')
+    // §"00:00 nur ausblenden, wenn technisch keine echte Uhrzeit gespeichert
+    // wurde": ein "00:00"-Platzhalter (keine echte Uhrzeit) darf einen
+    // Eintrag nicht fälschlich an den Tagesanfang sortieren -- gleiche
+    // Fallback-Sortierposition wie ganz ohne Uhrzeit.
+    const aKey = hasRealTime(a.time) ? a.time! : '99:99'
+    const bKey = hasRealTime(b.time) ? b.time! : '99:99'
+    return aKey.localeCompare(bKey)
   })
 }
 

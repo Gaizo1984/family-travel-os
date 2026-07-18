@@ -42,37 +42,54 @@ export async function commitPlaceToJourney(formData: FormData) {
 }
 
 /**
- * §"Übernahme ins Journey" (LUMI Intelligence v1, §6): Bulk-Insert für einen
- * kompletten, per `generateDayPlan` erzeugten Tagesplan -- ein `.insert([...])`
- * für alle Stopps, analog zum bestehenden Bulk-Insert in
- * `trip-idea-generation.ts`. Dedupe-Schutz: Stopps, die am selben Datum
- * bereits unter demselben Titel existieren, werden übersprungen statt
- * doppelt angelegt (z. B. bei versehentlichem Doppelklick).
+ * §"Übernahme ins Journey" (Tagesplaner 2.0): Bulk-Insert für EINE
+ * ausdrücklich gewählte Variante (Entspannt/Ausgewogen/Erlebnisreich) eines
+ * per `generateDayPlan` erzeugten Tagesplans -- ein `.insert([...])` für
+ * alle Stopps dieser Variante, analog zum bestehenden Bulk-Insert in
+ * `trip-idea-generation.ts`. Schreibt jetzt zusätzlich die echte, vom
+ * Tagesplaner berechnete Uhrzeit je Stopp (statt wie in v1 zeitlos).
+ *
+ * §"Duplikate verhindern" (Nutzervorgabe): Dedupe über ZWEI Signale --
+ * exakter Titel ODER dieselbe Place-ID am selben Datum -- robuster als nur
+ * der Titelvergleich (fängt z. B. leicht abweichende Namensschreibweisen
+ * desselben Orts ab, wenn der Ort bereits manuell im Journey eingetragen
+ * wurde).
  */
-export async function commitDayPlanToJourney(formData: FormData) {
+export async function commitDayPlanVariantToJourney(formData: FormData) {
   const tripId = String(formData.get('trip_id') ?? '')
   const tripSlug = String(formData.get('trip_slug') ?? '')
   const date = String(formData.get('date') ?? '')
-  const planRaw = String(formData.get('plan') ?? '')
+  const variantRaw = String(formData.get('variant') ?? '')
 
-  if (!tripId || !date || !planRaw) redirect('/today')
+  if (!tripId || !date || !variantRaw) redirect('/today')
 
-  let plan: { stops: Array<{ placeId: string; name: string; category: string; travelMinutes: number; travelDistanceKm: number; why: string | null }> }
+  let variant: {
+    pace: string
+    stops: Array<{ placeId: string; name: string; category: string; time: string | null; travelMinutes: number; travelDistanceKm: number; why: string | null }>
+  }
   try {
-    plan = JSON.parse(planRaw)
+    variant = JSON.parse(variantRaw)
   } catch {
     redirect(`/trips/${tripSlug}?error=${encodeURIComponent('Tagesplan konnte nicht gelesen werden')}`)
   }
 
   const supabase = await createClient()
-  const { data: existing } = await supabase.from('journey_events').select('title').eq('trip_id', tripId).eq('date', date)
+  const { data: existing } = await supabase.from('journey_events').select('title, metadata').eq('trip_id', tripId).eq('date', date)
   const existingTitles = new Set((existing ?? []).map((e) => e.title))
+  const existingPlaceIds = new Set(
+    (existing ?? [])
+      .map((e) => (e.metadata as { place_id?: string } | null)?.place_id)
+      .filter((id): id is string => Boolean(id)),
+  )
 
-  const rows = plan.stops
-    .filter((s) => !existingTitles.has(s.name))
+  const rows = variant.stops
+    .filter((s) => !existingTitles.has(s.name) && !existingPlaceIds.has(s.placeId))
     .map((s) => ({
-      trip_id: tripId, date, category: 'activity', title: s.name, notes: s.why, status: 'idea',
-      metadata: { place_id: s.placeId, duration_minutes: s.travelMinutes, distance_km: s.travelDistanceKm, source: 'lumi_day_plan' },
+      trip_id: tripId, date, time: s.time, category: 'activity', title: s.name, notes: s.why, status: 'idea',
+      metadata: {
+        place_id: s.placeId, duration_minutes: s.travelMinutes, distance_km: s.travelDistanceKm,
+        source: 'lumi_day_plan', pace: variant.pace, category: s.category,
+      },
     }))
 
   if (rows.length > 0) {

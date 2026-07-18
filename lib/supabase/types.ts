@@ -561,15 +561,15 @@ export interface Database {
       }
       day_plan_cache: {
         Row: {
-          id: string; family_id: string; trip_id: string; mode: string
+          id: string; family_id: string; trip_id: string; mode: string; date: string | null
           plan: Json; updated_at: string
         }
         Insert: {
-          id?: string; family_id: string; trip_id: string; mode: string
+          id?: string; family_id: string; trip_id: string; mode: string; date?: string | null
           plan: Json; updated_at?: string
         }
         Update: {
-          id?: string; family_id?: string; trip_id?: string; mode?: string
+          id?: string; family_id?: string; trip_id?: string; mode?: string; date?: string | null
           plan?: Json; updated_at?: string
         }
         Relationships: [

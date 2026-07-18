@@ -5,8 +5,8 @@ import { getFamily } from "@/lib/family";
 import { isTripCurrentlyRunning, isTripHistorical } from "@/lib/trip-status";
 import { deriveTripDateRange } from "@/lib/trip-dates";
 import { todayIsoInFamilyTimezone } from "@/lib/time";
-import { generateDayPlan, getLatestDayPlan, type DayPlan, type DayPlanMode } from "@/lib/actions/day-planner";
-import { commitDayPlanToJourney } from "@/lib/actions/lumi-journey";
+import { generateDayPlan, getLatestDayPlan, type DayPlan, type DayPlanVariant } from "@/lib/actions/day-planner";
+import { commitDayPlanVariantToJourney } from "@/lib/actions/lumi-journey";
 import { Banner } from "@/components/Banner";
 
 type TripRow = {
@@ -14,16 +14,6 @@ type TripRow = {
   stages: Array<{ start_date: string | null; end_date: string | null }>
   bookings: Array<{ type: string; status: string; start_datetime: string | null; end_datetime: string | null }>
 };
-
-const MODE_OPTIONS: Array<{ value: DayPlanMode; label: string }> = [
-  { value: "today", label: "Heute planen" },
-  { value: "tomorrow", label: "Morgen planen" },
-  { value: "bad_weather", label: "Schlechtwetter-Tag" },
-  { value: "morning", label: "Vormittag" },
-  { value: "afternoon", label: "Mittag/Nachmittag" },
-  { value: "dinner", label: "Restaurantabend" },
-  { value: "custom", label: "Individueller Wunsch" },
-];
 
 function Card({ children }: { children: React.ReactNode }) {
   return (
@@ -33,12 +23,21 @@ function Card({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * §"Tagesplaner 2.0": ersetzt die bisherige heute/morgen/Vormittag/...-
+ * Moduswahl (v1) durch ein freies Zieldatum -- Voraussetzung dafür, dass die
+ * Journey einen beliebigen freien Reisetag direkt hierher verlinken kann
+ * (siehe components/journey/JourneyDayCard.tsx). Zeigt nach der Erzeugung
+ * alle drei Varianten (Entspannt/Ausgewogen/Erlebnisreich) nebeneinander --
+ * jede mit eigenem "Diesen Plan übernehmen"-Formular, Speicherung erst nach
+ * ausdrücklicher Wahl einer Variante.
+ */
 export default async function DayPlanPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; new?: string }>;
+  searchParams: Promise<{ error?: string; date?: string }>;
 }) {
-  const { error, new: startNew } = await searchParams;
+  const { error, date: dateParam } = await searchParams;
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
   const todayIso = todayIsoInFamilyTimezone();
@@ -77,12 +76,16 @@ export default async function DayPlanPage({
     );
   }
 
+  // §"Freies Zieldatum": Vorbelegung aus ?date= (Journey-Link auf einen
+  // konkreten freien Tag) oder heute, innerhalb des Reisezeitraums begrenzt.
+  const tripStart = trip.start_date ?? todayIso;
+  const tripEnd = trip.end_date ?? todayIso;
+  const defaultDate = dateParam && dateParam >= tripStart && dateParam <= tripEnd ? dateParam : (todayIso >= tripStart && todayIso <= tripEnd ? todayIso : tripStart);
+
   // §Bugfix "Tagestrips löschen sich bei Menüpunktwechsel": der zuletzt
-  // erzeugte Plan kommt jetzt aus der DB (day_plan_cache) statt aus einem
-  // flüchtigen Redirect-Query-Param -- er bleibt bei Navigation bestehen,
-  // bis eine neue Ermittlung ihn überschreibt. "Neuen Plan erstellen"
-  // verlinkt auf ?new=1, um gezielt wieder die Moduswahl zu zeigen.
-  const plan: DayPlan | null = startNew ? null : await getLatestDayPlan(familyId, trip.id);
+  // erzeugte Plan kommt aus day_plan_cache (family_id, trip_id, date) und
+  // bleibt bei Navigation bestehen, solange dasselbe Datum gewählt ist.
+  const plan: DayPlan | null = dateParam ? await getLatestDayPlan(familyId, trip.id, defaultDate) : null;
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -94,92 +97,103 @@ export default async function DayPlanPage({
 
         {error && <Banner variant="error">{error}</Banner>}
 
-        {!plan && (
-          <Card>
-            <p className="mb-4" style={{ color: "var(--muted)", fontSize: "0.85rem", lineHeight: 1.6 }}>
-              LUMI baut euch eine echte Route aus Sehenswürdigkeiten, Natur, Stränden und Restaurants -- mit echten Fahrzeiten, nur auf Klick.
-            </p>
-            <form action={generateDayPlan} className="flex flex-col gap-2">
-              <input type="hidden" name="family_id" value={familyId} />
-              <input type="hidden" name="trip_id" value={trip.id} />
-              <input type="hidden" name="return_to" value="/today/plan" />
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {MODE_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="submit"
-                    name="mode"
-                    value={opt.value}
-                    style={{
-                      background: "var(--background)", color: "var(--foreground)", border: "1px solid var(--border)",
-                      borderRadius: "8px", padding: "10px 12px", fontSize: "0.75rem", cursor: "pointer", textAlign: "left",
-                    }}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </form>
-          </Card>
+        <Card>
+          <p className="mb-4" style={{ color: "var(--muted)", fontSize: "0.85rem", lineHeight: 1.6 }}>
+            LUMI baut euch drei Tagespläne (Entspannt/Ausgewogen/Erlebnisreich) aus Sehenswürdigkeiten, Natur, Stränden und Restaurants -- mit echten Fahrzeiten und rund um bereits feststehende Termine, nur auf Klick.
+          </p>
+          <form action={generateDayPlan} className="flex items-end gap-2 flex-wrap">
+            <input type="hidden" name="family_id" value={familyId} />
+            <input type="hidden" name="trip_id" value={trip.id} />
+            <input type="hidden" name="return_to" value="/today/plan" />
+            <div className="flex flex-col gap-1">
+              <label style={{ color: "var(--muted)", fontSize: "0.65rem", letterSpacing: "0.06em" }}>Für welchen Tag?</label>
+              <input
+                type="date" name="date" defaultValue={defaultDate} min={tripStart} max={tripEnd} required
+                style={{ background: "var(--background)", color: "var(--foreground)", border: "1px solid var(--border)", borderRadius: "8px", padding: "10px 12px", fontSize: "0.8rem", minHeight: "44px" }}
+              />
+            </div>
+            <button
+              type="submit"
+              style={{
+                background: "var(--foreground)", color: "var(--surface)", border: "none", borderRadius: "6px",
+                padding: "12px 20px", fontSize: "0.62rem", letterSpacing: "0.12em", textTransform: "uppercase", cursor: "pointer", minHeight: "44px",
+              }}
+            >
+              Tagesplan erzeugen
+            </button>
+          </form>
+        </Card>
+
+        {plan && plan.freeWindowNote && (
+          <div className="mt-5">
+            <Card><p style={{ color: "var(--muted)", fontSize: "0.82rem", lineHeight: 1.6 }}>{plan.freeWindowNote}</p></Card>
+          </div>
         )}
 
-        {plan && (
-          <>
-            <h1 className="font-light mb-1" style={{ color: "var(--foreground)", fontSize: "1.3rem", letterSpacing: "-0.01em" }}>
-              {plan.title}
-            </h1>
-            <p className="mb-6" style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
-              Gesamtfahrzeit ca. {plan.totalTravelMinutes} Min · {plan.totalTravelDistanceKm} km
-            </p>
-
-            <div className="space-y-2.5 mb-5">
-              {plan.stops.map((stop, i) => (
-                <Card key={stop.placeId}>
-                  <div className="flex items-center justify-between mb-1">
-                    <div style={{ color: "var(--foreground)", fontSize: "0.9rem" }}>{i + 1}. {stop.name}</div>
-                    <div style={{ color: "var(--muted)", fontSize: "0.68rem" }}>{stop.travelMinutes} Min · {stop.travelDistanceKm} km</div>
-                  </div>
-                  <div className="mb-2" style={{ color: "var(--muted)", fontSize: "0.7rem" }}>
-                    ca. {stop.stopDurationMinutes} Min vor Ort
-                  </div>
-                  {stop.why && <p style={{ color: "var(--muted)", fontSize: "0.78rem", lineHeight: 1.5 }}>{stop.why}</p>}
-                </Card>
-              ))}
-            </div>
-
-            <Card>
-              <div className="flex flex-col gap-1.5" style={{ color: "var(--muted)", fontSize: "0.75rem" }}>
-                {plan.weatherNote && <div>☀ {plan.weatherNote}</div>}
-                {plan.kidsNote && <div>👨‍👩‍👧‍👦 {plan.kidsNote}</div>}
-                {plan.mealBreakNote && <div>🍽 {plan.mealBreakNote}</div>}
-                <div>🕐 {plan.returnNote}</div>
-                <div style={{ color: "var(--muted)", opacity: 0.8 }}>{plan.alternativeNote}</div>
-              </div>
-            </Card>
-
-            <div className="flex items-center gap-3 mt-5 flex-wrap">
-              <form action={commitDayPlanToJourney}>
-                <input type="hidden" name="trip_id" value={trip.id} />
-                <input type="hidden" name="trip_slug" value={trip.slug} />
-                <input type="hidden" name="date" value={todayIso} />
-                <input type="hidden" name="plan" value={JSON.stringify(plan)} />
-                <button
-                  type="submit"
-                  style={{
-                    background: "var(--foreground)", color: "var(--surface)", border: "none", borderRadius: "6px",
-                    padding: "10px 20px", fontSize: "0.62rem", letterSpacing: "0.12em", textTransform: "uppercase", cursor: "pointer",
-                  }}
-                >
-                  Ins Journey übernehmen
-                </button>
-              </form>
-              <Link href="/today/plan?new=1" style={{ color: "var(--muted)", fontSize: "0.72rem", letterSpacing: "0.04em" }}>
-                Neuen Plan erstellen
-              </Link>
-            </div>
-          </>
+        {plan && plan.variants.length > 0 && (
+          <div className="flex flex-col gap-5 mt-5">
+            {plan.variants.map((variant) => (
+              <VariantCard key={variant.pace} variant={variant} tripId={trip.id} tripSlug={trip.slug} date={plan.date} />
+            ))}
+          </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function VariantCard({ variant, tripId, tripSlug, date }: { variant: DayPlanVariant; tripId: string; tripSlug: string; date: string }) {
+  return (
+    <div>
+      <h2 className="font-light mb-1" style={{ color: "var(--foreground)", fontSize: "1.15rem", letterSpacing: "-0.01em" }}>
+        {variant.title}
+      </h2>
+      <p className="mb-3" style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
+        Gesamtfahrzeit ca. {variant.totalTravelMinutes} Min · {variant.totalTravelDistanceKm} km
+      </p>
+
+      <div className="space-y-2.5 mb-3">
+        {variant.stops.map((stop, i) => (
+          <Card key={stop.placeId}>
+            <div className="flex items-center justify-between mb-1 flex-wrap gap-1">
+              <div style={{ color: "var(--foreground)", fontSize: "0.9rem" }}>
+                {i + 1}. {stop.name}
+                {stop.time && <span style={{ color: "var(--accent)", fontSize: "0.72rem", marginLeft: "8px" }}>{stop.time}</span>}
+              </div>
+              <div style={{ color: "var(--muted)", fontSize: "0.68rem" }}>{stop.travelMinutes} Min · {stop.travelDistanceKm} km</div>
+            </div>
+            <div className="mb-2" style={{ color: "var(--muted)", fontSize: "0.7rem" }}>
+              ca. {stop.stopDurationMinutes} Min vor Ort
+            </div>
+            {stop.why && <p style={{ color: "var(--muted)", fontSize: "0.78rem", lineHeight: 1.5 }}>{stop.why}</p>}
+          </Card>
+        ))}
+      </div>
+
+      <Card>
+        <div className="flex flex-col gap-1.5" style={{ color: "var(--muted)", fontSize: "0.75rem" }}>
+          {variant.weatherNote && <div>☀ {variant.weatherNote}</div>}
+          {variant.kidsNote && <div>👨‍👩‍👧‍👦 {variant.kidsNote}</div>}
+          {variant.mealBreakNote && <div>🍽 {variant.mealBreakNote}</div>}
+          <div>🕐 {variant.returnNote}</div>
+        </div>
+      </Card>
+
+      <form action={commitDayPlanVariantToJourney} className="mt-3">
+        <input type="hidden" name="trip_id" value={tripId} />
+        <input type="hidden" name="trip_slug" value={tripSlug} />
+        <input type="hidden" name="date" value={date} />
+        <input type="hidden" name="variant" value={JSON.stringify(variant)} />
+        <button
+          type="submit"
+          style={{
+            background: "var(--foreground)", color: "var(--surface)", border: "none", borderRadius: "6px",
+            padding: "10px 20px", fontSize: "0.62rem", letterSpacing: "0.12em", textTransform: "uppercase", cursor: "pointer", minHeight: "44px",
+          }}
+        >
+          Diesen Plan übernehmen
+        </button>
+      </form>
     </div>
   );
 }
