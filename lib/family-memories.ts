@@ -124,6 +124,13 @@ export async function hasDeclinedSimilarMemory(familyId: string, category: strin
   return (data?.length ?? 0) > 0
 }
 
+/** §"Frag-LUMI-Probleme beheben, Punkt 1" (Nutzervorgabe): geteilter Vorschlags-Typ -- sowohl `lib/lumi-brain-ai.ts` (die 5 LUMI-Brain-Intents) als auch `lib/concierge-ai.ts` (generischer Freitext-Pfad) füllen dasselbe Feld, damit eine geäußerte Vorliebe unabhängig davon erkannt wird, welcher der beiden KI-Pfade die Frage beantwortet. */
+export type MemoryCandidateSuggestion = {
+  memoryType: MemoryType
+  category: string
+  summary: string
+}
+
 export type MemoryCandidateInput = {
   familyId: string
   personId?: string | null

@@ -5,7 +5,7 @@ import type { LumiBrainIntent } from './lumi-brain-intent'
 import { extractMentionedDayMonth } from './lumi-brain-intent'
 import { formatDateDE } from './demo-data'
 import { splitDateTime } from './bookings'
-import { formatMemoriesForPrompt } from './family-memories'
+import { formatMemoriesForPrompt, type MemoryCandidateSuggestion } from './family-memories'
 
 const OPENAI_MODEL = 'gpt-5.4'
 
@@ -18,12 +18,6 @@ const OPENAI_MODEL = 'gpt-5.4'
  * `buildBasisLabel` unten) -- deterministisch, damit die Datenbasis-Angabe
  * nie erfunden werden kann.
  */
-export type LumiBrainMemoryCandidate = {
-  memoryType: 'confirmed_preference' | 'observed_pattern' | 'trip_specific_preference' | 'family_member_preference' | 'experience'
-  category: string
-  summary: string
-}
-
 export type LumiBrainAnswer = {
   title: string
   body: string
@@ -32,7 +26,7 @@ export type LumiBrainAnswer = {
   basisLabel: string
   links: Array<{ label: string; href: string }>
   /** §"Frag LUMI darf eine mögliche Erinnerung erkennen, aber nicht ungefragt speichern" (Nutzervorgabe) -- nur ein VORSCHLAG, wird als 'pending' angelegt, nie automatisch bestätigt. */
-  memoryCandidate: LumiBrainMemoryCandidate | null
+  memoryCandidate: MemoryCandidateSuggestion | null
 }
 
 const LUMI_BRAIN_SCHEMA = {
@@ -123,7 +117,18 @@ function buildVergleichPrompt(trip: LumiBrainTripContext, questionText: string, 
     parts.push('Keine gespeicherten Flugvergleichsdaten für diese Reise vorhanden.')
   }
 
-  parts.push('Beantworte die Frage ausschließlich auf Basis der oben gelieferten, bereits bewerteten Optionen. Erfinde keine weiteren Hotels/Flüge. Wenn keine Vergleichsdaten vorliegen, sage das ehrlich und empfehle, eine Suche über die Hotel-/Flugsuche zu starten, statt zu raten.')
+  // §"Frag-LUMI-Probleme beheben, Punkt 3: konkrete Empfehlungen statt
+  // allgemeiner Antworten" (Nutzervorgabe, wörtlich die vier geforderten
+  // Abschnitte) -- die KI bekommt die exakte body-Struktur vorgegeben, statt
+  // nur allgemein "fasse zusammen" zu hören. `body.split("\n\n")` (siehe
+  // AnswerCard, app/(app)/concierge/page.tsx) rendert jeden Absatz bereits
+  // als eigenen Block, keine UI-Änderung nötig.
+  const hasAnyOptions = (trip.hotelOptions && trip.hotelOptions.length > 0) || (trip.flightOptions && trip.flightOptions.length > 0)
+  parts.push(
+    hasAnyOptions
+      ? 'Beantworte die Frage ausschließlich auf Basis der oben gelieferten, bereits bewerteten Optionen -- erfinde keine weiteren Hotels/Flüge/Namen/Fakten. Strukturiere das Feld "body" als genau vier durch Leerzeile getrennte Absätze in dieser Reihenfolge: (1) klare Hauptempfehlung MIT dem konkreten Namen aus der obigen Liste, (2) 2-3 knappe, konkrete Gründe dafür, (3) mögliche Nachteile dieser Option, (4) eine konkrete Alternative aus der Liste samt kurzer Begründung, warum sie die zweite Wahl ist. Bis zu 130 Wörter für diese vier Absätze zusammen sind für diese Frage in Ordnung.'
+      : 'Es liegen keine gespeicherten Vergleichsdaten für diese Reise vor. Sage das im Feld "body" in einem einzigen, kurzen Absatz ehrlich -- erfinde KEINE Hotels/Flüge/Namen -- und empfehle stattdessen ausdrücklich, eine Suche über die Hotel-/Flugsuche zu starten (Link wird separat angezeigt).',
+  )
   return parts.join('\n\n')
 }
 
@@ -280,7 +285,7 @@ export async function generateLumiBrainAnswer(params: {
       text: { format: { type: 'json_schema', name: 'lumi_brain_answer', schema: LUMI_BRAIN_SCHEMA, strict: true } },
     })
     const parsed = JSON.parse(response.output_text)
-    const memoryCandidate: LumiBrainMemoryCandidate | null = parsed.memory_candidate
+    const memoryCandidate: MemoryCandidateSuggestion | null = parsed.memory_candidate
       ? { memoryType: parsed.memory_candidate.memory_type, category: parsed.memory_candidate.category, summary: parsed.memory_candidate.summary }
       : null
     return {

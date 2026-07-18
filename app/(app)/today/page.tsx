@@ -1,7 +1,7 @@
 import Link from "next/link";
 import {
   Clock, ArrowRight, Ticket, Car, ChevronRight, Sparkles, Compass,
-  FileQuestion, CloudSun, Shuffle, AlertTriangle, RefreshCw, Route, Plane, Hotel, Heart,
+  FileQuestion, CloudSun, Shuffle, AlertTriangle, RefreshCw, Route, Plane, Hotel, Heart, Trash2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
@@ -30,7 +30,11 @@ import { computeTripRequirements } from "@/lib/travel-requirements";
 import type { TravelRequirement } from "@/lib/travel-requirements";
 import { computeTripReadiness } from "@/lib/readiness";
 import type { ReadinessFinding } from "@/lib/readiness";
-import { askConcierge, refreshConciergeMessage, commitConciergeAction } from "@/lib/actions/concierge-actions";
+import { askConcierge, refreshConciergeMessage, commitConciergeAction, deleteConciergeMessage, deleteAllConciergeMessages } from "@/lib/actions/concierge-actions";
+import { listFamilyMemories } from "@/lib/family-memories";
+import type { FamilyMemory } from "@/lib/family-memories";
+import { MemoryCandidateCard } from "@/components/MemoryCandidateCard";
+import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { TODAY_CATEGORIES } from "@/lib/today-categories";
 import { resolveTripAiContext } from "@/lib/today-trip-context";
 import { scoreDestinations } from "@/lib/discover-scoring";
@@ -673,6 +677,15 @@ export default async function TodayPage({
   const EMBEDDED_QUICK_ACTIONS = QUICK_ACTIONS.filter((qa) => qa.key !== "today_important");
   const conciergeCards: DisplayCard[] = buildConciergeCards(null, recentConciergeMessages);
 
+  // §"Frag-LUMI-Probleme beheben, Punkt 1" (Nutzervorgabe): dieselbe
+  // Bestätigungskarte wie /concierge, hier zusätzlich im eingebetteten Panel
+  // -- sonst würde ein hier erkannter Memory-Kandidat erst sichtbar, wenn die
+  // Familie zufällig /concierge oder /today/preferences öffnet.
+  const allPendingMemories = await listFamilyMemories(familyId, "pending");
+  const pendingMemories: FamilyMemory[] = allPendingMemories.filter(
+    (m) => m.tripId === null || m.tripId === activeTrip.id,
+  );
+
   const activeRentalCar = bookings.find(
     (b) => b.type === "rental_car" && b.status !== "cancelled"
       && b.start_datetime && b.end_datetime
@@ -951,6 +964,12 @@ export default async function TodayPage({
         <section className="mb-8">
           <SectionLabel>Frag LUMI</SectionLabel>
 
+          {pendingMemories.length > 0 && (
+            <div className="mb-3">
+              {pendingMemories.map((m) => <MemoryCandidateCard key={m.id} memory={m} returnTo="/today" />)}
+            </div>
+          )}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
             {EMBEDDED_QUICK_ACTIONS.map((qa) => {
               const QaIcon = QUICK_ACTION_ICONS[qa.key];
@@ -1021,6 +1040,23 @@ export default async function TodayPage({
             </div>
           </form>
 
+          {conciergeCards.length > 0 && (
+            <div className="flex justify-end mb-2">
+              <form action={deleteAllConciergeMessages}>
+                <input type="hidden" name="family_id" value={familyId} />
+                <input type="hidden" name="return_to" value="/today" />
+                <ConfirmSubmitButton
+                  label="Gesamten Verlauf löschen"
+                  confirmMessage="Gesamten Frag-LUMI-Verlauf unwiderruflich löschen? Eure gespeicherten Vorlieben, Reisen, Buchungen und Journey-Daten bleiben davon unberührt."
+                  style={{
+                    background: "transparent", color: "var(--muted)", border: "1px solid var(--border)",
+                    borderRadius: "20px", padding: "6px 14px", fontSize: "0.62rem", cursor: "pointer",
+                  }}
+                />
+              </form>
+            </div>
+          )}
+
           {conciergeCards.map((card) => (
             <div key={card.key} className="rounded-xl p-6 mb-3" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
               <div className="flex items-center gap-2 mb-2">
@@ -1032,9 +1068,12 @@ export default async function TodayPage({
               <div className="mb-2" style={{ color: "var(--foreground)", fontSize: "0.95rem", fontWeight: 400 }}>
                 {card.title}
               </div>
-              <p className="mb-3" style={{ color: "var(--muted)", fontSize: "0.8rem", lineHeight: 1.6 }}>
-                {card.body}
-              </p>
+              {/* §"Konkrete Empfehlungen" (Frag-LUMI-Fix Punkt 3): mehrteilige, strukturierte Antworten (Hauptempfehlung/Gründe/Nachteile/Alternative) kommen als \n\n-getrennte Absätze -- gleiche Aufteilung wie AnswerCard (app/(app)/concierge/page.tsx), sonst würden sie hier zu einem einzigen Fließtext verschmelzen. */}
+              {card.body.split("\n\n").filter(Boolean).map((paragraph, i) => (
+                <p key={i} className="mb-2" style={{ color: "var(--muted)", fontSize: "0.8rem", lineHeight: 1.6 }}>
+                  {paragraph}
+                </p>
+              ))}
 
               {card.links.length > 0 && (
                 <div className="mb-3 space-y-1.5">
@@ -1091,6 +1130,23 @@ export default async function TodayPage({
                       eventTitle={card.eventTitle} label={card.commitLabel} className=""
                     />
                   )}
+                  <form action={deleteConciergeMessage}>
+                    <input type="hidden" name="family_id" value={familyId} />
+                    <input type="hidden" name="trip_id" value={activeTrip.id} />
+                    <input type="hidden" name="for_date" value={todayIso} />
+                    <input type="hidden" name="question_key" value={card.key} />
+                    <input type="hidden" name="return_to" value="/today" />
+                    <button
+                      type="submit"
+                      aria-label="Diese Frage löschen"
+                      style={{
+                        background: "transparent", color: "var(--muted)", border: "1px solid var(--border)",
+                        borderRadius: "20px", padding: "6px 10px", cursor: "pointer", display: "flex", alignItems: "center",
+                      }}
+                    >
+                      <Trash2 size={12} strokeWidth={1.6} />
+                    </button>
+                  </form>
                 </div>
               </div>
             </div>

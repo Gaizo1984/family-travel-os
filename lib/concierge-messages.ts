@@ -1,6 +1,7 @@
 import { createClient } from './supabase/server'
 import { generateConciergeAnswer } from './concierge-ai'
 import type { ConciergeLink } from './concierge'
+import { createPendingMemoryCandidate, hasDeclinedSimilarMemory } from './family-memories'
 
 export type CachedConciergeMessage = {
   questionKey: string
@@ -99,6 +100,20 @@ export async function generateAndCacheConciergeMessage(
 ): Promise<CachedConciergeMessage | null> {
   const result = await generateConciergeAnswer({ questionText, ...context, isRegenerate })
   if (!result) return null
+
+  // §"Frag-LUMI-Probleme beheben, Punkt 1" (Nutzervorgabe): einzige
+  // Einspeisestelle für den generischen KI-Pfad (Wetter anpassen/Alternative
+  // finden + Freitext ohne LUMI-Brain-Intent-Treffer) -- gleiches Muster wie
+  // lib/actions/concierge-actions.ts für den LUMI-Brain-Pfad, hier zentral
+  // statt an jeder der zwei Aufrufstellen von generateAndCacheConciergeMessage
+  // dupliziert.
+  if (result.memoryCandidate) {
+    const { memoryType, category, summary } = result.memoryCandidate
+    const alreadyDeclined = await hasDeclinedSimilarMemory(familyId, category, summary)
+    if (!alreadyDeclined) {
+      await createPendingMemoryCandidate({ familyId, tripId, memoryType, category, summary, source: 'concierge_chat' })
+    }
+  }
 
   const fingerprint = buildContextFingerprint(context.weatherSummary, context.knownPlanText)
   const supabase = await createClient()

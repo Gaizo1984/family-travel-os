@@ -311,6 +311,55 @@ export async function refreshConciergeMessage(formData: FormData) {
 }
 
 /**
+ * §"Frag-LUMI-Verlauf löschen, Punkt 2" (Nutzervorgabe): löscht GENAU EINE
+ * Frage samt Antwort -- ausschließlich aus `concierge_messages`, betrifft nie
+ * family_memories/trips/bookings/journey_events (komplett andere Tabellen).
+ * `concierge_messages` hat (Stand vor der begleitenden Migration) noch die
+ * permissive "dev"-RLS-Policy -- deshalb hier bewusst redundant nach
+ * `family_id` gescoped, statt sich allein auf RLS zu verlassen (anders als
+ * z.B. lib/actions/family-memories.ts, wo die echte family_members_only-
+ * Policy bereits ausreicht).
+ */
+export async function deleteConciergeMessage(formData: FormData) {
+  const familyId = String(formData.get('family_id') ?? '')
+  const tripId = String(formData.get('trip_id') ?? '').trim() || null
+  const forDate = String(formData.get('for_date') ?? '')
+  const questionKey = String(formData.get('question_key') ?? '')
+  const returnTo = String(formData.get('return_to') ?? '').trim() || '/concierge'
+  if (!familyId || !forDate || !questionKey) redirect(returnTo)
+
+  const supabase = await createClient()
+  let query = supabase.from('concierge_messages').delete()
+    .eq('family_id', familyId).eq('for_date', forDate).eq('question_key', questionKey)
+  query = tripId ? query.eq('trip_id', tripId) : query.is('trip_id', null)
+  const { error } = await query
+  if (error) redirect(`${returnTo}?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)
+  redirect(returnTo)
+}
+
+/**
+ * §"gesamten Verlauf löschen" + "darf bestätigte Vorlieben, Reisen,
+ * Buchungen oder Journey-Daten nicht entfernen" (Nutzervorgabe, wörtlich):
+ * löscht ALLE `concierge_messages`-Zeilen dieser Familie (alle Reisen/Tage),
+ * ausschließlich diese eine Tabelle -- `family_memories` (Unsere Vorlieben)
+ * und alle Reise-/Buchungs-/Journey-Tabellen werden hier nirgends
+ * referenziert, geschweige denn verändert. Die Sicherheitsabfrage läuft
+ * client-seitig VOR dem Absenden (siehe components/ConfirmSubmitButton.tsx),
+ * diese Funktion selbst prüft keine Bestätigung -- sie darf nur von einem
+ * bereits bestätigten Klick aus erreicht werden.
+ */
+export async function deleteAllConciergeMessages(formData: FormData) {
+  const familyId = String(formData.get('family_id') ?? '')
+  const returnTo = String(formData.get('return_to') ?? '').trim() || '/concierge'
+  if (!familyId) redirect(returnTo)
+
+  const supabase = await createClient()
+  const { error } = await supabase.from('concierge_messages').delete().eq('family_id', familyId)
+  if (error) redirect(`${returnTo}?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)
+  redirect(returnTo)
+}
+
+/**
  * §"Nie automatisch Daten ändern – immer Bestätigung verlangen": erst der
  * bewusste Klick auf "In Journey übernehmen"/"Alternative speichern" legt
  * einen echten journey_events-Eintrag an (status 'idea' — bewusst zurück-

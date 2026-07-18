@@ -1,4 +1,5 @@
 import OpenAI from 'openai'
+import type { MemoryCandidateSuggestion } from './family-memories'
 
 const OPENAI_MODEL = 'gpt-5.4'
 
@@ -7,7 +8,19 @@ export type ConciergeAiResult = {
   body: string
   /** Kurzer, konkreter Titel, geeignet als Journey-Termin, falls die Familie "In Journey übernehmen"/"Alternative speichern" wählt. */
   eventTitle: string
+  /**
+   * §"Frag-LUMI-Probleme beheben, Punkt 1" (Nutzervorgabe): dieser generische
+   * Pfad bediente bisher NUR Schnellaktionen (Wetter anpassen/Alternative
+   * finden) und Freitext-Fragen, die keinen der 5 LUMI-Brain-Intents treffen
+   * (siehe lib/lumi-brain-intent.ts) -- z. B. eine reine Präferenz-Aussage
+   * ohne Frageform ("Wir mögen keine riesigen Resorts..."). Ohne dieses Feld
+   * ging jede dort geäußerte dauerhafte Vorliebe verloren. Gleiches Muster/
+   * gleiche Vorsicht wie lib/lumi-brain-ai.ts::memory_candidate.
+   */
+  memoryCandidate: MemoryCandidateSuggestion | null
 }
+
+const MEMORY_CANDIDATE_INSTRUCTION = 'Prüfe zusätzlich: drückt der NUTZER im Fragetext selbst eine dauerhafte, wiederholbare Vorliebe oder Erfahrung aus (z.B. "wir mögen keine riesigen Resorts mit mehreren hundert Zimmern", "Direktflug ist uns einen Mehrpreis wert")? Falls ja, fülle memory_candidate strukturiert aus. Falls die Frage/Aussage nur eine normale Sachfrage ohne eine solche Aussage ist, setze memory_candidate auf null -- niemals eine Vorliebe erfinden, die nicht im Text steht.'
 
 const CONCIERGE_SCHEMA = {
   type: 'object',
@@ -15,8 +28,19 @@ const CONCIERGE_SCHEMA = {
     title: { type: 'string', description: 'Kurze, klare Kernaussage/Überschrift der Antwort — eine starke Empfehlung, keine Aufzählung von Optionen.' },
     body: { type: 'string', description: 'Konkrete Begründung/Ausführung, 50-90 Wörter, direkt und persönlich wie ein Reiseberater, keine Floskeln.' },
     event_title: { type: 'string', description: 'Kurzer, konkreter Titel (max. 8 Wörter) für einen möglichen Journey-Termin, falls die Familie diesen Vorschlag übernehmen möchte.' },
+    memory_candidate: {
+      type: ['object', 'null'],
+      description: 'NUR befüllen, wenn der NUTZER im Fragetext selbst eine dauerhafte, wiederholbare Vorliebe oder Erfahrung ausdrückt (nicht die Antwort selbst) -- sonst null. Niemals eine Vorliebe erfinden, die nicht im Text steht.',
+      properties: {
+        memory_type: { type: 'string', enum: ['confirmed_preference', 'observed_pattern', 'trip_specific_preference', 'family_member_preference', 'experience'] },
+        category: { type: 'string', description: 'z.B. hotel, flight, pace, activity, destination, interest' },
+        summary: { type: 'string', description: 'Kurze, menschenlesbare Zusammenfassung (max. 20 Wörter), z.B. "Kleinere, individuellere Resorts bevorzugt".' },
+      },
+      required: ['memory_type', 'category', 'summary'],
+      additionalProperties: false,
+    },
   },
-  required: ['title', 'body', 'event_title'],
+  required: ['title', 'body', 'event_title', 'memory_candidate'],
   additionalProperties: false,
 }
 
@@ -49,7 +73,9 @@ ${context.isRegenerate ? 'Die Familie möchte eine andere/aktualisierte Antwort 
 
 Frage der Familie: "${context.questionText}"
 
-Antworte mit GENAU EINER starken, konkreten Empfehlung — keine Liste konkurrierender Optionen. Widerspreche nicht dem bereits bekannten Plan, ergänze ihn sinnvoll. Erfinde keine konkreten Preise, Öffnungszeiten oder Adressen. Schreibe auf Deutsch, direkt und persönlich, wie ein vertrauter Reiseberater — kurz, konkret, handlungsorientiert.`
+Antworte mit GENAU EINER starken, konkreten Empfehlung — keine Liste konkurrierender Optionen. Widerspreche nicht dem bereits bekannten Plan, ergänze ihn sinnvoll. Erfinde keine konkreten Preise, Öffnungszeiten oder Adressen. Schreibe auf Deutsch, direkt und persönlich, wie ein vertrauter Reiseberater — kurz, konkret, handlungsorientiert.
+
+${MEMORY_CANDIDATE_INSTRUCTION}`
 
   try {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -60,7 +86,10 @@ Antworte mit GENAU EINER starken, konkreten Empfehlung — keine Liste konkurrie
     })
 
     const parsed = JSON.parse(response.output_text)
-    return { title: parsed.title, body: parsed.body, eventTitle: parsed.event_title }
+    const memoryCandidate: MemoryCandidateSuggestion | null = parsed.memory_candidate
+      ? { memoryType: parsed.memory_candidate.memory_type, category: parsed.memory_candidate.category, summary: parsed.memory_candidate.summary }
+      : null
+    return { title: parsed.title, body: parsed.body, eventTitle: parsed.event_title, memoryCandidate }
   } catch (e) {
     console.error('[provider:request-failed]', { provider: 'openai', requestType: 'concierge_answer', httpStatus: (e as { status?: number })?.status ?? 0 })
     return null

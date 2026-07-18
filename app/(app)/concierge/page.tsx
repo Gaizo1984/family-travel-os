@@ -16,6 +16,9 @@ import { todayIsoInFamilyTimezone } from "@/lib/time";
 import { listFamilyMemories } from "@/lib/family-memories";
 import type { FamilyMemory } from "@/lib/family-memories";
 import { MemoryCandidateCard } from "@/components/MemoryCandidateCard";
+import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
+import { deleteConciergeMessage, deleteAllConciergeMessages } from "@/lib/actions/concierge-actions";
+import { Trash2 } from "lucide-react";
 
 /** §"Basierend auf..." (Nutzervorgabe) -- rein deterministisch, keine KI-Vorschau; identischer Wortlaut wie lib/lumi-brain-ai.ts::buildBasisLabel, hier nur als UI-Text ohne KI-Aufruf dupliziert. */
 function basisLabelFor(selectedTrip: TripPickerEntry | null): string {
@@ -119,9 +122,42 @@ function AnswerCard({ card, hiddenFields, allowCommit }: { card: CardData; hidde
               </button>
             </form>
           )}
+          {/* §"einzelne Frage samt Antwort löschen" (Nutzervorgabe, Frag-LUMI-Fix Punkt 2): betrifft ausschließlich diese eine concierge_messages-Zeile, keine Sicherheitsabfrage nötig (nur beim gesamten Verlauf, siehe ClearHistoryButton). */}
+          <form action={deleteConciergeMessage}>
+            {hiddenFields}
+            <input type="hidden" name="question_key" value={card.key} />
+            <button
+              type="submit"
+              aria-label="Diese Frage löschen"
+              style={{
+                background: "transparent", color: "var(--muted)", border: "1px solid var(--border)",
+                borderRadius: "20px", padding: "6px 10px", cursor: "pointer", display: "flex", alignItems: "center",
+              }}
+            >
+              <Trash2 size={12} strokeWidth={1.6} />
+            </button>
+          </form>
         </div>
       </div>
     </div>
+  );
+}
+
+/** §"Sicherheitsabfrage vor dem vollständigen Löschen" (Nutzervorgabe): löscht den gesamten Frag-LUMI-Verlauf der Familie (alle Reisen/Tage) -- family_memories/Reisen/Buchungen/Journey-Daten bleiben unangetastet (siehe lib/actions/concierge-actions.ts::deleteAllConciergeMessages). */
+function ClearHistoryButton({ familyId, returnTo }: { familyId: string; returnTo: string }) {
+  return (
+    <form action={deleteAllConciergeMessages} className="flex justify-end mb-3">
+      <input type="hidden" name="family_id" value={familyId} />
+      <input type="hidden" name="return_to" value={returnTo} />
+      <ConfirmSubmitButton
+        label="Gesamten Verlauf löschen"
+        confirmMessage="Gesamten Frag-LUMI-Verlauf unwiderruflich löschen? Eure gespeicherten Vorlieben, Reisen, Buchungen und Journey-Daten bleiben davon unberührt."
+        style={{
+          background: "transparent", color: "var(--muted)", border: "1px solid var(--border)",
+          borderRadius: "20px", padding: "6px 14px", fontSize: "0.62rem", cursor: "pointer",
+        }}
+      />
+    </form>
   );
 }
 
@@ -304,6 +340,7 @@ export default async function ConciergePage({
 
           {cards.length > 0 && (
             <section>
+              <ClearHistoryButton familyId={familyId} returnTo={returnTo} />
               {cards.map((card) => <AnswerCard key={card.key} card={card} hiddenFields={hiddenFields} allowCommit={false} />)}
             </section>
           )}
@@ -393,6 +430,7 @@ export default async function ConciergePage({
 
           {cards.length > 0 && (
             <section>
+              <ClearHistoryButton familyId={familyId} returnTo={returnTo} />
               {cards.map((card) => <AnswerCard key={card.key} card={card} hiddenFields={hiddenFields} allowCommit />)}
             </section>
           )}
@@ -455,6 +493,7 @@ export default async function ConciergePage({
 
         {cards.length > 0 && (
           <section>
+            <ClearHistoryButton familyId={familyId} returnTo={returnTo} />
             {cards.map((card) => <AnswerCard key={card.key} card={card} hiddenFields={hiddenFields} allowCommit={false} />)}
           </section>
         )}

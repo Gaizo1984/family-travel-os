@@ -33,8 +33,20 @@ const FAMILIENFIT_KEYWORDS = [
   'zu voll', 'zu anstrengend', 'familiengerecht', 'schlafzeiten', 'transferzeit', 'zu viel für',
 ]
 
-const VERGLEICH_HOTEL_KEYWORDS = ['welches hotel', 'hotel passt besser', 'hotel vergleich', 'besseres hotel']
-const VERGLEICH_FLIGHT_KEYWORDS = ['welche flugverbindung', 'welcher flug', 'flug passt besser', 'flug vergleich', 'bessere flugverbindung']
+// §"Frag-LUMI-Probleme beheben, Punkt 3" (Nutzervorgabe): Hotel-/Flugfragen
+// landeten oft im generischen, ungegroundeten Freitext-Pfad statt hier, weil
+// natürliche Formulierungen ("Welches Hotel empfiehlst du uns?") die engen
+// Vergleichs-Phrasen nicht trafen -- gezielt um Empfehlungs-Formulierungen
+// ergänzt (bewusst weiterhin mit "hotel"/"flug" verankert, um keine
+// artfremden Fragen versehentlich hierher umzuleiten).
+const VERGLEICH_HOTEL_KEYWORDS = [
+  'welches hotel', 'hotel passt besser', 'hotel vergleich', 'besseres hotel',
+  'hotel empfehl', 'gutes hotel', 'hotel für uns', 'wie ist das hotel', 'hotelempfehlung',
+]
+const VERGLEICH_FLIGHT_KEYWORDS = [
+  'welche flugverbindung', 'welcher flug', 'flug passt besser', 'flug vergleich', 'bessere flugverbindung',
+  'flug empfehl', 'welchen flug', 'guter flug', 'flugempfehlung',
+]
 // §Bugfix "bestes Verhältnis"/"Komfort und Reisezeit" matchten nicht (Nutzervorgabe,
 // Qualitätsabschluss LUMI Brain v1): reines includes() ohne Wortgrenzen -- übliche
 // Flexionsformen/Verbindungswörter ergänzt, keine Grammatik-Normalisierung nötig.
