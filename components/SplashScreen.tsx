@@ -5,7 +5,8 @@ import { useEffect, useState } from 'react'
 const HOLD_MS_BROWSER = 900
 const FADE_MS_BROWSER = 450
 
-const MIN_HOLD_MS_STANDALONE = 2600
+/** §"Splashbild 1 Sekunde länger zeigen" (Nutzervorgabe nach erstem funktionierendem Test): 2600ms -> 3600ms. */
+const MIN_HOLD_MS_STANDALONE = 3600
 const FADE_MS_STANDALONE = 500
 
 /**
@@ -38,9 +39,9 @@ const LOAD_WAIT_CAP_MS = 4000
  * CSS-getriebenes Notnetz, unabhängig vom JS-State oben -- blendet auch ganz
  * ohne je laufendes JS irgendwann aus. Bewusst über dem realistischen
  * JS-Worst-Case (LOAD_WAIT_CAP_MS + MIN_HOLD_MS_STANDALONE + FADE_MS_STANDALONE
- * = 7100ms), damit sie im Erfolgsfall nie sichtbar eingreift.
+ * = 8100ms), damit sie im Erfolgsfall nie sichtbar eingreift.
  */
-const CSS_FALLBACK_MS = 8000
+const CSS_FALLBACK_MS = 9500
 const CSS_FALLBACK_HOLD_PERCENT = 94
 
 export function SplashScreen() {
