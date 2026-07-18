@@ -3,7 +3,7 @@ import { Map as MapIcon, Globe, Users, CalendarDays } from "lucide-react";
 import { formatDateDE } from "@/lib/demo-data";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
-import { buildTravelWorld } from "@/lib/travel-world";
+import { buildTravelWorldForFamilyAndPersons } from "@/lib/travel-world";
 import { isTripPastEnd, tripCountdownDisplay } from "@/lib/trip-status";
 import { deriveTripDateRange, tripDurationDays, TRIP_DATE_RANGE_OPEN_LABEL } from "@/lib/trip-dates";
 import { resolveTripImage, getHighlightPhotoByTripId, type ResolvedTripImage } from "@/lib/trip-images";
@@ -234,7 +234,14 @@ export default async function Dashboard() {
 
   // Highlightfoto-Query braucht nur familyId (keine Trip-IDs übergeben), hängt
   // also nicht von den Trips ab — direkt mit in dieselbe parallele Ladung.
-  const [{ data: tripsRaw }, { data: personsRaw }, worldStats, highlightPhotoByTripId] = await Promise.all([
+  // §"Ladezeit-Performance, N+1 vermeiden" (Nutzervorgabe): die Gesamtfamilien-
+  // Weltstatistik wandert bewusst in die zweite Promise.all weiter unten --
+  // dort wird sie zusammen mit den Pro-Personen-Varianten aus EINER
+  // gemeinsamen Rohdaten-Abfrage berechnet (buildTravelWorldForFamilyAndPersons),
+  // statt wie zuvor je einen eigenen buildTravelWorld()-Aufruf (und damit
+  // dieselben 3 Supabase-Abfragen) für die Gesamtfamilie UND jedes einzelne
+  // Familienmitglied auszulösen.
+  const [{ data: tripsRaw }, { data: personsRaw }, highlightPhotoByTripId] = await Promise.all([
     supabase
       .from("trips")
       .select(`
@@ -246,7 +253,6 @@ export default async function Dashboard() {
       .eq("family_id", familyId)
       .order("start_date", { ascending: true, nullsFirst: false }),
     supabase.from("persons").select("id, name, initials, color").eq("family_id", familyId).order("name"),
-    buildTravelWorld({ familyId }),
     getHighlightPhotoByTripId(supabase, familyId),
   ]);
 
@@ -310,8 +316,10 @@ export default async function Dashboard() {
   // §"Weltkarte von Familie aufs Hauptdashboard": erst Gesamtkarte, danach
   // per Swipe/Dots eine Karte je Familienmitglied -- alle aus derselben
   // buildTravelWorld-Quelle wie /family/world, keine eigene Aggregation.
-  const [perPersonWorlds, nextTripReadiness, nextTripWeather] = await Promise.all([
-    Promise.all(persons.map((p) => buildTravelWorld({ familyId, personId: p.id }))),
+  // §"Ladezeit-Performance, N+1 vermeiden": EIN Aufruf statt (Anzahl Personen
+  // + 1) einzelner buildTravelWorld()-Aufrufe -- siehe lib/travel-world.ts.
+  const [{ family: worldStats, byPersonId: perPersonWorlds }, nextTripReadiness, nextTripWeather] = await Promise.all([
+    buildTravelWorldForFamilyAndPersons(familyId, persons.map((p) => p.id)),
     computeTripReadiness(nextTrip.id),
     getWeatherForLocation(weatherCandidates),
   ]);
@@ -324,13 +332,13 @@ export default async function Dashboard() {
       href: "/family/world",
       node: <WorldMap visitedCodes={worldStats.countryCodes} />,
     },
-    ...persons.map((p, i) => ({
+    ...persons.map((p) => ({
       key: p.id,
       label: p.name,
       initials: p.initials,
       color: p.color,
       href: `/family/world?person=${p.id}`,
-      node: <WorldMap visitedCodes={perPersonWorlds[i].countryCodes} />,
+      node: <WorldMap visitedCodes={perPersonWorlds.get(p.id)!.countryCodes} />,
     })),
   ];
 

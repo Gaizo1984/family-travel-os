@@ -35,6 +35,40 @@ type PastTripRow = {
   year: number; places: string | null; duration_days: number | null
 }
 
+type TravelWorldRawData = {
+  trips: TripJoin[]
+  pastTrips: PastTripRow[]
+  travelersByPastTrip: Map<string, string[]>
+}
+
+/** Reine Datenbeschaffung (3 Supabase-Abfragen), keine Filterung/Aggregation -- siehe computeTravelWorld. */
+async function fetchTravelWorldRawData(familyId: string): Promise<TravelWorldRawData> {
+  const supabase = await createClient()
+  const [{ data: tripsRaw }, { data: pastTripsRaw }, { data: pastTravelersRaw }] = await Promise.all([
+    supabase.from('trips').select(`
+      id, slug, title, start_date, end_date, status,
+      trip_members ( person_id ),
+      stages ( country_code, is_transit, start_date, end_date ),
+      bookings ( type, status, start_datetime, end_datetime )
+    `).eq('family_id', familyId),
+    supabase.from('past_trips').select('id, country_or_region, country_code, year, places, duration_days').eq('family_id', familyId),
+    supabase.from('past_trip_travelers').select('past_trip_id, person_id'),
+  ])
+
+  const travelersByPastTrip = new Map<string, string[]>()
+  ;(pastTravelersRaw ?? []).forEach((t) => {
+    const list = travelersByPastTrip.get(t.past_trip_id) ?? []
+    list.push(t.person_id)
+    travelersByPastTrip.set(t.past_trip_id, list)
+  })
+
+  return {
+    trips: (tripsRaw ?? []) as unknown as TripJoin[],
+    pastTrips: (pastTripsRaw ?? []) as PastTripRow[],
+    travelersByPastTrip,
+  }
+}
+
 /**
  * §"Unsere Welt": EINZIGE Datenbasis für Weltkarte, Statistik, Reisegeschichte
  * und Personenfilter (family/page.tsx, family/world, family/[personId],
@@ -48,38 +82,16 @@ type PastTripRow = {
  *
  * `trip_members`/`past_trip_travelers` sind die einzige Quelle für den
  * Personenfilter -- keine automatische "ganze Familie"-Zuordnung.
+ *
+ * Reine Berechnung (keine Datenbankzugriffe) -- Rohdaten kommen aus
+ * `fetchTravelWorldRawData`. So getrennt, damit `buildTravelWorldForFamilyAndPersons`
+ * unten die Rohdaten einmal holen und mehrfach (Gesamtfamilie + je Person)
+ * berechnen kann, ohne die Aggregationslogik zu duplizieren.
  */
-export async function buildTravelWorld(params: {
-  familyId: string
-  personId?: string
-  statusFilter?: 'historical' | 'all'
-}): Promise<TravelWorld> {
-  const supabase = await createClient()
-  const statusFilter = params.statusFilter ?? 'historical'
+function computeTravelWorld(raw: TravelWorldRawData, options: { personId?: string; statusFilter?: 'historical' | 'all' }): TravelWorld {
+  const statusFilter = options.statusFilter ?? 'historical'
 
-  const [{ data: tripsRaw }, { data: pastTripsRaw }, { data: pastTravelersRaw }] = await Promise.all([
-    supabase.from('trips').select(`
-      id, slug, title, start_date, end_date, status,
-      trip_members ( person_id ),
-      stages ( country_code, is_transit, start_date, end_date ),
-      bookings ( type, status, start_datetime, end_datetime )
-    `).eq('family_id', params.familyId),
-    supabase.from('past_trips').select('id, country_or_region, country_code, year, places, duration_days').eq('family_id', params.familyId),
-    supabase.from('past_trip_travelers').select('past_trip_id, person_id'),
-  ])
-
-  const travelersByPastTrip = new Map<string, string[]>()
-  ;(pastTravelersRaw ?? []).forEach((t) => {
-    const list = travelersByPastTrip.get(t.past_trip_id) ?? []
-    list.push(t.person_id)
-    travelersByPastTrip.set(t.past_trip_id, list)
-  })
-
-  let trips = (tripsRaw ?? []) as unknown as TripJoin[]
-  // §"Reisezeitraum automatisch ableiten": Status/Statistik nutzen denselben
-  // zentral abgeleiteten Zeitraum (lib/trip-dates.ts) wie Reiseübersicht und
-  // Trip-Detail -- eine Reise ohne manuelles Datum, aber mit Buchungen/
-  // Etappen, zählt so trotzdem korrekt als laufend/erlebt.
+  let trips = raw.trips
   const rangeByTripId = new Map(trips.map((t) => [t.id, deriveTripDateRange(t, t.bookings, t.stages)]))
   const tripStatusInput = (t: TripJoin) => {
     const range = rangeByTripId.get(t.id)!
@@ -92,12 +104,12 @@ export async function buildTravelWorld(params: {
     trips = trips.filter((t) => t.status !== 'archived')
   }
 
-  let pastTrips = (pastTripsRaw ?? []) as PastTripRow[]
+  let pastTrips = raw.pastTrips
 
-  if (params.personId) {
-    const personId = params.personId
+  if (options.personId) {
+    const personId = options.personId
     trips = trips.filter((t) => t.trip_members.some((m) => m.person_id === personId))
-    pastTrips = pastTrips.filter((p) => (travelersByPastTrip.get(p.id) ?? []).includes(personId))
+    pastTrips = pastTrips.filter((p) => (raw.travelersByPastTrip.get(p.id) ?? []).includes(personId))
   }
 
   const countryCodes = new Set<string>()
@@ -130,7 +142,7 @@ export async function buildTravelWorld(params: {
       year: p.year as number | null,
       title: p.country_or_region,
       subtitle: [p.places, p.duration_days ? `${p.duration_days} Tage` : null].filter(Boolean).join(' · ') || 'Manuell erfasst',
-      travelerIds: travelersByPastTrip.get(p.id) ?? [],
+      travelerIds: raw.travelersByPastTrip.get(p.id) ?? [],
       countryCodes: p.country_code ? [p.country_code] : [],
       isCurrent: false,
       editHref: `/family/history/${p.id}/edit`,
@@ -141,4 +153,37 @@ export async function buildTravelWorld(params: {
   const lastCountryCode = [...timeline].reverse().flatMap((e) => e.countryCodes)[0] ?? null
 
   return { tripsCount: trips.length + pastTrips.length, countryCodes, travelDays, timeline, lastCountryCode }
+}
+
+export async function buildTravelWorld(params: {
+  familyId: string
+  personId?: string
+  statusFilter?: 'historical' | 'all'
+}): Promise<TravelWorld> {
+  const raw = await fetchTravelWorldRawData(params.familyId)
+  return computeTravelWorld(raw, { personId: params.personId, statusFilter: params.statusFilter })
+}
+
+/**
+ * §"Ladezeit-Performance, N+1 im Hauptdashboard" (Nutzervorgabe): app/(app)/page.tsx
+ * rief bisher `buildTravelWorld()` einmal für die Gesamtfamilie UND einmal
+ * PRO Familienmitglied auf -- bei 4 Personen 5 Aufrufe × 3 Supabase-Abfragen
+ * = 15 Datenbank-Rundreisen für Daten, die für alle Varianten identisch aus
+ * denselben drei Tabellen stammen. Holt die Rohdaten jetzt EINMAL und
+ * berechnet Gesamt- sowie Pro-Personen-Statistik rein in-memory (dieselbe
+ * `computeTravelWorld`-Logik wie `buildTravelWorld`, nur ohne wiederholte
+ * I/O). Nur für diesen einen Mehrfach-Bedarf gedacht -- alle anderen
+ * Aufrufstellen (family/world, family/[personId], family/history, trips,
+ * memories/yearbook, lumi-brain-context) brauchen weiterhin nur eine
+ * einzelne Variante und bleiben unverändert bei `buildTravelWorld()`.
+ */
+export async function buildTravelWorldForFamilyAndPersons(
+  familyId: string,
+  personIds: string[],
+  statusFilter?: 'historical' | 'all',
+): Promise<{ family: TravelWorld; byPersonId: Map<string, TravelWorld> }> {
+  const raw = await fetchTravelWorldRawData(familyId)
+  const family = computeTravelWorld(raw, { statusFilter })
+  const byPersonId = new Map(personIds.map((id) => [id, computeTravelWorld(raw, { personId: id, statusFilter })]))
+  return { family, byPersonId }
 }
