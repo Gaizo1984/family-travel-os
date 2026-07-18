@@ -1,6 +1,6 @@
 import Link from "next/link";
 import {
-  Clock, ArrowRight, Ticket, Car, ChevronRight, Sparkles, Compass, MessageSquare,
+  Clock, ArrowRight, Ticket, Car, ChevronRight, Sparkles, Compass,
   FileQuestion, CloudSun, Shuffle, AlertTriangle, RefreshCw, Route, Plane, Hotel, Heart,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -124,14 +124,22 @@ type TripRow = {
   stages: StageRow[]; bookings: BookingRow[]; journey_events: JourneyEventRow[];
 };
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
+/** §"einheitliche Schriftgrößen/Letterspacing der Abschnittsüberschriften": `subline` optional, alle bisherigen Aufrufstellen (ohne subline) bleiben unverändert. */
+function SectionLabel({ children, subline }: { children: React.ReactNode; subline?: string }) {
   return (
-    <h2
-      className="text-xs font-medium mb-4"
-      style={{ color: "var(--muted)", letterSpacing: "0.2em", textTransform: "uppercase", fontSize: "0.62rem" }}
-    >
-      {children}
-    </h2>
+    <div className="mb-4">
+      <h2
+        className="text-xs font-medium"
+        style={{ color: "var(--muted)", letterSpacing: "0.2em", textTransform: "uppercase", fontSize: "0.62rem" }}
+      >
+        {children}
+      </h2>
+      {subline && (
+        <p className="mt-1.5" style={{ color: "var(--muted)", fontSize: "0.78rem", lineHeight: 1.5 }}>
+          {subline}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -236,56 +244,124 @@ function formatTimestamp(iso: string): string {
   return new Date(iso).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) + " Uhr";
 }
 
-/** §Punkt 3 "Icon-Navigation", vollständig datengetrieben: eine Kachel je TODAY_CATEGORIES-Eintrag, kein hartkodiertes JSX pro Kategorie. */
 /**
- * §"Neue Reiseideen und Frag LUMI ins Dashboard LUMI integrieren, mit
- * extra Icon analog den dortigen Unterpunkten": zusätzliche, statische
- * Kacheln neben den TODAY_CATEGORIES -- bewusst NICHT Teil von
- * TODAY_CATEGORIES selbst, da sie keine KI-Vorschlags-Kategorien sind
- * (kein concierge_category_suggestions-Cache, eigene, bereits bestehende
- * Zielseiten) und die generische Kategorie-Architektur sonst verwässern würden.
- * §"Flugsuche/Hotelsuche gehören nicht zur Ideen-Generierung" (Nutzervorgabe):
- * von den vier Funktionskacheln auf /discover hierher umgezogen -- Flug-/
- * Hotelvergleich sind allgemeine Werkzeuge, keine Ideen-Generierung.
+ * §"LUMI-Hauptbereich neu strukturiert" (Nutzervorgabe): die vormals unter
+ * einer gemeinsamen "Entdecken für diese Reise"-Überschrift vermischten
+ * reisespezifischen Kategorien, Reiseplanung und Frag LUMI sind jetzt drei
+ * klar getrennte Bereiche -- reine Umsortierung bestehender Kacheln/Links,
+ * keine Business-Logik-Änderung:
+ *  1. `CategoryGrid`: TODAY_CATEGORIES (5, KI-Vorschlagskategorien) + Tagesplaner
+ *     -- exakt 6 Kacheln, 3 Spalten × 2 Zeilen.
+ *  2. `FragLumiCard`: vormals eine Kachel unter vielen, jetzt eine breite,
+ *     leicht hervorgehobene Karte -- verlinkt weiterhin nur auf /concierge,
+ *     keine neue Chat-/KI-Logik.
+ *  3. `NextTripShortcutsGrid`: Neue Reiseideen/Hotelvergleich/Flugvergleich,
+ *     eigener Abschnitt "Für eure nächste Reise", kompaktere Kachelvariante.
+ * "Unsere Vorlieben" (weder Teil von 1 noch 2 noch 3, Nutzervorgabe) bekommt
+ * einen eigenen kompakten Link direkt unter der Frag-LUMI-Karte.
  */
-const LUMI_SHORTCUTS: Array<{ href: string; label: string; Icon: LucideIcon }> = [
-  { href: "/today/plan", label: "Tagesplaner", Icon: Route },
-  { href: "/discover/flights", label: "Flugvergleich", Icon: Plane },
-  { href: "/hotels", label: "Hotelvergleich", Icon: Hotel },
+function GridTile({ href, label, Icon, compact }: { href: string; label: string; Icon: LucideIcon; compact?: boolean }) {
+  return (
+    <Link
+      href={href}
+      className="flex flex-col items-center justify-center gap-2 rounded-xl text-center transition-opacity hover:opacity-80"
+      style={{
+        background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none",
+        minHeight: compact ? 80 : 92, padding: compact ? "12px" : "16px",
+      }}
+    >
+      <Icon size={compact ? 18 : 20} strokeWidth={1.3} style={{ color: "var(--accent)" }} />
+      <span style={{ color: "var(--foreground)", fontSize: "0.72rem", fontWeight: 300 }}>{label}</span>
+    </Link>
+  );
+}
+
+const EXPLORE_EXTRA_SHORTCUT: { href: string; label: string; Icon: LucideIcon } = { href: "/today/plan", label: "Tagesplaner", Icon: Route };
+
+const NEXT_TRIP_SHORTCUTS: Array<{ href: string; label: string; Icon: LucideIcon }> = [
   { href: "/discover", label: "Neue Reiseideen", Icon: Compass },
-  { href: "/concierge", label: "Frag LUMI", Icon: MessageSquare },
-  { href: "/today/preferences", label: "Unsere Vorlieben", Icon: Heart },
+  { href: "/hotels", label: "Hotelvergleich", Icon: Hotel },
+  { href: "/discover/flights", label: "Flugvergleich", Icon: Plane },
 ];
 
+/** §Punkt 3 "Icon-Navigation", vollständig datengetrieben: eine Kachel je TODAY_CATEGORIES-Eintrag, kein hartkodiertes JSX pro Kategorie. */
 function CategoryGrid() {
   return (
     <section className="mb-8">
-      <SectionLabel>Entdecken für diese Reise</SectionLabel>
+      <SectionLabel subline="Orte, Erlebnisse und Ideen rund um eure aktuelle Reise">
+        Entdecken für diese Reise
+      </SectionLabel>
       <div className="grid grid-cols-3 gap-3">
         {TODAY_CATEGORIES.map(({ key, label, Icon }) => (
-          <Link
-            key={key}
-            href={`/today/category/${key}`}
-            className="flex flex-col items-center gap-2 rounded-xl p-4 text-center transition-opacity hover:opacity-80"
-            style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}
-          >
-            <Icon size={20} strokeWidth={1.3} style={{ color: "var(--accent)" }} />
-            <span style={{ color: "var(--foreground)", fontSize: "0.72rem", fontWeight: 300 }}>{label}</span>
-          </Link>
+          <GridTile key={key} href={`/today/category/${key}`} label={label} Icon={Icon} />
         ))}
-        {LUMI_SHORTCUTS.map(({ href, label, Icon }) => (
-          <Link
-            key={href}
-            href={href}
-            className="flex flex-col items-center gap-2 rounded-xl p-4 text-center transition-opacity hover:opacity-80"
-            style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}
-          >
-            <Icon size={20} strokeWidth={1.3} style={{ color: "var(--accent)" }} />
-            <span style={{ color: "var(--foreground)", fontSize: "0.72rem", fontWeight: 300 }}>{label}</span>
-          </Link>
+        <GridTile href={EXPLORE_EXTRA_SHORTCUT.href} label={EXPLORE_EXTRA_SHORTCUT.label} Icon={EXPLORE_EXTRA_SHORTCUT.Icon} />
+      </div>
+    </section>
+  );
+}
+
+/** §Frag LUMI aus dem Kachelraster gelöst: breite Premium-Card, verlinkt weiterhin nur auf die bestehende /concierge-Seite. */
+function FragLumiCard() {
+  return (
+    <Link
+      href="/concierge"
+      className="flex items-center gap-4 rounded-xl p-5 transition-opacity hover:opacity-90"
+      style={{ background: "var(--surface-2)", border: "1px solid rgba(184,154,94,0.35)", textDecoration: "none" }}
+    >
+      <div className="shrink-0 flex items-center justify-center rounded-full" style={{ width: 44, height: 44, background: "var(--accent-subtle)" }}>
+        <Sparkles size={20} strokeWidth={1.4} style={{ color: "var(--accent)" }} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div style={{ color: "var(--foreground)", fontSize: "0.95rem", marginBottom: "3px" }}>Frag LUMI</div>
+        <p style={{ color: "var(--muted)", fontSize: "0.78rem", lineHeight: 1.5 }}>
+          Plane euren Tag, kläre offene Fragen oder erhalte persönliche Empfehlungen für diese Reise.
+        </p>
+      </div>
+      <ChevronRight size={18} strokeWidth={1.5} style={{ color: "var(--accent)", flexShrink: 0 }} />
+    </Link>
+  );
+}
+
+/** §"Unsere Vorlieben" (Nutzervorgabe): kompakter sekundärer Link direkt unter der Frag-LUMI-Karte, weder im Explore- noch im Next-Trip-Grid. */
+function UnserePraeferenzenLink() {
+  return (
+    <Link href="/today/preferences" className="flex items-center gap-2.5 py-2 mt-3" style={{ textDecoration: "none" }}>
+      <Heart size={14} strokeWidth={1.5} style={{ color: "var(--accent)", flexShrink: 0 }} />
+      <span className="flex-1 min-w-0">
+        <span style={{ color: "var(--foreground)", fontSize: "0.78rem" }}>Unsere Vorlieben verwalten</span>
+        <span className="block" style={{ color: "var(--muted)", fontSize: "0.68rem" }}>Gespeicherte Reisepräferenzen ansehen und bearbeiten</span>
+      </span>
+      <ChevronRight size={12} strokeWidth={1.6} style={{ color: "var(--muted)", flexShrink: 0 }} />
+    </Link>
+  );
+}
+
+function NextTripShortcutsGrid() {
+  return (
+    <section className="mb-8">
+      <SectionLabel subline="Inspiration, Flüge und Hotels für neue Reiseideen">
+        Für eure nächste Reise
+      </SectionLabel>
+      <div className="grid grid-cols-3 gap-2.5">
+        {NEXT_TRIP_SHORTCUTS.map(({ href, label, Icon }) => (
+          <GridTile key={href} href={href} label={label} Icon={Icon} compact />
         ))}
       </div>
     </section>
+  );
+}
+
+function LumiHauptbereich() {
+  return (
+    <>
+      <CategoryGrid />
+      <section className="mb-8">
+        <FragLumiCard />
+        <UnserePraeferenzenLink />
+      </section>
+      <NextTripShortcutsGrid />
+    </>
   );
 }
 
@@ -462,7 +538,7 @@ export default async function TodayPage({
             <ChevronRight size={14} strokeWidth={1.6} style={{ color: "var(--muted)" }} />
           </Link>
 
-          <CategoryGrid />
+          <LumiHauptbereich />
 
           {hasOnThisDay && (
             <section className="mb-8">
@@ -812,7 +888,7 @@ export default async function TodayPage({
           </form>
         </section>
 
-        <CategoryGrid />
+        <LumiHauptbereich />
 
         {/* ── Vor einem Jahr wart ihr heute... ── */}
         {onThisDayMemoriesWithUrls.some((m) => m.url) && (
