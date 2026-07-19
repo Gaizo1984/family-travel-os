@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Users, BookOpenCheck, Images, Fingerprint, ChevronRight, TerminalSquare, type LucideIcon } from "lucide-react";
+import { Users, CloudDownload, Images, Fingerprint, ChevronRight, TerminalSquare, type LucideIcon } from "lucide-react";
 import { LogoutButton } from "@/components/LogoutButton";
 
 interface MoreLink {
@@ -12,9 +12,14 @@ interface MoreLink {
 // §"Neue Reiseideen und Frag LUMI ins Dashboard LUMI integrieren": beide
 // sind hier raus, jetzt als Icon-Kacheln direkt auf /today erreichbar
 // (analog zu den dortigen Kategorien) statt in der Mehr-Übersicht.
+// §"Buchungsportal entfernen" (Nutzervorgabe, kombinierter Fix-Sprint): kein
+// eigenes Datenmodell, dupliziert /discover/hotels, keine echte Flugsuche --
+// Merkliste schrieb bereits in journey_events (status='idea'), diese Zeilen
+// bleiben in der Journey der jeweiligen Reise erhalten. Ersetzt durch
+// "Offline-Reisen" (neues Feature, siehe app/(app)/mehr/offline-reisen).
 const MORE_LINKS: MoreLink[] = [
   { href: "/family", label: "Familie", description: "Reiseprofile & Vorlieben", Icon: Users },
-  { href: "/buchungsportal", label: "Buchungsportal", description: "Hotels, Flüge & Restaurants im Vergleich", Icon: BookOpenCheck },
+  { href: "/mehr/offline-reisen", label: "Offline-Reisen", description: "Gespeicherte Reisen ohne Verbindung nutzen", Icon: CloudDownload },
   { href: "/memories", label: "Travel Memory", description: "Eure gemeinsame Reisegalerie", Icon: Images },
   { href: "/mehr/passkeys", label: "Passkeys verwalten", description: "Anmeldung per Fingerabdruck oder Gesichtserkennung", Icon: Fingerprint },
   { href: "/mehr/developer", label: "Developer", description: "Serverseitige Testmodule für neue Integrationen", Icon: TerminalSquare },

@@ -1,4 +1,4 @@
-import { Star, ExternalLink, Search, Sparkles } from "lucide-react";
+import { Star, ExternalLink, Search, Sparkles, Bookmark } from "lucide-react";
 import { LUXURY_TIER_LABELS, type LuxuryHotelTier } from "@/lib/data/luxury-hotel-brands";
 import { buildHolidayCheckSearchUrl } from "@/lib/hotel-qualification";
 import type { HotelShortlistItem } from "@/lib/trip-idea-hotel-types";
@@ -27,7 +27,22 @@ export const PRICE_LEVEL_LABELS: Record<string, string> = {
  * `site:holidaycheck.de`, siehe `buildHolidayCheckSearchUrl` -- KEIN
  * erfundenes HolidayCheck-Deep-Link-Format, keine vorgetäuschten Preise).
  */
-export function HotelCard({ hotel, destination }: { hotel: HotelShortlistItem; destination: string }) {
+/**
+ * §"Echte Hotel-Merkfunktion ergänzen" (Nutzervorgabe, kombinierter Fix-
+ * Sprint): optionale Merk-Props, 1:1 nach Vorbild von FlightCard -- ohne
+ * `searchKey`/`saveAction` (bestehende Aufrufstellen, z. B. die ideen-
+ * gekoppelte Shortlist) bleibt die Karte unverändert.
+ */
+export function HotelCard({
+  hotel, destination, searchKey, saveAction, isSaved, saveDisabled, returnTo,
+}: {
+  hotel: HotelShortlistItem; destination: string
+  searchKey?: string
+  saveAction?: (formData: FormData) => void | Promise<void>
+  isSaved?: boolean
+  saveDisabled?: boolean
+  returnTo?: string
+}) {
   const isUnverified = (field: string) => hotel.unverifiedFields.includes(field);
   return (
     <div className="rounded-xl overflow-hidden" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
@@ -130,6 +145,37 @@ export function HotelCard({ hotel, destination }: { hotel: HotelShortlistItem; d
           </a>
         </div>
         <p style={{ color: "var(--muted)", fontSize: "0.6rem", fontStyle: "italic" }}>Preise nicht live geprüft.</p>
+
+        {searchKey && saveAction && (
+          <div className="mt-3 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+            {isSaved ? (
+              <span className="inline-flex items-center gap-1.5" style={{ color: "var(--accent)", fontSize: "0.7rem" }}>
+                <Bookmark size={12} strokeWidth={1.8} fill="currentColor" />
+                Gemerkt
+              </span>
+            ) : (
+              <form action={saveAction}>
+                <input type="hidden" name="search_key" value={searchKey} />
+                <input type="hidden" name="option_id" value={hotel.placeId} />
+                <input type="hidden" name="destination" value={destination} />
+                <input type="hidden" name="return_to" value={returnTo ?? ""} />
+                <button
+                  type="submit"
+                  disabled={saveDisabled}
+                  className="inline-flex items-center gap-1.5"
+                  style={{
+                    background: "none", border: "none", padding: 0, fontSize: "0.7rem",
+                    color: saveDisabled ? "var(--muted)" : "var(--accent)",
+                    cursor: saveDisabled ? "not-allowed" : "pointer",
+                  }}
+                >
+                  <Bookmark size={12} strokeWidth={1.8} />
+                  {saveDisabled ? "Limit erreicht -- bitte erst eins löschen" : "Dieses Hotel merken"}
+                </button>
+              </form>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

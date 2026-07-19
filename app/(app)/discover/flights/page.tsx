@@ -136,19 +136,17 @@ export default async function DiscoverFlightsPage({
     }
   }
 
-  // §"Gemerkte Verbindungen direkt auf /discover/flights, gefiltert nach der
-  // aktuell angezeigten Strecke" (Nutzervorgabe): route-basiert, nicht an
-  // den exakten Suchlauf gebunden -- zeigt auch bereits gemerkte
-  // Verbindungen aus früheren Datums-Suchläufen für dieselbe Strecke.
-  const { data: savedRows } = currentRouteKey
-    ? await supabase
-        .from("saved_flight_options")
-        .select("id, option_id, flight_option, found_departure_date, found_return_date, created_at")
-        .eq("family_id", familyId)
-        .eq("route_key", currentRouteKey)
-        .order("created_at", { ascending: true })
-    : { data: null };
-  const savedFlights = savedRows ?? [];
+  // §"Gemerkte Flüge sichtbar machen" (Nutzervorgabe, kombinierter Fix-Sprint):
+  // vorher nur sichtbar, wenn gerade eine Suche für exakt diese Strecke lief
+  // (currentRouteKey) -- jetzt immer alle gemerkten Verbindungen der Familie,
+  // über alle Strecken hinweg, unabhängig vom aktuellen Suchzustand.
+  const { data: allSavedRows } = await supabase
+    .from("saved_flight_options")
+    .select("id, route_key, option_id, flight_option, found_departure_date, found_return_date, created_at, search_key")
+    .eq("family_id", familyId)
+    .order("created_at", { ascending: true });
+  const allSavedFlights = allSavedRows ?? [];
+  const savedFlights = currentRouteKey ? allSavedFlights.filter((s) => s.route_key === currentRouteKey) : [];
 
   const { total: combosTotal, capped: combosCapped } = mode === "flexible" && sp.window_start_date && sp.window_end_date
     ? countFlexibleDateCombinations(sp.window_start_date, sp.window_end_date, Number(sp.nights_min) || 0, Number(sp.nights_max) || 0)
@@ -198,6 +196,70 @@ export default async function DiscoverFlightsPage({
             defaultNightsMax={sp.nights_max}
           />
         </div>
+
+        {(() => {
+          const otherRoutes = allSavedFlights.filter((s) => s.route_key !== currentRouteKey);
+          if (otherRoutes.length === 0) return null;
+          const grouped = new Map<string, typeof otherRoutes>();
+          for (const s of otherRoutes) grouped.set(s.route_key, [...(grouped.get(s.route_key) ?? []), s]);
+          return (
+            <section className="mb-8">
+              <div style={{ color: "var(--muted)", fontSize: "0.58rem", letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: "10px" }}>
+                Gemerkte Flüge
+              </div>
+              <div className="space-y-6">
+                {[...grouped.entries()].map(([routeKey, items]) => {
+                  const first = items[0].flight_option as unknown as FlightSearchOption;
+                  const routeLabel = `${first.outbound.segments[0]?.departureAirport ?? "?"} → ${first.outbound.segments[first.outbound.segments.length - 1]?.arrivalAirport ?? "?"}`;
+                  return (
+                    <div key={routeKey}>
+                      <div className="mb-2" style={{ color: "var(--foreground)", fontSize: "0.76rem" }}>
+                        {routeLabel} <span style={{ color: "var(--muted)" }}>({items.length}/{MAX_SAVED_FLIGHTS_PER_ROUTE})</span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {items.map((s) => {
+                          const option = s.flight_option as unknown as FlightSearchOption;
+                          const nights = s.found_return_date ? nightsBetween(s.found_departure_date, s.found_return_date) : null;
+                          return (
+                            <div key={s.id} className="relative">
+                              <FlightCard
+                                option={option}
+                                searchedAt={s.created_at}
+                                dateContext={{ departureDate: s.found_departure_date, returnDate: s.found_return_date, nights }}
+                              />
+                              <div className="flex items-center gap-3 mt-2 flex-wrap">
+                                {s.search_key && (
+                                  <Link
+                                    href={`/discover/flights?search_key=${encodeURIComponent(s.search_key)}`}
+                                    style={{ color: "var(--accent)", fontSize: "0.68rem", textDecoration: "none" }}
+                                  >
+                                    Treffer öffnen →
+                                  </Link>
+                                )}
+                                <form action={deleteSavedFlightOption}>
+                                  <input type="hidden" name="id" value={s.id} />
+                                  <input type="hidden" name="return_to" value={returnTo} />
+                                  <button
+                                    type="submit"
+                                    className="flex items-center gap-1.5"
+                                    style={{ background: "none", border: "none", cursor: "pointer", color: "#B5624A", fontSize: "0.68rem", padding: 0 }}
+                                  >
+                                    <Trash2 size={12} strokeWidth={1.8} />
+                                    Nicht mehr merken
+                                  </button>
+                                </form>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          );
+        })()}
 
         {savedFlights.length > 0 && (
           <section className="mb-8">

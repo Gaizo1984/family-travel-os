@@ -1,10 +1,13 @@
 import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { searchHotelsStandalone } from "@/lib/actions/hotel-search";
+import { saveHotelOption, deleteSavedHotelOption } from "@/lib/actions/saved-hotels";
+import { MAX_SAVED_HOTELS_PER_DESTINATION } from "@/lib/saved-hotels-shared";
 import { HotelSearchForm } from "@/components/HotelSearchForm";
 import { HotelResultGroups } from "@/components/HotelResultGroups";
+import { HotelCard } from "@/components/HotelCard";
 import { Banner } from "@/components/Banner";
 import { SMALL_DESTINATION_THRESHOLD } from "@/lib/hotel-qualification";
 import type { HotelShortlistItem } from "@/lib/trip-idea-hotel-types";
@@ -58,6 +61,25 @@ export default async function HotelsPage({
     .order("updated_at", { ascending: false })
     .limit(3);
 
+  // §"Echte Hotel-Merkfunktion ergänzen, immer sichtbar" (Nutzervorgabe,
+  // kombinierter Fix-Sprint): alle gemerkten Hotels der Familie, unabhängig
+  // vom aktuellen Suchzustand -- gruppiert nach Ziel.
+  const { data: allSavedRows } = await supabase
+    .from("saved_hotel_options")
+    .select("id, search_key, destination, option_id, hotel_option, created_at")
+    .eq("family_id", familyId)
+    .order("created_at", { ascending: true });
+  const allSavedHotels = allSavedRows ?? [];
+  const savedOptionIds = sp.search_key ? allSavedHotels.filter((s) => s.search_key === sp.search_key).map((s) => s.option_id) : [];
+  const currentSavedCount = savedOptionIds.length;
+
+  const usp = new URLSearchParams();
+  if (sp.destination) usp.set("destination", sp.destination);
+  if (sp.check_in) usp.set("check_in", sp.check_in);
+  if (sp.nights) usp.set("nights", sp.nights);
+  if (sp.search_key) usp.set("search_key", sp.search_key);
+  const returnTo = usp.toString() ? `/hotels?${usp.toString()}` : "/hotels";
+
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
       <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-9">
@@ -89,6 +111,56 @@ export default async function HotelsPage({
             ideaId={sp.idea_id}
           />
         </div>
+
+        {(() => {
+          const otherSaved = allSavedHotels.filter((s) => s.search_key !== sp.search_key);
+          if (otherSaved.length === 0) return null;
+          const grouped = new Map<string, typeof otherSaved>();
+          for (const s of otherSaved) grouped.set(s.search_key, [...(grouped.get(s.search_key) ?? []), s]);
+          return (
+            <section className="mb-8">
+              <div style={{ color: "var(--muted)", fontSize: "0.58rem", letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: "10px" }}>
+                Gemerkte Hotels
+              </div>
+              <div className="space-y-6">
+                {[...grouped.entries()].map(([searchKey, items]) => (
+                  <div key={searchKey}>
+                    <div className="mb-2" style={{ color: "var(--foreground)", fontSize: "0.76rem" }}>
+                      {items[0].destination} <span style={{ color: "var(--muted)" }}>({items.length}/{MAX_SAVED_HOTELS_PER_DESTINATION})</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-2">
+                      {items.map((s) => (
+                        <div key={s.id}>
+                          <HotelCard hotel={s.hotel_option as unknown as HotelShortlistItem} destination={items[0].destination} />
+                          <div className="flex items-center gap-3 mt-2 flex-wrap">
+                            <Link
+                              href={`/hotels?destination=${encodeURIComponent(items[0].destination)}&search_key=${encodeURIComponent(searchKey)}`}
+                              style={{ color: "var(--accent)", fontSize: "0.68rem", textDecoration: "none" }}
+                            >
+                              Treffer öffnen →
+                            </Link>
+                            <form action={deleteSavedHotelOption}>
+                              <input type="hidden" name="id" value={s.id} />
+                              <input type="hidden" name="return_to" value={returnTo} />
+                              <button
+                                type="submit"
+                                className="flex items-center gap-1.5"
+                                style={{ background: "none", border: "none", cursor: "pointer", color: "#B5624A", fontSize: "0.68rem", padding: 0 }}
+                              >
+                                <Trash2 size={12} strokeWidth={1.8} />
+                                Nicht mehr merken
+                              </button>
+                            </form>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          );
+        })()}
 
         {!hotelResult && recentSearches && recentSearches.length > 0 && (
           <section className="mb-8">
@@ -123,7 +195,11 @@ export default async function HotelsPage({
                 An diesem Ziel gibt es insgesamt nur wenige Hotels — hier werden alle real gefundenen Optionen gezeigt, nicht nur die üblichen Top-Kategorien.
               </Banner>
             )}
-            <HotelResultGroups items={hotelResult.items} destination={sp.destination ?? ""} />
+            <HotelResultGroups
+              items={hotelResult.items} destination={sp.destination ?? ""}
+              searchKey={sp.search_key} saveAction={saveHotelOption} returnTo={returnTo}
+              savedOptionIds={savedOptionIds} saveLimitReached={currentSavedCount >= MAX_SAVED_HOTELS_PER_DESTINATION}
+            />
           </>
         )}
       </div>

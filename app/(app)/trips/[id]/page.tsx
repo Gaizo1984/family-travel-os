@@ -23,6 +23,7 @@ import { resolveCurrentLocation, nearbyStageGeocodeCandidates } from "@/lib/toda
 import { getWeatherForLocation, describeWeatherCode } from "@/lib/weather";
 import { COUNTRY_NAMES } from "@/lib/geo-suggestions";
 import { todayIsoInFamilyTimezone } from "@/lib/time";
+import { SaveTripOfflineButton } from "@/components/SaveTripOfflineButton";
 
 const H_FG    = "#F0EBE3";
 const H_MUTED = "#A89880";
@@ -650,6 +651,10 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
               <QuickNavItem Icon={Wallet} label="Budget" href={`/trips/${trip.slug}/budget`} />
               <QuickNavItem Icon={MoreHorizontal} label="Mehr" href={moreHref} />
             </div>
+          </div>
+
+          <div className="flex justify-end">
+            <SaveTripOfflineButton tripId={trip.id} />
           </div>
 
           <section id="journey">

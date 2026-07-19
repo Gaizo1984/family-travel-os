@@ -26,7 +26,17 @@ function categoryOf(item: HotelShortlistItem): CategoryKey | null {
  * `belowStandard`) bleiben ungruppiert. Von der idee-gekoppelten
  * Hotel-Shortlist UND der eigenständigen Hotelsuche gemeinsam genutzt.
  */
-export function HotelResultGroups({ items, destination }: { items: HotelShortlistItem[]; destination: string }) {
+/** §"Echte Hotel-Merkfunktion ergänzen" (Nutzervorgabe): optionale Merk-Props, ohne `searchKey`/`saveAction` unverändertes Verhalten (bestehende ideen-gekoppelte Aufrufstelle bleibt unangetastet). */
+export function HotelResultGroups({
+  items, destination, searchKey, saveAction, savedOptionIds, saveLimitReached, returnTo,
+}: {
+  items: HotelShortlistItem[]; destination: string
+  searchKey?: string
+  saveAction?: (formData: FormData) => void | Promise<void>
+  savedOptionIds?: string[]
+  saveLimitReached?: boolean
+  returnTo?: string
+}) {
   const grouped = new Map<CategoryKey, HotelShortlistItem[]>();
   const belowStandardItems: HotelShortlistItem[] = [];
   for (const item of items) {
@@ -55,14 +65,28 @@ export function HotelResultGroups({ items, destination }: { items: HotelShortlis
               {label} ({groupItems.length})
             </summary>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4">
-              {groupItems.map((h) => <HotelCard key={h.placeId} hotel={h} destination={destination} />)}
+              {groupItems.map((h) => (
+                <HotelCard
+                  key={h.placeId} hotel={h} destination={destination}
+                  searchKey={searchKey} saveAction={saveAction} returnTo={returnTo}
+                  isSaved={savedOptionIds?.includes(h.placeId)}
+                  saveDisabled={saveLimitReached && !savedOptionIds?.includes(h.placeId)}
+                />
+              ))}
             </div>
           </details>
         );
       })}
       {belowStandardItems.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {belowStandardItems.map((h) => <HotelCard key={h.placeId} hotel={h} destination={destination} />)}
+          {belowStandardItems.map((h) => (
+            <HotelCard
+              key={h.placeId} hotel={h} destination={destination}
+              searchKey={searchKey} saveAction={saveAction} returnTo={returnTo}
+              isSaved={savedOptionIds?.includes(h.placeId)}
+              saveDisabled={saveLimitReached && !savedOptionIds?.includes(h.placeId)}
+            />
+          ))}
         </div>
       )}
     </div>

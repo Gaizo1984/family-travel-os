@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   cacheDocument, getCachedDocument, removeCachedDocument, keepCachedDocumentLonger, pruneExpiredDocuments,
-  type OfflineCachePolicy,
+  type OfflineCachePolicy, type CachedDocumentMeta,
 } from '@/lib/offline-document-cache'
 import { formatDateDE } from '@/lib/demo-data'
 
@@ -17,8 +17,11 @@ type Props = {
   altText: string
   /** §"Zwei Sicherheitsstufen" (Nutzervorgabe): Default 'standard' -- unverändertes Verhalten für Boardingpass/Gepäckbeleg. 'sensitive' (nur ESTA/ETA) verlangt explizite Zustimmung vor dem ersten Speichern, siehe unten. */
   policy?: OfflineCachePolicy
-  /** Nur für `policy: 'sensitive'` genutzt -- an welche Reise der Eintrag gebunden ist (für gezieltes Löschen bei Reise-Löschung). */
+  /** §"Offline-Bereich, Dokumente-Tab" (Nutzervorgabe): jetzt bei jeder Policy gesetzt, damit das Dokument einer Reise zugeordnet werden kann -- nicht mehr nur für 'sensitive'. */
   tripId?: string | null
+  docType: CachedDocumentMeta['docType']
+  /** Anzeige-Titel im Offline-Dokumente-Tab (z. B. Personenname oder "Koffer 1"). */
+  label: string
 }
 
 /**
@@ -30,7 +33,7 @@ type Props = {
  */
 export function OfflineDocumentViewer({
   documentId, sourceUrl, fileName, mimeType, isPdf, referenceDateIso, altText,
-  policy = 'standard', tripId = null,
+  policy = 'standard', tripId = null, docType, label,
 }: Props) {
   const [displayUrl, setDisplayUrl] = useState<string | null>(null);
   const [pendingBlob, setPendingBlob] = useState<Blob | null>(null);
@@ -76,7 +79,7 @@ export function OfflineDocumentViewer({
           }
           return;
         }
-        const meta = await cacheDocument(documentId, blob, fileName, mimeType, { policy: 'standard', referenceDateIso });
+        const meta = await cacheDocument(documentId, blob, fileName, mimeType, { policy: 'standard', referenceDateIso, tripId, docType, label });
         objectUrl = URL.createObjectURL(blob);
         if (!cancelled) {
           setDisplayUrl(objectUrl);
@@ -94,7 +97,7 @@ export function OfflineDocumentViewer({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [documentId, sourceUrl, fileName, mimeType, referenceDateIso, policy]);
+  }, [documentId, sourceUrl, fileName, mimeType, referenceDateIso, policy, tripId, docType, label]);
 
   const handleRemove = useCallback(async () => {
     await removeCachedDocument(documentId);
@@ -112,13 +115,13 @@ export function OfflineDocumentViewer({
   const handleConsentAndCache = useCallback(async () => {
     if (!pendingBlob) return;
     setConsenting(true);
-    const meta = await cacheDocument(documentId, pendingBlob, fileName, mimeType, { policy: 'sensitive', tripId });
+    const meta = await cacheDocument(documentId, pendingBlob, fileName, mimeType, { policy: 'sensitive', tripId, docType, label });
     setExpiresAt(meta.expiresAt);
     setKeepLonger(false);
     setIsCached(true);
     setPendingBlob(null);
     setConsenting(false);
-  }, [documentId, pendingBlob, fileName, mimeType, tripId]);
+  }, [documentId, pendingBlob, fileName, mimeType, tripId, docType, label]);
 
   return (
     <div className="flex flex-col items-center">

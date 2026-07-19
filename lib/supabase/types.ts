@@ -898,20 +898,40 @@ export interface Database {
         Row: {
           id: string; family_id: string; route_key: string; origin_codes: string[]; destination_code: string
           option_id: string; flight_option: Json; found_departure_date: string; found_return_date: string | null
+          search_key: string | null; adults: number | null; children: number | null; infants: number | null
           created_at: string
         }
         Insert: {
           id?: string; family_id: string; route_key: string; origin_codes: string[]; destination_code: string
           option_id: string; flight_option: Json; found_departure_date: string; found_return_date?: string | null
+          search_key?: string | null; adults?: number | null; children?: number | null; infants?: number | null
           created_at?: string
         }
         Update: {
           id?: string; family_id?: string; route_key?: string; origin_codes?: string[]; destination_code?: string
           option_id?: string; flight_option?: Json; found_departure_date?: string; found_return_date?: string | null
+          search_key?: string | null; adults?: number | null; children?: number | null; infants?: number | null
           created_at?: string
         }
         Relationships: [
           { foreignKeyName: "saved_flight_options_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }
+        ]
+      }
+      saved_hotel_options: {
+        Row: {
+          id: string; family_id: string; search_key: string; destination: string
+          option_id: string; hotel_option: Json; created_at: string
+        }
+        Insert: {
+          id?: string; family_id: string; search_key: string; destination: string
+          option_id: string; hotel_option: Json; created_at?: string
+        }
+        Update: {
+          id?: string; family_id?: string; search_key?: string; destination?: string
+          option_id?: string; hotel_option?: Json; created_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "saved_hotel_options_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }
         ]
       }
       lumi_brain_usage: {

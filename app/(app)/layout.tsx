@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LayoutDashboard, Plane, Users, Sparkles, Camera, MoreHorizontal, BookOpenCheck, Images } from "lucide-react";
+import { LayoutDashboard, Plane, Users, Sparkles, Camera, MoreHorizontal, Images } from "lucide-react";
 import { RoutePrefetcher } from "@/components/RoutePrefetcher";
 
 // §"Neue Reiseideen und Frag LUMI sollen ins Dashboard LUMI integriert
@@ -14,7 +14,6 @@ const NAV = [
   { href: "/family", label: "Familie", Icon: Users },
   { href: "/today", label: "LUMI", Icon: Sparkles },
   { href: "/content-studio", label: "Content", Icon: Camera },
-  { href: "/buchungsportal", label: "Buchungsportal", Icon: BookOpenCheck },
   { href: "/memories", label: "Memory", Icon: Images },
 ];
 

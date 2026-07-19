@@ -34,7 +34,7 @@ export async function saveFlightOption(formData: FormData): Promise<void> {
 
   const { data: cacheRow } = await supabase
     .from('flight_search_cache')
-    .select('origin_codes, destination_code, departure_date, return_date, results')
+    .select('origin_codes, destination_code, departure_date, return_date, results, adults, children, infants')
     .eq('family_id', familyId)
     .eq('search_key', searchKey)
     .maybeSingle()
@@ -70,6 +70,10 @@ export async function saveFlightOption(formData: FormData): Promise<void> {
       family_id: familyId, route_key: routeKey, origin_codes: cacheRow.origin_codes, destination_code: cacheRow.destination_code,
       option_id: optionId, flight_option: option as unknown as Json,
       found_departure_date: cacheRow.departure_date, found_return_date: cacheRow.return_date,
+      // §"Aus der Merkliste direkt zum Treffer" (Nutzervorgabe): search_key
+      // erlaubt später einen direkten Cache-Lookup ("Treffer öffnen"), ohne
+      // die Originalsuche neu zusammensetzen zu müssen.
+      search_key: searchKey, adults: cacheRow.adults, children: cacheRow.children, infants: cacheRow.infants,
     },
     { onConflict: 'family_id,route_key,option_id' },
   )

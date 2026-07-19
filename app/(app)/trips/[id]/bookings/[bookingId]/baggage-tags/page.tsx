@@ -96,6 +96,9 @@ export default async function BaggageTagViewerPage({
             isPdf={tag.isPdf}
             referenceDateIso={referenceDateIso}
             altText={`Gepäckbeleg ${tag.name} · ${tag.label}`}
+            tripId={trip.id}
+            docType="baggage_tag"
+            label={`${tag.name} · ${tag.label}`}
           />
         </section>
       ))}

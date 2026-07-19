@@ -94,6 +94,9 @@ export default async function BoardingPassViewerPage({
             isPdf={pass.isPdf}
             referenceDateIso={referenceDateIso}
             altText={`Boardingpass ${pass.name}`}
+            tripId={trip.id}
+            docType="boarding_pass"
+            label={pass.name}
           />
         </section>
       ))}

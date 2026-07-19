@@ -215,6 +215,8 @@ export default async function DocumentDetailPage({
                 altText={doc.label}
                 policy="sensitive"
                 tripId={assignedTrips[0]?.id ?? null}
+                docType={doc.doc_type as "esta" | "eta"}
+                label={doc.label}
               />
             </div>
           ) : signedDocUrl ? (
