@@ -26,9 +26,14 @@
  *     u. U. noch HTML/RSC-Stände von vor diversen Offline-Bugfixes
  *     (Entfernen-Button, Lesepfad-Fix) und wurden nur beim nächsten
  *     Online-Laden dieser Seiten neu befüllt, nie automatisch bereinigt.
+ * v3: offlineFallbackResponse() war in v2 nur definiert, aber nie im
+ *     fetch-Handler verdrahtet -- Navigationen zu "/" liefen dadurch
+ *     weiterhin unkontrolliert durch (kein event.respondWith), der
+ *     Kaltstart-Hänger am nativen Splash bestand unverändert fort. Jetzt
+ *     tatsächlich als eigener Zweig ergänzt.
  */
 
-const CACHE_VERSION = 'v2'
+const CACHE_VERSION = 'v3'
 const CACHE_NAME = `lumi-offline-reisen-${CACHE_VERSION}`
 
 const OFFLINE_TRIP_PATH_PREFIX = '/mehr/offline-reisen'
@@ -143,6 +148,19 @@ self.addEventListener('fetch', (event) => {
   // unangetastet durchs Netzwerk, kein event.respondWith().
   const isNavigation = request.mode === 'navigate'
   const isRscNavigation = request.headers.get('rsc') === '1'
+
+  // §Bugfix "Kaltstart im Flugmodus hängt am nativen Splash": echte
+  // Seitenaufrufe (kein RSC-Fetch innerhalb einer bereits laufenden App) zu
+  // JEDER anderen Seite außer den beiden Offline-Reisen-Routen bleiben
+  // unangetastet, solange sie online funktionieren -- nur wenn der
+  // Netzwerk-Request wirklich fehlschlägt (offline), liefert der Service
+  // Worker die oben erzeugte Hinweisseite statt gar keine Antwort. Kein
+  // Caching von "/" oder anderen Seiten, keine Cache-First-Strategie.
+  if (isNavigation && !isOfflineTripRoute(url.pathname)) {
+    event.respondWith(fetch(request).catch(() => offlineFallbackResponse()))
+    return
+  }
+
   if (!(isNavigation || isRscNavigation) || !isOfflineTripRoute(url.pathname)) return
 
   // Network-first, Fallback auf Cache -- online immer der frische Stand
