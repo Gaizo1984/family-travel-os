@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Trash2, RefreshCw, ChevronRight } from 'lucide-react'
 import {
-  listTripSnapshots, removeTripSnapshot, purgeSensitiveOfflineDocuments, purgeStandardOfflineDocuments,
+  listTripSnapshots, removeOfflineTrip,
   getOfflineStorageSize, saveTripSnapshot, cacheDocument, getCachedDocument,
   type OfflineTripSnapshot,
 } from '@/lib/offline-document-cache'
@@ -26,6 +26,7 @@ type Row = { snapshot: OfflineTripSnapshot; size: number }
 export function OfflineTripsList() {
   const [rows, setRows] = useState<Row[] | null>(null)
   const [busyTripId, setBusyTripId] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     const snapshots = await listTripSnapshots()
@@ -35,19 +36,24 @@ export function OfflineTripsList() {
 
   useEffect(() => { load() }, [load])
 
+  // §Bugfix "Entfernen blieb lautlos hängen": Fehler jetzt sichtbar statt
+  // stillschweigend verschluckt -- siehe lib/offline-document-cache.ts,
+  // removeOfflineTrip (ein gebündelter Aufruf statt drei paralleler).
   const handleRemove = useCallback(async (tripId: string) => {
     setBusyTripId(tripId)
-    await Promise.all([
-      removeTripSnapshot(tripId),
-      purgeSensitiveOfflineDocuments(tripId),
-      purgeStandardOfflineDocuments(tripId),
-    ])
-    await load()
+    setError(null)
+    try {
+      await removeOfflineTrip(tripId)
+      await load()
+    } catch (e) {
+      setError('Entfernen fehlgeschlagen: ' + (e instanceof Error ? e.message : 'Unbekannter Fehler') + ' -- bitte erneut versuchen.')
+    }
     setBusyTripId(null)
   }, [load])
 
   const handleRefresh = useCallback(async (tripId: string) => {
     setBusyTripId(tripId)
+    setError(null)
     try {
       const snapshot = await fetchOfflineTripSnapshotData(tripId)
       if (snapshot) {
@@ -66,7 +72,9 @@ export function OfflineTripsList() {
           } catch { /* einzelnes Dokument nicht erreichbar, weiter mit den anderen */ }
         }))
       }
-    } catch { /* offline oder Fehler -- gespeicherter Stand bleibt unverändert erhalten */ }
+    } catch {
+      setError('Keine Verbindung oder Fehler beim Aktualisieren -- der zuvor gespeicherte Stand bleibt erhalten.')
+    }
     await load()
     setBusyTripId(null)
   }, [load])
@@ -75,21 +83,32 @@ export function OfflineTripsList() {
     return <p style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>Lädt …</p>
   }
 
+  const errorBanner = error && (
+    <div className="mb-4 rounded-lg px-4 py-3" style={{ background: 'rgba(181,98,74,0.1)', border: '1px solid rgba(181,98,74,0.3)', color: '#B5624A', fontSize: '0.78rem' }}>
+      {error}
+    </div>
+  );
+
   if (rows.length === 0) {
     return (
-      <div className="rounded-xl p-6" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-        <p className="mb-2" style={{ color: 'var(--foreground)', fontSize: '0.88rem' }}>
-          Keine Reise offline gespeichert
-        </p>
-        <p style={{ color: 'var(--muted)', fontSize: '0.8rem', lineHeight: 1.6 }}>
-          Öffne eine Reise online und speichere die benötigten Inhalte für die Offline-Nutzung.
-        </p>
+      <div>
+        {errorBanner}
+        <div className="rounded-xl p-6" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+          <p className="mb-2" style={{ color: 'var(--foreground)', fontSize: '0.88rem' }}>
+            Keine Reise offline gespeichert
+          </p>
+          <p style={{ color: 'var(--muted)', fontSize: '0.8rem', lineHeight: 1.6 }}>
+            Öffne eine Reise online und speichere die benötigten Inhalte für die Offline-Nutzung.
+          </p>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="space-y-3">
+    <div>
+      {errorBanner}
+      <div className="space-y-3">
       {rows.map(({ snapshot, size }) => (
         <div key={snapshot.tripId} className="rounded-xl p-5" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
           <div className="flex items-start justify-between gap-3 mb-3">
@@ -135,11 +154,12 @@ export function OfflineTripsList() {
                 opacity: busyTripId === snapshot.tripId ? 0.6 : 1,
               }}
             >
-              <Trash2 size={12} strokeWidth={1.6} /> Entfernen
+              <Trash2 size={12} strokeWidth={1.6} /> {busyTripId === snapshot.tripId ? 'Entfernt…' : 'Entfernen'}
             </button>
           </div>
         </div>
       ))}
+      </div>
     </div>
   );
 }

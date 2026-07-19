@@ -1,9 +1,10 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Plane, Hotel, Ticket, Luggage, FileCheck2, Trash2 } from 'lucide-react'
 import {
-  getTripSnapshot, listCachedDocumentsForTrip, removeCachedDocument,
+  getTripSnapshot, listCachedDocumentsForTrip, removeCachedDocument, removeOfflineTrip,
   type OfflineTripSnapshot, type CachedDocumentMeta,
 } from '@/lib/offline-document-cache'
 import { OfflineDocumentViewer } from '@/components/OfflineDocumentViewer'
@@ -106,9 +107,12 @@ function DocumentRow({ doc, onRemoved }: { doc: CachedDocumentMeta; onRemoved: (
 }
 
 export function OfflineTripDetail({ tripId }: { tripId: string }) {
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>('uebersicht');
   const [snapshot, setSnapshot] = useState<OfflineTripSnapshot | null | undefined>(undefined);
   const [documents, setDocuments] = useState<CachedDocumentMeta[]>([]);
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
   async function reloadDocuments() {
     setDocuments(await listCachedDocumentsForTrip(tripId));
@@ -119,6 +123,22 @@ export function OfflineTripDetail({ tripId }: { tripId: string }) {
     reloadDocuments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tripId]);
+
+  // §Bugfix "kein Entfernen-Button in der Reise-Detailansicht" (Nutzer-
+  // Feedback): bisher gab es nur pro Dokument einen Löschen-Button (siehe
+  // DocumentRow), aber keine Möglichkeit, die gesamte Offline-Reise von hier
+  // aus zu entfernen -- nur über die Liste (components/OfflineTripsList.tsx).
+  async function handleRemoveTrip() {
+    setRemoving(true);
+    setRemoveError(null);
+    try {
+      await removeOfflineTrip(tripId);
+      router.push('/mehr/offline-reisen');
+    } catch (e) {
+      setRemoveError('Entfernen fehlgeschlagen: ' + (e instanceof Error ? e.message : 'Unbekannter Fehler') + ' -- bitte erneut versuchen.');
+      setRemoving(false);
+    }
+  }
 
   if (snapshot === undefined) {
     return <p style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>Lädt …</p>;
@@ -142,12 +162,33 @@ export function OfflineTripDetail({ tripId }: { tripId: string }) {
 
   return (
     <div>
-      <div style={{ color: 'var(--accent)', fontSize: '0.55rem', letterSpacing: '0.24em', textTransform: 'uppercase', marginBottom: '10px' }}>
-        Offline · {snapshot.statusLabel}
+      <div className="flex items-start justify-between gap-3 mb-2">
+        <div>
+          <div style={{ color: 'var(--accent)', fontSize: '0.55rem', letterSpacing: '0.24em', textTransform: 'uppercase', marginBottom: '10px' }}>
+            Offline · {snapshot.statusLabel}
+          </div>
+          <h1 className="font-light" style={{ color: 'var(--foreground)', fontSize: 'clamp(1.4rem, 5vw, 1.9rem)', letterSpacing: '-0.01em' }}>
+            {snapshot.title}
+          </h1>
+        </div>
+        <button
+          type="button"
+          onClick={handleRemoveTrip}
+          disabled={removing}
+          className="flex items-center gap-1.5 shrink-0"
+          style={{
+            background: 'transparent', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: '20px',
+            padding: '7px 12px', fontSize: '0.64rem', cursor: 'pointer', opacity: removing ? 0.6 : 1, whiteSpace: 'nowrap',
+          }}
+        >
+          <Trash2 size={12} strokeWidth={1.6} /> {removing ? 'Entfernt…' : 'Reise offline entfernen'}
+        </button>
       </div>
-      <h1 className="font-light mb-2" style={{ color: 'var(--foreground)', fontSize: 'clamp(1.4rem, 5vw, 1.9rem)', letterSpacing: '-0.01em' }}>
-        {snapshot.title}
-      </h1>
+      {removeError && (
+        <div className="mb-4 rounded-lg px-4 py-3" style={{ background: 'rgba(181,98,74,0.1)', border: '1px solid rgba(181,98,74,0.3)', color: '#B5624A', fontSize: '0.78rem' }}>
+          {removeError}
+        </div>
+      )}
       <p className="mb-6" style={{ color: 'var(--muted)', fontSize: '0.78rem' }}>
         {snapshot.dateRangeLabel}
       </p>

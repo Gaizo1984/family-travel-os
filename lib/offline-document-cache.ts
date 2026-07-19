@@ -35,6 +35,19 @@
  * Reise-Snapshot-/Export-Funktion einfließen, falls eine solche einmal gebaut
  * wird -- diese Datei bleibt die einzige Stelle, die Passagier-/Einreise-
  * dokumente geräte-lokal vorhält.
+ *
+ * §Bugfix "Entfernen im Offline-Bereich bleibt wirkungslos hängen": jede
+ * Funktion öffnete bisher ihre EIGENE IndexedDB-Verbindung (`indexedDB.open`
+ * + `db.close()` pro Aufruf) -- beim Entfernen einer Reise liefen dadurch bis
+ * zu drei parallele Verbindungen/readwrite-Transaktionen auf demselben Store
+ * gleichzeitig. Funktional sollte das laut Spezifikation zwar seriell
+ * abgearbeitet werden, war aber unnötig fehleranfällig, und ein Fehler in
+ * einer der drei parallelen Löschoperationen ließ (mangels Fehlerbehandlung
+ * in components/OfflineTripsList.tsx) die komplette Aktion lautlos
+ * hängen -- kein Reload der Liste, kein zurückgesetzter Button-Zustand,
+ * keine sichtbare Fehlermeldung. Jetzt EINE wiederverwendete Verbindung
+ * (Standard-Empfehlung für IndexedDB-Apps) statt vieler Kurzverbindungen,
+ * plus sichtbares Fehler-Feedback in der UI (siehe OfflineTripsList.tsx).
  */
 
 const DB_NAME = 'family-travel-os-offline-cache'
@@ -95,8 +108,19 @@ export type OfflineTripSnapshot = {
   cachedAt: string
 }
 
+/**
+ * Eine einzige, wiederverwendete Verbindung für die gesamte Modul-Lebenszeit
+ * statt einer neuen Verbindung pro Funktionsaufruf -- Standardmuster für
+ * IndexedDB-Apps, vermeidet unnötige parallele Kurzverbindungen (siehe
+ * Bugfix-Hinweis oben). Bei einem Verbindungsfehler wird `dbPromise`
+ * zurückgesetzt, damit der nächste Aufruf einen neuen Versuch startet statt
+ * dauerhaft an einer kaputten Verbindung hängenzubleiben.
+ */
+let dbPromise: Promise<IDBDatabase> | null = null
+
 function openDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
+  if (dbPromise) return dbPromise
+  dbPromise = new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION)
     request.onupgradeneeded = () => {
       const db = request.result
@@ -107,9 +131,18 @@ function openDb(): Promise<IDBDatabase> {
         db.createObjectStore(TRIP_SNAPSHOT_STORE_NAME, { keyPath: 'tripId' })
       }
     }
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error)
+    request.onsuccess = () => {
+      const db = request.result
+      // Falls die DB in einem anderen Tab auf eine neuere Version aktualisiert
+      // wird, muss diese Verbindung sich schließen, damit sie nicht blockiert
+      // -- der nächste Aufruf dieses Moduls öffnet dann automatisch neu.
+      db.onversionchange = () => { db.close(); dbPromise = null }
+      resolve(db)
+    }
+    request.onerror = () => { dbPromise = null; reject(request.error) }
+    request.onblocked = () => { dbPromise = null; reject(new Error('IndexedDB-Upgrade blockiert -- bitte andere Tabs dieser App schließen und erneut versuchen.')) }
   })
+  return dbPromise
 }
 
 function addDaysIso(fromIso: string, days: number): string {
@@ -163,21 +196,18 @@ export async function cacheDocument(
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
   })
-  db.close()
   const { blob: _blob, ...meta } = record
   return meta
 }
 
 export async function getCachedDocument(documentId: string): Promise<CachedDocumentRecord | null> {
   const db = await openDb()
-  const result = await new Promise<CachedDocumentRecord | null>((resolve, reject) => {
+  return new Promise<CachedDocumentRecord | null>((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readonly')
     const req = tx.objectStore(STORE_NAME).get(documentId)
     req.onsuccess = () => resolve(req.result ?? null)
     req.onerror = () => reject(req.error)
   })
-  db.close()
-  return result
 }
 
 export async function removeCachedDocument(documentId: string): Promise<void> {
@@ -188,7 +218,6 @@ export async function removeCachedDocument(documentId: string): Promise<void> {
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
   })
-  db.close()
 }
 
 /**
@@ -212,7 +241,6 @@ export async function keepCachedDocumentLonger(documentId: string): Promise<void
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
   })
-  db.close()
 }
 
 /**
@@ -238,7 +266,6 @@ export async function pruneExpiredDocuments(): Promise<void> {
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
   })
-  db.close()
 }
 
 /**
@@ -266,7 +293,6 @@ export async function purgeSensitiveOfflineDocuments(tripId?: string): Promise<v
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
   })
-  db.close()
 }
 
 /**
@@ -293,7 +319,6 @@ export async function purgeStandardOfflineDocuments(tripId: string): Promise<voi
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
   })
-  db.close()
 }
 
 /**
@@ -321,7 +346,6 @@ export async function listCachedDocumentsForTrip(tripId: string): Promise<Cached
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
   })
-  db.close()
   return results
 }
 
@@ -334,19 +358,16 @@ export async function saveTripSnapshot(snapshot: OfflineTripSnapshot): Promise<v
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
   })
-  db.close()
 }
 
 export async function getTripSnapshot(tripId: string): Promise<OfflineTripSnapshot | null> {
   const db = await openDb()
-  const result = await new Promise<OfflineTripSnapshot | null>((resolve, reject) => {
+  return new Promise<OfflineTripSnapshot | null>((resolve, reject) => {
     const tx = db.transaction(TRIP_SNAPSHOT_STORE_NAME, 'readonly')
     const req = tx.objectStore(TRIP_SNAPSHOT_STORE_NAME).get(tripId)
     req.onsuccess = () => resolve(req.result ?? null)
     req.onerror = () => reject(req.error)
   })
-  db.close()
-  return result
 }
 
 /** §"Nur echte, ausdrücklich gespeicherte Reisen anzeigen" (Nutzervorgabe): einzige Datenquelle für den Offline-Bereich -- rein lesend aus IndexedDB, keine Supabase-Abfrage, keine Demo-/Seed-/Fallback-Reisen können hier je auftauchen, weil ausschließlich das erscheint, was zuvor bewusst per `saveTripSnapshot` gespeichert wurde. */
@@ -358,7 +379,6 @@ export async function listTripSnapshots(): Promise<OfflineTripSnapshot[]> {
     req.onsuccess = () => resolve(req.result ?? [])
     req.onerror = () => reject(req.error)
   })
-  db.close()
   return results.sort((a, b) => b.cachedAt.localeCompare(a.cachedAt))
 }
 
@@ -370,14 +390,13 @@ export async function removeTripSnapshot(tripId: string): Promise<void> {
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
   })
-  db.close()
 }
 
 /** §"gespeicherte Größe" (Nutzervorgabe): Snapshot-JSON-Größe + Summe der Blob-Größen aller gecachten Dokumente dieser Reise, für eine menschenlesbare Anzeige (z. B. "2,4 MB") in der Offline-Reisen-Liste. */
 export async function getOfflineStorageSize(tripId: string): Promise<number> {
+  const db = await openDb()
   const [snapshot, docs] = await Promise.all([getTripSnapshot(tripId), listCachedDocumentsForTrip(tripId)])
   const snapshotSize = snapshot ? new Blob([JSON.stringify(snapshot)]).size : 0
-  const db = await openDb()
   const docSizes = await Promise.all(
     docs.map((d) => new Promise<number>((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readonly')
@@ -386,6 +405,19 @@ export async function getOfflineStorageSize(tripId: string): Promise<number> {
       req.onerror = () => reject(req.error)
     })),
   )
-  db.close()
   return snapshotSize + docSizes.reduce((sum, s) => sum + s, 0)
+}
+
+/**
+ * §Bugfix "Entfernen bleibt lautlos hängen": EIN gebündelter, sequentieller
+ * Aufruf statt drei parallelen (siehe Modul-Kommentar oben) -- räumt Snapshot
+ * + beide Dokument-Policies einer Reise vollständig ab. Wirft bei einem
+ * Fehler regulär (kein stilles Verschlucken), damit die aufrufende UI
+ * (components/OfflineTripsList.tsx) den Fehler sichtbar anzeigen kann statt
+ * unbemerkt hängenzubleiben.
+ */
+export async function removeOfflineTrip(tripId: string): Promise<void> {
+  await removeTripSnapshot(tripId)
+  await purgeSensitiveOfflineDocuments(tripId)
+  await purgeStandardOfflineDocuments(tripId)
 }
