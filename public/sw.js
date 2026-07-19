@@ -38,6 +38,43 @@ function cacheKeyFor(request) {
   return url.toString()
 }
 
+/**
+ * §Bugfix "Kaltstart im Flugmodus hängt am nativen Splash" (Nutzer-Feedback):
+ * die App startet beim Öffnen über das Homescreen-Icon immer bei "/"
+ * (manifest start_url) -- diese Seite war nie Teil dieses bewusst eng
+ * begrenzten Caches (Nutzervorgabe: nur die beiden Offline-Reisen-Routen).
+ * Ohne Verbindung schlägt die Navigation zu "/" dadurch fehl, und ohne
+ * jede Antwort bleibt der native Android-Splash (App-Icon) unbegrenzt
+ * stehen, weil es nie ein erstes Bild gibt. KEIN Caching von "/" oder
+ * irgendeiner anderen Seite -- nur ein Sicherheitsnetz: schlägt eine
+ * beliebige Top-Level-Navigation (echter Seitenaufruf, keine interne
+ * Client-Navigation) mangels Verbindung fehl, liefert der Service Worker
+ * diese winzige, hier direkt erzeugte Hinweisseite mit Link zu den
+ * Offline-Reisen, statt den Request unbegrenzt hängen zu lassen.
+ */
+function offlineFallbackResponse() {
+  const html = `<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Lumi Travel · Offline</title>
+<style>
+  body { margin:0; min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:#E8E3DA; color:#25211D; text-align:center; padding:32px; }
+  a { display:inline-block; margin-top:6px; padding:12px 26px; background:#25211D; color:#F3EFE8; text-decoration:none; border-radius:8px; font-size:0.85rem; letter-spacing:0.04em; }
+  p { color:#7C7063; font-size:0.85rem; line-height:1.6; max-width:320px; margin:0; }
+  .eyebrow { font-size:0.6rem; letter-spacing:0.24em; text-transform:uppercase; color:#B89A5E; }
+</style>
+</head>
+<body>
+  <div class="eyebrow">Keine Verbindung</div>
+  <p>Diese Seite braucht Internet. Eure offline gespeicherten Reisen sind trotzdem erreichbar.</p>
+  <a href="/mehr/offline-reisen">Zu den Offline-Reisen</a>
+</body>
+</html>`
+  return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+}
+
 self.addEventListener('install', () => {
   // Bewusst kein Vorab-Precaching -- vermeidet zusätzliche Netzwerklast beim
   // ersten Laden (siehe components/SplashScreen.tsx: die Standalone-
