@@ -31,9 +31,14 @@
  *     weiterhin unkontrolliert durch (kein event.respondWith), der
  *     Kaltstart-Hänger am nativen Splash bestand unverändert fort. Jetzt
  *     tatsächlich als eigener Zweig ergänzt.
+ * v4: Cache-Bedingung war auf isNavigation/isRscNavigation beschränkt --
+ *     das Hintergrund-Priming in SaveTripOfflineButton.tsx (einfaches
+ *     fetch(), weder "navigate" noch rsc-Header) wurde dadurch nie
+ *     gecached, obwohl der Code das schon lange vorgab zu tun. Jetzt wird
+ *     jeder GET-Request zu den beiden Offline-Reisen-Routen gecached.
  */
 
-const CACHE_VERSION = 'v3'
+const CACHE_VERSION = 'v4'
 const CACHE_NAME = `lumi-offline-reisen-${CACHE_VERSION}`
 
 const OFFLINE_TRIP_PATH_PREFIX = '/mehr/offline-reisen'
@@ -143,11 +148,10 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // Nur Navigations-/RSC-Requests zu den beiden Offline-Reisen-Routen --
-  // alles andere (Supabase, andere Seiten, Bilder, Dokumente) bewusst
-  // unangetastet durchs Netzwerk, kein event.respondWith().
+  // Nur Requests zu den beiden Offline-Reisen-Routen -- alles andere
+  // (Supabase, andere Seiten, Bilder, Dokumente) bewusst unangetastet durchs
+  // Netzwerk, kein event.respondWith().
   const isNavigation = request.mode === 'navigate'
-  const isRscNavigation = request.headers.get('rsc') === '1'
 
   // §Bugfix "Kaltstart im Flugmodus hängt am nativen Splash": echte
   // Seitenaufrufe (kein RSC-Fetch innerhalb einer bereits laufenden App) zu
@@ -161,7 +165,15 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  if (!(isNavigation || isRscNavigation) || !isOfflineTripRoute(url.pathname)) return
+  // §Bugfix "Für Offline speichern füllt den Seiten-Cache nie": das
+  // Hintergrund-Priming in SaveTripOfflineButton.tsx ruft diese Routen per
+  // einfachem fetch() auf -- das hat weder mode "navigate" noch den
+  // rsc-Header, wurde also von der ursprünglichen Einschränkung auf
+  // isNavigation/isRscNavigation nie erfasst und lief unkontrolliert (und
+  // uncached) durchs Netzwerk. Da hier ohnehin schon strikt auf die beiden
+  // Offline-Reisen-Pfade eingegrenzt ist, ist es sicher, jeden GET-Request
+  // dorthin zu cachen -- nicht nur Navigationen/RSC-Fetches.
+  if (!isOfflineTripRoute(url.pathname)) return
 
   // Network-first, Fallback auf Cache -- online immer der frische Stand
   // (inkl. neuer Deploys), offline der zuletzt erfolgreich geladene Stand.
