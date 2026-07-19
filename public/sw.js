@@ -16,9 +16,19 @@
  *   Platzhalterdaten irgendwo -- fehlt ein Snapshot, zeigt die bereits
  *   bestehende Client-Logik weiterhin ehrlich "kein Offline-Stand
  *   gespeichert".
+ *
+ * §CACHE_VERSION-Historie (Nutzervorgabe "Cache-Version sauber verwalten und
+ * alte Caches entfernen"): bei JEDER inhaltlichen Änderung an diesem Skript
+ * hier hochzählen -- das `activate`-Handling löscht dann automatisch alle
+ * Caches einer älteren Version, sobald die App das nächste Mal online lädt.
+ * v2: Fallback-Hinweisseite bei fehlgeschlagenen Kaltstart-Navigationen
+ *     ergänzt (siehe offlineFallbackResponse) -- alte v1-Caches enthielten
+ *     u. U. noch HTML/RSC-Stände von vor diversen Offline-Bugfixes
+ *     (Entfernen-Button, Lesepfad-Fix) und wurden nur beim nächsten
+ *     Online-Laden dieser Seiten neu befüllt, nie automatisch bereinigt.
  */
 
-const CACHE_VERSION = 'v1'
+const CACHE_VERSION = 'v2'
 const CACHE_NAME = `lumi-offline-reisen-${CACHE_VERSION}`
 
 const OFFLINE_TRIP_PATH_PREFIX = '/mehr/offline-reisen'
