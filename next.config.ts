@@ -20,6 +20,18 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "50mb",
     },
   },
+  // §Bugfix "Service-Worker-Update erreicht das installierte App-Icon nicht
+  // zuverlässig": manche Android/Chrome-Kombinationen führen den üblichen
+  // Byte-Vergleich von /sw.js bei Standalone-gestarteten PWAs erkennbar
+  // nicht zuverlässig/rechtzeitig aus (bestätigt per Live-Test -- weder
+  // Warten noch Löschen der Chrome-Website-Daten hat geholfen). Fix: die
+  // Registrierungs-URL selbst wird pro Deploy eindeutig gemacht (siehe
+  // ServiceWorkerRegistration.tsx), das umgeht die Update-Heuristik
+  // komplett. VERCEL_GIT_COMMIT_SHA wird von Vercel automatisch gesetzt,
+  // aber nicht ohne explizites Re-Exposing im Client-Bundle sichtbar.
+  env: {
+    NEXT_PUBLIC_SW_BUILD_ID: process.env.VERCEL_GIT_COMMIT_SHA ?? String(Date.now()),
+  },
   // §"Service Worker nur für Offline-Reisen" (Nutzervorgabe): exakt die von
   // der offiziellen Next.js-16-PWA-Doku empfohlene Konfiguration für
   // public/sw.js -- der Browser muss bei jedem Start die aktuelle Service-

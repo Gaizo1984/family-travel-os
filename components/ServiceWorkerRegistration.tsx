@@ -22,7 +22,14 @@ export function ServiceWorkerRegistration() {
     if (!('serviceWorker' in navigator)) return
 
     const register = () => {
-      navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' }).catch((err) => {
+      // §Bugfix "Service-Worker-Update erreicht das installierte App-Icon
+      // nicht zuverlässig": statt auf Chromes eigenen (bei manchen
+      // Standalone-PWAs unzuverlässigen) Byte-Vergleich von /sw.js zu
+      // vertrauen, ist die Registrierungs-URL pro Deploy eindeutig --
+      // jeder neue Build ist damit aus Browsersicht unmissverständlich
+      // eine neue Datei, die sofort installiert wird.
+      const swUrl = `/sw.js?v=${process.env.NEXT_PUBLIC_SW_BUILD_ID ?? 'dev'}`
+      navigator.serviceWorker.register(swUrl, { scope: '/', updateViaCache: 'none' }).catch((err) => {
         console.warn('[sw] Registrierung fehlgeschlagen -- Offline-Reisen funktioniert dann nur online.', err)
       })
     }
