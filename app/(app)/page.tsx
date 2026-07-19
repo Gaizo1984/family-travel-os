@@ -269,7 +269,16 @@ export default async function Dashboard() {
   // Nicht allein auf den (oft veralteten) Status verlassen: Eine Reise, deren
   // Enddatum bereits vergangen ist, darf nie als "Nächste Reise" erscheinen,
   // selbst wenn sie nie manuell auf "completed" gesetzt wurde.
-  const upcoming = trips.filter((t) => (t.status === "active" || t.status === "planned") && !isTripPastEnd(tripStatusInput(t)));
+  // §Bugfix "Hauptdashboard zeigt falsche nächste Reise" (Nutzer-Feedback):
+  // die obige SQL-Abfrage sortiert nach der ROHEN trips.start_date-Spalte
+  // (nullsFirst: false) -- eine Reise ganz ohne eigenes Datum, aber mit
+  // datierten Etappen/Buchungen (wie hier `deriveTripDateRange` es auflöst),
+  // rutschte dadurch ans Ende, obwohl sie chronologisch die nächste ist.
+  // /today und /trips sortieren bereits korrekt nach dem abgeleiteten Zeitraum
+  // -- hier fehlte exakt dieser zweite Sortierschritt nach der Filterung.
+  const upcoming = trips
+    .filter((t) => (t.status === "active" || t.status === "planned") && !isTripPastEnd(tripStatusInput(t)))
+    .sort((a, b) => (tripStatusInput(a).start_date ?? "").localeCompare(tripStatusInput(b).start_date ?? ""));
   const nextTrip = upcoming[0] ?? trips[0];
 
   // Highlightfoto je Reise (falls die Familie eines markiert hat) — erste Stufe der Bildauflösung.
