@@ -47,6 +47,18 @@ export function SaveTripOfflineButton({ tripId }: { tripId: string }) {
           }
         }),
       )
+
+      // §"App-Shell für diese Offline-Route sofort verfügbar machen"
+      // (Nutzervorgabe): primt den Service-Worker-Cache (public/sw.js) direkt
+      // nach dem Speichern, statt darauf zu warten, dass die Familie beide
+      // Seiten zufällig einmal online besucht -- rein informative Requests,
+      // ihr Ergebnis wird hier nicht ausgewertet. Schlägt das Priming fehl
+      // (z. B. weil der Service Worker noch nicht registriert ist), bleibt
+      // "Für Offline speichern" trotzdem erfolgreich -- die Seite lädt dann
+      // erst offline-fähig, sobald sie einmal online besucht wurde.
+      fetch('/mehr/offline-reisen').catch(() => {})
+      fetch(`/mehr/offline-reisen/${tripId}`).catch(() => {})
+
       setState('done')
     } catch {
       setState('error')

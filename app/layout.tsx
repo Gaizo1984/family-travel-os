@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist } from "next/font/google";
 import { SplashScreen } from "@/components/SplashScreen";
+import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistration";
 import "./globals.css";
 
 const geist = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -49,6 +50,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         style={{ background: "var(--background)", color: "var(--foreground)" }}
       >
         <SplashScreen />
+        <ServiceWorkerRegistration />
         {children}
       </body>
     </html>

@@ -20,6 +20,21 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "50mb",
     },
   },
+  // §"Service Worker nur für Offline-Reisen" (Nutzervorgabe): exakt die von
+  // der offiziellen Next.js-16-PWA-Doku empfohlene Konfiguration für
+  // public/sw.js -- der Browser muss bei jedem Start die aktuelle Service-
+  // Worker-Datei selbst prüfen, statt eine veraltete Version zu behalten.
+  async headers() {
+    return [
+      {
+        source: "/sw.js",
+        headers: [
+          { key: "Content-Type", value: "application/javascript; charset=utf-8" },
+          { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;
