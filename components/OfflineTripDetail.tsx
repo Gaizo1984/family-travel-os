@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Plane, Hotel, Ticket, Luggage, FileCheck2, Trash2 } from 'lucide-react'
 import {
-  getTripSnapshot, listCachedDocumentsForTrip, removeCachedDocument, removeOfflineTrip,
+  listTripSnapshots, listCachedDocumentsForTrip, removeCachedDocument, removeOfflineTrip,
   type OfflineTripSnapshot, type CachedDocumentMeta,
 } from '@/lib/offline-document-cache'
 import { OfflineDocumentViewer } from '@/components/OfflineDocumentViewer'
@@ -118,8 +118,16 @@ export function OfflineTripDetail({ tripId }: { tripId: string }) {
     setDocuments(await listCachedDocumentsForTrip(tripId));
   }
 
+  // §Bugfix "Reise erscheint in der Liste, aber nicht in der Detailansicht"
+  // (Nutzer-Feedback): OfflineTripsList liest über listTripSnapshots()
+  // (getAll()), die Detailansicht las bisher über getTripSnapshot()
+  // (get() mit Einzelschlüssel) -- zwei getrennte Zugriffspfade auf
+  // denselben Store. Da der getAll()-Pfad nachweislich funktioniert (die
+  // Liste zeigt die Reise korrekt an), liest die Detailansicht jetzt
+  // über denselben Pfad + Filterung, statt über einen zweiten, davon
+  // unabhängigen Einzel-Get.
   useEffect(() => {
-    getTripSnapshot(tripId).then(setSnapshot);
+    listTripSnapshots().then((all) => setSnapshot(all.find((s) => s.tripId === tripId) ?? null));
     reloadDocuments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tripId]);
