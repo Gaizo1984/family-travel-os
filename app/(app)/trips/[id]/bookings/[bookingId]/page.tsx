@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { BOOKING_TYPE_CONFIG, BOOKING_STATUS_LABELS, PAYMENT_STATUS_LABELS, formatDateTimeDE } from "@/lib/bookings";
 import { uploadBookingDocument, deleteBookingDocument, uploadBoardingPass, uploadBaggageTag } from "@/lib/actions/documents";
 import { toggleBookingCancelled } from "@/lib/actions/bookings";
-import { sortForBoardingPassViewer } from "@/lib/boarding-passes";
+import { sortForBoardingPassViewer, detectFlightLegOptions } from "@/lib/boarding-passes";
 import type { BookingType, BookingStatus, PaymentStatus } from "@/lib/supabase/types";
 import { Banner } from "@/components/Banner";
 import { formatCurrencyDE } from "@/lib/demo-data";
@@ -78,12 +78,12 @@ export default async function BookingDetailPage({
 
   const { data: docsRaw } = await supabase
     .from("documents")
-    .select("id, label, storage_path, doc_type, person_id")
+    .select("id, label, storage_path, doc_type, person_id, details")
     .eq("booking_id", b.id);
 
-  const withSignedUrl = async (d: { id: string; label: string | null; storage_path: string; person_id: string | null }) => {
+  const withSignedUrl = async (d: { id: string; label: string | null; storage_path: string; person_id: string | null; details: unknown }) => {
     const url = await getCachedSignedUrl("documents", d.storage_path);
-    return { id: d.id, label: d.label ?? "Dokument", storage_path: d.storage_path, person_id: d.person_id, url };
+    return { id: d.id, label: d.label ?? "Dokument", storage_path: d.storage_path, person_id: d.person_id, details: d.details as Record<string, string> | null, url };
   };
 
   const documents = await Promise.all((docsRaw ?? []).filter((d) => d.doc_type === "booking_document").map(withSignedUrl));
@@ -94,6 +94,22 @@ export default async function BookingDetailPage({
     (trip.trip_members as unknown as Array<{ persons: { id: string; name: string; initials: string } | null }>)
       .flatMap((tm) => (tm.persons ? [tm.persons] : []))
   );
+
+  // §"2 Boardingpässe pro Person bei Zwischenstopp... klar nach Flug
+  // trennen, keine Person doppelt" (Nutzervorgabe): eine Person kann jetzt
+  // mehrere Boardingpässe haben (einen je Flugabschnitt) -- statt einer nach
+  // person_id geschlüsselten Map (die den zweiten Pass bisher stillschweigend
+  // überschrieben hat, siehe Bugfix-Kontext) wird pro Person eine Liste
+  // aufgebaut. Ohne erkannten Zwischenstopp bleibt das Verhalten identisch
+  // zu vorher (genau ein Eintrag je Person).
+  const flightLegOptions = detectFlightLegOptions(b.details);
+  const boardingPassesByPerson = new Map<string, typeof boardingPassDocs>();
+  for (const doc of boardingPassDocs) {
+    if (!doc.person_id) continue;
+    const list = boardingPassesByPerson.get(doc.person_id) ?? [];
+    list.push(doc);
+    boardingPassesByPerson.set(doc.person_id, list);
+  }
   const boardingPassByPerson = new Map(boardingPassDocs.map((d) => [d.person_id, d]));
 
   return (
@@ -210,34 +226,90 @@ export default async function BookingDetailPage({
 
             <div className="mb-4">
               {members.map((person) => {
-                const doc = boardingPassByPerson.get(person.id);
-                return (
-                  <div key={person.id} className="flex items-center gap-3 py-2" style={{ borderBottom: "1px solid var(--border)" }}>
-                    <div
-                      className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
-                      style={{ background: "var(--accent-subtle)", color: "var(--accent)", fontSize: "0.6rem", letterSpacing: "0.03em" }}
-                    >
-                      {person.initials}
+                const docs = boardingPassesByPerson.get(person.id) ?? [];
+
+                if (flightLegOptions.length === 0) {
+                  // §Unverändertes Verhalten ohne erkannten Zwischenstopp: genau ein Eintrag je Person.
+                  const doc = docs[0];
+                  return (
+                    <div key={person.id} className="flex items-center gap-3 py-2" style={{ borderBottom: "1px solid var(--border)" }}>
+                      <div
+                        className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
+                        style={{ background: "var(--accent-subtle)", color: "var(--accent)", fontSize: "0.6rem", letterSpacing: "0.03em" }}
+                      >
+                        {person.initials}
+                      </div>
+                      <span className="flex-1 min-w-0" style={{ color: "var(--foreground)", fontSize: "0.82rem" }}>{person.name}</span>
+                      {doc ? (
+                        <>
+                          <span className="flex items-center gap-1" style={{ color: "#4C7A5D", fontSize: "0.7rem" }}>
+                            <Check size={13} strokeWidth={1.8} /> Hinterlegt
+                          </span>
+                          <form action={deleteBookingDocument}>
+                            <input type="hidden" name="document_id" value={doc.id} />
+                            <input type="hidden" name="storage_path" value={doc.storage_path} />
+                            <input type="hidden" name="slug" value={trip.slug} />
+                            <input type="hidden" name="booking_id" value={b.id} />
+                            <button type="submit" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", display: "flex" }} aria-label="Boardingpass löschen">
+                              <Trash2 size={13} strokeWidth={1.4} />
+                            </button>
+                          </form>
+                        </>
+                      ) : (
+                        <span style={{ color: "#B5624A", fontSize: "0.7rem" }}>Fehlt</span>
+                      )}
                     </div>
-                    <span className="flex-1 min-w-0" style={{ color: "var(--foreground)", fontSize: "0.82rem" }}>{person.name}</span>
-                    {doc ? (
-                      <>
-                        <span className="flex items-center gap-1" style={{ color: "#4C7A5D", fontSize: "0.7rem" }}>
-                          <Check size={13} strokeWidth={1.8} /> Hinterlegt
-                        </span>
-                        <form action={deleteBookingDocument}>
-                          <input type="hidden" name="document_id" value={doc.id} />
-                          <input type="hidden" name="storage_path" value={doc.storage_path} />
-                          <input type="hidden" name="slug" value={trip.slug} />
-                          <input type="hidden" name="booking_id" value={b.id} />
-                          <button type="submit" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", display: "flex" }} aria-label="Boardingpass löschen">
-                            <Trash2 size={13} strokeWidth={1.4} />
-                          </button>
-                        </form>
-                      </>
-                    ) : (
-                      <span style={{ color: "#B5624A", fontSize: "0.7rem" }}>Fehlt</span>
-                    )}
+                  );
+                }
+
+                // §Bugfix "2. Boardingpass verschwand" + "klar nach Flug
+                // trennen" (Nutzervorgabe): bei erkanntem Zwischenstopp eine
+                // eigene Zeile je Flugabschnitt -- Alt-/unerwartete Pässe
+                // ohne (erkennbares) leg-Feld werden zusätzlich angezeigt,
+                // nicht verschluckt.
+                const knownLegValues = new Set(flightLegOptions.map((o) => o.value));
+                const legRows = flightLegOptions.map((opt) => ({
+                  key: opt.value, legLabel: opt.label,
+                  doc: docs.find((d) => d.details?.leg === opt.value),
+                }));
+                const extraRows = docs
+                  .filter((d) => !d.details?.leg || !knownLegValues.has(d.details.leg))
+                  .map((d) => ({ key: d.id, legLabel: "Boardingpass (ohne Flugabschnitt)", doc: d }));
+
+                return (
+                  <div key={person.id} className="py-2" style={{ borderBottom: "1px solid var(--border)" }}>
+                    <div className="flex items-center gap-3 mb-1.5">
+                      <div
+                        className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
+                        style={{ background: "var(--accent-subtle)", color: "var(--accent)", fontSize: "0.6rem", letterSpacing: "0.03em" }}
+                      >
+                        {person.initials}
+                      </div>
+                      <span style={{ color: "var(--foreground)", fontSize: "0.82rem" }}>{person.name}</span>
+                    </div>
+                    {[...legRows, ...extraRows].map((row) => (
+                      <div key={row.key} className="flex items-center gap-3 py-1" style={{ paddingLeft: "40px" }}>
+                        <span className="flex-1 min-w-0" style={{ color: "var(--muted)", fontSize: "0.72rem" }}>{row.legLabel}</span>
+                        {row.doc ? (
+                          <>
+                            <span className="flex items-center gap-1" style={{ color: "#4C7A5D", fontSize: "0.7rem" }}>
+                              <Check size={13} strokeWidth={1.8} /> Hinterlegt
+                            </span>
+                            <form action={deleteBookingDocument}>
+                              <input type="hidden" name="document_id" value={row.doc.id} />
+                              <input type="hidden" name="storage_path" value={row.doc.storage_path} />
+                              <input type="hidden" name="slug" value={trip.slug} />
+                              <input type="hidden" name="booking_id" value={b.id} />
+                              <button type="submit" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", display: "flex" }} aria-label="Boardingpass löschen">
+                                <Trash2 size={13} strokeWidth={1.4} />
+                              </button>
+                            </form>
+                          </>
+                        ) : (
+                          <span style={{ color: "#B5624A", fontSize: "0.7rem" }}>Fehlt</span>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 );
               })}
@@ -258,6 +330,19 @@ export default async function BookingDetailPage({
                   {members.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
               </div>
+              {flightLegOptions.length > 0 && (
+                <div className="min-w-[160px]">
+                  <label htmlFor="bp-leg" style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: "6px" }}>
+                    Flugabschnitt
+                  </label>
+                  <select
+                    id="bp-leg" name="leg" required
+                    style={{ width: "100%", padding: "9px 12px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 300, outline: "none" }}
+                  >
+                    {flightLegOptions.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                  </select>
+                </div>
+              )}
               <div className="flex-1 min-w-[160px]">
                 <label htmlFor="bp-file" style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: "6px" }}>
                   Datei

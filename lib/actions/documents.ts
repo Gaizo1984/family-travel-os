@@ -298,6 +298,12 @@ export async function uploadBoardingPass(formData: FormData) {
   const bookingId = String(formData.get('booking_id') ?? '')
   const slug      = String(formData.get('slug') ?? '')
   const personId  = String(formData.get('person_id') ?? '')
+  // §"2 Boardingpässe pro Person bei Zwischenstopp... klar nach Flug
+  // trennen" (Nutzervorgabe): nur gesetzt, wenn das Formular einen
+  // Flugabschnitt zur Auswahl anbot (siehe detectFlightLegOptions) --
+  // bei Flügen ohne Zwischenstopp bleibt das Feld leer, exakt bisheriges
+  // Verhalten.
+  const leg = String(formData.get('leg') ?? '').trim()
   const detailPath = `/trips/${slug}/bookings/${bookingId}`
 
   if (!personId)
@@ -326,7 +332,7 @@ export async function uploadBoardingPass(formData: FormData) {
     person_id: personId,
     doc_type: 'boarding_pass',
     label: person?.name ? `Boardingpass ${person.name}` : 'Boardingpass',
-    details: { source: 'manual' },
+    details: leg ? { source: 'manual', leg } : { source: 'manual' },
     storage_provider: 'supabase_storage',
     storage_bucket: 'documents',
     storage_path: storagePath,

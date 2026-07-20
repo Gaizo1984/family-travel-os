@@ -16,3 +16,37 @@ export function sortForBoardingPassViewer<T extends { name: string }>(persons: T
     return a.name.localeCompare(b.name)
   })
 }
+
+export type FlightLegOption = { value: string; label: string }
+
+/**
+ * §"Bei Flügen mit Zwischenstopp gibt es pro Person 2 Boardingpässe... klar
+ * erkenntlich nach Flug trennen" (Nutzervorgabe, wörtlich): erkennt einen
+ * Zwischenstopp ausschließlich anhand bereits vorhandener Buchungsdaten
+ * (`bookings.details.layover_airport`, siehe lib/saved-flights-shared.ts
+ * computeLayoverDetails/lib/bookings.ts) -- kein neues Segment-Datenmodell,
+ * keine erfundenen Flughafencodes, falls `from`/`to` nicht vorliegen.
+ */
+export function detectFlightLegOptions(bookingDetails: Record<string, string> | null | undefined): FlightLegOption[] {
+  const layoverAirport = bookingDetails?.layover_airport
+  if (!layoverAirport) return []
+
+  const from = bookingDetails?.from
+  const to = bookingDetails?.to
+  if (from && to) {
+    return [
+      { value: '1', label: `1. Flug: ${from} → ${layoverAirport}` },
+      { value: '2', label: `2. Flug: ${layoverAirport} → ${to}` },
+    ]
+  }
+  return [
+    { value: '1', label: '1. Flug' },
+    { value: '2', label: '2. Flug' },
+  ]
+}
+
+/** Kurzbeschriftung für einen bereits hochgeladenen Pass -- `null`, wenn kein Leg gespeichert ist (Altdaten oder Buchung ohne Zwischenstopp). */
+export function legLabelFor(leg: string | undefined | null, options: FlightLegOption[]): string | null {
+  if (!leg) return null
+  return options.find((o) => o.value === leg)?.label ?? `Flugabschnitt ${leg}`
+}
