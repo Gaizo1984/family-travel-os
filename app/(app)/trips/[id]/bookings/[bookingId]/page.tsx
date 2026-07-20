@@ -8,6 +8,8 @@ import { toggleBookingCancelled } from "@/lib/actions/bookings";
 import { sortForBoardingPassViewer, detectFlightLegOptions } from "@/lib/boarding-passes";
 import type { BookingType, BookingStatus, PaymentStatus } from "@/lib/supabase/types";
 import { Banner } from "@/components/Banner";
+import { FileInputButton } from "@/components/FileInputButton";
+import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
 import { formatCurrencyDE } from "@/lib/demo-data";
 import { getCachedSignedUrl } from "@/lib/signed-storage-url";
 
@@ -343,19 +345,20 @@ export default async function BookingDetailPage({
                   </select>
                 </div>
               )}
-              <div className="flex-1 min-w-[160px]">
-                <label htmlFor="bp-file" style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: "6px" }}>
-                  Datei
+              <div className="flex-1 min-w-[220px]">
+                <label style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: "6px" }}>
+                  Boardingpass
                 </label>
-                <input id="bp-file" name="file" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" required style={{ width: "100%", fontSize: "0.75rem", color: "var(--muted)" }} />
+                <FileInputButton
+                  id="bp-file" name="file" accept="image/jpeg,image/png,image/webp,application/pdf" required
+                  buttonLabel="Foto oder PDF auswählen"
+                />
               </div>
-              <button
-                type="submit"
-                style={{ background: "var(--foreground)", color: "var(--surface)", border: "none", borderRadius: "6px", padding: "10px 18px", fontSize: "0.62rem", letterSpacing: "0.14em", textTransform: "uppercase", cursor: "pointer", whiteSpace: "nowrap" }}
-              >
-                <Ticket size={12} strokeWidth={1.6} style={{ display: "inline", marginRight: "6px", verticalAlign: "-2px" }} />
-                Hinzufügen
-              </button>
+              <SubmitButtonWithProgress
+                label="Hinzufügen" pendingLabel="Wird hochgeladen …"
+                icon={<Ticket size={12} strokeWidth={1.6} />}
+                style={{ padding: "10px 18px", fontSize: "0.62rem" }}
+              />
             </form>
           </div>
         )}
