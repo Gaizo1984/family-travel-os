@@ -23,11 +23,14 @@ export default async function NewBookingPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{
     type?: string; category?: string; error?: string; draft?: string; storage_path?: string
-    from_saved_option_id?: string; from_saved_option_table?: string
+    from_saved_option_id?: string; from_saved_option_table?: string; return_draft?: string
   }>;
 }) {
   const { id } = await params;
-  const { type, category, error, draft: draftRaw, storage_path, from_saved_option_id, from_saved_option_table } = await searchParams;
+  const {
+    type, category, error, draft: draftRaw, storage_path,
+    from_saved_option_id, from_saved_option_table, return_draft,
+  } = await searchParams;
 
   // §Formular-Daten nach einem Validierungsfehler wiederherstellen (siehe
   // lib/actions/bookings.ts::redirectWithDraft) -- statt die Seite leer neu
@@ -137,6 +140,10 @@ export default async function NewBookingPage({
             ...(from_saved_option_id && from_saved_option_table
               ? { from_saved_option_id, from_saved_option_table }
               : {}),
+            // §Bugfix "Rückflug fehlt" (Live-Test-Feedback): nur durchgereicht,
+            // nicht ausgewertet -- die Verkettung zum Rückflug-Formular passiert
+            // serverseitig in createBooking (lib/actions/bookings.ts).
+            ...(return_draft ? { return_draft } : {}),
           }}
           submitLabel="Buchung speichern"
           cancelHref={`/trips/${trip.slug}`}

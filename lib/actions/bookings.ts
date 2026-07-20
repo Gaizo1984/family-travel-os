@@ -291,6 +291,13 @@ export async function createBooking(formData: FormData) {
   // Auslöser für den Übergang auf status='booked', nie ein reiner UI-Klick.
   const fromSavedOptionId    = String(formData.get('from_saved_option_id') ?? '').trim()
   const fromSavedOptionTable = String(formData.get('from_saved_option_table') ?? '').trim()
+  // §Bugfix "Rückflug fehlt" (Live-Test-Feedback, Nutzer wünscht automatische
+  // Verkettung): nur gesetzt, wenn buildFlightAdoptionUrl einen Rückflug
+  // mitgegeben hat -- löst nach erfolgreichem Speichern DIESER (Hinflug-)
+  // Buchung eine Weiterleitung zum vorausgefüllten Rückflug-Formular aus,
+  // statt zur Reiseseite. Weiterhin manuell zu bestätigen, kein
+  // automatisches Durchbuchen.
+  const returnDraftRaw = String(formData.get('return_draft') ?? '').trim()
   const f = readCommonFields(formData)
 
   const newPath = `/trips/${slug}/bookings/new?type=${f.type}${category ? `&category=${category}` : ''}&`
@@ -360,6 +367,11 @@ export async function createBooking(formData: FormData) {
       stageId = newStageId
       await supabase.from('bookings').update({ stage_id: newStageId }).eq('id', created.id)
     }
+  }
+
+  if (returnDraftRaw) {
+    const params = new URLSearchParams({ type: 'flight', draft: returnDraftRaw })
+    redirect(`/trips/${slug}/bookings/new?${params.toString()}`)
   }
 
   redirect(category ? `/trips/${slug}/bookings/category/${category}` : `/trips/${slug}`)
