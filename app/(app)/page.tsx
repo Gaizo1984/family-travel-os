@@ -3,7 +3,7 @@ import { Map as MapIcon, Globe, Users, CalendarDays } from "lucide-react";
 import { formatDateDE } from "@/lib/demo-data";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
-import { buildTravelWorldForFamilyAndPersons } from "@/lib/travel-world";
+import { buildTravelWorldForFamilyAndPersons, syncTripDerivedCountryVisits } from "@/lib/travel-world";
 import { isTripPastEnd, tripCountdownDisplay } from "@/lib/trip-status";
 import { deriveTripDateRange, tripDurationDays, TRIP_DATE_RANGE_OPEN_LABEL } from "@/lib/trip-dates";
 import { resolveTripImage, getHighlightPhotoByTripId, type ResolvedTripImage } from "@/lib/trip-images";
@@ -332,6 +332,24 @@ export default async function Dashboard() {
     computeTripReadiness(nextTrip.id),
     getWeatherForLocation(weatherCandidates),
   ]);
+
+  // §"Besuchte Länder personenbezogen" (Nutzervorgabe): dieselbe
+  // person_country_visits-Quelle wie /family/world, damit auch manuell
+  // markierte Länder (nicht nur echte Reisen) auf der Dashboard-Karte
+  // erscheinen. Statistik-Zahlen (worldStats/perPersonWorlds) bleiben
+  // unverändert bei buildTravelWorldForFamilyAndPersons.
+  await syncTripDerivedCountryVisits(familyId);
+  const { data: dashboardVisitsRaw } = persons.length > 0
+    ? await supabase.from("person_country_visits").select("person_id, country_code").in("person_id", persons.map((p) => p.id))
+    : { data: [] as { person_id: string; country_code: string }[] };
+  const dashboardVisitedByPerson = new Map<string, Set<string>>();
+  const dashboardVisitedFamily = new Set<string>();
+  for (const v of dashboardVisitsRaw ?? []) {
+    if (!dashboardVisitedByPerson.has(v.person_id)) dashboardVisitedByPerson.set(v.person_id, new Set());
+    dashboardVisitedByPerson.get(v.person_id)!.add(v.country_code);
+    dashboardVisitedFamily.add(v.country_code);
+  }
+
   const mapPanels: WorldMapPanel[] = [
     {
       key: "family",
@@ -339,7 +357,7 @@ export default async function Dashboard() {
       initials: "Alle",
       color: null,
       href: "/family/world",
-      node: <WorldMap visitedCodes={worldStats.countryCodes} />,
+      node: <WorldMap visitedCodes={dashboardVisitedFamily} />,
     },
     ...persons.map((p) => ({
       key: p.id,
@@ -347,7 +365,7 @@ export default async function Dashboard() {
       initials: p.initials,
       color: p.color,
       href: `/family/world?person=${p.id}`,
-      node: <WorldMap visitedCodes={perPersonWorlds.get(p.id)!.countryCodes} />,
+      node: <WorldMap visitedCodes={dashboardVisitedByPerson.get(p.id) ?? new Set<string>()} />,
     })),
   ];
 

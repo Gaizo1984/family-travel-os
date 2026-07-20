@@ -12,6 +12,8 @@ export type BookingStatus   = 'pending' | 'confirmed' | 'cancelled' | 'reserved'
 export type PaymentStatus   = 'unpaid' | 'partial' | 'paid' | 'refunded'
 /** §Phase B "Gemerkt/Ausgewählt/Gebucht" (Nutzervorgabe, Statuswerte wörtlich englisch): Lebenszyklus für saved_flight_options/saved_hotel_options. 'selected' ist nur eine Zwischenstufe, 'booked' wird ausschließlich von createBooking gesetzt, nie von einem reinen UI-Klick. */
 export type SavedOptionStatus = 'saved' | 'selected' | 'booked'
+/** §"Besuchte Länder personenbezogen" (Nutzervorgabe): 'trip' = ausschließlich per Sync aus stages/past_trips befüllt (lib/travel-world.ts::syncTripDerivedCountryVisits), 'manual' = ausschließlich über die Länder-Checkliste selbst. */
+export type PersonCountryVisitSource = 'trip' | 'manual'
 export type TripStatus      = 'planned' | 'active' | 'completed' | 'archived'
 export type TaskStatus      = 'open' | 'done' | 'snoozed'
 export type JournalVis      = 'family' | 'private'
@@ -950,6 +952,24 @@ export interface Database {
           { foreignKeyName: "saved_hotel_options_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] },
           { foreignKeyName: "saved_hotel_options_trip_id_fkey"; columns: ["trip_id"]; isOneToOne: false; referencedRelation: "trips"; referencedColumns: ["id"] },
           { foreignKeyName: "saved_hotel_options_booking_id_fkey"; columns: ["booking_id"]; isOneToOne: false; referencedRelation: "bookings"; referencedColumns: ["id"] }
+        ]
+      }
+      person_country_visits: {
+        Row: {
+          id: string; person_id: string; country_code: string; source: PersonCountryVisitSource
+          trip_id: string | null; first_visited_at: string | null; created_at: string; updated_at: string
+        }
+        Insert: {
+          id?: string; person_id: string; country_code: string; source: PersonCountryVisitSource
+          trip_id?: string | null; first_visited_at?: string | null; created_at?: string; updated_at?: string
+        }
+        Update: {
+          id?: string; person_id?: string; country_code?: string; source?: PersonCountryVisitSource
+          trip_id?: string | null; first_visited_at?: string | null; created_at?: string; updated_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "person_country_visits_person_id_fkey"; columns: ["person_id"]; isOneToOne: false; referencedRelation: "persons"; referencedColumns: ["id"] },
+          { foreignKeyName: "person_country_visits_trip_id_fkey"; columns: ["trip_id"]; isOneToOne: false; referencedRelation: "trips"; referencedColumns: ["id"] }
         ]
       }
       lumi_brain_usage: {

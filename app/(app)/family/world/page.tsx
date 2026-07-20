@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ChevronLeft, Map as MapIcon, Globe, CalendarDays, Compass } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
-import { buildTravelWorld } from "@/lib/travel-world";
+import { buildTravelWorld, syncTripDerivedCountryVisits } from "@/lib/travel-world";
 import { WorldMap } from "@/components/WorldMap";
 import { COUNTRY_NAMES } from "@/lib/geo-suggestions";
 
@@ -33,10 +33,31 @@ export default async function FamilyWorldPage({
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
 
+  // §"Besuchte Länder personenbezogen" (Nutzervorgabe): hält
+  // person_country_visits aktuell, bevor die Weltkarte deren (jetzt auch
+  // manuell markierte) Länder anzeigt -- reine On-Demand-Berechnung wie
+  // buildTravelWorld selbst, kein Hintergrundjob.
+  await syncTripDerivedCountryVisits(familyId);
+
   const [{ data: persons }, travelWorld] = await Promise.all([
     supabase.from("persons").select("id, name").eq("family_id", familyId).order("name"),
     buildTravelWorld({ familyId, personId: personFilter || undefined }),
   ]);
+
+  // §"familienweite Ansicht: Land markieren sobald mindestens eine Person
+  // dort war; Personenfilter: nur Länder der ausgewählten Person markieren"
+  // (Nutzervorgabe, wörtlich): Karte zeigt jetzt person_country_visits
+  // (Reise + manuell), NICHT mehr nur travelWorld.countryCodes -- erfasst
+  // dadurch auch rein manuell markierte Länder. Statistik/Zeitstrahl bleiben
+  // unverändert bei travelWorld (ausschließlich echte Reisen).
+  const familyPersonIds = (persons ?? []).map((p) => p.id);
+  let mapVisitedCodes = new Set<string>();
+  if (familyPersonIds.length > 0) {
+    let query = supabase.from("person_country_visits").select("country_code, person_id").in("person_id", familyPersonIds);
+    if (personFilter) query = query.eq("person_id", personFilter);
+    const { data: visitRows } = await query;
+    mapVisitedCodes = new Set((visitRows ?? []).map((r) => r.country_code));
+  }
 
   const selectedPersonName = (persons ?? []).find((p) => p.id === personFilter)?.name;
   const recentEntries = [...travelWorld.timeline].reverse().slice(0, 5);
@@ -89,7 +110,7 @@ export default async function FamilyWorldPage({
           ))}
         </div>
 
-        {travelWorld.tripsCount === 0 ? (
+        {travelWorld.tripsCount === 0 && mapVisitedCodes.size === 0 ? (
           <Card>
             <p className="mb-4" style={{ color: "var(--muted)", fontSize: "0.85rem", lineHeight: 1.6 }}>
               {personFilter
@@ -102,6 +123,12 @@ export default async function FamilyWorldPage({
               </Link>
               <Link href="/family/history/new" style={{ color: "var(--accent)", fontSize: "0.72rem", letterSpacing: "0.06em", textDecoration: "none" }}>
                 Land besucht →
+              </Link>
+              <Link
+                href={personFilter ? `/family/world/countries?person=${personFilter}` : "/family/world/countries"}
+                style={{ color: "var(--accent)", fontSize: "0.72rem", letterSpacing: "0.06em", textDecoration: "none" }}
+              >
+                Länderliste durchgehen →
               </Link>
             </div>
           </Card>
@@ -124,8 +151,16 @@ export default async function FamilyWorldPage({
             </div>
 
             {/* ── Weltkarte ── */}
-            <div className="rounded-xl p-4 mb-8" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-              <WorldMap visitedCodes={travelWorld.countryCodes} />
+            <div className="rounded-xl p-4 mb-4" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+              <WorldMap visitedCodes={mapVisitedCodes} />
+            </div>
+            <div className="mb-8">
+              <Link
+                href={personFilter ? `/family/world/countries?person=${personFilter}` : "/family/world/countries"}
+                style={{ color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.06em", textDecoration: "none" }}
+              >
+                Alle Länder verwalten →
+              </Link>
             </div>
 
             {/* ── Reisegeschichte (Vorschau) ── */}
