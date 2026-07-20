@@ -9,9 +9,14 @@ import type { SavedOptionStatus } from '@/lib/supabase/types'
  * Aktionszeile für Flüge UND Hotels (identisches Verhalten, nur die
  * durchgereichten Server Actions unterscheiden sich sonst hätte diese Logik
  * doppelt in app/(app)/discover/flights/page.tsx und app/(app)/hotels/page.tsx
- * gestanden). "booked" erscheint bewusst NICHT mit Lösch-/Auswahl-Aktionen --
- * Vorgabe: "gebuchte Einträge nicht zusätzlich unter Gemerkt oder Ausgewählt
- * anzeigen", die echte Buchung ist ab dann die einzige Quelle der Wahrheit.
+ * gestanden). "booked" zeigt keine Auswahl-/Zuordnungs-Aktionen mehr (die
+ * echte Buchung ist dann die Quelle der Wahrheit für Status/Preis) -- aber
+ * SEHR WOHL eine Löschen-Aktion für die Merkliste-Zeile selbst (§Bugfix
+ * "Gelöschte gebuchte Flüge blieben unter 'Bereits gebucht' bestehen":
+ * fehlte hier zuvor, obwohl dieselbe Löschfunktion in der
+ * Buchungsübersicht -- app/(app)/trips/[id]/bookings/page.tsx -- längst
+ * für alle drei Status verfügbar ist; jetzt konsistent überall). Löscht
+ * ausschließlich die Merkliste-Zeile, nie die echte Buchung selbst.
  */
 export function SavedOptionStatusRow({
   id, status, tripId, tripTitle, tripSlug, adoptionUrl, bookingId,
@@ -34,15 +39,29 @@ export function SavedOptionStatusRow({
 }) {
   if (status === 'booked') {
     return (
-      <div className="flex items-center gap-1.5 mt-2" style={{ color: '#4C7A5D', fontSize: '0.68rem' }}>
-        <CheckCircle2 size={12} strokeWidth={1.8} />
-        {tripSlug && bookingId ? (
-          <Link href={`/trips/${tripSlug}/bookings/${bookingId}`} style={{ color: '#4C7A5D', textDecoration: 'underline' }}>
-            Gebucht -- zur Buchung →
-          </Link>
-        ) : (
-          <span>Gebucht</span>
-        )}
+      <div className="flex items-center gap-3 mt-2 flex-wrap">
+        <div className="flex items-center gap-1.5" style={{ color: '#4C7A5D', fontSize: '0.68rem' }}>
+          <CheckCircle2 size={12} strokeWidth={1.8} />
+          {tripSlug && bookingId ? (
+            <Link href={`/trips/${tripSlug}/bookings/${bookingId}`} style={{ color: '#4C7A5D', textDecoration: 'underline' }}>
+              Gebucht -- zur Buchung →
+            </Link>
+          ) : (
+            <span>Gebucht</span>
+          )}
+        </div>
+        <form action={deleteAction}>
+          <input type="hidden" name="id" value={id} />
+          <input type="hidden" name="return_to" value={returnTo} />
+          <button
+            type="submit"
+            className="flex items-center gap-1.5"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#B5624A', fontSize: '0.68rem', padding: 0 }}
+          >
+            <Trash2 size={12} strokeWidth={1.8} />
+            Nicht mehr merken
+          </button>
+        </form>
       </div>
     )
   }
