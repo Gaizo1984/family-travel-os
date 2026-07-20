@@ -5,7 +5,7 @@ import { getFamily } from "@/lib/family";
 import { searchFlightsStandalone } from "@/lib/actions/flight-search";
 import {
   saveFlightOption, deleteSavedFlightOption, assignTripToSavedFlightOption,
-  markSavedFlightOptionSelected, unmarkSavedFlightOptionSelected,
+  markSavedFlightOptionSelected, unmarkSavedFlightOptionSelected, refreshSavedFlightOption,
 } from "@/lib/actions/saved-flights";
 import { buildRouteKey, MAX_SAVED_FLIGHTS_PER_ROUTE, buildFlightAdoptionUrl } from "@/lib/saved-flights-shared";
 import { listTripsForPicker } from "@/lib/lumi-trip-picker";
@@ -44,6 +44,47 @@ function buildCurrentFlightsUrl(sp: Record<string, string | undefined>): string 
   return qs ? `/discover/flights?${qs}` : "/discover/flights";
 }
 
+/**
+ * §Bugfix "Kein falscher Buchungslink, stattdessen ehrliche Neusuche"
+ * (Nutzervorgabe, wörtlich): "Treffer öffnen" nur, solange die Cache-Zeile
+ * noch existiert UND das Angebot noch nicht abgelaufen ist (Duffel,
+ * ~15-30 Min.) -- sonst "Verbindung neu suchen" statt eines stillen/falschen
+ * Links. Kein externer/erfundener Link, ausschließlich diese beiden
+ * Zustände.
+ */
+function TrefferOrRefreshAction({
+  savedOptionId, searchKey, isFresh, returnTo,
+}: {
+  savedOptionId: string
+  searchKey: string | null
+  isFresh: boolean
+  returnTo: string
+}) {
+  if (isFresh && searchKey) {
+    return (
+      <Link
+        href={`/discover/flights?search_key=${encodeURIComponent(searchKey)}`}
+        className="block mt-2"
+        style={{ color: "var(--accent)", fontSize: "0.68rem", textDecoration: "none" }}
+      >
+        Treffer öffnen →
+      </Link>
+    );
+  }
+  return (
+    <form action={refreshSavedFlightOption} className="mt-2">
+      <input type="hidden" name="id" value={savedOptionId} />
+      <input type="hidden" name="return_to" value={returnTo} />
+      <button
+        type="submit"
+        style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent)", fontSize: "0.68rem", padding: 0 }}
+      >
+        Verbindung neu suchen
+      </button>
+    </form>
+  );
+}
+
 export default async function DiscoverFlightsPage({
   searchParams,
 }: {
@@ -52,6 +93,7 @@ export default async function DiscoverFlightsPage({
     traveler_ids?: string; idea_id?: string; search_key?: string; search_keys?: string
     mode?: string; window_start_date?: string; window_end_date?: string
     nights_min?: string; nights_max?: string; batch?: string; error?: string
+    expired_option?: string
   }>;
 }) {
   const sp = await searchParams;
@@ -141,6 +183,17 @@ export default async function DiscoverFlightsPage({
     }
   }
 
+  // §Bugfix "Stiller Leerzustand bei abgelaufenem/fehlendem Cache"
+  // (Nutzervorgabe): bislang zeigte ein toter/gelöschter search_key
+  // kommentarlos gar nichts an. `expired_option` hat sein eigenes,
+  // spezifischeres Banner (siehe unten) -- dieses hier greift nur, wenn ein
+  // Cache-Lookup versucht wurde, aber ohne diesen Kontext leer blieb (z. B.
+  // ein alter Link/Lesezeichen).
+  const cacheLookupAttempted = Boolean(sp.search_key) || (mode === "flexible" && Boolean(sp.search_keys));
+  const missingCacheBanner = cacheLookupAttempted && !flightResult && !sp.expired_option
+    ? "Dieser gespeicherte Treffer ist nicht mehr verfügbar -- bitte über \"Verbindung neu suchen\" bei einer gemerkten Verbindung aktualisieren, oder eine neue Suche starten."
+    : null;
+
   // §"Gemerkte Flüge sichtbar machen" (Nutzervorgabe, kombinierter Fix-Sprint):
   // vorher nur sichtbar, wenn gerade eine Suche für exakt diese Strecke lief
   // (currentRouteKey) -- jetzt immer alle gemerkten Verbindungen der Familie,
@@ -163,6 +216,48 @@ export default async function DiscoverFlightsPage({
   // Reise-Query/-Sortierung.
   const pickerTrips = await listTripsForPicker(familyId);
   const tripById = new Map(pickerTrips.map((t) => [t.id, t]));
+
+  // §Bugfix "Kein falscher Buchungslink, stattdessen ehrliche Neusuche"
+  // (Nutzervorgabe): "gültiger Cache" heißt sowohl "flight_search_cache-Zeile
+  // existiert noch" ALS AUCH "das Angebot selbst ist noch nicht abgelaufen"
+  // (Duffel `expires_at`, ~15-30 Min., bereits vorhandene Prüfung
+  // FlightScoringService.isExpired -- bisher nur kosmetisch genutzt in
+  // FlightCard, jetzt zusätzlich für die Treffer-öffnen/Neu-suchen-Weiche).
+  // Eine Batch-Abfrage statt N+1 Einzel-Lookups pro gemerktem Flug.
+  const savedSearchKeys = [...new Set(allSavedFlights.map((s) => s.search_key).filter((k): k is string => Boolean(k)))];
+  const { data: cacheExistRows } = savedSearchKeys.length > 0
+    ? await supabase.from("flight_search_cache").select("search_key").eq("family_id", familyId).in("search_key", savedSearchKeys)
+    : { data: [] as { search_key: string }[] };
+  const cacheKeysPresent = new Set((cacheExistRows ?? []).map((r) => r.search_key));
+
+  function isSavedFlightFresh(s: { search_key: string | null; flight_option: unknown }): boolean {
+    if (!s.search_key || !cacheKeysPresent.has(s.search_key)) return false;
+    return !FlightScoringService.isExpired(s.flight_option as unknown as FlightSearchOption);
+  }
+
+  // §Nutzer-Nachbesserung "ursprüngliche Verbindung hervorheben": nach einer
+  // Neusuche (refreshSavedFlightOption) versucht, dieselbe Verbindung unter
+  // den frischen Ergebnissen wiederzufinden. Duffel-Angebots-IDs sind pro
+  // Suche neu -- Abgleich stattdessen über Carrier+Flugnummer+Abflugtag des
+  // ersten Hinflug-Segments (robust, ohne Fuzzy-Logik).
+  let expiredOptionBanner: string | null = null;
+  let highlightOptionId: string | undefined;
+  if (sp.expired_option) {
+    const expiredRow = allSavedFlightsRaw.find((s) => s.id === sp.expired_option);
+    if (expiredRow) {
+      const originalOption = expiredRow.flight_option as unknown as FlightSearchOption;
+      expiredOptionBanner = `Das ursprüngliche Angebot ist nicht mehr aktuell -- hier die aktuellen Ergebnisse für dieselbe Suche. Preis beim Merken: ${originalOption.price} ${originalOption.currency}.`;
+      const origFirstSeg = originalOption.outbound.segments[0];
+      if (flightResult && origFirstSeg) {
+        const match = flightResult.options.find((o) => {
+          const seg = o.outbound.segments[0];
+          return seg && seg.carrierCode === origFirstSeg.carrierCode && seg.flightNumber === origFirstSeg.flightNumber
+            && seg.departureTime.slice(0, 10) === origFirstSeg.departureTime.slice(0, 10);
+        });
+        if (match) highlightOptionId = match.id;
+      }
+    }
+  }
 
   const { total: combosTotal, capped: combosCapped } = mode === "flexible" && sp.window_start_date && sp.window_end_date
     ? countFlexibleDateCombinations(sp.window_start_date, sp.window_end_date, Number(sp.nights_min) || 0, Number(sp.nights_max) || 0)
@@ -194,6 +289,8 @@ export default async function DiscoverFlightsPage({
 
         {staleDateBanner && <Banner variant="error">{staleDateBanner}</Banner>}
         {sp.error && <Banner variant="error">{sp.error}</Banner>}
+        {missingCacheBanner && <Banner variant="error">{missingCacheBanner}</Banner>}
+        {expiredOptionBanner && <Banner variant="error">{expiredOptionBanner}</Banner>}
 
         <div className="rounded-xl p-6 md:p-8 mb-8" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
           <FlightSearchForm
@@ -243,15 +340,9 @@ export default async function DiscoverFlightsPage({
                                 searchedAt={s.created_at}
                                 dateContext={{ departureDate: s.found_departure_date, returnDate: s.found_return_date, nights }}
                               />
-                              {s.search_key && (
-                                <Link
-                                  href={`/discover/flights?search_key=${encodeURIComponent(s.search_key)}`}
-                                  className="block mt-2"
-                                  style={{ color: "var(--accent)", fontSize: "0.68rem", textDecoration: "none" }}
-                                >
-                                  Treffer öffnen →
-                                </Link>
-                              )}
+                              <TrefferOrRefreshAction
+                                savedOptionId={s.id} searchKey={s.search_key} isFresh={isSavedFlightFresh(s)} returnTo={returnTo}
+                              />
                               <SavedOptionStatusRow
                                 id={s.id}
                                 status={s.status}
@@ -294,6 +385,9 @@ export default async function DiscoverFlightsPage({
                       option={option}
                       searchedAt={s.created_at}
                       dateContext={{ departureDate: s.found_departure_date, returnDate: s.found_return_date, nights }}
+                    />
+                    <TrefferOrRefreshAction
+                      savedOptionId={s.id} searchKey={s.search_key} isFresh={isSavedFlightFresh(s)} returnTo={returnTo}
                     />
                     <SavedOptionStatusRow
                       id={s.id}
@@ -369,6 +463,7 @@ export default async function DiscoverFlightsPage({
             savedOptionIds={savedOptionIds}
             saveAction={saveFlightOption}
             returnTo={returnTo}
+            highlightOptionId={highlightOptionId}
           />
         )}
 

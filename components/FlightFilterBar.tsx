@@ -21,7 +21,7 @@ const CHIP_STYLE = (active: boolean): React.CSSProperties => ({
  */
 export function FlightFilterBar({
   options, isSandboxData, providerName, searchedAt, dateContextByOptionId,
-  searchKeyByOptionId, savedOptionIds, saveAction, returnTo,
+  searchKeyByOptionId, savedOptionIds, saveAction, returnTo, highlightOptionId,
 }: {
   options: FlightSearchOption[]
   isSandboxData: boolean
@@ -36,6 +36,8 @@ export function FlightFilterBar({
   savedOptionIds?: string[]
   saveAction?: (formData: FormData) => void | Promise<void>
   returnTo?: string
+  /** §Bugfix "Kein falscher Buchungslink, stattdessen ehrliche Neusuche" (Nutzer-Nachbesserung: ursprüngliche Verbindung hervorheben): nach "Verbindung neu suchen" die per Carrier+Flugnummer+Datum wiedergefundene Original-Verbindung markieren. */
+  highlightOptionId?: string
 }) {
   const [directOnly, setDirectOnly] = useState(false)
   const [maxOneStop, setMaxOneStop] = useState(false)
@@ -114,6 +116,7 @@ export function FlightFilterBar({
                 isSaved={isSaved}
                 saveDisabled={saveDisabled}
                 saveAction={saveAction}
+                isHighlightedMatch={highlightOptionId === o.id}
               />
             )
           })}

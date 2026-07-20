@@ -107,7 +107,7 @@ function BaggageDetail({ option }: { option: FlightSearchOption }) {
 }
 
 export function FlightCard({
-  option, searchedAt, dateContext, searchKey, returnTo, isSaved, saveDisabled, saveAction,
+  option, searchedAt, dateContext, searchKey, returnTo, isSaved, saveDisabled, saveAction, isHighlightedMatch,
 }: {
   option: FlightSearchOption; searchedAt: string; dateContext?: FlightDateContext
   /** §"Bis zu 3 Flugverbindungen pro Strecke merken": nur gesetzt, wenn diese Karte aus einer Suche stammt (nicht bei bereits gemerkten Karten -- die haben kein "Merken"-Formular mehr, siehe `isSaved`-Aufrufer in app/(app)/discover/flights/page.tsx). */
@@ -116,11 +116,32 @@ export function FlightCard({
   isSaved?: boolean
   saveDisabled?: boolean
   saveAction?: (formData: FormData) => void | Promise<void>
+  /** §Bugfix "Kein falscher Buchungslink, stattdessen ehrliche Neusuche" (Nutzer-Nachbesserung): markiert die nach "Verbindung neu suchen" wiedergefundene ursprüngliche Verbindung. */
+  isHighlightedMatch?: boolean
 }) {
   const isExpired = FlightScoringService.isExpired(option);
 
   return (
-    <div className="rounded-xl p-5" style={{ background: "var(--surface)", border: "1px solid var(--border)", opacity: isExpired ? 0.55 : 1 }}>
+    <div
+      className="rounded-xl p-5"
+      style={{
+        background: "var(--surface)",
+        border: isHighlightedMatch ? "1px solid rgba(184,154,94,0.6)" : "1px solid var(--border)",
+        boxShadow: isHighlightedMatch ? "0 0 0 1px rgba(184,154,94,0.3)" : undefined,
+        opacity: isExpired ? 0.55 : 1,
+      }}
+    >
+      {isHighlightedMatch && (
+        <div
+          className="inline-flex items-center mb-3"
+          style={{
+            color: "var(--accent)", fontSize: "0.6rem", letterSpacing: "0.04em",
+            border: "1px solid rgba(184,154,94,0.4)", borderRadius: "20px", padding: "3px 9px",
+          }}
+        >
+          Ursprünglich gemerkte Verbindung
+        </div>
+      )}
       {dateContext && (
         <div className="flex items-center gap-1.5 mb-3" style={{ color: "var(--accent)", fontSize: "0.68rem" }}>
           <CalendarRange size={12} strokeWidth={1.6} />
