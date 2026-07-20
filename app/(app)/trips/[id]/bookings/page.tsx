@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { deleteSavedFlightOption } from "@/lib/actions/saved-flights";
+import { deleteSavedHotelOption } from "@/lib/actions/saved-hotels";
 import { computeSavedOptionBreakdown, type SavedOptionRow } from "@/lib/booking-status-breakdown";
 import { formatCurrencyDE } from "@/lib/demo-data";
 import type { FlightSearchOption } from "@/lib/flight-types";
@@ -16,7 +18,21 @@ const REAL_BOOKING_ONLY_TYPES: { type: BookingType; label: string; emptyLabel: s
   { type: "activity", label: "Aktivitäten", emptyLabel: "Keine Aktivitäten gebucht" },
 ];
 
-function StatusColumn({ title, items }: { title: string; items: { label: string; sub: string; href?: string }[] }) {
+type StatusColumnItem = {
+  id: string; label: string; sub: string; href?: string
+  deleteAction: (formData: FormData) => void; returnTo: string
+};
+
+/**
+ * §Bugfix "Gemerkte/gebuchte Flüge müssen aus der Buchungsübersicht löschbar
+ * sein" (Live-Test-Feedback): entfernt nur die Merkliste-Zeile
+ * (saved_flight_options/saved_hotel_options), niemals die echte Buchung --
+ * eine bereits bestätigte Buchung bleibt unangetastet und hat ihren eigenen
+ * Lösch-Weg (/trips/[id]/bookings/[bookingId]/delete). Bewusst dieselben,
+ * bereits bestehenden deleteSavedFlightOption/deleteSavedHotelOption Actions
+ * -- keine zweite Löschlogik.
+ */
+function StatusColumn({ title, items }: { title: string; items: StatusColumnItem[] }) {
   return (
     <div>
       <div className="mb-2 flex items-center justify-between" style={{ color: "var(--muted)", fontSize: "0.62rem", letterSpacing: "0.1em", textTransform: "uppercase" }}>
@@ -27,24 +43,33 @@ function StatusColumn({ title, items }: { title: string; items: { label: string;
         <div style={{ color: "var(--muted)", fontSize: "0.72rem" }}>—</div>
       ) : (
         <div className="space-y-2">
-          {items.map((item, i) => {
-            const content = (
-              <>
-                <div style={{ color: "var(--foreground)", fontSize: "0.78rem" }}>{item.label}</div>
-                <div style={{ color: "var(--muted)", fontSize: "0.68rem" }}>{item.sub}</div>
-              </>
-            );
-            return item.href ? (
-              <Link key={i} href={item.href} className="block rounded-lg px-3 py-2 transition-opacity hover:opacity-80"
-                style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}>
-                {content}
-              </Link>
-            ) : (
-              <div key={i} className="rounded-lg px-3 py-2" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-                {content}
-              </div>
-            );
-          })}
+          {items.map((item) => (
+            <div key={item.id} className="rounded-lg px-3 py-2" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+              {item.href ? (
+                <Link href={item.href} className="block" style={{ textDecoration: "none" }}>
+                  <div style={{ color: "var(--foreground)", fontSize: "0.78rem" }}>{item.label}</div>
+                  <div style={{ color: "var(--muted)", fontSize: "0.68rem" }}>{item.sub}</div>
+                </Link>
+              ) : (
+                <>
+                  <div style={{ color: "var(--foreground)", fontSize: "0.78rem" }}>{item.label}</div>
+                  <div style={{ color: "var(--muted)", fontSize: "0.68rem" }}>{item.sub}</div>
+                </>
+              )}
+              <form action={item.deleteAction} className="mt-1.5">
+                <input type="hidden" name="id" value={item.id} />
+                <input type="hidden" name="return_to" value={item.returnTo} />
+                <button
+                  type="submit"
+                  className="flex items-center gap-1"
+                  style={{ background: "none", border: "none", cursor: "pointer", color: "#B5624A", fontSize: "0.62rem", padding: 0 }}
+                >
+                  <Trash2 size={10} strokeWidth={1.8} />
+                  Entfernen
+                </button>
+              </form>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -91,6 +116,8 @@ export default async function TripBookingsOverviewPage({ params }: { params: Pro
     return `${segs[0]?.departureAirport ?? "?"} → ${segs[segs.length - 1]?.arrivalAirport ?? "?"}`;
   }
 
+  const returnTo = `/trips/${trip.slug}/bookings`;
+
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
       <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-9">
@@ -114,14 +141,17 @@ export default async function TripBookingsOverviewPage({ params }: { params: Pro
           <div className="mb-3" style={{ color: "var(--foreground)", fontSize: "0.85rem" }}>Flüge</div>
           <div className="grid grid-cols-3 gap-3">
             <StatusColumn title={STATUS_LABEL.saved} items={flightBreakdown.saved.map((r) => ({
-              label: flightRouteLabel(r.data), sub: formatCurrencyDE(r.data.price, r.data.currency),
+              id: r.id, label: flightRouteLabel(r.data), sub: formatCurrencyDE(r.data.price, r.data.currency),
+              deleteAction: deleteSavedFlightOption, returnTo,
             }))} />
             <StatusColumn title={STATUS_LABEL.selected} items={flightBreakdown.selected.map((r) => ({
-              label: flightRouteLabel(r.data), sub: formatCurrencyDE(r.data.price, r.data.currency),
+              id: r.id, label: flightRouteLabel(r.data), sub: formatCurrencyDE(r.data.price, r.data.currency),
+              deleteAction: deleteSavedFlightOption, returnTo,
             }))} />
             <StatusColumn title={STATUS_LABEL.booked} items={flightBreakdown.booked.map((r) => ({
-              label: flightRouteLabel(r.data), sub: "Gebucht",
+              id: r.id, label: flightRouteLabel(r.data), sub: "Gebucht",
               href: r.bookingId ? `/trips/${trip.slug}/bookings/${r.bookingId}` : undefined,
+              deleteAction: deleteSavedFlightOption, returnTo,
             }))} />
           </div>
         </section>
@@ -129,11 +159,16 @@ export default async function TripBookingsOverviewPage({ params }: { params: Pro
         <section className="mb-10">
           <div className="mb-3" style={{ color: "var(--foreground)", fontSize: "0.85rem" }}>Hotels</div>
           <div className="grid grid-cols-3 gap-3">
-            <StatusColumn title={STATUS_LABEL.saved} items={hotelBreakdown.saved.map((r) => ({ label: r.data.name, sub: r.data.address }))} />
-            <StatusColumn title={STATUS_LABEL.selected} items={hotelBreakdown.selected.map((r) => ({ label: r.data.name, sub: r.data.address }))} />
+            <StatusColumn title={STATUS_LABEL.saved} items={hotelBreakdown.saved.map((r) => ({
+              id: r.id, label: r.data.name, sub: r.data.address, deleteAction: deleteSavedHotelOption, returnTo,
+            }))} />
+            <StatusColumn title={STATUS_LABEL.selected} items={hotelBreakdown.selected.map((r) => ({
+              id: r.id, label: r.data.name, sub: r.data.address, deleteAction: deleteSavedHotelOption, returnTo,
+            }))} />
             <StatusColumn title={STATUS_LABEL.booked} items={hotelBreakdown.booked.map((r) => ({
-              label: r.data.name, sub: "Gebucht",
+              id: r.id, label: r.data.name, sub: "Gebucht",
               href: r.bookingId ? `/trips/${trip.slug}/bookings/${r.bookingId}` : undefined,
+              deleteAction: deleteSavedHotelOption, returnTo,
             }))} />
           </div>
         </section>
