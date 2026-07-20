@@ -56,7 +56,11 @@ export function MemoryCandidateCard({ memory, returnTo }: { memory: FamilyMemory
       {!editing ? (
         <>
           <p className="mb-3" style={{ color: "var(--foreground)", fontSize: "0.85rem", fontWeight: 300 }}>
-            Soll ich mir merken, dass {summary.charAt(0).toLowerCase() + summary.slice(1)}?
+            {/* §Bugfix "Aktivitäten-Vorschläge beginnen mit Personenname" (Nutzer-Nachbesserung):
+               personenbezogene Vorschläge (z. B. "Elias mag ...") beginnen mit einem
+               Eigennamen -- der sollte nie kleingeschrieben werden. Familienweite
+               Vorschläge (personId null) verhalten sich exakt wie bisher. */}
+            Soll ich mir merken, dass {memory.personId ? summary : summary.charAt(0).toLowerCase() + summary.slice(1)}?
           </p>
           <div className="flex items-center gap-2 flex-wrap">
             <form action={confirmFamilyMemory}>

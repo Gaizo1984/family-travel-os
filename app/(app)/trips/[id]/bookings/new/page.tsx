@@ -2,11 +2,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getFamily } from "@/lib/family";
 import { createBooking } from "@/lib/actions/bookings";
 import { extractBookingData } from "@/lib/actions/booking-extraction";
 import { BOOKING_TYPE_ORDER, BOOKING_TYPE_CONFIG, BOOKING_CATEGORIES } from "@/lib/bookings";
 import type { BookingCategory } from "@/lib/bookings";
 import type { BookingType } from "@/lib/supabase/types";
+import { loadTripParticipantOptions } from "@/lib/trip-participants";
 import { BookingForm } from "../BookingForm";
 
 type BookingDraft = {
@@ -106,6 +108,14 @@ export default async function NewBookingPage({
     : `/trips/${trip.slug}/bookings/new`;
   const changeTypeLabel = categoryConfig ? `Zurück zu ${categoryConfig.label}` : "Buchungstyp ändern";
 
+  // §"Standardmäßig alle Reiseteilnehmer vorauswählen" (Nutzervorgabe): beim
+  // Neuanlegen sind alle verfügbaren Optionen vorab angehakt.
+  let participants: Awaited<ReturnType<typeof loadTripParticipantOptions>> = [];
+  if (config.showParticipants) {
+    const { id: familyId } = await getFamily();
+    participants = await loadTripParticipantOptions(supabase, trip.id, familyId);
+  }
+
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
       <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-9">
@@ -151,6 +161,8 @@ export default async function NewBookingPage({
           infoMessage={draft ? "Automatisch ausgelesen — bitte prüfen und bei Bedarf korrigieren." : (from_saved_option_id ? "Aus deiner Merkliste übernommen — bitte prüfen und bei Bedarf korrigieren." : undefined)}
           existingStoragePath={storage_path}
           values={draft ?? undefined}
+          participants={participants}
+          selectedParticipantIds={participants.map((p) => p.id)}
         />
       </div>
     </div>

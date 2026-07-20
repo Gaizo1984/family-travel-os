@@ -2,10 +2,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getFamily } from "@/lib/family";
 import { updateBooking } from "@/lib/actions/bookings";
 import { extractBookingData } from "@/lib/actions/booking-extraction";
 import { BOOKING_TYPE_CONFIG } from "@/lib/bookings";
 import type { BookingType } from "@/lib/supabase/types";
+import { loadTripParticipantOptions } from "@/lib/trip-participants";
 import { BookingForm } from "../../BookingForm";
 
 type BookingDraft = {
@@ -45,13 +47,27 @@ export default async function EditBookingPage({
 
   const { data: booking } = await supabase
     .from("bookings")
-    .select("id, trip_id, stage_id, type, title, provider, booking_reference, status, payment_status, amount, currency, start_datetime, end_datetime, notes, details")
+    .select("id, trip_id, stage_id, type, title, provider, booking_reference, status, payment_status, amount, currency, start_datetime, end_datetime, notes, details, participant_person_ids")
     .eq("id", bookingId)
     .eq("trip_id", trip.id)
     .maybeSingle();
 
   if (!booking) notFound();
   const config = BOOKING_TYPE_CONFIG[booking.type as BookingType];
+
+  // §"Gelöschte oder nicht mehr zur Reise gehörende Personen defensiv
+  // ignorieren" (Nutzervorgabe, wörtlich): die gespeicherte Auswahl wird nur
+  // gegen die aktuell gültigen Optionen vorbefüllt, nie ungeprüft übernommen
+  // -- eine inzwischen gelöschte Person-ID würde sonst als kaputte/unsichtbare
+  // Checkbox "verschwinden", aber beim nächsten Speichern versehentlich
+  // wieder mitgeschickt.
+  let participants: Awaited<ReturnType<typeof loadTripParticipantOptions>> = [];
+  if (config.showParticipants) {
+    const { id: familyId } = await getFamily();
+    participants = await loadTripParticipantOptions(supabase, trip.id, familyId);
+  }
+  const validParticipantIds = new Set(participants.map((p) => p.id));
+  const selectedParticipantIds = (booking.participant_person_ids ?? []).filter((id) => validParticipantIds.has(id));
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -97,6 +113,8 @@ export default async function EditBookingPage({
             notes: booking.notes,
             details: booking.details as Record<string, string> | null,
           }}
+          participants={participants}
+          selectedParticipantIds={selectedParticipantIds}
         />
 
         <div

@@ -55,6 +55,8 @@ export type BookingTypeConfig = {
   supportsExtraction: boolean
   /** Gruppen-Schlüssel (siehe DetailField.group) -> Label des Einklapp-Buttons, z. B. { layover: '+ Zwischenstopp hinzufügen' }. */
   collapsibleGroups?: Record<string, string>
+  /** §"Teilnehmerauswahl nur bei Aktivitätsbuchungen" (Nutzervorgabe, wörtlich): nur bei `activity` gesetzt -- steuert den Teilnehmer-Checkbox-Abschnitt in BookingForm.tsx. */
+  showParticipants?: boolean
 }
 
 /**
@@ -193,6 +195,7 @@ export const BOOKING_TYPE_CONFIG: Record<BookingType, BookingTypeConfig> = {
     ],
     visibleFields: DEFAULT_VISIBLE_FIELDS,
     supportsExtraction: false,
+    showParticipants: true,
   },
   restaurant: {
     value: 'restaurant', label: 'Restaurant', icon: UtensilsCrossed,

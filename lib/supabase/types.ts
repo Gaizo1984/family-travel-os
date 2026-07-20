@@ -151,6 +151,7 @@ export interface Database {
           payment_status: PaymentStatus
           amount: number | null; currency: string; start_datetime: string | null
           end_datetime: string | null; details: Json | null; notes: string | null
+          participant_person_ids: string[] | null
           created_at: string; updated_at: string
         }
         Insert: {
@@ -159,6 +160,7 @@ export interface Database {
           payment_status?: PaymentStatus
           amount?: number | null; currency?: string; start_datetime?: string | null
           end_datetime?: string | null; details?: Json | null; notes?: string | null
+          participant_person_ids?: string[] | null
           created_at?: string; updated_at?: string
         }
         Update: {
@@ -167,6 +169,7 @@ export interface Database {
           payment_status?: PaymentStatus
           amount?: number | null; currency?: string; start_datetime?: string | null
           end_datetime?: string | null; details?: Json | null; notes?: string | null
+          participant_person_ids?: string[] | null
           created_at?: string; updated_at?: string
         }
         Relationships: [

@@ -72,6 +72,8 @@ function DetailFieldControl({ field, value }: { field: DetailField; value: strin
   );
 }
 
+export type BookingParticipantOption = { id: string; name: string; initials: string; color: string };
+
 export function BookingForm({
   config,
   action,
@@ -83,6 +85,8 @@ export function BookingForm({
   infoMessage,
   values,
   existingStoragePath,
+  participants,
+  selectedParticipantIds,
 }: {
   config: BookingTypeConfig;
   action: (formData: FormData) => void | Promise<void>;
@@ -97,6 +101,10 @@ export function BookingForm({
   values?: BookingValues;
   /** Bereits hochgeladene Datei (aus einer vorangegangenen KI-Auslesung) — Datei-Feld wird optional. */
   existingStoragePath?: string;
+  /** §"Teilnehmerauswahl nur bei Aktivitätsbuchungen" (Nutzervorgabe): Reiseteilnehmer-Optionen, nur relevant wenn config.showParticipants. */
+  participants?: BookingParticipantOption[];
+  /** §"Standardmäßig alle Reiseteilnehmer vorauswählen, aber frei änderbar" (Nutzervorgabe, wörtlich) -- beim Neuanlegen alle Reiseteilnehmer, beim Bearbeiten die bereits gespeicherte (gegen gelöschte Personen gefilterte) Auswahl. */
+  selectedParticipantIds?: string[];
 }) {
   const start = splitDateTime(values?.start_datetime ?? null);
   const end = splitDateTime(values?.end_datetime ?? null);
@@ -155,6 +163,34 @@ export function BookingForm({
               defaultValue={values?.provider ?? ""}
               style={FIELD_STYLE}
             />
+          </div>
+        )}
+
+        {/* Teilnehmer */}
+        {config.showParticipants && participants && participants.length > 0 && (
+          <div className="mb-5">
+            <label style={LABEL_STYLE}>Teilnehmer</label>
+            <div className="flex flex-wrap gap-2">
+              {participants.map((p) => {
+                const checked = (selectedParticipantIds ?? []).includes(p.id);
+                return (
+                  <label
+                    key={p.id}
+                    className="flex items-center gap-2 rounded-lg px-3 py-2 cursor-pointer"
+                    style={{ background: "var(--background)", border: "1px solid var(--border)" }}
+                  >
+                    <input type="checkbox" name="participant_person_ids" value={p.id} defaultChecked={checked} />
+                    <span
+                      className="inline-flex items-center justify-center rounded-full"
+                      style={{ width: "18px", height: "18px", background: p.color, color: "#fff", fontSize: "0.55rem" }}
+                    >
+                      {p.initials}
+                    </span>
+                    <span style={{ color: "var(--foreground)", fontSize: "0.78rem" }}>{p.name}</span>
+                  </label>
+                );
+              })}
+            </div>
           </div>
         )}
 

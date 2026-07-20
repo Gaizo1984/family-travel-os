@@ -6,8 +6,16 @@ import { BOOKING_TYPE_CONFIG, combineDateTime, AUTO_STAGE_NOTE_LAYOVER } from '@
 import { suggestCountryCode } from '@/lib/geo-suggestions'
 import { readDateGroupFromFormData } from '@/lib/documents'
 import { getFamily } from '@/lib/family'
+import { maybeSuggestActivityPreference } from '@/lib/actions/activity-preference-learning'
 import type { BookingType, BookingStatus, PaymentStatus } from '@/lib/supabase/types'
 import type { SupabaseClient } from '@supabase/supabase-js'
+
+/** §"Teilnehmerauswahl nur bei Aktivitätsbuchungen, keine Person doppelt speichern" (Nutzervorgabe, wörtlich): dedupliziert, nur für type='activity' gelesen. */
+function readParticipantPersonIds(formData: FormData, type: BookingType): string[] {
+  if (type !== 'activity') return []
+  const raw = formData.getAll('participant_person_ids').map(String).filter(Boolean)
+  return [...new Set(raw)]
+}
 
 /**
  * Deterministische Etappen-Zuordnung (kein Raten): Wenn keine Etappe manuell
@@ -299,6 +307,7 @@ export async function createBooking(formData: FormData) {
   // automatisches Durchbuchen.
   const returnDraftRaw = String(formData.get('return_draft') ?? '').trim()
   const f = readCommonFields(formData)
+  const participantIds = readParticipantPersonIds(formData, f.type)
 
   const newPath = `/trips/${slug}/bookings/new?type=${f.type}${category ? `&category=${category}` : ''}&`
 
@@ -350,10 +359,27 @@ export async function createBooking(formData: FormData) {
     end_datetime: endDatetime,
     details: Object.keys(f.details).length > 0 ? f.details : null,
     notes: f.notes || null,
+    participant_person_ids: participantIds.length > 0 ? participantIds : null,
   }).select('id').single()
 
   if (error)
     redirectWithDraft(newPath, 'Speicherfehler: ' + error.message, f)
+
+  // §"So lernt LUMI Brain automatisch auch die Vorlieben" (Nutzervorgabe) --
+  // nur bei Neuanlage (nicht bei updateBooking, keine Vorschlags-Flut durch
+  // reines Bearbeiten), best effort: ein Fehler hier darf die bereits
+  // gespeicherte Buchung nie im Nachhinein ungültig machen.
+  if (f.type === 'activity' && participantIds.length > 0) {
+    try {
+      const { id: familyId } = await getFamily()
+      const { data: participantPersons } = await supabase.from('persons').select('id, name').in('id', participantIds)
+      for (const p of participantPersons ?? []) {
+        await maybeSuggestActivityPreference(familyId, p.id, p.name)
+      }
+    } catch (e) {
+      console.error('[activity-preference-learning] fehlgeschlagen:', e)
+    }
+  }
 
   if (fromSavedOptionId && created && (fromSavedOptionTable === 'flight' || fromSavedOptionTable === 'hotel')) {
     const table = fromSavedOptionTable === 'flight' ? 'saved_flight_options' : 'saved_hotel_options'
@@ -382,6 +408,7 @@ export async function updateBooking(formData: FormData) {
   const slug       = String(formData.get('slug') ?? '')
   const editPath = `/trips/${slug}/bookings/${bookingId}/edit?`
   const f = readCommonFields(formData)
+  const participantIds = readParticipantPersonIds(formData, f.type)
 
   if (f.dateError)
     redirectWithDraft(editPath, f.dateError, f)
@@ -447,6 +474,7 @@ export async function updateBooking(formData: FormData) {
       end_datetime: endDatetime,
       details: Object.keys(f.details).length > 0 ? f.details : null,
       notes: f.notes || null,
+      participant_person_ids: participantIds.length > 0 ? participantIds : null,
     })
     .eq('id', bookingId)
 
