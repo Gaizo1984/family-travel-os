@@ -1,12 +1,30 @@
 'use server'
 
 import { redirect } from 'next/navigation'
+import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { getFamily } from '@/lib/family'
 
 function appendError(returnTo: string, error: string): string {
   const separator = returnTo.includes('?') ? '&' : '?'
   return `${returnTo}${separator}error=${encodeURIComponent(error)}`
+}
+
+/**
+ * §Bugfix "Markierung erst nach Verlassen/Wiederkommen sichtbar" (Live-Test-
+ * Feedback): jedes Häkchen redirectet auf exakt dieselbe URL, auf der es
+ * schon steht (mehrere Formulare auf einer Seite, `return_to` = aktuelle
+ * Länderliste inkl. Such-/Kontinentfilter) -- genau das Szenario, in dem
+ * Next.js' Router Cache einen "Redirect zur bereits angezeigten Route" ohne
+ * frischen Refetch bedienen kann, obwohl die Daten server-seitig längst
+ * aktuell sind (bereits als bekanntes Muster in lib/actions/memories.ts
+ * dokumentiert). Revalidiert deshalb explizit alle Stellen, die
+ * person_country_visits anzeigen (Länderliste, Weltkarte, Dashboard).
+ */
+function revalidateCountryVisitViews(): void {
+  revalidatePath('/family/world/countries')
+  revalidatePath('/family/world')
+  revalidatePath('/')
 }
 
 /**
@@ -34,6 +52,7 @@ export async function addManualCountryVisit(formData: FormData): Promise<void> {
   )
   if (error) redirect(appendError(returnTo, 'Speichern fehlgeschlagen: ' + error.message))
 
+  revalidateCountryVisitViews()
   redirect(returnTo)
 }
 
@@ -59,5 +78,6 @@ export async function removeManualCountryVisit(formData: FormData): Promise<void
   await supabase.from('person_country_visits').delete()
     .eq('person_id', personId).eq('country_code', countryCode).eq('source', 'manual')
 
+  revalidateCountryVisitViews()
   redirect(returnTo)
 }
