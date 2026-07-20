@@ -819,14 +819,25 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
               >
                 Buchungen{bookings.length > 0 ? ` · ${bookings.length}` : ""}
               </h2>
-              {bookings.length > 0 && (
+              <div className="flex items-center gap-4">
+                {/* §Phase B "Zentrale Buchungsübersicht" (Nutzervorgabe): Gemerkt/
+                   Ausgewählt/Gebucht für Flüge/Hotels plus echte Mietwagen-/
+                   Transfer-/Aktivitäten-Buchungen an einem Ort. */}
                 <Link
-                  href={`/trips/${trip.slug}/bookings/new`}
+                  href={`/trips/${trip.slug}/bookings`}
                   style={{ color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.08em", textDecoration: "none" }}
                 >
-                  + Buchung hinzufügen
+                  Buchungsübersicht →
                 </Link>
-              )}
+                {bookings.length > 0 && (
+                  <Link
+                    href={`/trips/${trip.slug}/bookings/new`}
+                    style={{ color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.08em", textDecoration: "none" }}
+                  >
+                    + Buchung hinzufügen
+                  </Link>
+                )}
+              </div>
             </div>
 
             {bookings.length > 0 ? (

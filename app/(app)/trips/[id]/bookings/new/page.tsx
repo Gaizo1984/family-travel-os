@@ -21,10 +21,13 @@ export default async function NewBookingPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ type?: string; category?: string; error?: string; draft?: string; storage_path?: string }>;
+  searchParams: Promise<{
+    type?: string; category?: string; error?: string; draft?: string; storage_path?: string
+    from_saved_option_id?: string; from_saved_option_table?: string
+  }>;
 }) {
   const { id } = await params;
-  const { type, category, error, draft: draftRaw, storage_path } = await searchParams;
+  const { type, category, error, draft: draftRaw, storage_path, from_saved_option_id, from_saved_option_table } = await searchParams;
 
   // §Formular-Daten nach einem Validierungsfehler wiederherstellen (siehe
   // lib/actions/bookings.ts::redirectWithDraft) -- statt die Seite leer neu
@@ -127,11 +130,18 @@ export default async function NewBookingPage({
           hiddenFields={{
             trip_id: trip.id, slug: trip.slug, type: config.value, mode: "create",
             ...(categoryConfig ? { category: categoryConfig.value } : {}),
+            // §Phase B "Zur Reise übernehmen" (Nutzervorgabe): nur gesetzt, wenn
+            // dieses Formular über den Draft-Link aus einer gemerkten Flug-/
+            // Hotel-Option kam -- löst nach erfolgreichem Speichern in
+            // createBooking die Verknüpfung (status='booked') aus.
+            ...(from_saved_option_id && from_saved_option_table
+              ? { from_saved_option_id, from_saved_option_table }
+              : {}),
           }}
           submitLabel="Buchung speichern"
           cancelHref={`/trips/${trip.slug}`}
           errorMessage={error}
-          infoMessage={draft ? "Automatisch ausgelesen — bitte prüfen und bei Bedarf korrigieren." : undefined}
+          infoMessage={draft ? "Automatisch ausgelesen — bitte prüfen und bei Bedarf korrigieren." : (from_saved_option_id ? "Aus deiner Merkliste übernommen — bitte prüfen und bei Bedarf korrigieren." : undefined)}
           existingStoragePath={storage_path}
           values={draft ?? undefined}
         />

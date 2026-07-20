@@ -1,10 +1,15 @@
 import Link from "next/link";
-import { ChevronLeft, Trash2 } from "lucide-react";
+import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { searchFlightsStandalone } from "@/lib/actions/flight-search";
-import { saveFlightOption, deleteSavedFlightOption } from "@/lib/actions/saved-flights";
-import { buildRouteKey, MAX_SAVED_FLIGHTS_PER_ROUTE } from "@/lib/saved-flights-shared";
+import {
+  saveFlightOption, deleteSavedFlightOption, assignTripToSavedFlightOption,
+  markSavedFlightOptionSelected, unmarkSavedFlightOptionSelected,
+} from "@/lib/actions/saved-flights";
+import { buildRouteKey, MAX_SAVED_FLIGHTS_PER_ROUTE, buildFlightAdoptionUrl } from "@/lib/saved-flights-shared";
+import { listTripsForPicker } from "@/lib/lumi-trip-picker";
+import { SavedOptionStatusRow } from "@/components/SavedOptionStatusRow";
 import { getFlightProviderName } from "@/lib/providers/flights-provider";
 import { FlightScoringService } from "@/lib/flight-scoring-service";
 import { FlightSearchForm, type SearchMode } from "@/components/FlightSearchForm";
@@ -142,11 +147,22 @@ export default async function DiscoverFlightsPage({
   // über alle Strecken hinweg, unabhängig vom aktuellen Suchzustand.
   const { data: allSavedRows } = await supabase
     .from("saved_flight_options")
-    .select("id, route_key, option_id, flight_option, found_departure_date, found_return_date, created_at, search_key")
+    .select("id, route_key, option_id, flight_option, found_departure_date, found_return_date, created_at, search_key, status, trip_id, booking_id")
     .eq("family_id", familyId)
     .order("created_at", { ascending: true });
-  const allSavedFlights = allSavedRows ?? [];
+  const allSavedFlightsRaw = allSavedRows ?? [];
+  // §Phase B "gebuchte Einträge nicht zusätzlich als bloß gemerkt anzeigen"
+  // (Nutzervorgabe): eigener Abschnitt statt Mischung mit den aktiven
+  // Gemerkt-/Ausgewählt-Listen.
+  const allSavedFlights = allSavedFlightsRaw.filter((s) => s.status !== "booked");
+  const bookedFlights = allSavedFlightsRaw.filter((s) => s.status === "booked");
   const savedFlights = currentRouteKey ? allSavedFlights.filter((s) => s.route_key === currentRouteKey) : [];
+
+  // §Phase B "Reise zuordnen" (Nutzervorgabe): dieselbe zentrale, sortierte
+  // Reiseliste wie Frag LUMI (lib/lumi-trip-picker.ts) -- keine zweite
+  // Reise-Query/-Sortierung.
+  const pickerTrips = await listTripsForPicker(familyId);
+  const tripById = new Map(pickerTrips.map((t) => [t.id, t]));
 
   const { total: combosTotal, capped: combosCapped } = mode === "flexible" && sp.window_start_date && sp.window_end_date
     ? countFlexibleDateCombinations(sp.window_start_date, sp.window_end_date, Number(sp.nights_min) || 0, Number(sp.nights_max) || 0)
@@ -227,28 +243,30 @@ export default async function DiscoverFlightsPage({
                                 searchedAt={s.created_at}
                                 dateContext={{ departureDate: s.found_departure_date, returnDate: s.found_return_date, nights }}
                               />
-                              <div className="flex items-center gap-3 mt-2 flex-wrap">
-                                {s.search_key && (
-                                  <Link
-                                    href={`/discover/flights?search_key=${encodeURIComponent(s.search_key)}`}
-                                    style={{ color: "var(--accent)", fontSize: "0.68rem", textDecoration: "none" }}
-                                  >
-                                    Treffer öffnen →
-                                  </Link>
-                                )}
-                                <form action={deleteSavedFlightOption}>
-                                  <input type="hidden" name="id" value={s.id} />
-                                  <input type="hidden" name="return_to" value={returnTo} />
-                                  <button
-                                    type="submit"
-                                    className="flex items-center gap-1.5"
-                                    style={{ background: "none", border: "none", cursor: "pointer", color: "#B5624A", fontSize: "0.68rem", padding: 0 }}
-                                  >
-                                    <Trash2 size={12} strokeWidth={1.8} />
-                                    Nicht mehr merken
-                                  </button>
-                                </form>
-                              </div>
+                              {s.search_key && (
+                                <Link
+                                  href={`/discover/flights?search_key=${encodeURIComponent(s.search_key)}`}
+                                  className="block mt-2"
+                                  style={{ color: "var(--accent)", fontSize: "0.68rem", textDecoration: "none" }}
+                                >
+                                  Treffer öffnen →
+                                </Link>
+                              )}
+                              <SavedOptionStatusRow
+                                id={s.id}
+                                status={s.status}
+                                tripId={s.trip_id}
+                                tripTitle={s.trip_id ? tripById.get(s.trip_id)?.title ?? null : null}
+                                tripSlug={s.trip_id ? tripById.get(s.trip_id)?.slug ?? null : null}
+                                adoptionUrl={s.trip_id ? buildFlightAdoptionUrl(tripById.get(s.trip_id)?.slug ?? "", s.id, option) : null}
+                                bookingId={s.booking_id}
+                                trips={pickerTrips}
+                                returnTo={returnTo}
+                                deleteAction={deleteSavedFlightOption}
+                                assignTripAction={assignTripToSavedFlightOption}
+                                markSelectedAction={markSavedFlightOptionSelected}
+                                unmarkSelectedAction={unmarkSavedFlightOptionSelected}
+                              />
                             </div>
                           );
                         })}
@@ -277,18 +295,53 @@ export default async function DiscoverFlightsPage({
                       searchedAt={s.created_at}
                       dateContext={{ departureDate: s.found_departure_date, returnDate: s.found_return_date, nights }}
                     />
-                    <form action={deleteSavedFlightOption} className="mt-2">
-                      <input type="hidden" name="id" value={s.id} />
-                      <input type="hidden" name="return_to" value={returnTo} />
-                      <button
-                        type="submit"
-                        className="flex items-center gap-1.5"
-                        style={{ background: "none", border: "none", cursor: "pointer", color: "#B5624A", fontSize: "0.68rem", padding: 0 }}
-                      >
-                        <Trash2 size={12} strokeWidth={1.8} />
-                        Verbindung nicht mehr merken
-                      </button>
-                    </form>
+                    <SavedOptionStatusRow
+                      id={s.id}
+                      status={s.status}
+                      tripId={s.trip_id}
+                      tripTitle={s.trip_id ? tripById.get(s.trip_id)?.title ?? null : null}
+                      tripSlug={s.trip_id ? tripById.get(s.trip_id)?.slug ?? null : null}
+                      adoptionUrl={s.trip_id ? buildFlightAdoptionUrl(tripById.get(s.trip_id)?.slug ?? "", s.id, option) : null}
+                      bookingId={s.booking_id}
+                      trips={pickerTrips}
+                      returnTo={returnTo}
+                      deleteAction={deleteSavedFlightOption}
+                      assignTripAction={assignTripToSavedFlightOption}
+                      markSelectedAction={markSavedFlightOptionSelected}
+                      unmarkSelectedAction={unmarkSavedFlightOptionSelected}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {bookedFlights.length > 0 && (
+          <section className="mb-8">
+            <div style={{ color: "var(--muted)", fontSize: "0.58rem", letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: "10px" }}>
+              Bereits gebucht
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {bookedFlights.map((s) => {
+                const option = s.flight_option as unknown as FlightSearchOption;
+                const nights = s.found_return_date ? nightsBetween(s.found_departure_date, s.found_return_date) : null;
+                const tripSlug = s.trip_id ? tripById.get(s.trip_id)?.slug ?? null : null;
+                return (
+                  <div key={s.id}>
+                    <FlightCard
+                      option={option}
+                      searchedAt={s.created_at}
+                      dateContext={{ departureDate: s.found_departure_date, returnDate: s.found_return_date, nights }}
+                    />
+                    <SavedOptionStatusRow
+                      id={s.id} status={s.status} tripId={s.trip_id}
+                      tripTitle={s.trip_id ? tripById.get(s.trip_id)?.title ?? null : null}
+                      tripSlug={tripSlug} adoptionUrl={null} bookingId={s.booking_id}
+                      trips={pickerTrips} returnTo={returnTo}
+                      deleteAction={deleteSavedFlightOption} assignTripAction={assignTripToSavedFlightOption}
+                      markSelectedAction={markSavedFlightOptionSelected} unmarkSelectedAction={unmarkSavedFlightOptionSelected}
+                    />
                   </div>
                 );
               })}

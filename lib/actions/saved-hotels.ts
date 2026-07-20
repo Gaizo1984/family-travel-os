@@ -83,3 +83,44 @@ export async function deleteSavedHotelOption(formData: FormData): Promise<void> 
 
   redirect(returnTo)
 }
+
+/** §Phase B "Reise zuordnen" (Nutzervorgabe): setzt nur trip_id, keine Statusänderung -- gleiches Muster inkl. trips.family_id-Gegenprüfung wie assignTripToSavedFlightOption. */
+export async function assignTripToSavedHotelOption(formData: FormData): Promise<void> {
+  const id = String(formData.get('id') ?? '')
+  const tripId = String(formData.get('trip_id') ?? '')
+  const returnTo = String(formData.get('return_to') ?? '/hotels')
+  const { id: familyId } = await getFamily()
+  const supabase = await createClient()
+
+  if (id && tripId) {
+    const { data: trip } = await supabase.from('trips').select('id').eq('id', tripId).eq('family_id', familyId).maybeSingle()
+    if (trip) await supabase.from('saved_hotel_options').update({ trip_id: tripId }).eq('id', id).eq('family_id', familyId)
+  }
+
+  redirect(returnTo)
+}
+
+/** §Phase B "Ausgewählt ist eine Zwischenstufe" (Nutzervorgabe, wörtlich): nur möglich, wenn bereits eine Reise zugeordnet ist. */
+export async function markSavedHotelOptionSelected(formData: FormData): Promise<void> {
+  const id = String(formData.get('id') ?? '')
+  const returnTo = String(formData.get('return_to') ?? '/hotels')
+  const { id: familyId } = await getFamily()
+  const supabase = await createClient()
+
+  if (id) {
+    await supabase.from('saved_hotel_options').update({ status: 'selected' }).eq('id', id).eq('family_id', familyId).not('trip_id', 'is', null)
+  }
+
+  redirect(returnTo)
+}
+
+export async function unmarkSavedHotelOptionSelected(formData: FormData): Promise<void> {
+  const id = String(formData.get('id') ?? '')
+  const returnTo = String(formData.get('return_to') ?? '/hotels')
+  const { id: familyId } = await getFamily()
+  const supabase = await createClient()
+
+  if (id) await supabase.from('saved_hotel_options').update({ status: 'saved' }).eq('id', id).eq('family_id', familyId)
+
+  redirect(returnTo)
+}

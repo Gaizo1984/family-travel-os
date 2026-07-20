@@ -10,6 +10,8 @@ export type BookingType     = 'flight' | 'accommodation' | 'rental_car' | 'trans
                              | 'restaurant' | 'train' | 'ferry' | 'insurance' | 'other'
 export type BookingStatus   = 'pending' | 'confirmed' | 'cancelled' | 'reserved'
 export type PaymentStatus   = 'unpaid' | 'partial' | 'paid' | 'refunded'
+/** §Phase B "Gemerkt/Ausgewählt/Gebucht" (Nutzervorgabe, Statuswerte wörtlich englisch): Lebenszyklus für saved_flight_options/saved_hotel_options. 'selected' ist nur eine Zwischenstufe, 'booked' wird ausschließlich von createBooking gesetzt, nie von einem reinen UI-Klick. */
+export type SavedOptionStatus = 'saved' | 'selected' | 'booked'
 export type TripStatus      = 'planned' | 'active' | 'completed' | 'archived'
 export type TaskStatus      = 'open' | 'done' | 'snoozed'
 export type JournalVis      = 'family' | 'private'
@@ -899,39 +901,52 @@ export interface Database {
           id: string; family_id: string; route_key: string; origin_codes: string[]; destination_code: string
           option_id: string; flight_option: Json; found_departure_date: string; found_return_date: string | null
           search_key: string | null; adults: number | null; children: number | null; infants: number | null
+          status: SavedOptionStatus; trip_id: string | null; booking_id: string | null
           created_at: string
         }
         Insert: {
           id?: string; family_id: string; route_key: string; origin_codes: string[]; destination_code: string
           option_id: string; flight_option: Json; found_departure_date: string; found_return_date?: string | null
           search_key?: string | null; adults?: number | null; children?: number | null; infants?: number | null
+          status?: SavedOptionStatus; trip_id?: string | null; booking_id?: string | null
           created_at?: string
         }
         Update: {
           id?: string; family_id?: string; route_key?: string; origin_codes?: string[]; destination_code?: string
           option_id?: string; flight_option?: Json; found_departure_date?: string; found_return_date?: string | null
           search_key?: string | null; adults?: number | null; children?: number | null; infants?: number | null
+          status?: SavedOptionStatus; trip_id?: string | null; booking_id?: string | null
           created_at?: string
         }
         Relationships: [
-          { foreignKeyName: "saved_flight_options_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }
+          { foreignKeyName: "saved_flight_options_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] },
+          { foreignKeyName: "saved_flight_options_trip_id_fkey"; columns: ["trip_id"]; isOneToOne: false; referencedRelation: "trips"; referencedColumns: ["id"] },
+          { foreignKeyName: "saved_flight_options_booking_id_fkey"; columns: ["booking_id"]; isOneToOne: false; referencedRelation: "bookings"; referencedColumns: ["id"] }
         ]
       }
       saved_hotel_options: {
         Row: {
           id: string; family_id: string; search_key: string; destination: string
-          option_id: string; hotel_option: Json; created_at: string
+          option_id: string; hotel_option: Json
+          status: SavedOptionStatus; trip_id: string | null; booking_id: string | null
+          created_at: string
         }
         Insert: {
           id?: string; family_id: string; search_key: string; destination: string
-          option_id: string; hotel_option: Json; created_at?: string
+          option_id: string; hotel_option: Json
+          status?: SavedOptionStatus; trip_id?: string | null; booking_id?: string | null
+          created_at?: string
         }
         Update: {
           id?: string; family_id?: string; search_key?: string; destination?: string
-          option_id?: string; hotel_option?: Json; created_at?: string
+          option_id?: string; hotel_option?: Json
+          status?: SavedOptionStatus; trip_id?: string | null; booking_id?: string | null
+          created_at?: string
         }
         Relationships: [
-          { foreignKeyName: "saved_hotel_options_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }
+          { foreignKeyName: "saved_hotel_options_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] },
+          { foreignKeyName: "saved_hotel_options_trip_id_fkey"; columns: ["trip_id"]; isOneToOne: false; referencedRelation: "trips"; referencedColumns: ["id"] },
+          { foreignKeyName: "saved_hotel_options_booking_id_fkey"; columns: ["booking_id"]; isOneToOne: false; referencedRelation: "bookings"; referencedColumns: ["id"] }
         ]
       }
       lumi_brain_usage: {

@@ -57,6 +57,25 @@ export type BookingTypeConfig = {
   collapsibleGroups?: Record<string, string>
 }
 
+/**
+ * §Phase B "Zur Reise übernehmen" (Nutzervorgabe): gleiche Form wie die
+ * bereits bestehenden lokalen `BookingDraft`/`BookingValues`-Typen in
+ * lib/actions/booking-extraction.ts, app/(app)/trips/[id]/bookings/new/page.tsx
+ * und BookingForm.tsx (dort bewusst nicht angefasst, um deren bestehendes
+ * Verhalten nicht zu riskieren) -- hier als EIN gemeinsamer Typ für die neuen
+ * Draft-Erzeuger (buildFlightAdoptionDraft/buildHotelAdoptionDraft), damit
+ * die nicht noch eine vierte, leicht abweichende Kopie hinzufügen. `title:
+ * null` ist für Flüge unkritisch, da createBooking den Titel für type
+ * 'flight' ohnehin serverseitig aus Richtung+Strecke ableitet (siehe
+ * readCommonFields) und das Draft-Feld dafür ignoriert.
+ */
+export type BookingAdoptionDraft = {
+  stage_id: string | null; title: string | null; provider: string | null; booking_reference: string | null
+  status: string; payment_status: string; amount: number | null; currency: string
+  start_datetime: string | null; end_datetime: string | null; notes: string | null
+  details: Record<string, string> | null
+}
+
 export const BOOKING_TYPE_ORDER: BookingType[] = [
   'flight', 'accommodation', 'transfer', 'rental_car', 'activity',
   'restaurant', 'train', 'ferry', 'insurance', 'other',

@@ -1,10 +1,15 @@
 import Link from "next/link";
-import { ChevronLeft, Trash2 } from "lucide-react";
+import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { searchHotelsStandalone } from "@/lib/actions/hotel-search";
-import { saveHotelOption, deleteSavedHotelOption } from "@/lib/actions/saved-hotels";
-import { MAX_SAVED_HOTELS_PER_DESTINATION } from "@/lib/saved-hotels-shared";
+import {
+  saveHotelOption, deleteSavedHotelOption, assignTripToSavedHotelOption,
+  markSavedHotelOptionSelected, unmarkSavedHotelOptionSelected,
+} from "@/lib/actions/saved-hotels";
+import { MAX_SAVED_HOTELS_PER_DESTINATION, buildHotelAdoptionUrl } from "@/lib/saved-hotels-shared";
+import { listTripsForPicker } from "@/lib/lumi-trip-picker";
+import { SavedOptionStatusRow } from "@/components/SavedOptionStatusRow";
 import { HotelSearchForm } from "@/components/HotelSearchForm";
 import { HotelResultGroups } from "@/components/HotelResultGroups";
 import { HotelCard } from "@/components/HotelCard";
@@ -66,12 +71,18 @@ export default async function HotelsPage({
   // vom aktuellen Suchzustand -- gruppiert nach Ziel.
   const { data: allSavedRows } = await supabase
     .from("saved_hotel_options")
-    .select("id, search_key, destination, option_id, hotel_option, created_at")
+    .select("id, search_key, destination, option_id, hotel_option, created_at, status, trip_id, booking_id")
     .eq("family_id", familyId)
     .order("created_at", { ascending: true });
-  const allSavedHotels = allSavedRows ?? [];
+  const allSavedHotelsRaw = allSavedRows ?? [];
+  // §Phase B "gebuchte Einträge nicht zusätzlich als bloß gemerkt anzeigen" (Nutzervorgabe).
+  const allSavedHotels = allSavedHotelsRaw.filter((s) => s.status !== "booked");
+  const bookedHotels = allSavedHotelsRaw.filter((s) => s.status === "booked");
   const savedOptionIds = sp.search_key ? allSavedHotels.filter((s) => s.search_key === sp.search_key).map((s) => s.option_id) : [];
   const currentSavedCount = savedOptionIds.length;
+
+  const pickerTrips = await listTripsForPicker(familyId);
+  const tripById = new Map(pickerTrips.map((t) => [t.id, t]));
 
   const usp = new URLSearchParams();
   if (sp.destination) usp.set("destination", sp.destination);
@@ -129,31 +140,36 @@ export default async function HotelsPage({
                       {items[0].destination} <span style={{ color: "var(--muted)" }}>({items.length}/{MAX_SAVED_HOTELS_PER_DESTINATION})</span>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-2">
-                      {items.map((s) => (
-                        <div key={s.id}>
-                          <HotelCard hotel={s.hotel_option as unknown as HotelShortlistItem} destination={items[0].destination} />
-                          <div className="flex items-center gap-3 mt-2 flex-wrap">
+                      {items.map((s) => {
+                        const hotel = s.hotel_option as unknown as HotelShortlistItem;
+                        return (
+                          <div key={s.id}>
+                            <HotelCard hotel={hotel} destination={items[0].destination} />
                             <Link
                               href={`/hotels?destination=${encodeURIComponent(items[0].destination)}&search_key=${encodeURIComponent(searchKey)}`}
+                              className="block mt-2"
                               style={{ color: "var(--accent)", fontSize: "0.68rem", textDecoration: "none" }}
                             >
                               Treffer öffnen →
                             </Link>
-                            <form action={deleteSavedHotelOption}>
-                              <input type="hidden" name="id" value={s.id} />
-                              <input type="hidden" name="return_to" value={returnTo} />
-                              <button
-                                type="submit"
-                                className="flex items-center gap-1.5"
-                                style={{ background: "none", border: "none", cursor: "pointer", color: "#B5624A", fontSize: "0.68rem", padding: 0 }}
-                              >
-                                <Trash2 size={12} strokeWidth={1.8} />
-                                Nicht mehr merken
-                              </button>
-                            </form>
+                            <SavedOptionStatusRow
+                              id={s.id}
+                              status={s.status}
+                              tripId={s.trip_id}
+                              tripTitle={s.trip_id ? tripById.get(s.trip_id)?.title ?? null : null}
+                              tripSlug={s.trip_id ? tripById.get(s.trip_id)?.slug ?? null : null}
+                              adoptionUrl={s.trip_id ? buildHotelAdoptionUrl(tripById.get(s.trip_id)?.slug ?? "", s.id, hotel) : null}
+                              bookingId={s.booking_id}
+                              trips={pickerTrips}
+                              returnTo={returnTo}
+                              deleteAction={deleteSavedHotelOption}
+                              assignTripAction={assignTripToSavedHotelOption}
+                              markSelectedAction={markSavedHotelOptionSelected}
+                              unmarkSelectedAction={unmarkSavedHotelOptionSelected}
+                            />
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 ))}
@@ -161,6 +177,33 @@ export default async function HotelsPage({
             </section>
           );
         })()}
+
+        {bookedHotels.length > 0 && (
+          <section className="mb-8">
+            <div style={{ color: "var(--muted)", fontSize: "0.58rem", letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: "10px" }}>
+              Bereits gebucht
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {bookedHotels.map((s) => {
+                const hotel = s.hotel_option as unknown as HotelShortlistItem;
+                const tripSlug = s.trip_id ? tripById.get(s.trip_id)?.slug ?? null : null;
+                return (
+                  <div key={s.id}>
+                    <HotelCard hotel={hotel} destination={s.destination} />
+                    <SavedOptionStatusRow
+                      id={s.id} status={s.status} tripId={s.trip_id}
+                      tripTitle={s.trip_id ? tripById.get(s.trip_id)?.title ?? null : null}
+                      tripSlug={tripSlug} adoptionUrl={null} bookingId={s.booking_id}
+                      trips={pickerTrips} returnTo={returnTo}
+                      deleteAction={deleteSavedHotelOption} assignTripAction={assignTripToSavedHotelOption}
+                      markSelectedAction={markSavedHotelOptionSelected} unmarkSelectedAction={unmarkSavedHotelOptionSelected}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
 
         {!hotelResult && recentSearches && recentSearches.length > 0 && (
           <section className="mb-8">

@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import { BOOKING_TYPE_CONFIG, combineDateTime, AUTO_STAGE_NOTE_LAYOVER } from '@/lib/bookings'
 import { suggestCountryCode } from '@/lib/geo-suggestions'
 import { readDateGroupFromFormData } from '@/lib/documents'
+import { getFamily } from '@/lib/family'
 import type { BookingType, BookingStatus, PaymentStatus } from '@/lib/supabase/types'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
@@ -282,6 +283,14 @@ export async function createBooking(formData: FormData) {
   const tripId   = String(formData.get('trip_id') ?? '')
   const slug     = String(formData.get('slug') ?? '')
   const category = String(formData.get('category') ?? '').trim()
+  // §Phase B "Zur Reise übernehmen" (Nutzervorgabe: "keine Buchung
+  // automatisch final bestätigen, nach erfolgreicher Übernahme die Option
+  // mit der Reise verknüpfen"): nur gesetzt, wenn dieses Formular über den
+  // Draft-Link aus einer gemerkten Flug-/Hotel-Option heraus geöffnet wurde
+  // (siehe buildFlightAdoptionDraft/buildHotelAdoptionDraft) -- der einzige
+  // Auslöser für den Übergang auf status='booked', nie ein reiner UI-Klick.
+  const fromSavedOptionId    = String(formData.get('from_saved_option_id') ?? '').trim()
+  const fromSavedOptionTable = String(formData.get('from_saved_option_table') ?? '').trim()
   const f = readCommonFields(formData)
 
   const newPath = `/trips/${slug}/bookings/new?type=${f.type}${category ? `&category=${category}` : ''}&`
@@ -338,6 +347,12 @@ export async function createBooking(formData: FormData) {
 
   if (error)
     redirectWithDraft(newPath, 'Speicherfehler: ' + error.message, f)
+
+  if (fromSavedOptionId && created && (fromSavedOptionTable === 'flight' || fromSavedOptionTable === 'hotel')) {
+    const table = fromSavedOptionTable === 'flight' ? 'saved_flight_options' : 'saved_hotel_options'
+    const { id: familyId } = await getFamily()
+    await supabase.from(table).update({ status: 'booked', booking_id: created.id }).eq('id', fromSavedOptionId).eq('family_id', familyId)
+  }
 
   if (!stageId) {
     const newStageId = await maybeCreateAccommodationStage(supabase, tripId, f.type, f.title, startDatetime, endDatetime)

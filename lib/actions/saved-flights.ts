@@ -92,3 +92,52 @@ export async function deleteSavedFlightOption(formData: FormData): Promise<void>
 
   redirect(returnTo)
 }
+
+/**
+ * §Phase B "Reise zuordnen" (Nutzervorgabe): setzt nur trip_id, keine
+ * Statusänderung -- ein gemerkter Treffer bleibt bis zur bewussten
+ * Markierung "ausgewählt". §"Familien- und Nutzerzugriff prüfen" (Vorgabe
+ * aus dem ursprünglichen Fix-Sprint): trips.family_id wird explizit
+ * gegengeprüft, statt der über das Formular übergebenen trip_id blind zu
+ * vertrauen -- RLS auf saved_flight_options schützt nur die Zeile selbst,
+ * nicht die referenzierte trip_id.
+ */
+export async function assignTripToSavedFlightOption(formData: FormData): Promise<void> {
+  const id = String(formData.get('id') ?? '')
+  const tripId = String(formData.get('trip_id') ?? '')
+  const returnTo = String(formData.get('return_to') ?? '/discover/flights')
+  const { id: familyId } = await getFamily()
+  const supabase = await createClient()
+
+  if (id && tripId) {
+    const { data: trip } = await supabase.from('trips').select('id').eq('id', tripId).eq('family_id', familyId).maybeSingle()
+    if (trip) await supabase.from('saved_flight_options').update({ trip_id: tripId }).eq('id', id).eq('family_id', familyId)
+  }
+
+  redirect(returnTo)
+}
+
+/** §Phase B "Ausgewählt ist eine Zwischenstufe" (Nutzervorgabe, wörtlich): nur möglich, wenn bereits eine Reise zugeordnet ist. */
+export async function markSavedFlightOptionSelected(formData: FormData): Promise<void> {
+  const id = String(formData.get('id') ?? '')
+  const returnTo = String(formData.get('return_to') ?? '/discover/flights')
+  const { id: familyId } = await getFamily()
+  const supabase = await createClient()
+
+  if (id) {
+    await supabase.from('saved_flight_options').update({ status: 'selected' }).eq('id', id).eq('family_id', familyId).not('trip_id', 'is', null)
+  }
+
+  redirect(returnTo)
+}
+
+export async function unmarkSavedFlightOptionSelected(formData: FormData): Promise<void> {
+  const id = String(formData.get('id') ?? '')
+  const returnTo = String(formData.get('return_to') ?? '/discover/flights')
+  const { id: familyId } = await getFamily()
+  const supabase = await createClient()
+
+  if (id) await supabase.from('saved_flight_options').update({ status: 'saved' }).eq('id', id).eq('family_id', familyId)
+
+  redirect(returnTo)
+}
