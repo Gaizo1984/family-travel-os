@@ -178,6 +178,9 @@ export const WORLD_COUNTRIES: WorldCountry[] = [
   { code: 'PR', name: 'Puerto Rico', continent: 'Nordamerika' },
   { code: 'PS', name: 'Palästina', continent: 'Asien' },
   { code: 'PT', name: 'Portugal', continent: 'Europa' },
+  // §"Palau habe ich ebenfalls nicht gefunden" (Nutzer-Feedback): kein eigener
+  // Pfad in der Karten-SVG -- als Kreis-Marker ergänzt, siehe components/WorldMap.tsx.
+  { code: 'PW', name: 'Palau', continent: 'Ozeanien' },
   { code: 'PY', name: 'Paraguay', continent: 'Südamerika' },
   { code: 'QA', name: 'Katar', continent: 'Asien' },
   { code: 'RE', name: 'Réunion', continent: 'Afrika' },
@@ -194,6 +197,10 @@ export const WORLD_COUNTRIES: WorldCountry[] = [
   { code: 'SI', name: 'Slowenien', continent: 'Europa' },
   { code: 'SK', name: 'Slowakei', continent: 'Europa' },
   { code: 'SL', name: 'Sierra Leone', continent: 'Afrika' },
+  // §"San Marino und Vatikan fehlen" (Nutzer-Feedback): kein eigener Pfad in
+  // der Karten-SVG (beide Enklaven innerhalb Italiens) -- als Kreis-Marker
+  // ergänzt, siehe components/WorldMap.tsx.
+  { code: 'SM', name: 'San Marino', continent: 'Europa' },
   { code: 'SN', name: 'Senegal', continent: 'Afrika' },
   { code: 'SO', name: 'Somalia', continent: 'Afrika' },
   { code: 'SR', name: 'Suriname', continent: 'Südamerika' },
@@ -221,6 +228,7 @@ export const WORLD_COUNTRIES: WorldCountry[] = [
   { code: 'US', name: 'Vereinigte Staaten', continent: 'Nordamerika' },
   { code: 'UY', name: 'Uruguay', continent: 'Südamerika' },
   { code: 'UZ', name: 'Usbekistan', continent: 'Asien' },
+  { code: 'VA', name: 'Vatikanstadt', continent: 'Europa' },
   { code: 'VC', name: 'St. Vincent und die Grenadinen', continent: 'Nordamerika' },
   { code: 'VE', name: 'Venezuela', continent: 'Südamerika' },
   { code: 'VG', name: 'Britische Jungferninseln', continent: 'Nordamerika' },

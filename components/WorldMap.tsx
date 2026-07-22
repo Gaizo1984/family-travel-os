@@ -18,12 +18,30 @@ function loadBaseSvg(): string {
  * abgelesen) — nur die tatsächlich in der App als Destination vorkommenden
  * kleinen Länder, kein Anspruch auf Vollständigkeit aller Kleinstaaten.
  */
+/**
+ * §"San Marino, Vatikan, Palau fehlen -- als Kreis-Marker ergänzen"
+ * (Nutzervorgabe): diese drei Länder haben in der Basis-SVG gar keinen
+ * eigenen `<path>` (bestätigt per Grep) -- anders als die fünf Länder oben,
+ * deren Pfade nur zu klein zum Antippen sind. Da hier keine SVG-Koordinaten
+ * "abgelesen" werden konnten, wurden SM/VA/PW per linearer Kalibrierung aus
+ * den fünf oben bereits bekannten (Land, echte Koordinate, Marker-Pixel)
+ * -Paaren geschätzt (Ausgangswert: einfache Äquirektangular-Projektion auf
+ * 2000×1001, per kleinster-Quadrate-Korrektur an die tatsächlichen
+ * Marker-Pixel angepasst). San Marino/Vatikan liegen nahe an den bereits
+ * kalibrierten Punkten Montenegro/Malta -- vermutlich zuverlässig. Palau hat
+ * keinen nahen Kalibrierungspunkt (kein Pazifik-Land in der Referenzmenge)
+ * -- Position ist eine gröbere Schätzung, ggf. nach echter Sichtprüfung
+ * nachzujustieren.
+ */
 const SMALL_COUNTRY_MARKERS: Record<string, { cx: number; cy: number }> = {
   ME: { cx: 1078, cy: 300 },   // Montenegro
   MV: { cx: 1389.2, cy: 548.6 }, // Malediven
   MT: { cx: 1053, cy: 343.3 },  // Malta
   SC: { cx: 1288.3, cy: 601.8 }, // Seychellen
   MU: { cx: 1295, cy: 702.3 },  // Mauritius
+  SM: { cx: 1040.4, cy: 291.6 }, // San Marino (kalibriert, nahe Montenegro/Malta)
+  VA: { cx: 1041.3, cy: 304.6 }, // Vatikanstadt (kalibriert, nahe Montenegro/Malta)
+  PW: { cx: 1737.9, cy: 524.9 }, // Palau (kalibriert, aber ohne nahen Referenzpunkt -- unsicherer)
 }
 
 /**
