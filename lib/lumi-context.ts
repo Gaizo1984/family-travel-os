@@ -35,6 +35,9 @@ export type LumiContext = {
   upcomingBookings: TimelineBooking[]
   plannedActivities: LumiJourneyItem[]
   readinessFindings: ReadinessFinding[]
+  /** §"Zwischenstopp-Planung optional" (Nutzervorgabe): siehe lib/today-trip-context.ts::resolveTripAiContext. */
+  isPlanningAheadOfStopover: boolean
+  stopoverAlternative: { label: string; countryCode: string | null } | null
   /** §"LUMI Brain, keine zweite Journey-Logik": rohe Etappen/Buchungen/Termine
    * dieser Reise -- bereits Teil dieser Abfrage, hier nur zusätzlich
    * exponiert, damit Aufrufer (lib/lumi-brain-context.ts) `buildJourneyTimeline`
@@ -97,14 +100,14 @@ function pickRelevantAccommodation(bookings: TimelineBooking[], isActive: boolea
  * `buildFamilyDnaSummary` für Familie/Kinderalter, `computeTripReadiness`
  * für offene Vorbereitungspunkte) statt sie zu duplizieren.
  */
-export async function buildLumiContext(familyId: string, tripId: string, todayIso: string): Promise<LumiContextResult> {
+export async function buildLumiContext(familyId: string, tripId: string, todayIso: string, preferStopover = false): Promise<LumiContextResult> {
   const supabase = await createClient()
 
   const [{ data: tripRow }, dna] = await Promise.all([
     supabase.from('trips').select(`
       id, slug, title, status, start_date, end_date,
       trip_members ( persons ( name ) ),
-      stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code, cover_photo_id ),
+      stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code, cover_photo_id, is_transit ),
       bookings ( id, type, title, provider, status, start_datetime, end_datetime, stage_id, details ),
       journey_events ( id, date, time, category, title, location, status )
     `).eq('id', tripId).maybeSingle(),
@@ -123,6 +126,7 @@ export async function buildLumiContext(familyId: string, tripId: string, todayIs
     { id: trip.id, slug: trip.slug, title: trip.title, subtitle: null, trip_members: trip.trip_members, stages: trip.stages, bookings: trip.bookings },
     isActive,
     todayIso,
+    preferStopover,
   )
 
   const relevantAccommodation = pickRelevantAccommodation(trip.bookings, isActive, todayIso)
@@ -160,6 +164,7 @@ export async function buildLumiContext(familyId: string, tripId: string, todayIs
     hasRentalCar, todaysBookings, upcomingBookings,
     plannedActivities: trip.journey_events,
     readinessFindings: readiness.findings,
+    isPlanningAheadOfStopover: aiContext.isPlanningAheadOfStopover, stopoverAlternative: aiContext.stopoverAlternative,
     stages: trip.stages, allBookings: trip.bookings, allEvents: trip.journey_events,
   } }
 }

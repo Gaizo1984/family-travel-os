@@ -1,4 +1,4 @@
-import { resolveCurrentLocation, nearbyStageGeocodeCandidates } from './today'
+import { resolveCurrentLocation, resolvePlanningLocation, nearbyStageGeocodeCandidates } from './today'
 import type { StageInput, TimelineBooking } from './journey'
 import { getWeatherForLocation } from './weather'
 import type { WeatherLocationCandidate, WeatherResult } from './weather'
@@ -13,6 +13,10 @@ export type TripAiContext = {
   countryCode: string | null
   memberNames: string[]
   weather: WeatherResult | null
+  /** §"Planung fürs eigentliche Ziel bereits während eines kurzen Zwischenstopps" (Nutzervorgabe): true, wenn locationLabel NICHT der tatsächliche heutige Aufenthaltsort ist, sondern vorausschauend das nächste "echte" Reiseziel. */
+  isPlanningAheadOfStopover: boolean
+  /** Der tatsächliche heutige Zwischenstopp-Ort, nur gesetzt wenn isPlanningAheadOfStopover -- für den optionalen Umschalter in der UI. */
+  stopoverAlternative: { label: string; countryCode: string | null } | null
 }
 
 type TripRowForContext = {
@@ -38,17 +42,25 @@ export async function resolveTripAiContext(
   trip: TripRowForContext,
   isActive: boolean,
   todayIso: string,
+  /** §"Zwischenstopp-Planung soll optional bleiben" (Nutzervorgabe, wörtlich): erzwingt bei `true` den tatsächlichen heutigen Zwischenstopp-Ort statt der vorausschauenden Ziel-Etappe -- gesetzt über den `?stopover=1`-Umschalter in der UI. */
+  preferStopover = false,
 ): Promise<TripAiContext> {
   const sortedStages = [...trip.stages].sort((a, b) => (a.start_date ?? '').localeCompare(b.start_date ?? ''))
 
   let locationLabel: string
   let countryCode: string | null
   let candidates: WeatherLocationCandidate[]
+  let isPlanningAheadOfStopover = false
+  let stopoverAlternative: { label: string; countryCode: string | null } | null = null
 
   if (isActive) {
     const loc = resolveCurrentLocation(trip, sortedStages, trip.bookings, todayIso)
-    locationLabel = loc.label
-    countryCode = loc.countryCode
+    const planning = resolvePlanningLocation(loc, sortedStages, todayIso, preferStopover)
+    isPlanningAheadOfStopover = planning.isPlanningAheadOfStopover
+    stopoverAlternative = planning.stopoverAlternative
+
+    locationLabel = planning.location.label
+    countryCode = planning.location.countryCode
     const countryName = countryCode ? COUNTRY_NAMES[countryCode] ?? null : null
     candidates = [
       { query: locationLabel, countryCode },
@@ -81,5 +93,6 @@ export async function resolveTripAiContext(
   return {
     tripId: trip.id, tripSlug: trip.slug, tripTitle: trip.title, isActive,
     locationLabel, countryCode, memberNames, weather,
+    isPlanningAheadOfStopover, stopoverAlternative,
   }
 }

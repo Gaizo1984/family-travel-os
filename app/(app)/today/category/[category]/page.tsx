@@ -66,7 +66,7 @@ export default async function TodayCategoryPage({
     .select(`
       id, slug, title, subtitle, status, start_date, end_date,
       trip_members ( persons ( id, name ) ),
-      stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code ),
+      stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code, is_transit ),
       bookings ( id, type, title, provider, status, start_datetime, end_datetime, stage_id, details, created_at )
     `)
     .eq("family_id", familyId);

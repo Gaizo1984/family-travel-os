@@ -13,7 +13,7 @@ import { deriveTripDateRange } from "@/lib/trip-dates";
 import { sortStagesChronologically, buildJourneyTimeline } from "@/lib/journey";
 import type { StageInput, TimelineBooking, TimelineEvent, TimelineDay } from "@/lib/journey";
 import { sortBookingsChronologically } from "@/lib/bookings";
-import { buildTodayTimelineItems, findNextUpcoming, buildTomorrowPrepItems, resolveCurrentLocation, nearbyStageGeocodeCandidates, detectDayHighlight } from "@/lib/today";
+import { buildTodayTimelineItems, findNextUpcoming, buildTomorrowPrepItems, resolveCurrentLocation, resolvePlanningLocation, nearbyStageGeocodeCandidates, detectDayHighlight } from "@/lib/today";
 import { getWeatherForLocation, describeWeatherCode } from "@/lib/weather";
 import type { WeatherLocationCandidate, WeatherResult } from "@/lib/weather";
 import { getCachedTodayRecommendation } from "@/lib/today-recommendation";
@@ -37,6 +37,7 @@ import { MemoryCandidateCard } from "@/components/MemoryCandidateCard";
 import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { TODAY_CATEGORIES } from "@/lib/today-categories";
 import { resolveTripAiContext } from "@/lib/today-trip-context";
+import { StopoverPlanningNotice } from "@/components/StopoverPlanningNotice";
 import { scoreDestinations } from "@/lib/discover-scoring";
 import type { ScoredDestination } from "@/lib/discover-scoring";
 import { searchDestinations } from "@/lib/providers/destination-provider";
@@ -391,9 +392,10 @@ function WeatherStrip({ weather }: { weather: WeatherResult }) {
 export default async function TodayPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; stopover?: string }>;
 }) {
-  const { error } = await searchParams;
+  const { error, stopover } = await searchParams;
+  const preferStopover = stopover === "1";
   const supabase = await createClient();
   const family = await getFamily();
   const familyId = family.id;
@@ -408,7 +410,7 @@ export default async function TodayPage({
       .select(`
         id, slug, title, subtitle, status, start_date, end_date,
         trip_members ( persons ( id, name ) ),
-        stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code, cover_photo_id ),
+        stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code, cover_photo_id, is_transit ),
         bookings ( id, type, title, provider, status, start_datetime, end_datetime, stage_id, details, created_at ),
         journey_events ( id, stage_id, date, time, category, title, location, status )
       `)
@@ -613,6 +615,8 @@ export default async function TodayPage({
 
   // Eine einzige Standortquelle für Untertitel, Wetter und Hero-Bild — siehe
   // resolveCurrentLocation für die Prioritätskette (Etappe → Unterkunft → Reiseziel).
+  // Bleibt bewusst unverändert der tatsächliche JETZIGE Aufenthaltsort (Hero-Bild,
+  // 📍-Label, "Wetter gerade jetzt") -- siehe lib/today.ts::resolvePlanningLocation.
   const currentLocation = resolveCurrentLocation(activeTrip, stages, bookings, todayIso);
   const stageImages = await resolveStageImages(supabase, stages);
   const heroImage = (currentLocation.stageId && stageImages.get(currentLocation.stageId)) || {
@@ -626,13 +630,39 @@ export default async function TodayPage({
     ...nearbyStageGeocodeCandidates(stages, currentLocation.label, currentLocation.countryCode, todayIso),
     ...(countryName && countryName !== currentLocation.label ? [{ query: countryName }] : []),
   ];
+
+  // §"Bereits heute Tipps/Planung fürs eigentliche Ziel möglich, Zwischenstopp-
+  // Planung nur optional" (Nutzervorgabe, wörtlich): NUR die Tagesempfehlung
+  // (weiter unten, generateAndCacheTodayRecommendation) nutzt bei einem kurzen
+  // Zwischenstopp die vorausschauende Ziel-Etappe -- Hero/Wetter oben bleiben
+  // unverändert der echte aktuelle Standort.
+  const planningLocation = resolvePlanningLocation(currentLocation, stages, todayIso, preferStopover);
+  // §Für den bidirektionalen Umschalter: unabhängig vom aktuellen `preferStopover`-
+  // Zustand feststellen, ob die Situation überhaupt eine Zwischenstopp-Umschaltung
+  // hergibt (sonst kein Banner nötig, egal welcher Toggle-Zustand) -- und das
+  // "eigentliche Ziel"-Label auch dann kennen, wenn gerade preferStopover aktiv ist.
+  const unforcedPlanningLocation = resolvePlanningLocation(currentLocation, stages, todayIso, false);
+  const stopoverOverrideAvailable = unforcedPlanningLocation.isPlanningAheadOfStopover;
+  const stopoverToggleHref = preferStopover ? "/today" : "/today?stopover=1";
+  const stopoverBannerStopoverLabel = currentLocation.label;
+  const stopoverBannerDestinationLabel = unforcedPlanningLocation.location.label;
+  const planningCountryName = planningLocation.location.countryCode ? COUNTRY_NAMES[planningLocation.location.countryCode] ?? null : null;
+  const planningWeatherCandidates: WeatherLocationCandidate[] = planningLocation.isPlanningAheadOfStopover
+    ? [
+        { query: planningLocation.location.label, countryCode: planningLocation.location.countryCode },
+        ...nearbyStageGeocodeCandidates(stages, planningLocation.location.label, planningLocation.location.countryCode, todayIso),
+        ...(planningCountryName && planningCountryName !== planningLocation.location.label ? [{ query: planningCountryName }] : []),
+      ]
+    : [];
+
   const timelineItems = todayDay ? buildTodayTimelineItems(todayDay) : [];
   const nextUp = findNextUpcoming(timelineItems, nowHHMM);
   const prepItems = buildTomorrowPrepItems(tomorrowDay, stages, tomorrowIso);
   const highlightTitle = detectDayHighlight(timelineItems);
 
-  const [weather, cachedRecommendation] = await Promise.all([
+  const [weather, planningWeather, cachedRecommendation] = await Promise.all([
     getWeatherForLocation(weatherCandidates),
+    planningLocation.isPlanningAheadOfStopover ? getWeatherForLocation(planningWeatherCandidates) : Promise.resolve(null),
     getCachedTodayRecommendation(familyId, activeTrip.id, todayIso),
   ]);
   const currentWeather = weather ? describeWeatherCode(weather.currentCode) : null;
@@ -644,6 +674,13 @@ export default async function TodayPage({
 
   const knownPlanText = timelineItems.map((i) => `${i.time ?? ""} ${i.title}`.trim()).join(", ");
   const weatherSummary = currentWeather ? `${weather!.currentTemp}°C, ${currentWeather.label}` : null;
+  // §Für die Tagesempfehlung: bei aktiver Vorausplanung Wetter/Ort des
+  // eigentlichen Ziels statt des Zwischenstopps, sonst identisch zu oben.
+  const planningWeatherDescribed = planningWeather ? describeWeatherCode(planningWeather.currentCode) : null;
+  const planningLocationLabel = planningLocation.location.label;
+  const planningWeatherSummary = planningLocation.isPlanningAheadOfStopover
+    ? (planningWeatherDescribed ? `${planningWeather!.currentTemp}°C, ${planningWeatherDescribed.label}` : null)
+    : weatherSummary;
   const familyDnaText = formatFamilyDnaForPrompt(dna, todayIso);
   const conciergeMemberNames = activeTrip.trip_members.flatMap((m) => (m.persons ? [m.persons.name] : []));
 
@@ -803,6 +840,14 @@ export default async function TodayPage({
         {/* ── "Heute empfiehlt LUMI": nur auf Klick, max. 1x täglich aus Cache ── */}
         <section className="mb-8">
           <SectionLabel>Heute empfiehlt LUMI</SectionLabel>
+          {stopoverOverrideAvailable && (
+            <StopoverPlanningNotice
+              destinationLabel={stopoverBannerDestinationLabel}
+              stopoverLabel={stopoverBannerStopoverLabel}
+              preferStopover={preferStopover}
+              toggleHref={stopoverToggleHref}
+            />
+          )}
           {recommendation ? (
             <>
               <Card>
@@ -856,8 +901,8 @@ export default async function TodayPage({
                 <input type="hidden" name="trip_id" value={activeTrip.id} />
                 <input type="hidden" name="for_date" value={todayIso} />
                 <input type="hidden" name="date_label" value={dateLabel} />
-                <input type="hidden" name="location_label" value={currentLocation.label} />
-                <input type="hidden" name="weather_summary" value={weatherSummary ?? ""} />
+                <input type="hidden" name="location_label" value={planningLocationLabel} />
+                <input type="hidden" name="weather_summary" value={planningWeatherSummary ?? ""} />
                 <input type="hidden" name="family_dna_text" value={familyDnaText} />
                 <input type="hidden" name="known_plan_text" value={knownPlanText} />
                 <input type="hidden" name="highlight_title" value={highlightTitle ?? ""} />
@@ -881,8 +926,8 @@ export default async function TodayPage({
             <input type="hidden" name="trip_slug" value={activeTrip.slug} />
             <input type="hidden" name="for_date" value={todayIso} />
             <input type="hidden" name="date_label" value={dateLabel} />
-            <input type="hidden" name="location_label" value={currentLocation.label} />
-            <input type="hidden" name="weather_summary" value={weatherSummary ?? ""} />
+            <input type="hidden" name="location_label" value={planningLocationLabel} />
+            <input type="hidden" name="weather_summary" value={planningWeatherSummary ?? ""} />
             <input type="hidden" name="known_plan_text" value={knownPlanText} />
             <input type="hidden" name="highlight_title" value={highlightTitle ?? ""} />
             <input type="hidden" name="member_names" value={conciergeMemberNames.join(",")} />
@@ -980,8 +1025,8 @@ export default async function TodayPage({
                   <input type="hidden" name="trip_slug" value={activeTrip.slug} />
                   <input type="hidden" name="for_date" value={todayIso} />
                   <input type="hidden" name="date_label" value={dateLabel} />
-                  <input type="hidden" name="location_label" value={currentLocation.label} />
-                  <input type="hidden" name="weather_summary" value={weatherSummary ?? ""} />
+                  <input type="hidden" name="location_label" value={planningLocationLabel} />
+                  <input type="hidden" name="weather_summary" value={planningWeatherSummary ?? ""} />
                   <input type="hidden" name="known_plan_text" value={knownPlanText} />
                   <input type="hidden" name="highlight_title" value={highlightTitle ?? ""} />
                   <input type="hidden" name="member_names" value={conciergeMemberNames.join(",")} />
@@ -1010,8 +1055,8 @@ export default async function TodayPage({
             <input type="hidden" name="trip_slug" value={activeTrip.slug} />
             <input type="hidden" name="for_date" value={todayIso} />
             <input type="hidden" name="date_label" value={dateLabel} />
-            <input type="hidden" name="location_label" value={currentLocation.label} />
-            <input type="hidden" name="weather_summary" value={weatherSummary ?? ""} />
+            <input type="hidden" name="location_label" value={planningLocationLabel} />
+            <input type="hidden" name="weather_summary" value={planningWeatherSummary ?? ""} />
             <input type="hidden" name="known_plan_text" value={knownPlanText} />
             <input type="hidden" name="highlight_title" value={highlightTitle ?? ""} />
             <input type="hidden" name="member_names" value={conciergeMemberNames.join(",")} />
@@ -1101,8 +1146,8 @@ export default async function TodayPage({
                       <input type="hidden" name="trip_slug" value={activeTrip.slug} />
                       <input type="hidden" name="for_date" value={todayIso} />
                       <input type="hidden" name="date_label" value={dateLabel} />
-                      <input type="hidden" name="location_label" value={currentLocation.label} />
-                      <input type="hidden" name="weather_summary" value={weatherSummary ?? ""} />
+                      <input type="hidden" name="location_label" value={planningLocationLabel} />
+                      <input type="hidden" name="weather_summary" value={planningWeatherSummary ?? ""} />
                       <input type="hidden" name="known_plan_text" value={knownPlanText} />
                       <input type="hidden" name="highlight_title" value={highlightTitle ?? ""} />
                       <input type="hidden" name="member_names" value={conciergeMemberNames.join(",")} />

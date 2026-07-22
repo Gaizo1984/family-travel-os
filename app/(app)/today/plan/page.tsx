@@ -5,14 +5,18 @@ import { getFamily } from "@/lib/family";
 import { isTripCurrentlyRunning, isTripHistorical } from "@/lib/trip-status";
 import { deriveTripDateRange } from "@/lib/trip-dates";
 import { todayIsoInFamilyTimezone } from "@/lib/time";
+import { sortStagesChronologically } from "@/lib/journey";
+import type { StageInput, TimelineBooking } from "@/lib/journey";
+import { resolveCurrentLocation, resolvePlanningLocation } from "@/lib/today";
 import { generateDayPlan, getLatestDayPlan, type DayPlan, type DayPlanVariant } from "@/lib/actions/day-planner";
 import { commitDayPlanVariantToJourney } from "@/lib/actions/lumi-journey";
 import { Banner } from "@/components/Banner";
+import { StopoverPlanningNotice } from "@/components/StopoverPlanningNotice";
 
 type TripRow = {
-  id: string; slug: string; status: string; start_date: string | null; end_date: string | null
-  stages: Array<{ start_date: string | null; end_date: string | null }>
-  bookings: Array<{ type: string; status: string; start_datetime: string | null; end_datetime: string | null }>
+  id: string; slug: string; title: string; subtitle: string | null; status: string; start_date: string | null; end_date: string | null
+  stages: StageInput[]
+  bookings: TimelineBooking[]
 };
 
 function Card({ children }: { children: React.ReactNode }) {
@@ -35,16 +39,21 @@ function Card({ children }: { children: React.ReactNode }) {
 export default async function DayPlanPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; date?: string }>;
+  searchParams: Promise<{ error?: string; date?: string; stopover?: string }>;
 }) {
-  const { error, date: dateParam } = await searchParams;
+  const { error, date: dateParam, stopover } = await searchParams;
+  const preferStopover = stopover === "1";
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
   const todayIso = todayIsoInFamilyTimezone();
 
   const { data: trips } = await supabase
     .from("trips")
-    .select("id, slug, status, start_date, end_date, stages ( start_date, end_date ), bookings ( type, status, start_datetime, end_datetime )")
+    .select(`
+      id, slug, title, subtitle, status, start_date, end_date,
+      stages ( id, title, location, start_date, end_date, nights, accommodation, sort_order, country_code, is_transit ),
+      bookings ( id, type, title, provider, status, start_datetime, end_datetime, stage_id )
+    `)
     .eq("family_id", familyId);
   // §"Reisezeitraum automatisch ableiten": ohne manuelles Datum, aber mit
   // Buchungen/Etappen, gilt die Reise trotzdem korrekt als laufend (lib/trip-dates.ts).
@@ -85,7 +94,26 @@ export default async function DayPlanPage({
   // §Bugfix "Tagestrips löschen sich bei Menüpunktwechsel": der zuletzt
   // erzeugte Plan kommt aus day_plan_cache (family_id, trip_id, date) und
   // bleibt bei Navigation bestehen, solange dasselbe Datum gewählt ist.
-  const plan: DayPlan | null = dateParam ? await getLatestDayPlan(familyId, trip.id, defaultDate) : null;
+  const cachedPlan: DayPlan | null = dateParam ? await getLatestDayPlan(familyId, trip.id, defaultDate) : null;
+  // §"Zwischenstopp-Planung optional" (Nutzervorgabe): ein mit anderem
+  // Umschalter-Stand erzeugter Plan passt nicht zum aktuell gewählten Ziel --
+  // dann lieber "noch kein Plan" statt einen aus dem falschen Kontext zeigen.
+  const plan = cachedPlan && cachedPlan.preferStopover === preferStopover ? cachedPlan : null;
+
+  // §Der Zwischenstopp-Umschalter/-Hinweis gilt nur für die laufende Reise
+  // (siehe lib/today.ts::resolvePlanningLocation) -- bei einer bevorstehenden
+  // Reise wählt resolveTripAiContext ohnehin immer die Etappe mit den meisten
+  // Nächten, unabhängig vom Umschalter.
+  const sortedStages = sortStagesChronologically(trip.stages);
+  const currentLocation = trip === activeTrip ? resolveCurrentLocation(trip, sortedStages, trip.bookings, todayIso) : null;
+  const unforcedPlanningLocation = currentLocation ? resolvePlanningLocation(currentLocation, sortedStages, todayIso, false) : null;
+  const stopoverOverrideAvailable = unforcedPlanningLocation?.isPlanningAheadOfStopover ?? false;
+  const stopoverToggleParams = new URLSearchParams();
+  if (dateParam) stopoverToggleParams.set("date", dateParam);
+  if (!preferStopover) stopoverToggleParams.set("stopover", "1");
+  const stopoverToggleHref = `/today/plan${stopoverToggleParams.toString() ? `?${stopoverToggleParams.toString()}` : ""}`;
+  const stopoverBannerStopoverLabel = currentLocation?.label ?? "";
+  const stopoverBannerDestinationLabel = unforcedPlanningLocation?.location.label ?? "";
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -97,6 +125,15 @@ export default async function DayPlanPage({
 
         {error && <Banner variant="error">{error}</Banner>}
 
+        {stopoverOverrideAvailable && (
+          <StopoverPlanningNotice
+            destinationLabel={stopoverBannerDestinationLabel}
+            stopoverLabel={stopoverBannerStopoverLabel}
+            preferStopover={preferStopover}
+            toggleHref={stopoverToggleHref}
+          />
+        )}
+
         <Card>
           <p className="mb-4" style={{ color: "var(--muted)", fontSize: "0.85rem", lineHeight: 1.6 }}>
             LUMI baut euch drei Tagespläne (Entspannt/Ausgewogen/Erlebnisreich) aus Sehenswürdigkeiten, Natur, Stränden und Restaurants -- mit echten Fahrzeiten und rund um bereits feststehende Termine, nur auf Klick.
@@ -105,6 +142,7 @@ export default async function DayPlanPage({
             <input type="hidden" name="family_id" value={familyId} />
             <input type="hidden" name="trip_id" value={trip.id} />
             <input type="hidden" name="return_to" value="/today/plan" />
+            <input type="hidden" name="prefer_stopover" value={preferStopover ? "1" : ""} />
             <div className="flex flex-col gap-1">
               <label style={{ color: "var(--muted)", fontSize: "0.65rem", letterSpacing: "0.06em" }}>Für welchen Tag?</label>
               <input

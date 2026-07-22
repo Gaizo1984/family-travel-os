@@ -53,6 +53,8 @@ export type DayPlan = {
   /** Erklärender Hinweis, wenn für den Tag keine/kaum Varianten möglich waren (zu wenig freie Zeit) -- kein erzwungener Plan. */
   freeWindowNote: string | null
   generatedAt: string
+  /** §"Zwischenstopp-Planung optional" (Nutzervorgabe): mit welchem Umschalter-Stand dieser Plan erzeugt wurde -- ein gecachter Plan wird nur bei übereinstimmendem Umschalter erneut angezeigt (siehe app/(app)/today/plan/page.tsx). */
+  preferStopover: boolean
 }
 
 const PACE_CONFIG: Record<DayPlanPace, { label: string; maxStops: number; categories: TodayCategoryKey[] }> = {
@@ -322,8 +324,8 @@ export type DayPlanGenerationResult =
  * DIESEN Tag auf (§Bugfix ggü. v1, das immer das reale Heute für die
  * Ausgangspunkt-Auflösung nutzte, auch im Modus "morgen").
  */
-export async function generateDayPlanPreview(familyId: string, tripId: string, dateIso: string): Promise<DayPlanGenerationResult> {
-  const contextResult = await buildLumiContext(familyId, tripId, dateIso)
+export async function generateDayPlanPreview(familyId: string, tripId: string, dateIso: string, preferStopover = false): Promise<DayPlanGenerationResult> {
+  const contextResult = await buildLumiContext(familyId, tripId, dateIso, preferStopover)
   if (!contextResult.ok) return { ok: false, reason: lumiContextErrorMessage(contextResult.reason) }
   const context = contextResult.context
 
@@ -335,7 +337,7 @@ export async function generateDayPlanPreview(familyId: string, tripId: string, d
       plan: {
         date: dateIso, originLabel: context.origin.formattedAddress, variants: [],
         freeWindowNote: 'An diesem Tag ist zu wenig freie Zeit für einen Tagesplan -- bereits feststehende Termine füllen den Tag weitgehend aus.',
-        generatedAt: new Date().toISOString(),
+        generatedAt: new Date().toISOString(), preferStopover,
       },
     }
   }
@@ -376,12 +378,12 @@ export async function generateDayPlanPreview(familyId: string, tripId: string, d
       plan: {
         date: dateIso, originLabel: context.origin.formattedAddress, variants: [],
         freeWindowNote: 'Für diesen Tag konnte kein Tagesplan erzeugt werden -- zu wenig freie Zeit oder keine ausreichend nahen Orte.',
-        generatedAt: new Date().toISOString(),
+        generatedAt: new Date().toISOString(), preferStopover,
       },
     }
   }
 
-  return { ok: true, plan: { date: dateIso, originLabel: context.origin.formattedAddress, variants, freeWindowNote: null, generatedAt: new Date().toISOString() } }
+  return { ok: true, plan: { date: dateIso, originLabel: context.origin.formattedAddress, variants, freeWindowNote: null, generatedAt: new Date().toISOString(), preferStopover } }
 }
 
 /** Zuletzt für diesen Tag erzeugter Plan -- Vorschau bleibt bei Navigation bestehen, bis eine neue Ermittlung sie überschreibt (gleiches Muster wie v1). */
@@ -403,11 +405,18 @@ export async function generateDayPlan(formData: FormData) {
   const tripId = String(formData.get('trip_id') ?? '')
   const date = String(formData.get('date') ?? '')
   const returnTo = String(formData.get('return_to') ?? '/today/plan')
+  const preferStopover = String(formData.get('prefer_stopover') ?? '') === '1'
 
   if (!familyId || !tripId || !date) redirect('/today')
 
-  const result = await generateDayPlanPreview(familyId, tripId, date)
-  if (!result.ok) redirect(`${returnTo}?error=${encodeURIComponent(result.reason)}`)
+  const result = await generateDayPlanPreview(familyId, tripId, date, preferStopover)
+  const redirectParams = new URLSearchParams({ date })
+  if (preferStopover) redirectParams.set('stopover', '1')
+
+  if (!result.ok) {
+    redirectParams.set('error', result.reason)
+    redirect(`${returnTo}?${redirectParams.toString()}`)
+  }
 
   const supabase = await createClient()
   const { error } = await supabase.from('day_plan_cache').upsert(
@@ -416,5 +425,5 @@ export async function generateDayPlan(formData: FormData) {
   )
   if (error) console.error('[day-planner] cache upsert failed', { date, error: error.message })
 
-  redirect(`${returnTo}?date=${encodeURIComponent(date)}`)
+  redirect(`${returnTo}?${redirectParams.toString()}`)
 }

@@ -156,6 +156,63 @@ export function resolveCurrentLocation(
   return { label, countryCode, stageId: null, source: 'destination' }
 }
 
+export type PlanningLocationResult = {
+  location: CurrentLocation
+  /** true, wenn `location` NICHT der tatsächliche heutige Aufenthaltsort ist, sondern vorausschauend das nächste "echte" Reiseziel. */
+  isPlanningAheadOfStopover: boolean
+  /** Der tatsächliche heutige Zwischenstopp-Ort, nur gesetzt wenn isPlanningAheadOfStopover -- für den optionalen Umschalter in der UI. */
+  stopoverAlternative: { label: string; countryCode: string | null } | null
+}
+
+/**
+ * §"Falls man Aktivitäten bei einem Stoppover machen möchte, sollte diese
+ * Planung nur optional sein. Aber bei 2 oder mehr Nächten kann dies als
+ * Hauptstandort gesehen werden." (Nutzervorgabe, wörtlich): nimmt das
+ * Ergebnis von `resolveCurrentLocation` entgegen und ersetzt es für
+ * PLANUNGSZWECKE (Tagesempfehlung, LUMI-Vorschläge, Tagesplaner) durch die
+ * nächste "echte" Etappe, wenn heute nur ein kurzer Zwischenstopp ist.
+ * `resolveCurrentLocation` selbst bleibt für "wo sind wir GERADE JETZT"
+ * (z. B. Wetter) unverändert die einzige Quelle -- diese Funktion ist ein
+ * bewusst separater, dünner Layer darüber, kein Ersatz. Von
+ * `lib/today-trip-context.ts::resolveTripAiContext` UND direkt von
+ * `app/(app)/today/page.tsx` genutzt (letztere Seite baut ihre
+ * Tagesempfehlung/Hero-Anzeige bisher direkt auf `resolveCurrentLocation`
+ * auf, ohne über `resolveTripAiContext` zu laufen -- deshalb hier als
+ * eigenständige, wiederverwendbare Funktion statt nur inline in
+ * resolveTripAiContext).
+ */
+export function resolvePlanningLocation(
+  loc: CurrentLocation,
+  sortedStages: StageInput[],
+  todayIso: string,
+  preferStopover: boolean,
+): PlanningLocationResult {
+  const currentStage = loc.stageId ? sortedStages.find((s) => s.id === loc.stageId) : null
+  const isShortStopover = currentStage?.is_transit === true && (currentStage.nights ?? 0) < 2
+
+  if (!isShortStopover || preferStopover) {
+    return { location: loc, isPlanningAheadOfStopover: false, stopoverAlternative: null }
+  }
+
+  const upcomingMainStage = sortedStages.find(
+    (s) => s.start_date && s.start_date > todayIso && !(s.is_transit === true && (s.nights ?? 0) < 2),
+  )
+  if (!upcomingMainStage) {
+    return { location: loc, isPlanningAheadOfStopover: false, stopoverAlternative: null }
+  }
+
+  return {
+    location: {
+      label: upcomingMainStage.location || upcomingMainStage.title,
+      countryCode: upcomingMainStage.country_code ?? null,
+      stageId: upcomingMainStage.id,
+      source: 'stage',
+    },
+    isPlanningAheadOfStopover: true,
+    stopoverAlternative: { label: loc.label, countryCode: loc.countryCode },
+  }
+}
+
 /**
  * Zusätzliche, rein für die Wetter-Geokodierung gedachte Kandidaten (nicht für
  * die Anzeige): weitere Etappen derselben Reise im selben Land, sortiert nach
