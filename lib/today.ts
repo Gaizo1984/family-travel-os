@@ -194,8 +194,13 @@ export function resolvePlanningLocation(
     return { location: loc, isPlanningAheadOfStopover: false, stopoverAlternative: null }
   }
 
+  // §Bugfix "erster Tag zeigt weiterhin nur den Zwischenstopp": bei einer
+  // Anschlussverbindung beginnt das eigentliche Hauptziel oft am SELBEN
+  // Kalendertag wie der kurze Zwischenstopp (Landung + Check-in noch am
+  // Ankunftstag) -- ein striktes `>` hätte diese Etappe an genau diesem Tag
+  // übersehen und wäre fälschlich beim Zwischenstopp geblieben.
   const upcomingMainStage = sortedStages.find(
-    (s) => s.start_date && s.start_date > todayIso && !(s.is_transit === true && (s.nights ?? 0) < 2),
+    (s) => s.start_date && s.start_date >= todayIso && !(s.is_transit === true && (s.nights ?? 0) < 2),
   )
   if (!upcomingMainStage) {
     return { location: loc, isPlanningAheadOfStopover: false, stopoverAlternative: null }
