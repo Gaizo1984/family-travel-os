@@ -81,9 +81,10 @@ function EventRow({ event, isNext }: { event: JourneyEvent; isNext: boolean }) {
  * auf dem Dashboard), `isPast` wird gedimmt (gleiche `opacity:0.45`-Konvention
  * wie bisher auf /today).
  */
-export function JourneyDayCard({ day, photoUrlByPhotoId, nextEventId }: { day: JourneyDayBucket; photoUrlByPhotoId: Map<string, string>; nextEventId: string | null }) {
+export function JourneyDayCard({ day, photoUrlByPhotoId, nextEventId, tripSlug }: { day: JourneyDayBucket; photoUrlByPhotoId: Map<string, string>; nextEventId: string | null; tripSlug: string }) {
   const weather = day.weather ? describeWeatherCode(day.weather.code) : null;
   const dayLabel = day.stage?.location ?? day.stage?.title ?? null;
+  const addEntryHref = `/trips/${tripSlug}/journey-events/new?date=${day.date}${day.stage ? `&stage_id=${day.stage.id}` : ""}&return_to=${encodeURIComponent(`/trips/${tripSlug}/journey`)}`;
 
   return (
     <div
@@ -138,6 +139,17 @@ export function JourneyDayCard({ day, photoUrlByPhotoId, nextEventId }: { day: J
           <span style={{ color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.04em" }}>Tagesplan erstellen →</span>
         </Link>
       )}
+
+      {/* §"Direkt im Journal unter dem jeweiligen Tag einen Eintrag anlegen"
+          (Nutzervorgabe): spart den Umweg über Datum/Aufenthalt manuell
+          erneut auswählen -- beides kommt bereits aus diesem Tag mit. */}
+      <Link
+        href={addEntryHref}
+        className="inline-block mt-2"
+        style={{ color: "var(--accent)", fontSize: "0.66rem", letterSpacing: "0.04em", textDecoration: "none" }}
+      >
+        + Eintrag hinzufügen
+      </Link>
 
       {day.photos.length > 0 && (
         <div className="flex gap-2 mt-2 overflow-x-auto">

@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 import { BadgeCheck, IdCard, FileCheck, Stamp, Globe2, Shield, Receipt, FileText, Ticket, Luggage } from 'lucide-react'
 import { formatDateDE } from './demo-data'
+import { addDaysIso, isoToday } from './date-utils'
 
 export type DocumentType = 'passport' | 'id_card' | 'visa' | 'esta' | 'eta' | 'entry_permit' | 'insurance' | 'booking_document' | 'boarding_pass' | 'baggage_tag' | 'other'
 
@@ -206,6 +207,30 @@ export function getTripDateFieldRange(startDate: string | null, endDate: string 
     minYear: Math.min(startYear, currentYear) - 1,
     maxYear: Math.max(endYear, currentYear) + 1,
   }
+}
+
+const JOURNEY_EVENT_DATE_MARGIN_DAYS = 2
+
+/**
+ * §"Maximal 2 Tage vor/nach der Reise, sonst verliert man bei der
+ * Aktivitäten-Anlage schnell den Überblick" (Nutzervorgabe, wörtlich):
+ * Aktivitäten/Restaurants/etc. lassen sich nur innerhalb eines engen
+ * Fensters um die Reise anlegen, statt (wie zuvor über
+ * `getTripDateFieldRange`) irgendein Jahr/Monat/Tag im gesamten
+ * Kalenderjahr-Bereich zuzulassen. `keepIso` hält beim Bearbeiten eines
+ * bestehenden Eintrags dessen Datum immer auswählbar, auch falls es
+ * (z. B. nach nachträglicher Änderung der Reisedaten) außerhalb des
+ * eigentlichen ±2-Tage-Fensters liegen sollte.
+ */
+export function getJourneyEventDateRange(startDate: string | null, endDate: string | null, keepIso?: string | null): { minIso: string; maxIso: string } {
+  const today = isoToday()
+  const start = startDate ?? today
+  const end = endDate ?? start
+  let minIso = addDaysIso(start, -JOURNEY_EVENT_DATE_MARGIN_DAYS)
+  let maxIso = addDaysIso(end, JOURNEY_EVENT_DATE_MARGIN_DAYS)
+  if (keepIso && keepIso < minIso) minIso = keepIso
+  if (keepIso && keepIso > maxIso) maxIso = keepIso
+  return { minIso, maxIso }
 }
 
 export function splitIsoDate(iso: string | null | undefined): { day: string; month: string; year: string } {

@@ -3,8 +3,9 @@ import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { updateJourneyEvent, deleteJourneyEvent } from "@/lib/actions/journey-events";
-import { getTripDateFieldRange } from "@/lib/documents";
-import { DateSelectFields } from "@/components/DateSelectFields";
+import { getJourneyEventDateRange } from "@/lib/documents";
+import { DaySelectField } from "@/components/DaySelectField";
+import { TimeSelectField } from "@/components/TimeSelectField";
 import { Banner } from "@/components/Banner";
 import {
   JOURNEY_EVENT_CATEGORY_ORDER, JOURNEY_EVENT_CATEGORIES,
@@ -117,11 +118,8 @@ export default async function EditJourneyEventPage({
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <DateSelectFields label="Datum *" namePrefix="date" defaultIso={event.date} range={getTripDateFieldRange(trip.start_date, trip.end_date)} />
-              <div className="mb-5">
-                <label htmlFor="je-time" style={LABEL_STYLE}>Uhrzeit (optional)</label>
-                <input id="je-time" name="time" type="time" defaultValue={event.time ?? ""} style={FIELD_STYLE} />
-              </div>
+              <DaySelectField label="Datum *" namePrefix="date" defaultIso={event.date} {...getJourneyEventDateRange(trip.start_date, trip.end_date, event.date)} />
+              <TimeSelectField id="je-time" label="Uhrzeit (optional)" name="time" defaultValue={event.time} />
             </div>
 
             {(stages ?? []).length > 0 && (

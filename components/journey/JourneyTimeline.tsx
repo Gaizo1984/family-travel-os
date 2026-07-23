@@ -92,7 +92,7 @@ function FreeDayGroupCard({ days }: { days: JourneyDayBucket[] }) {
  * je Tag in JourneyDayCard gezeichnet, damit sie zwischen den Karten
  * durchläuft), keine Kalenderansicht.
  */
-export function JourneyTimeline({ days, photoUrlByPhotoId }: { days: JourneyDayBucket[]; photoUrlByPhotoId: Map<string, string> }) {
+export function JourneyTimeline({ days, photoUrlByPhotoId, tripSlug }: { days: JourneyDayBucket[]; photoUrlByPhotoId: Map<string, string>; tripSlug: string }) {
   if (days.length === 0) return null;
   const nextEventId = findNextEventId(days);
   const items = groupConsecutiveFreeDays(days);
@@ -102,7 +102,7 @@ export function JourneyTimeline({ days, photoUrlByPhotoId }: { days: JourneyDayB
         item.kind === "freeGroup" ? (
           <FreeDayGroupCard key={`group-${item.days[0].date}`} days={item.days} />
         ) : (
-          <JourneyDayCard key={item.day.date} day={item.day} photoUrlByPhotoId={photoUrlByPhotoId} nextEventId={nextEventId} />
+          <JourneyDayCard key={item.day.date} day={item.day} photoUrlByPhotoId={photoUrlByPhotoId} nextEventId={nextEventId} tripSlug={tripSlug} />
         ),
       )}
     </div>

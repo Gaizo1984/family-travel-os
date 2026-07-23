@@ -153,7 +153,7 @@ export default async function TripJourneyPage({ params }: { params: Promise<{ id
             <div style={{ color: "var(--muted)", fontSize: "0.58rem", letterSpacing: "0.16em", textTransform: "uppercase", marginBottom: "14px" }}>
               {overview.phase === "after" ? "Reiseverlauf (Rückblick)" : "Reiseverlauf"}
             </div>
-            <JourneyTimeline days={overview.days} photoUrlByPhotoId={photoUrlByPhotoId} />
+            <JourneyTimeline days={overview.days} photoUrlByPhotoId={photoUrlByPhotoId} tripSlug={trip.slug} />
           </section>
         ) : (
           <div className="rounded-xl p-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
