@@ -3,6 +3,7 @@ import type { DocumentType } from './documents'
 import { detectFlightStopoverSuggestions, detectSingleFlightLayoverSuggestions } from './flight-stopovers'
 import { computeTripRequirements } from './travel-requirements'
 import { formatDateDE } from './demo-data'
+import { todayIsoInFamilyTimezone } from './time'
 
 export type ReadinessSeverity = 'conflict' | 'hint'
 export type ReadinessTheme = 'documents' | 'entry' | 'insurance' | 'itinerary' | 'bookings'
@@ -87,6 +88,7 @@ export async function computeTripReadiness(tripId: string): Promise<ReadinessRes
   }
   const slug = trip.slug
   const tripEnd = trip.end_date
+  const todayIso = todayIsoInFamilyTimezone()
 
   // §Performance: die folgenden Abfragen sind alle unabhängig voneinander
   // (keine hängt vom Ergebnis einer anderen ab, außer der Dokumente-Query, die
@@ -153,8 +155,14 @@ export async function computeTripReadiness(tripId: string): Promise<ReadinessRes
 
   for (let i = 0; i < stages.length; i++) {
     const s = stages[i]
+    // §Bugfix "Ready to Travel nennt noch das Hotel einer bereits
+    // abgeschlossenen Etappe" (Nutzervorgabe): eine "fehlt noch"-Vorbereitung
+    // für eine Etappe, die schon vorbei ist (z. B. ein kurzer
+    // Flughafen-Zwischenstopp am Reiseanfang), ist nichts mehr zum
+    // Vorbereiten -- nur laufende/künftige Etappen zählen hier.
+    const stageIsPast = s.end_date !== null && s.end_date < todayIso
 
-    if ((s.nights ?? 0) >= 1 && !s.accommodation) {
+    if (!stageIsPast && (s.nights ?? 0) >= 1 && !s.accommodation) {
       const hasAccommodationBooking = bookings.some((b) => b.type === 'accommodation' && b.stage_id === s.id)
       if (!hasAccommodationBooking) {
         findings.push({
@@ -179,7 +187,7 @@ export async function computeTripReadiness(tripId: string): Promise<ReadinessRes
       }
     }
 
-    if (i > 0) {
+    if (i > 0 && !stageIsPast) {
       const prev = stages[i - 1]
       if (prev.end_date && s.start_date && s.start_date > addDaysIso(prev.end_date, 1)) {
         findings.push({
