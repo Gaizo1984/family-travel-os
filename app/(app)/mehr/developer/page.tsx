@@ -13,11 +13,16 @@ import { HotelQualificationTestCard } from './HotelQualificationTestCard'
 import { FlightUsageCard } from './FlightUsageCard'
 import { LumiBrainUsageCard } from './LumiBrainUsageCard'
 import { LumiBrainTestCard } from './LumiBrainTestCard'
+import { ReelSpikeTestCard } from './ReelSpikeTestCard'
 
 // §"Duffel-Testaufruf kann mehrere Sekunden dauern": höher als die
 // Plattform-Standardlaufzeit, damit der Flugsuche-Testcard-Button nicht
 // durch ein Funktions-Timeout abgewürgt wird.
-export const maxDuration = 60;
+// §Content Studio 3.0, Sprint 0b: der Remotion-Sandbox-Testrender braucht
+// deutlich länger (Sandbox-Kaltstart inkl. System-/Browser-Installation kann
+// laut Remotion-Doku mehrere Minuten dauern) -- an die Fluid-Compute-
+// Obergrenze angehoben, gleiche Konvention wie /discover/flights.
+export const maxDuration = 280;
 
 /**
  * Dauerhafter, geschützter Developer-Bereich (Mehr → Developer) für
@@ -75,6 +80,7 @@ export default async function DeveloperPage() {
           <LumiBrainTestCard lastRun={runs.lumi_brain ?? null} />
           <FlightUsageCard />
           <LumiBrainUsageCard />
+          <ReelSpikeTestCard lastRun={runs.reel_spike ?? null} />
         </div>
       </div>
     </div>

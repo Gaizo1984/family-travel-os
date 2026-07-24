@@ -9,6 +9,21 @@ const nextConfig: NextConfig = {
   // Pfad. Genau das erklärt, warum die Kompression nur in echter Produktion
   // korrupte Bilddaten erzeugte.
   serverExternalPackages: ["sharp"],
+  // §Content Studio 3.0, Sprint 0b (Infrastruktur-Spike): das Remotion-Bundle
+  // wird per "prebuild"-Skript (NICHT "postbuild"!) VOR `next build` einmalig
+  // nach remotion/.output/ erzeugt (bundle() selbst darf laut Remotion-Doku
+  // NICHT innerhalb einer Serverless-Function laufen -- deshalb Build-Zeit
+  // statt Request-Zeit). §Bugfix (in diesem Sprint selbst gefunden): mit
+  // "postbuild" existierte remotion/.output beim eigentlichen File-Tracing
+  // während `next build` noch gar nicht -- outputFileTracingIncludes wertet
+  // nur zu DIESEM Zeitpunkt vorhandene Dateien aus, ein "postbuild"-Skript
+  // läuft zu spät. Ohne diesen Eintrag (und die richtige Reihenfolge) würde
+  // das Bundle beim Deploy NICHT mit ausgeliefert und die Server Action
+  // fände zur Laufzeit keine Bundle-Datei -- exakt dasselbe Grundmuster wie
+  // serverExternalPackages oben für die native sharp-Binary.
+  outputFileTracingIncludes: {
+    "/mehr/developer": ["remotion/.output/**/*"],
+  },
   experimental: {
     serverActions: {
       // Next.js begrenzt Server-Action-Request-Bodies standardmäßig auf 1 MB —

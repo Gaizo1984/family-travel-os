@@ -4,18 +4,23 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3001",
+    "prebuild": "remotion bundle remotion/index.ts --out-dir remotion/.output --public-dir remotion/public",
     "build": "next build",
     "start": "next start -p 3001",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@remotion/cli": "^4.0.498",
+    "@remotion/vercel": "^4.0.498",
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.110.1",
+    "@vercel/sandbox": "^2.8.0",
     "lucide-react": "^1.23.0",
     "next": "16.2.10",
     "openai": "^6.46.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "remotion": "^4.0.498",
     "sharp": "^0.35.3"
   },
   "devDependencies": {
@@ -28,6 +33,7 @@
   },
   "allowScripts": {
     "sharp@0.34.5": true,
-    "sharp@0.35.3": true
+    "sharp@0.35.3": true,
+    "esbuild@0.28.1": true
   }
 }
