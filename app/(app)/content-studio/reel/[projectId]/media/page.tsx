@@ -362,11 +362,22 @@ export default async function ReelMediaPage({
 
           {storyboardDraft && (
             <div className="mt-6 rounded-xl p-5 flex flex-col gap-4" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-              <div className="flex items-center gap-2">
-                <Sparkles size={14} strokeWidth={1.6} style={{ color: "var(--accent)" }} />
-                <span style={{ color: "var(--accent)", fontSize: "0.62rem", letterSpacing: "0.16em", textTransform: "uppercase" }}>
-                  Aktuelles Storyboard
-                </span>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Sparkles size={14} strokeWidth={1.6} style={{ color: "var(--accent)" }} />
+                  <span style={{ color: "var(--accent)", fontSize: "0.62rem", letterSpacing: "0.16em", textTransform: "uppercase" }}>
+                    Aktuelles Storyboard
+                  </span>
+                </div>
+                <Link
+                  href={`/content-studio/reel/${projectId}/timeline`}
+                  style={{
+                    background: "var(--accent)", color: "var(--surface)", borderRadius: "999px",
+                    padding: "6px 14px", fontSize: "0.68rem", textDecoration: "none",
+                  }}
+                >
+                  Zur Timeline
+                </Link>
               </div>
 
               <div>

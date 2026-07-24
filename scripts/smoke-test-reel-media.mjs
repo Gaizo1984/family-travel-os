@@ -88,7 +88,35 @@ async function main() {
       structure: { hook: 'SMOKE-TEST', scenes: [{ source_type: 'photo', source_id: fakeIdA, duration_seconds: 2, transition: 'cut', camera_motion: 'static', text_overlay: '', video_start_seconds: null }], outro: '', music_direction: '', caption: '', hashtags: [], quality_check: null, reasoning: '' },
     }).select('id').single()
     check('content_drafts (draft_type=video_reel) angelegt', !draftError && !!draft?.id, draftError?.message)
+
+    // §Content Studio 3.0, Sprint 4: Timeline-Mutationen (reel-timeline.ts)
+    // schreiben die Struktur per Read-Modify-Write auf DIESELBE
+    // content_drafts-Zeile zurueck (kein neuer Draft) -- hier geprueft, dass
+    // ein solches Update inkl. des Undo-Feldes "_previous_scenes" korrekt
+    // rundtrippt (JSONB-Serialisierung).
+    const sceneA = { source_type: 'photo', source_id: fakeIdA, duration_seconds: 2, transition: 'cut', camera_motion: 'static', text_overlay: 'A', video_start_seconds: null }
+    const sceneB = { source_type: 'video', source_id: fakeIdB, duration_seconds: 3, transition: 'fade', camera_motion: 'ken_burns_in', text_overlay: 'B', video_start_seconds: 1 }
+    const { error: updateError } = await supabase.from('content_drafts').update({
+      structure: { hook: 'SMOKE-TEST', scenes: [sceneB, sceneA], outro: '', music_direction: '', caption: '', hashtags: [], quality_check: null, reasoning: '', _previous_scenes: [sceneA, sceneB] },
+    }).eq('id', draft?.id ?? '')
+    const { data: reread } = await supabase.from('content_drafts').select('structure').eq('id', draft?.id ?? '').maybeSingle()
+    check(
+      'Timeline-Update (Reorder + Undo-Snapshot) rundtrippt korrekt',
+      !updateError && reread?.structure?.scenes?.[0]?.source_id === fakeIdB && reread?.structure?._previous_scenes?.length === 2,
+      updateError?.message,
+    )
     await supabase.from('content_drafts').delete().eq('id', draft?.id ?? '')
+
+    // §Sprint 4: eigene Musikdatei landet im bestehenden "documents"-Bucket
+    // unter familyId/reel-music/{projectId}/... (kein neuer Bucket, siehe
+    // lib/actions/reel-timeline.ts::uploadReelMusic) -- gleiches
+    // Signed-Upload+move()-Muster wie Video, hier fuer Audio geprueft.
+    const musicStaging = `uploads-staging/smoke-test/music-${Date.now()}`
+    const musicFinal = `${familyId}/reel-music/${project.id}/music-${Date.now()}.mp3`
+    const musicUp = await supabase.storage.from('documents').upload(musicStaging, new Uint8Array([0, 0, 0, 0]), { contentType: 'audio/mpeg' })
+    const musicMv = await supabase.storage.from('documents').move(musicStaging, musicFinal)
+    check('Musikdatei-Upload + move() erfolgreich', !musicUp.error && !musicMv.error, (musicUp.error ?? musicMv.error)?.message)
+    await supabase.storage.from('documents').remove([musicFinal, musicStaging])
 
     await supabase.from('memory_videos').delete().eq('id', video?.id ?? '')
     await supabase.from('content_projects').delete().eq('id', project.id)
