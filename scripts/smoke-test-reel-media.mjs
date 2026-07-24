@@ -80,6 +80,16 @@ async function main() {
     }).select('id').single()
     check('memory_videos-Zeile angelegt', !videoError && !!video?.id, videoError?.message)
 
+    // §Content Studio 3.0, Sprint 3: neue Persistenz-Oberflaeche
+    // (content_drafts, draft_type='video_reel') -- additiv, keine neue
+    // Tabelle/Migration, daher hier statt in einer eigenen Migration geprueft.
+    const { data: draft, error: draftError } = await supabase.from('content_drafts').insert({
+      project_id: project.id, draft_type: 'video_reel',
+      structure: { hook: 'SMOKE-TEST', scenes: [{ source_type: 'photo', source_id: fakeIdA, duration_seconds: 2, transition: 'cut', camera_motion: 'static', text_overlay: '', video_start_seconds: null }], outro: '', music_direction: '', caption: '', hashtags: [], quality_check: null, reasoning: '' },
+    }).select('id').single()
+    check('content_drafts (draft_type=video_reel) angelegt', !draftError && !!draft?.id, draftError?.message)
+    await supabase.from('content_drafts').delete().eq('id', draft?.id ?? '')
+
     await supabase.from('memory_videos').delete().eq('id', video?.id ?? '')
     await supabase.from('content_projects').delete().eq('id', project.id)
     console.log('Cleanup (Datenbank) durchgeführt.')

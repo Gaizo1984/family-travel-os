@@ -14,6 +14,7 @@ import {
   tonalityInstruction, languageInstruction, CONTENT_FOCUS_LABELS, CONTENT_MOOD_LABELS,
 } from '@/lib/ai-style-guidelines'
 import { MAX_RETAINED_MEMORIES_PER_TRIP, MAX_PHOTOS_BY_FORMAT, DEFAULT_MAX_PHOTOS, MAX_SELECTED_FOR_CAROUSEL, CONTENT_FORMAT_LABELS } from '@/lib/content-session-limits'
+import { BASE_CONTENT_PROPS } from '@/lib/content-schema-fragments'
 import type { Json } from '@/lib/supabase/types'
 
 /** Gleiches Modell wie alle übrigen KI-Flows (Pass/ESTA/Beleg/Reiseideen/Content). */
@@ -205,22 +206,6 @@ const SESSION_ASSESSMENT_SCHEMA = {
   },
   required: ['assessments'],
   additionalProperties: false,
-}
-
-const BASE_CONTENT_PROPS = {
-  caption: { type: 'string', description: 'Fertige Bildunterschrift mit Emojis' },
-  hashtags: { type: 'array', items: { type: 'string' }, maxItems: 12 },
-  quality_check: {
-    type: 'object',
-    description: 'Ehrliche Kurzbewertung: Bild-Text-Passung, visuelle Vielfalt, Hook-Stärke, Engagement-Potenzial, Authentizität.',
-    properties: {
-      rating: { type: 'string', enum: ['stark', 'solide', 'verbesserungsfaehig'] },
-      summary: { type: 'string', description: 'Ein bis zwei Sätze Begründung' },
-      suggestions: { type: 'array', items: { type: 'string' }, description: 'Konkrete Verbesserungsvorschläge, leeres Array wenn rating="stark"' },
-    },
-    required: ['rating', 'summary', 'suggestions'],
-    additionalProperties: false,
-  },
 }
 
 const CONTENT_FORMAT_SCHEMAS: Record<string, Record<string, unknown>> = {

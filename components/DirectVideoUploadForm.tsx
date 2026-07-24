@@ -63,11 +63,13 @@ export function DirectVideoUploadForm({
 
     const paths: string[] = []
     const mimeTypes: string[] = []
+    const durations: (number | null)[] = []
     let rejectedCount = 0
 
     try {
       // §Vorab-Prüfung: Typ/Größe/Dauer -- abgelehnte Dateien lösen KEINEN Upload aus.
       const accepted: File[] = []
+      const acceptedDurations: (number | null)[] = []
       for (const file of files) {
         if (!ALLOWED_REEL_VIDEO_MIME_TYPES.includes(file.type as (typeof ALLOWED_REEL_VIDEO_MIME_TYPES)[number])) {
           rejectedCount++; continue
@@ -80,6 +82,7 @@ export function DirectVideoUploadForm({
           rejectedCount++; continue
         }
         accepted.push(file)
+        acceptedDurations.push(duration)
       }
 
       if (accepted.length === 0) {
@@ -97,6 +100,7 @@ export function DirectVideoUploadForm({
           if (error) throw error
           paths.push(slots[i].path)
           mimeTypes.push(accepted[i].type)
+          durations.push(acceptedDurations[i])
         } catch {
           rejectedCount++
         }
@@ -120,6 +124,11 @@ export function DirectVideoUploadForm({
       hiddenMimes.name = 'uploaded_mime_types'
       hiddenMimes.value = JSON.stringify(mimeTypes)
       form.appendChild(hiddenMimes)
+      const hiddenDurations = document.createElement('input')
+      hiddenDurations.type = 'hidden'
+      hiddenDurations.name = 'uploaded_durations'
+      hiddenDurations.value = JSON.stringify(durations)
+      form.appendChild(hiddenDurations)
 
       setProgress(null)
       if (rejectedCount > 0) {

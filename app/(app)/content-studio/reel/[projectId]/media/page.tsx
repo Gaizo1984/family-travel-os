@@ -1,19 +1,32 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, Video, Plus, Minus, ArrowUp, ArrowDown, Clock } from "lucide-react";
+import { ChevronLeft, Video, Plus, Minus, ArrowUp, ArrowDown, Clock, Sparkles } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import {
   createReelVideoUploadSlots, uploadReelVideos,
   addReelMediaItem, removeReelMediaItem, reorderReelMediaItem,
+  createReelThumbnailUploadSlots, saveReelVideoThumbnail,
 } from "@/lib/actions/content-reel-media";
+import { generateReelStoryboard } from "@/lib/actions/reel-storyboard";
 import { reelMediaLimitFor, ALLOWED_REEL_VIDEO_MIME_TYPES } from "@/lib/reel-media-limits";
 import { REEL_STYLE_LABELS } from "@/lib/ai-style-guidelines";
 import { getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
 import { SignedPhoto } from "@/components/SignedPhoto";
 import { DirectVideoUploadForm } from "@/components/DirectVideoUploadForm";
+import { GenerateReelStoryboardButton } from "@/components/GenerateReelStoryboardButton";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
 import { Banner } from "@/components/Banner";
+
+type ReelStoryboardScene = {
+  source_type: "photo" | "video"; source_id: string; duration_seconds: number
+  transition: string; camera_motion: string; text_overlay: string; video_start_seconds: number | null
+};
+type ReelStoryboardStructure = {
+  hook: string; outro: string; music_direction: string; caption: string; hashtags: string[]
+  reasoning: string; scenes: ReelStoryboardScene[]
+  quality_check: { rating: string; summary: string; suggestions: string[] } | null
+};
 
 const ICON_BUTTON_STYLE: React.CSSProperties = {
   background: "none", border: "none", cursor: "pointer", display: "flex", padding: "8px", margin: "-4px",
@@ -40,10 +53,10 @@ export default async function ReelMediaPage({
   searchParams,
 }: {
   params: Promise<{ projectId: string }>;
-  searchParams: Promise<{ error?: string; uploaded?: string }>;
+  searchParams: Promise<{ error?: string; uploaded?: string; storyboard?: string }>;
 }) {
   const { projectId } = await params;
-  const { error, uploaded } = await searchParams;
+  const { error, uploaded, storyboard } = await searchParams;
 
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
@@ -57,7 +70,7 @@ export default async function ReelMediaPage({
     .maybeSingle();
   if (!project || !project.trip_id) notFound();
 
-  const [{ data: photosRaw }, { data: videosRaw }, { data: itemsRaw }] = await Promise.all([
+  const [{ data: photosRaw }, { data: videosRaw }, { data: itemsRaw }, { data: draftRaw }] = await Promise.all([
     supabase
       .from("memory_photos")
       .select("id, storage_path, caption")
@@ -66,7 +79,7 @@ export default async function ReelMediaPage({
       .order("sort_order", { ascending: true }),
     supabase
       .from("memory_videos")
-      .select("id, storage_path, duration_seconds, caption, created_at")
+      .select("id, storage_path, thumbnail_storage_path, duration_seconds, caption, created_at")
       .eq("trip_id", project.trip_id)
       .order("created_at", { ascending: false }),
     supabase
@@ -74,7 +87,16 @@ export default async function ReelMediaPage({
       .select("id, source_type, source_id, sort_order")
       .eq("project_id", projectId)
       .order("sort_order", { ascending: true }),
+    supabase
+      .from("content_drafts")
+      .select("id, structure, created_at")
+      .eq("project_id", projectId)
+      .eq("draft_type", "video_reel")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
+  const storyboardDraft = draftRaw ? { id: draftRaw.id, structure: draftRaw.structure as unknown as ReelStoryboardStructure } : null;
 
   const photos = photosRaw ?? [];
   const videos = videosRaw ?? [];
@@ -111,6 +133,26 @@ export default async function ReelMediaPage({
   const limit = reelMediaLimitFor(project.reel_duration_seconds ?? 30);
   const selectedCount = selectedTiles.length;
   const showVideoUpload = videos.length === 0;
+
+  // §Content Studio 3.0, Sprint 3: nur für AUSGEWÄHLTE Videos ohne Standbild
+  // wird eine kurzlebige Signed-URL des Rohvideos erzeugt -- ausschließlich
+  // zur clientseitigen Standbild-Erzeugung (GenerateReelStoryboardButton),
+  // niemals zur Wiedergabe/Weitergabe.
+  const selectedVideosWithoutThumbnail = selectedTiles.filter((t) => {
+    if (t.sourceType !== "video") return false;
+    const v = videos.find((vv) => vv.id === t.sourceId);
+    return !!v && !v.thumbnail_storage_path;
+  });
+  const videosNeedingThumbnail = (
+    await Promise.all(
+      selectedVideosWithoutThumbnail.map(async (t) => {
+        const v = videos.find((vv) => vv.id === t.sourceId);
+        if (!v) return null;
+        const { data: signed } = await supabase.storage.from("documents").createSignedUrl(v.storage_path, 300);
+        return signed?.signedUrl ? { videoId: v.id, signedUrl: signed.signedUrl } : null;
+      })
+    )
+  ).filter((x): x is { videoId: string; signedUrl: string } => x !== null);
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -295,6 +337,97 @@ export default async function ReelMediaPage({
             Noch {limit.min - selectedCount} Medien bis zum Minimum für {project.reel_duration_seconds}s.
           </p>
         )}
+
+        <section className="mt-10 pt-8" style={{ borderTop: "1px solid var(--border)" }}>
+          <h2 className="mb-1" style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase" }}>
+            KI-Storyboard
+          </h2>
+          <p className="mb-4" style={{ color: "var(--muted)", fontSize: "0.72rem", lineHeight: 1.5 }}>
+            Wählt Szenen aus den oben ausgewählten Medien, ordnet sie und schreibt Hook, Texte und Musikrichtung.
+            Noch keine Timeline oder gerendertes Video -- nur der Plan.
+          </p>
+
+          {storyboard === "1" && <Banner variant="success">Storyboard erstellt.</Banner>}
+
+          <GenerateReelStoryboardButton
+            action={generateReelStoryboard}
+            projectId={projectId}
+            returnTo={returnTo}
+            videosNeedingThumbnail={videosNeedingThumbnail}
+            createThumbnailSlots={createReelThumbnailUploadSlots}
+            saveThumbnail={saveReelVideoThumbnail}
+            disabled={selectedCount < limit.min}
+            label={storyboardDraft ? "Storyboard neu erstellen" : "Storyboard erstellen"}
+          />
+
+          {storyboardDraft && (
+            <div className="mt-6 rounded-xl p-5 flex flex-col gap-4" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+              <div className="flex items-center gap-2">
+                <Sparkles size={14} strokeWidth={1.6} style={{ color: "var(--accent)" }} />
+                <span style={{ color: "var(--accent)", fontSize: "0.62rem", letterSpacing: "0.16em", textTransform: "uppercase" }}>
+                  Aktuelles Storyboard
+                </span>
+              </div>
+
+              <div>
+                <p style={{ color: "var(--muted)", fontSize: "0.65rem", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "4px" }}>Hook</p>
+                <p style={{ color: "var(--foreground)", fontSize: "0.82rem", lineHeight: 1.5 }}>{storyboardDraft.structure.hook}</p>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <p style={{ color: "var(--muted)", fontSize: "0.65rem", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                  Szenen ({storyboardDraft.structure.scenes.length})
+                </p>
+                {storyboardDraft.structure.scenes.map((scene, idx) => (
+                  <div key={`${scene.source_type}-${scene.source_id}-${idx}`} className="flex items-start gap-3 p-2.5 rounded-lg" style={{ background: "var(--background)" }}>
+                    <span style={{ color: "var(--accent)", fontSize: "0.7rem", width: "18px", flexShrink: 0 }}>{idx + 1}.</span>
+                    <div className="flex-1">
+                      <p style={{ color: "var(--foreground)", fontSize: "0.76rem" }}>
+                        {scene.source_type === "photo" ? "Foto" : "Video"} · {scene.duration_seconds}s · {scene.transition} · {scene.camera_motion}
+                        {scene.video_start_seconds != null ? ` · ab ${scene.video_start_seconds}s` : ""}
+                      </p>
+                      {scene.text_overlay && (
+                        <p style={{ color: "var(--muted)", fontSize: "0.74rem", marginTop: "2px" }}>„{scene.text_overlay}“</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div>
+                <p style={{ color: "var(--muted)", fontSize: "0.65rem", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "4px" }}>Outro</p>
+                <p style={{ color: "var(--foreground)", fontSize: "0.82rem", lineHeight: 1.5 }}>{storyboardDraft.structure.outro}</p>
+              </div>
+
+              <div>
+                <p style={{ color: "var(--muted)", fontSize: "0.65rem", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "4px" }}>Musikrichtung</p>
+                <p style={{ color: "var(--foreground)", fontSize: "0.82rem", lineHeight: 1.5 }}>{storyboardDraft.structure.music_direction}</p>
+              </div>
+
+              <div>
+                <p style={{ color: "var(--muted)", fontSize: "0.65rem", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "4px" }}>Caption</p>
+                <p style={{ color: "var(--foreground)", fontSize: "0.82rem", lineHeight: 1.5 }}>{storyboardDraft.structure.caption}</p>
+                {storyboardDraft.structure.hashtags?.length > 0 && (
+                  <p style={{ color: "var(--muted)", fontSize: "0.74rem", marginTop: "4px" }}>{storyboardDraft.structure.hashtags.map((h) => `#${h}`).join(" ")}</p>
+                )}
+              </div>
+
+              <div>
+                <p style={{ color: "var(--muted)", fontSize: "0.65rem", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "4px" }}>Begründung</p>
+                <p style={{ color: "var(--muted)", fontSize: "0.76rem", lineHeight: 1.5 }}>{storyboardDraft.structure.reasoning}</p>
+              </div>
+
+              {storyboardDraft.structure.quality_check && (
+                <div>
+                  <p style={{ color: "var(--muted)", fontSize: "0.65rem", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "4px" }}>
+                    Qualitäts-Check · {storyboardDraft.structure.quality_check.rating}
+                  </p>
+                  <p style={{ color: "var(--muted)", fontSize: "0.76rem", lineHeight: 1.5 }}>{storyboardDraft.structure.quality_check.summary}</p>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
       </div>
     </div>
   );

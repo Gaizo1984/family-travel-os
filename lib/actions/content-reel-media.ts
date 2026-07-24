@@ -66,6 +66,14 @@ export async function uploadReelVideos(formData: FormData) {
   } catch {
     mimeTypes = []
   }
+  /** §Für Sprint 3 (KI-Storyboard) nötig: reale Cliplänge, nie erfunden -- clientseitig per <video>.duration ermittelt (DirectVideoUploadForm.tsx), hier nur übernommen, keine erneute Messung serverseitig (würde die Datei laden). */
+  let durations: (number | null)[] = []
+  try {
+    const parsed = JSON.parse(String(formData.get('uploaded_durations') ?? '[]'))
+    if (Array.isArray(parsed) && parsed.every((d) => d === null || typeof d === 'number')) durations = parsed
+  } catch {
+    durations = []
+  }
 
   const supabase = await createClient()
   const { id: familyId } = await getFamily()
@@ -111,7 +119,7 @@ export async function uploadReelVideos(formData: FormData) {
       family_id: familyId,
       trip_id: project.trip_id,
       storage_path: finalPath,
-      duration_seconds: null,
+      duration_seconds: durations[i] ?? null,
     })
     if (insertError) {
       rejectedCount++
@@ -169,6 +177,40 @@ export async function removeReelMediaItem(formData: FormData) {
   await supabase.from('content_reel_media_items').delete().eq('id', itemId).eq('project_id', projectId)
 
   redirect(returnTo)
+}
+
+/** §Content Studio 3.0, Sprint 3: Posterframe-Upload für ein Video, das noch keins hat -- gleiches Signed-Upload-Muster wie der Videoupload selbst. */
+export async function createReelThumbnailUploadSlots(count: number): Promise<UploadSlot[]> {
+  const { id: familyId } = await getFamily()
+  return createUploadSlots(familyId, count)
+}
+
+/**
+ * §"Bei Videos nur ein Standbild/Posterframe analysieren, niemals das
+ * Rohvideo an OpenAI senden" (Nutzervorgabe): das Standbild wird clientseitig
+ * per <video>+<canvas> aus dem Video selbst erzeugt (components/
+ * GenerateReelStoryboardButton.tsx) -- hier nur per `storage.move()`
+ * übernommen (kein Function-Buffering) und in memory_videos.thumbnail_storage_path
+ * hinterlegt, damit spätere Storyboard-Läufe (und künftig auch andere
+ * Ansichten) es wiederverwenden können, statt es bei jedem Lauf neu zu erzeugen.
+ */
+export async function saveReelVideoThumbnail(formData: FormData): Promise<{ ok: boolean }> {
+  const videoId = String(formData.get('video_id') ?? '')
+  const stagingPath = String(formData.get('staging_path') ?? '')
+  if (!videoId || !stagingPath) return { ok: false }
+
+  const supabase = await createClient()
+  const { id: familyId } = await getFamily()
+
+  const { data: video } = await supabase.from('memory_videos').select('id, family_id').eq('id', videoId).eq('family_id', familyId).maybeSingle()
+  if (!video) return { ok: false }
+
+  const finalPath = `${familyId}/thumb-${crypto.randomUUID()}.jpg`
+  const { error: moveError } = await supabase.storage.from(STORAGE_BUCKET).move(stagingPath, finalPath)
+  if (moveError) return { ok: false }
+
+  const { error: updateError } = await supabase.from('memory_videos').update({ thumbnail_storage_path: finalPath }).eq('id', videoId)
+  return { ok: !updateError }
 }
 
 /** §"Reihenfolge änderbar" (Nutzervorgabe): identisches Swap-Muster wie `reorderMemoryPhoto` (lib/actions/memories.ts). */
