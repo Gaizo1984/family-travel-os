@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { after } from "next/server";
-import { ArrowRight, ImagePlus, Settings, MapPin, Wand2, Clapperboard, Clock, Gauge, Trash2 } from "lucide-react";
+import { ArrowRight, ImagePlus, Settings, MapPin, Wand2, Clapperboard, Clock, Gauge, Trash2, Film } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { WhatCanAI } from "./WhatCanAI";
@@ -200,6 +200,23 @@ export default async function ContentStudioPage() {
             nach 24h) -- LUMI erstellt daraus Beitrag, Story oder Reel inkl. Hook, Caption und Hashtags. Ausgewählte
             Bilder lassen sich optional dauerhaft behalten.
           </p>
+        </Link>
+
+        {/* §Content Studio 3.0, Sprint 1: separater, kleinerer Einstieg -- noch
+            kein vollwertiger Flow (keine KI-Analyse/Timeline/Rendering), daher
+            bewusst nicht als primäre "Content erstellen"-Kachel, aber sichtbar
+            auffindbar. */}
+        <Link
+          href="/content-studio/reel/new"
+          className="flex items-center gap-3 mb-8 rounded-xl p-5"
+          style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}
+        >
+          <Film size={16} strokeWidth={1.5} style={{ color: "var(--accent)", flexShrink: 0 }} />
+          <div className="flex-1 min-w-0">
+            <div style={{ color: "var(--foreground)", fontSize: "0.85rem" }}>Video-Reel erstellen · Beta</div>
+            <div style={{ color: "var(--muted)", fontSize: "0.68rem" }}>Aus vorhandenen Fotos und Videos -- Stil und Dauer wählen</div>
+          </div>
+          <ArrowRight size={14} strokeWidth={1.5} style={{ color: "var(--accent)", flexShrink: 0 }} />
         </Link>
 
         {(openSessions ?? []).length > 0 && (

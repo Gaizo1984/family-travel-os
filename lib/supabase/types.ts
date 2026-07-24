@@ -428,6 +428,7 @@ export interface Database {
           content_date: string | null; stage_id: string | null; language: string | null; tonality: string | null
           output_format: string | null
           content_focus: string | null; custom_focus: string | null; mood: string[] | null; hint_text: string | null
+          reel_style: string | null; reel_duration_seconds: number | null
         }
         Insert: {
           id?: string; family_id: string; trip_id?: string | null; title: string
@@ -435,6 +436,7 @@ export interface Database {
           content_date?: string | null; stage_id?: string | null; language?: string | null; tonality?: string | null
           output_format?: string | null
           content_focus?: string | null; custom_focus?: string | null; mood?: string[] | null; hint_text?: string | null
+          reel_style?: string | null; reel_duration_seconds?: number | null
         }
         Update: {
           id?: string; family_id?: string; trip_id?: string | null; title?: string
@@ -442,6 +444,7 @@ export interface Database {
           content_date?: string | null; stage_id?: string | null; language?: string | null; tonality?: string | null
           output_format?: string | null
           content_focus?: string | null; custom_focus?: string | null; mood?: string[] | null; hint_text?: string | null
+          reel_style?: string | null; reel_duration_seconds?: number | null
         }
         Relationships: [
           { foreignKeyName: "content_projects_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] },
@@ -667,6 +670,79 @@ export interface Database {
           { foreignKeyName: "memory_photos_uploaded_by_person_id_fkey"; columns: ["uploaded_by_person_id"]; isOneToOne: false; referencedRelation: "persons";  referencedColumns: ["id"] },
           { foreignKeyName: "memory_photos_is_duplicate_of_fkey";       columns: ["is_duplicate_of"];       isOneToOne: false; referencedRelation: "memory_photos"; referencedColumns: ["id"] },
           { foreignKeyName: "memory_photos_stage_id_fkey";              columns: ["stage_id"];              isOneToOne: false; referencedRelation: "stages"; referencedColumns: ["id"] }
+        ]
+      }
+      memory_videos: {
+        Row: {
+          id: string; family_id: string; trip_id: string | null; uploaded_by_person_id: string | null
+          storage_path: string; thumbnail_storage_path: string | null; duration_seconds: number | null
+          taken_at: string | null; caption: string | null; is_highlight: boolean; created_at: string
+        }
+        Insert: {
+          id?: string; family_id: string; trip_id?: string | null; uploaded_by_person_id?: string | null
+          storage_path: string; thumbnail_storage_path?: string | null; duration_seconds?: number | null
+          taken_at?: string | null; caption?: string | null; is_highlight?: boolean; created_at?: string
+        }
+        Update: {
+          id?: string; family_id?: string; trip_id?: string | null; uploaded_by_person_id?: string | null
+          storage_path?: string; thumbnail_storage_path?: string | null; duration_seconds?: number | null
+          taken_at?: string | null; caption?: string | null; is_highlight?: boolean; created_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "memory_videos_family_id_fkey";             columns: ["family_id"];             isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] },
+          { foreignKeyName: "memory_videos_trip_id_fkey";               columns: ["trip_id"];               isOneToOne: false; referencedRelation: "trips";    referencedColumns: ["id"] },
+          { foreignKeyName: "memory_videos_uploaded_by_person_id_fkey"; columns: ["uploaded_by_person_id"]; isOneToOne: false; referencedRelation: "persons";  referencedColumns: ["id"] }
+        ]
+      }
+      content_reel_media_items: {
+        Row: {
+          id: string; project_id: string; source_type: string; source_id: string
+          sort_order: number; created_at: string
+        }
+        Insert: {
+          id?: string; project_id: string; source_type: string; source_id: string
+          sort_order?: number; created_at?: string
+        }
+        Update: {
+          id?: string; project_id?: string; source_type?: string; source_id?: string
+          sort_order?: number; created_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "content_reel_media_items_project_id_fkey"; columns: ["project_id"]; isOneToOne: false; referencedRelation: "content_projects"; referencedColumns: ["id"] }
+        ]
+      }
+      content_reel_renders: {
+        Row: {
+          id: string; draft_id: string; quality: string; status: string
+          provider: string | null; provider_job_id: string | null; progress_percent: number | null
+          attempt_count: number; max_attempts: number
+          output_storage_path: string | null; output_duration_seconds: number | null
+          error_message: string | null; requested_at: string; completed_at: string | null
+        }
+        Insert: {
+          id?: string; draft_id: string; quality: string; status?: string
+          provider?: string | null; provider_job_id?: string | null; progress_percent?: number | null
+          attempt_count?: number; max_attempts?: number
+          output_storage_path?: string | null; output_duration_seconds?: number | null
+          error_message?: string | null; requested_at?: string; completed_at?: string | null
+        }
+        Update: {
+          id?: string; draft_id?: string; quality?: string; status?: string
+          provider?: string | null; provider_job_id?: string | null; progress_percent?: number | null
+          attempt_count?: number; max_attempts?: number
+          output_storage_path?: string | null; output_duration_seconds?: number | null
+          error_message?: string | null; requested_at?: string; completed_at?: string | null
+        }
+        Relationships: [
+          { foreignKeyName: "content_reel_renders_draft_id_fkey"; columns: ["draft_id"]; isOneToOne: false; referencedRelation: "content_drafts"; referencedColumns: ["id"] }
+        ]
+      }
+      reel_render_usage: {
+        Row: { id: string; family_id: string; month_key: string; render_count: number; updated_at: string }
+        Insert: { id?: string; family_id: string; month_key: string; render_count?: number; updated_at?: string }
+        Update: { id?: string; family_id?: string; month_key?: string; render_count?: number; updated_at?: string }
+        Relationships: [
+          { foreignKeyName: "reel_render_usage_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }
         ]
       }
       content_project_photos: {

@@ -74,6 +74,17 @@ export const CONTENT_MOOD_LABELS: Record<string, string> = Object.fromEntries(
   CONTENT_MOOD_OPTIONS.map((o) => [o.value, o.label]),
 )
 
+/** §Content Studio 3.0: die drei Reel-Stile aus dem MVP-Zuschnitt -- fließen später in Storyboard-/Rendering-Prompt ein (Sprint 3+), hier bereits als Auswahl-Katalog für den Einstieg (Sprint 1). */
+export const REEL_STYLE_OPTIONS = [
+  { value: 'luxury_travel', label: 'Luxury Travel' },
+  { value: 'family_memory', label: 'Family Memory' },
+  { value: 'dynamic_adventure', label: 'Dynamic Adventure' },
+] as const
+export type ReelStyle = (typeof REEL_STYLE_OPTIONS)[number]['value']
+export const REEL_STYLE_LABELS: Record<string, string> = Object.fromEntries(
+  REEL_STYLE_OPTIONS.map((o) => [o.value, o.label]),
+)
+
 /** §"Klickstärke ohne Clickbait": ein zum Entwurf passender Content-Winkel statt generischer KI-Floskeln oder billiger Übertreibung. */
 export const ENGAGEMENT_ANGLE_INSTRUCTION =
   'Wähle einen zum Material passenden Content-Winkel (z.B. Kontrast, Überraschung, Familienmoment, ' +
