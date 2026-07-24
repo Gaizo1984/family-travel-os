@@ -14,11 +14,10 @@ import { REEL_STYLE_OPTIONS } from '@/lib/ai-style-guidelines'
  * nächstes wirklich hochgeladen oder -- wie hier -- aus vorhandenen Medien
  * ausgewählt wird, siehe Sprint 2).
  *
- * §"Noch keine KI-Analyse, Timeline oder produktives Rendering" (Sprint-1-
- * Abgrenzung): nach dem Anlegen geht es auf die bereits bestehende,
- * generische Projektübersicht (/content-studio/projects/[projectId]) --
- * keine neue Detailseite in diesem Schritt, echte Wiederverwendung statt
- * einer weiteren, noch leeren Seite.
+ * §Sprint 2: nach dem Anlegen geht es direkt zur Medienauswahl
+ * (/content-studio/reel/[projectId]/media) -- der tatsächliche nächste
+ * Schritt im Flow, statt eines Zwischenstopps auf der generischen,
+ * leeren Projektübersicht.
  */
 export async function startReelProject(formData: FormData) {
   const tripId = String(formData.get('trip_id') ?? '')
@@ -54,5 +53,5 @@ export async function startReelProject(formData: FormData) {
     redirect(`${newPath}?error=${encodeURIComponent('Speicherfehler: ' + (error?.message ?? 'unbekannt'))}`)
   }
 
-  redirect(`/content-studio/projects/${project.id}`)
+  redirect(`/content-studio/reel/${project.id}/media`)
 }
