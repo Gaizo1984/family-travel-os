@@ -18,8 +18,25 @@ export function reelMediaLimitFor(durationSeconds: number): { min: number; max: 
 /** §"Clip-Länge begrenzen" (Nutzervorgabe): deutlich kürzer als die Reel-Gesamtdauer -- ein einzelner Clip soll nie den ganzen Reel füllen. */
 export const MAX_REEL_VIDEO_CLIP_SECONDS = 20
 
-/** Entspricht dem konfigurierten Supabase-Storage-Bucket-Limit (supabase/config.toml, file_size_limit = 50MiB) -- keine serverseitige Videokomprimierung in diesem Sprint, daher realistische Handy-Videogröße innerhalb des Bucket-Limits. */
+/** Entspricht dem konfigurierten Supabase-Storage-Bucket-Limit (supabase/config.toml, file_size_limit = 50MiB). Videos darüber werden clientseitig komprimiert (siehe REEL_VIDEO_COMPRESSION_*-Konstanten unten), nicht mehr pauschal abgelehnt. */
 export const MAX_REEL_VIDEO_FILE_SIZE_BYTES = 50 * 1024 * 1024
+
+/**
+ * §"Zentrale Limits für Originalgröße, Zielgröße und Clipdauer" (Nutzervorgabe,
+ * wörtlich) -- clientseitige Videokompression (lib/video-compression-client.ts).
+ * Zielgröße bewusst deutlich unter MAX_REEL_VIDEO_FILE_SIZE_BYTES, damit trotz
+ * Mux-/Container-Overhead und Bitrate-Schwankungen sicher unter dem
+ * Upload-Limit gelandet wird ("mit etwas Puffer").
+ */
+export const REEL_VIDEO_COMPRESSION_TARGET_BYTES = 44 * 1024 * 1024
+/** Ab dieser Originalgröße wird eine Kompression gar nicht erst versucht -- das Encoding liefe sonst im Browser unangemessen lange/speicherintensiv. */
+export const MAX_REEL_VIDEO_SOURCE_FILE_SIZE_BYTES = 500 * 1024 * 1024
+export const REEL_VIDEO_COMPRESSION_MAX_WIDTH = 1080
+export const REEL_VIDEO_COMPRESSION_MAX_HEIGHT = 1920
+export const REEL_VIDEO_COMPRESSION_FPS = 30
+export const REEL_VIDEO_COMPRESSION_AUDIO_BITRATE_BPS = 128_000
+/** Untergrenze, damit ein sehr langer/ungewöhnlicher Clip nicht auf eine unbrauchbar niedrige Video-Bitrate gedrückt wird. */
+export const REEL_VIDEO_COMPRESSION_MIN_VIDEO_BITRATE_BPS = 500_000
 
 export const ALLOWED_REEL_VIDEO_MIME_TYPES = ['video/mp4', 'video/quicktime', 'video/webm'] as const
 

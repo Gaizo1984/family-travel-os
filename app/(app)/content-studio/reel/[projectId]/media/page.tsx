@@ -6,8 +6,9 @@ import { getFamily } from "@/lib/family";
 import {
   createReelVideoUploadSlots, uploadReelVideos,
   addReelMediaItem, removeReelMediaItem, reorderReelMediaItem,
-  createReelThumbnailUploadSlots, saveReelVideoThumbnail,
+  createReelThumbnailUploadSlots, saveReelVideoThumbnail, deleteReelVideo,
 } from "@/lib/actions/content-reel-media";
+import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { generateReelStoryboard } from "@/lib/actions/reel-storyboard";
 import { reelMediaLimitFor, ALLOWED_REEL_VIDEO_MIME_TYPES } from "@/lib/reel-media-limits";
 import { REEL_STYLE_LABELS } from "@/lib/ai-style-guidelines";
@@ -284,6 +285,15 @@ export default async function ReelMediaPage({
                       <div className="absolute inset-0 flex items-center justify-center" style={{ background: "var(--surface)" }}>
                         <Video size={22} strokeWidth={1.5} style={{ color: "var(--muted)" }} />
                       </div>
+                    )}
+                    {tile.sourceType === "video" && (
+                      <form action={deleteReelVideo.bind(null, tile.sourceId, returnTo)} className="absolute top-1.5 left-1.5 z-10">
+                        <ConfirmSubmitButton
+                          label="🗑"
+                          confirmMessage="Dieses Video endgültig löschen? Es wird aus Storage, aus allen Reel-Auswahllisten und aus jedem Storyboard entfernt, das es verwendet (die betroffene Szene fällt weg, die Gesamtdauer wird automatisch ausgeglichen)."
+                          style={{ ...ICON_BUTTON_STYLE, padding: "4px", background: "rgba(10,9,7,0.55)", borderRadius: "999px", fontSize: "0.7rem", lineHeight: 1 }}
+                        />
+                      </form>
                     )}
                     <div
                       className="absolute inset-0 flex items-end justify-end p-1.5"

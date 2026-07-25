@@ -80,6 +80,30 @@ async function main() {
     }).select('id').single()
     check('memory_videos-Zeile angelegt', !videoError && !!video?.id, videoError?.message)
 
+    // §"Dateien aus dem Content Studio sollten nicht dauerhaft gespeichert
+    // bleiben" -- prueft die temporary/expires_at/retained_as_memory-Spalten
+    // (20260727000012_reel_video_temporary_storage.sql) und dass ein noch in
+    // einem Reel-Projekt ausgewaehltes Video vom Cleanup-Kandidatenfilter
+    // (temporary=true, retained_as_memory=false, expires_at < now) erkannt,
+    // aber NICHT geloescht werden darf (das uebernimmt hier nur die reine
+    // Datenpruefung, nicht der echte Cleanup-Lauf).
+    const pastExpiry = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+    const { error: ttlUpdateError } = await supabase.from('memory_videos').update({
+      temporary: true, expires_at: pastExpiry, retained_as_memory: false,
+    }).eq('id', video?.id ?? '')
+    if (ttlUpdateError?.message?.includes("Could not find the 'temporary' column")) {
+      console.log('\nÜBERSPRUNGEN - TTL-Spalten auf memory_videos (' + ttlUpdateError.message + ').')
+      console.log('Erwartet, solange 20260727000012_reel_video_temporary_storage.sql noch nicht angewendet wurde.\n')
+    } else {
+      const { data: expiredCandidates } = await supabase
+        .from('memory_videos').select('id').eq('temporary', true).eq('retained_as_memory', false).lt('expires_at', new Date().toISOString())
+      check(
+        'memory_videos TTL-Spalten rundtrippen korrekt und Video gilt als Cleanup-Kandidat',
+        !ttlUpdateError && (expiredCandidates ?? []).some((v) => v.id === video?.id),
+        ttlUpdateError?.message,
+      )
+    }
+
     // §Content Studio 3.0, Sprint 3: neue Persistenz-Oberflaeche
     // (content_drafts, draft_type='video_reel') -- additiv, keine neue
     // Tabelle/Migration, daher hier statt in einer eigenen Migration geprueft.

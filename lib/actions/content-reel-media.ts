@@ -9,6 +9,9 @@ import {
   reelMediaLimitFor, MAX_REEL_VIDEO_FILE_SIZE_BYTES,
   ALLOWED_REEL_VIDEO_MIME_TYPES, REEL_VIDEO_EXTENSION_BY_MIME,
 } from '@/lib/reel-media-limits'
+import { rebalanceScenes } from '@/lib/reel-scene-rebalance'
+import type { ReelStoryboardStructure } from '@/lib/reel-storyboard-types'
+import type { Json } from '@/lib/supabase/types'
 
 /**
  * §Content Studio 3.0, Sprint 2 -- Medienauswahl für ein Reel-Projekt.
@@ -115,11 +118,19 @@ export async function uploadReelVideos(formData: FormData) {
       continue
     }
 
+    // §"Dateien aus dem Content Studio sollten nicht dauerhaft gespeichert
+    // bleiben" (Nutzervorgabe, wörtlich): 48h-Frist ab Upload -- läuft nur
+    // ab, wenn das Video zu diesem Zeitpunkt in KEINEM Reel-Projekt mehr
+    // ausgewählt ist (siehe lib/reel-video-cleanup.ts). Manuelles, früheres
+    // Löschen bleibt jederzeit möglich (lib/actions/content-reel-media.ts::deleteReelVideo).
+    const REEL_VIDEO_TTL_HOURS = 48
     const { error: insertError } = await supabase.from('memory_videos').insert({
       family_id: familyId,
       trip_id: project.trip_id,
       storage_path: finalPath,
       duration_seconds: durations[i] ?? null,
+      temporary: true,
+      expires_at: new Date(Date.now() + REEL_VIDEO_TTL_HOURS * 60 * 60 * 1000).toISOString(),
     })
     if (insertError) {
       rejectedCount++
@@ -211,6 +222,67 @@ export async function saveReelVideoThumbnail(formData: FormData): Promise<{ ok: 
 
   const { error: updateError } = await supabase.from('memory_videos').update({ thumbnail_storage_path: finalPath }).eq('id', videoId)
   return { ok: !updateError }
+}
+
+/**
+ * §"Das Hochgeladene Video würde ich zudem gerne löschen" + "Videos aus dem
+ * Content Studio sollten nicht dauerhaft gespeichert bleiben" (Nutzervorgabe,
+ * wörtlich): manuelles, sofortiges Löschen -- unabhängig von der 48h-Frist
+ * (lib/reel-video-cleanup.ts). Anders als der automatische Cleanup (der ein
+ * noch verwendetes Video NIE anfasst) entfernt diese Aktion das Video
+ * BEWUSST auch aus jedem Storyboard, das es referenziert (Szene raus +
+ * Dauer-Ausgleich, exakt das Muster von removeReelTimelineScene) -- der
+ * Nutzer trifft die Entscheidung hier aktiv selbst, die Reel-PROJEKTE bleiben
+ * dabei erhalten (nur die eine Szene fällt weg), wie gefordert.
+ */
+export async function deleteReelVideo(videoId: string, returnTo: string): Promise<void> {
+  const supabase = await createClient()
+  const { id: familyId } = await getFamily()
+
+  const { data: video } = await supabase
+    .from('memory_videos')
+    .select('id, family_id, trip_id, storage_path, thumbnail_storage_path')
+    .eq('id', videoId).eq('family_id', familyId).maybeSingle()
+  if (!video) redirect(`${returnTo}?error=${encodeURIComponent('Video nicht gefunden.')}`)
+
+  // §Storyboards derselben Reise durchsuchen (ein Video kann in mehreren Reel-Projekten ausgewählt sein).
+  const { data: reelProjects } = video.trip_id
+    ? await supabase.from('content_projects').select('id').eq('trip_id', video.trip_id).eq('project_type', 'reel')
+    : { data: [] as { id: string }[] }
+  const projectIds = (reelProjects ?? []).map((p) => p.id)
+
+  if (projectIds.length > 0) {
+    const { data: drafts } = await supabase
+      .from('content_drafts')
+      .select('id, structure')
+      .eq('draft_type', 'video_reel')
+      .in('project_id', projectIds)
+
+    for (const draft of drafts ?? []) {
+      const structure = draft.structure as unknown as ReelStoryboardStructure
+      const idx = structure.scenes.findIndex((s) => s.source_type === 'video' && s.source_id === videoId)
+      if (idx === -1) continue
+
+      const previousScenes = structure.scenes.map((s) => ({ ...s }))
+      const remainingScenes = structure.scenes.filter((_, i) => i !== idx)
+      const target = structure.reel_duration_seconds ?? 30
+      const newStructure: ReelStoryboardStructure = {
+        ...structure, scenes: rebalanceScenes(remainingScenes, target), _previous_scenes: previousScenes,
+      }
+      await supabase.from('content_drafts').update({ structure: newStructure as unknown as Json }).eq('id', draft.id)
+    }
+  }
+
+  await supabase.from('content_reel_media_items').delete().eq('source_type', 'video').eq('source_id', videoId)
+
+  const pathsToRemove = [video.storage_path, video.thumbnail_storage_path].filter((p): p is string => Boolean(p))
+  const { error: removeError } = await supabase.storage.from(STORAGE_BUCKET).remove(pathsToRemove)
+  if (removeError) redirect(`${returnTo}?error=${encodeURIComponent('Storage-Datei konnte nicht gelöscht werden.')}`)
+
+  const { error: deleteError } = await supabase.from('memory_videos').delete().eq('id', videoId)
+  if (deleteError) redirect(`${returnTo}?error=${encodeURIComponent('Speicherfehler beim Löschen.')}`)
+
+  redirect(returnTo)
 }
 
 /** §"Reihenfolge änderbar" (Nutzervorgabe): identisches Swap-Muster wie `reorderMemoryPhoto` (lib/actions/memories.ts). */

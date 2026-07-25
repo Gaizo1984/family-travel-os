@@ -677,16 +677,19 @@ export interface Database {
           id: string; family_id: string; trip_id: string | null; uploaded_by_person_id: string | null
           storage_path: string; thumbnail_storage_path: string | null; duration_seconds: number | null
           taken_at: string | null; caption: string | null; is_highlight: boolean; created_at: string
+          temporary: boolean; expires_at: string | null; retained_as_memory: boolean
         }
         Insert: {
           id?: string; family_id: string; trip_id?: string | null; uploaded_by_person_id?: string | null
           storage_path: string; thumbnail_storage_path?: string | null; duration_seconds?: number | null
           taken_at?: string | null; caption?: string | null; is_highlight?: boolean; created_at?: string
+          temporary?: boolean; expires_at?: string | null; retained_as_memory?: boolean
         }
         Update: {
           id?: string; family_id?: string; trip_id?: string | null; uploaded_by_person_id?: string | null
           storage_path?: string; thumbnail_storage_path?: string | null; duration_seconds?: number | null
           taken_at?: string | null; caption?: string | null; is_highlight?: boolean; created_at?: string
+          temporary?: boolean; expires_at?: string | null; retained_as_memory?: boolean
         }
         Relationships: [
           { foreignKeyName: "memory_videos_family_id_fkey";             columns: ["family_id"];             isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] },

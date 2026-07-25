@@ -10,6 +10,7 @@ import { regenerateContentStrategy } from "@/lib/actions/content-strategy-action
 import { deleteContentSessionProject } from "@/lib/actions/content-sessions";
 import { CONTENT_FORMAT_LABELS } from "@/lib/content-session-limits";
 import { cleanupExpiredContentSessionPhotos } from "@/lib/content-session-cleanup";
+import { cleanupExpiredReelVideos } from "@/lib/reel-video-cleanup";
 
 const STEPS = [
   { Icon: MapPin, label: "Reise & Format wählen" },
@@ -33,6 +34,11 @@ export default async function ContentStudioPage() {
   after(async () => {
     try {
       await cleanupExpiredContentSessionPhotos();
+    } catch {
+      // bewusst verschluckt -- der Cron-Job übernimmt beim nächsten Lauf ohnehin
+    }
+    try {
+      await cleanupExpiredReelVideos();
     } catch {
       // bewusst verschluckt -- der Cron-Job übernimmt beim nächsten Lauf ohnehin
     }
