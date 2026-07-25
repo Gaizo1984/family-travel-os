@@ -134,6 +134,18 @@ export default async function ReelTimelinePage({ params }: { params: Promise<{ p
             removeMusic: removeReelMusic,
           }}
         />
+
+        <div className="mt-8 flex justify-center">
+          <Link
+            href={`/content-studio/reel/${projectId}/render`}
+            style={{
+              background: "var(--accent)", color: "var(--surface)", borderRadius: "999px",
+              padding: "12px 24px", fontSize: "0.78rem", textDecoration: "none",
+            }}
+          >
+            Weiter zum Rendern
+          </Link>
+        </div>
       </div>
     </div>
   );

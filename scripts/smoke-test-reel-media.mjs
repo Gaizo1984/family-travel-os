@@ -105,6 +105,35 @@ async function main() {
       !updateError && reread?.structure?.scenes?.[0]?.source_id === fakeIdB && reread?.structure?._previous_scenes?.length === 2,
       updateError?.message,
     )
+    // §Content Studio 3.0, Sprint 5: content_reel_renders (Sprint 1, bisher
+    // ungenutzt) plus die neuen additiven Metadaten-Spalten
+    // (cost_estimate_usd/output_size_bytes/render_duration_seconds/
+    // aws_bucket_name/aws_function_name aus
+    // 20260727000011_reel_render_metadata.sql) -- rein DB-seitig geprueft,
+    // ohne einen echten AWS-Render auszuloesen.
+    const { data: renderRow, error: renderError } = await supabase.from('content_reel_renders').insert({
+      draft_id: draft.id, quality: 'preview_lowres', status: 'queued', provider: 'remotion_lambda', attempt_count: 1, max_attempts: 2,
+    }).select('id').single()
+    check('content_reel_renders-Zeile angelegt', !renderError && !!renderRow?.id, renderError?.message)
+
+    const { error: renderUpdateError } = await supabase.from('content_reel_renders').update({
+      status: 'completed', progress_percent: 100, cost_estimate_usd: 0.002, output_size_bytes: 813366,
+      render_duration_seconds: 65.8, aws_bucket_name: 'smoke-test-bucket', aws_function_name: 'smoke-test-function',
+      output_storage_path: 'smoke-test/unused.mp4', output_duration_seconds: 15,
+    }).eq('id', renderRow?.id ?? '')
+    if (renderUpdateError?.message?.includes("Could not find the 'aws_bucket_name' column")) {
+      console.log('\nÜBERSPRUNGEN - Render-Metadaten-Spalten (' + renderUpdateError.message + ').')
+      console.log('Erwartet, solange 20260727000011_reel_render_metadata.sql noch nicht angewendet wurde.\n')
+    } else {
+      const { data: renderReread } = await supabase.from('content_reel_renders').select('*').eq('id', renderRow?.id ?? '').maybeSingle()
+      check(
+        'content_reel_renders Render-Metadaten (Kosten/Größe/Dauer) rundtrippen korrekt',
+        !renderUpdateError && renderReread?.cost_estimate_usd === 0.002 && renderReread?.output_size_bytes === 813366 && renderReread?.aws_bucket_name === 'smoke-test-bucket',
+        renderUpdateError?.message,
+      )
+    }
+    await supabase.from('content_reel_renders').delete().eq('id', renderRow?.id ?? '')
+
     await supabase.from('content_drafts').delete().eq('id', draft?.id ?? '')
 
     // §Sprint 4: eigene Musikdatei landet im bestehenden "documents"-Bucket

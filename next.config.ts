@@ -8,7 +8,13 @@ const nextConfig: NextConfig = {
   // installierte Binary genutzt wird, nie der tatsächliche Vercel-Bundling-
   // Pfad. Genau das erklärt, warum die Kompression nur in echter Produktion
   // korrupte Bilddaten erzeugte.
-  serverExternalPackages: ["sharp"],
+  // §Content Studio 3.0, Sprint 5: `@remotion/lambda` zieht transitiv
+  // `@remotion/renderer`/`@remotion/cli` nach, die plattformspezifische
+  // native Compositor-Binaries per `require()` laden (analog zu `sharp`
+  // oben) -- ohne diesen Eintrag versucht Next.js' Bundler, diese `require`-
+  // Aufrufe statisch aufzulösen, und schlägt fehl, weil die Linux-Binaries
+  // lokal (Windows-Dev) gar nicht installiert sind.
+  serverExternalPackages: ["sharp", "@remotion/lambda"],
   // §Content Studio 3.0, Sprint 0b (Infrastruktur-Spike): das Remotion-Bundle
   // wird per "prebuild"-Skript (NICHT "postbuild"!) VOR `next build` einmalig
   // nach remotion/.output/ erzeugt (bundle() selbst darf laut Remotion-Doku
@@ -21,8 +27,15 @@ const nextConfig: NextConfig = {
   // das Bundle beim Deploy NICHT mit ausgeliefert und die Server Action
   // fände zur Laufzeit keine Bundle-Datei -- exakt dasselbe Grundmuster wie
   // serverExternalPackages oben für die native sharp-Binary.
+  // §Content Studio 3.0, Sprint 5: der Render-Trigger (lib/actions/reel-render.ts,
+  // von /content-studio/reel/[projectId]/render aus aufgerufen) braucht das
+  // Bundle zur Laufzeit ebenso wie der bisherige Dev-Test unter
+  // /mehr/developer -- ohne einen eigenen Eintrag hier würde Next.js'
+  // File-Tracing das Bundle für DIESE Route beim Vercel-Deploy nicht
+  // mitausliefern (siehe Bugfix-Kommentar unten).
   outputFileTracingIncludes: {
     "/mehr/developer": ["remotion/.output/**/*"],
+    "/content-studio/reel/[projectId]/render": ["remotion/.output/**/*"],
   },
   experimental: {
     serverActions: {

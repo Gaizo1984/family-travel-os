@@ -19,8 +19,15 @@ export const REMOTION_LAMBDA_REGION = ALLOWED_REMOTION_AWS_REGION
 /** Muss exakt zum `--site-name` beim Deploy passen (spätere Etappe). */
 export const REMOTION_LAMBDA_SITE_NAME = 'family-travel-reel'
 
-/** Wiederverwendet dieselbe minimale Testkomposition wie der Vercel-Sandbox-Spike -- siehe remotion/Root.tsx. */
+/** Wiederverwendet dieselbe minimale Testkomposition wie der Vercel-Sandbox-Spike -- siehe remotion/Root.tsx. Bleibt ausschließlich für scripts/reel-lambda-test.mjs (Dev-Test) reserviert, NICHT für echte Familien-Reels. */
 export const REMOTION_LAMBDA_COMPOSITION_ID = 'ReelSpike'
+
+/** §Content Studio 3.0, Sprint 5: echte Reel-Renders wählen die Komposition anhand des in Sprint 1 gewählten Stils -- IDs müssen exakt zu remotion/Root.tsx passen. */
+export const REMOTION_LAMBDA_COMPOSITION_BY_STYLE: Record<string, string> = {
+  luxury_travel: 'LuxuryTravelReel',
+  family_memory: 'FamilyMemoryReel',
+  dynamic_adventure: 'DynamicAdventureReel',
+}
 
 /**
  * §"Lifecycle-Löschung nach spätestens 24 Stunden" (Nutzervorgabe): "1-day"

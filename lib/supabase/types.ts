@@ -718,6 +718,8 @@ export interface Database {
           attempt_count: number; max_attempts: number
           output_storage_path: string | null; output_duration_seconds: number | null
           error_message: string | null; requested_at: string; completed_at: string | null
+          cost_estimate_usd: number | null; output_size_bytes: number | null; render_duration_seconds: number | null
+          aws_bucket_name: string | null; aws_function_name: string | null
         }
         Insert: {
           id?: string; draft_id: string; quality: string; status?: string
@@ -725,6 +727,8 @@ export interface Database {
           attempt_count?: number; max_attempts?: number
           output_storage_path?: string | null; output_duration_seconds?: number | null
           error_message?: string | null; requested_at?: string; completed_at?: string | null
+          cost_estimate_usd?: number | null; output_size_bytes?: number | null; render_duration_seconds?: number | null
+          aws_bucket_name?: string | null; aws_function_name?: string | null
         }
         Update: {
           id?: string; draft_id?: string; quality?: string; status?: string
@@ -732,6 +736,8 @@ export interface Database {
           attempt_count?: number; max_attempts?: number
           output_storage_path?: string | null; output_duration_seconds?: number | null
           error_message?: string | null; requested_at?: string; completed_at?: string | null
+          cost_estimate_usd?: number | null; output_size_bytes?: number | null; render_duration_seconds?: number | null
+          aws_bucket_name?: string | null; aws_function_name?: string | null
         }
         Relationships: [
           { foreignKeyName: "content_reel_renders_draft_id_fkey"; columns: ["draft_id"]; isOneToOne: false; referencedRelation: "content_drafts"; referencedColumns: ["id"] }
