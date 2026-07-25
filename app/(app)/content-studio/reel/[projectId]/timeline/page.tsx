@@ -44,7 +44,7 @@ export default async function ReelTimelinePage({ params }: { params: Promise<{ p
   if (!draft) redirect(`/content-studio/reel/${projectId}/media?error=${encodeURIComponent("Bitte zuerst ein Storyboard erstellen.")}`);
 
   const structure = draft.structure as unknown as ReelStoryboardStructure;
-  const reelDurationSeconds = (project.reel_duration_seconds ?? 30) as 15 | 30;
+  const reelDurationSeconds = (project.reel_duration_seconds ?? 30) as 15 | 30 | 60;
   const reelStyle = (project.reel_style ?? "family_memory") as ReelStyleId;
 
   const photoIds = structure.scenes.filter((s) => s.source_type === "photo").map((s) => s.source_id);

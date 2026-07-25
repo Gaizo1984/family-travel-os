@@ -7,9 +7,7 @@ import {
   MIN_SCENE_DURATION_SECONDS, MAX_SCENE_DURATION_SECONDS, MIN_SCENES_REMAINING,
   normalizeTransition, normalizeCameraMotion,
   ALLOWED_MUSIC_MIME_TYPES, MAX_MUSIC_FILE_SIZE_BYTES, MUSIC_EXTENSION_BY_MIME,
-  type ReelMusicPreset,
 } from '@/lib/reel-timeline-options'
-import { REEL_MUSIC_PRESET_OPTIONS } from '@/lib/reel-timeline-options'
 import { createUploadSlots, type UploadSlot } from '@/lib/actions/photo-staging'
 import type { ReelStoryboardStructure, ReelTimelineScene } from '@/lib/reel-storyboard-types'
 import type { Json } from '@/lib/supabase/types'
@@ -248,23 +246,26 @@ export async function regenerateReelSceneTextOverlay(projectId: string, index: n
   }
 }
 
-export async function updateReelMusicChoice(
-  projectId: string, choice: { source: 'none' } | { source: 'preset'; presetKey: ReelMusicPreset },
-): Promise<Result> {
+/**
+ * §Content Studio 3.0, Sprint 6: "echte, nachweislich lizenzfreie
+ * Musik-Presets nur dann ergänzen, wenn die Audiodateien mit klarer
+ * Lizenzquelle vorliegen; sonst weiterhin nur eigene Musik oder keine
+ * Musik" (Nutzervorgabe, wörtlich) -- es gibt keine solchen verifizierbaren
+ * Dateien, daher bewusst nur noch `{source:'none'}` (eigene Musik läuft
+ * weiterhin ausschließlich über `uploadReelMusic`). `music_preset_key`
+ * bleibt als Feld in `ReelStoryboardStructure` erhalten (Altkompatibilität
+ * für ggf. bereits gespeicherte Drafts), wird aber nie mehr neu gesetzt.
+ */
+export async function updateReelMusicChoice(projectId: string, choice: { source: 'none' }): Promise<Result> {
   const ctx = await loadOwnedDraftContext(projectId)
   if (!ctx) return { ok: false, error: 'Projekt/Storyboard nicht gefunden.' }
-  if (choice.source === 'preset' && !REEL_MUSIC_PRESET_OPTIONS.some((o) => o.value === choice.presetKey))
-    return { ok: false, error: 'Ungültige Musikauswahl.' }
 
-  // §Vorherige eigene Musikdatei wird beim Wechsel auf Preset/Keine entfernt -- keine verwaisten Dateien im Storage.
+  // §Vorherige eigene Musikdatei wird beim Wechsel auf "Keine Musik" entfernt -- keine verwaisten Dateien im Storage.
   if (ctx.structure.music_source === 'custom' && ctx.structure.music_storage_path)
     await ctx.supabase.storage.from(STORAGE_BUCKET).remove([ctx.structure.music_storage_path])
 
   const structure: ReelStoryboardStructure = {
-    ...ctx.structure,
-    music_source: choice.source,
-    music_preset_key: choice.source === 'preset' ? choice.presetKey : null,
-    music_storage_path: null,
+    ...ctx.structure, music_source: choice.source, music_preset_key: null, music_storage_path: null,
   }
   return saveStructure(ctx.supabase, ctx.draftId, structure)
 }

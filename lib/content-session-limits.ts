@@ -20,9 +20,10 @@ export const CONTENT_FORMAT_LABELS: Record<string, string> = {
   day_recap: 'Tagesrückblick', highlight: 'Ausflug/Highlight', hotel_content: 'Hotel-Content', package: 'Content-Paket',
 }
 
-/** §Content Studio 3.0, MVP-Abgrenzung (Nutzervorgabe): nur 15 und 30 Sekunden -- 60s bewusst außerhalb des MVP. */
+/** §Content Studio 3.0, Sprint 6 (Abschluss-Polish): "60-Sekunden-Preset ergänzen" (Nutzervorgabe) -- ursprünglich MVP-Abgrenzung "nur 15 und 30 Sekunden", jetzt bewusst erweitert. */
 export const REEL_DURATION_OPTIONS = [
   { value: '15', label: '15 Sekunden' },
   { value: '30', label: '30 Sekunden' },
+  { value: '60', label: '60 Sekunden' },
 ] as const
-export type ReelDurationSeconds = 15 | 30
+export type ReelDurationSeconds = 15 | 30 | 60

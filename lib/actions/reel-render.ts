@@ -232,6 +232,42 @@ export async function listReelRenders(projectId: string): Promise<ReelRenderStat
 }
 
 /**
+ * §Content Studio 3.0, Sprint 6: "fertige Reels löschen und Storage-Dateien
+ * mit entfernen" (Nutzervorgabe, wörtlich) -- Storage-first (etabliertes
+ * Muster, z. B. deleteContentSessionProject): erst die Datei aus
+ * `content-reels` entfernen, erst danach die DB-Zeile -- ein Abbruch
+ * mittendrin hinterlässt so höchstens eine verwaiste DB-Zeile (sichtbar,
+ * erneut löschbar), nie eine verwaiste, unsichtbare Storage-Datei.
+ *
+ * §Sicherheitscheck (Abschluss-Audit): `queued`/`rendering`-Zeilen dürfen
+ * NICHT gelöscht werden -- der eigentliche Lambda-Render läuft in diesem
+ * Fall bereits auf AWS und würde ohne DB-Zeile nie fertig abgeholt/nach
+ * Supabase übernommen/aufgeräumt werden (verwaister, weiterhin kostender
+ * AWS-Job ohne jede Nachverfolgung). Nur `completed`/`failed` sind löschbar
+ * -- deckt sich mit der UI, die den Löschen-Button ohnehin nur dort zeigt,
+ * jetzt aber auch serverseitig erzwungen statt nur versteckt.
+ */
+export async function deleteReelRender(projectId: string, renderRowId: string): Promise<{ ok: boolean; error?: string }> {
+  const ctx = await loadOwnedRenderContext(projectId)
+  if (!ctx) return { ok: false, error: 'Projekt/Storyboard nicht gefunden.' }
+
+  const { data: row } = await ctx.supabase.from('content_reel_renders').select('id, status, output_storage_path').eq('id', renderRowId).eq('draft_id', ctx.draftId).maybeSingle()
+  if (!row) return { ok: false, error: 'Render nicht gefunden.' }
+  if (row.status !== 'completed' && row.status !== 'failed')
+    return { ok: false, error: 'Ein laufender Render kann nicht gelöscht werden.' }
+
+  if (row.output_storage_path) {
+    const { error: removeError } = await ctx.supabase.storage.from(OUTPUT_BUCKET).remove([row.output_storage_path])
+    if (removeError) return { ok: false, error: 'Storage-Datei konnte nicht gelöscht werden.' }
+  }
+
+  const { error: deleteError } = await ctx.supabase.from('content_reel_renders').delete().eq('id', renderRowId)
+  if (deleteError) return { ok: false, error: 'Speicherfehler beim Löschen.' }
+
+  return { ok: true }
+}
+
+/**
  * §"Status und Fortschritt per Polling anzeigen" + "AWS-Zwischendatei nach
  * erfolgreicher Übernahme löschen" + "MP4 nur über Signed URL anzeigen und
  * herunterladen" (Nutzervorgabe, wörtlich): der Poll-Tick, der `done:true`

@@ -4,7 +4,8 @@ import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { REEL_STYLE_LABELS } from "@/lib/ai-style-guidelines";
-import { listReelRenders, startReelRender, pollReelRenderStatus } from "@/lib/actions/reel-render";
+import { listReelRenders, startReelRender, pollReelRenderStatus, deleteReelRender } from "@/lib/actions/reel-render";
+import { getReelRenderUsageSummary } from "@/lib/reel-render-usage";
 import { ReelRenderPanel } from "@/components/ReelRenderPanel";
 
 /**
@@ -32,8 +33,11 @@ export default async function ReelRenderPage({ params }: { params: Promise<{ pro
     .order("created_at", { ascending: false }).limit(1).maybeSingle();
   if (!draft) redirect(`/content-studio/reel/${projectId}/media?error=${encodeURIComponent("Bitte zuerst ein Storyboard erstellen.")}`);
 
-  const reelDurationSeconds = (project.reel_duration_seconds ?? 30) as 15 | 30;
-  const renders = await listReelRenders(projectId);
+  const reelDurationSeconds = (project.reel_duration_seconds ?? 30) as 15 | 30 | 60;
+  const [renders, usageSummary] = await Promise.all([
+    listReelRenders(projectId),
+    getReelRenderUsageSummary(familyId),
+  ]);
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -58,8 +62,10 @@ export default async function ReelRenderPage({ params }: { params: Promise<{ pro
           projectId={projectId}
           reelDurationSeconds={reelDurationSeconds}
           initialRenders={renders}
+          usageSummary={usageSummary}
           startRender={startReelRender}
           pollStatus={pollReelRenderStatus}
+          deleteRenderAction={deleteReelRender}
         />
       </div>
     </div>

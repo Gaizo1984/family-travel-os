@@ -1,11 +1,12 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { RefreshCw, Download, AlertCircle } from 'lucide-react'
+import { RefreshCw, Download, AlertCircle, Trash2 } from 'lucide-react'
 import type { ReelRenderStatus } from '@/lib/actions/reel-render'
 
 type StartFn = (projectId: string, quality: 'preview_lowres' | 'final') => Promise<{ ok: boolean; renderRowId?: string; error?: string }>
 type PollFn = (projectId: string, renderRowId: string) => Promise<{ ok: boolean; render?: ReelRenderStatus; error?: string }>
+type DeleteFn = (projectId: string, renderRowId: string) => Promise<{ ok: boolean; error?: string }>
 
 const STATUS_LABELS: Record<string, string> = {
   queued: 'In Warteschlange', rendering: 'Wird gerendert', completed: 'Fertig', failed: 'Fehlgeschlagen',
@@ -18,30 +19,42 @@ function formatBytes(bytes: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
 /**
- * §Content Studio 3.0, Sprint 5: "Status und Fortschritt per Polling
+ * §Content Studio 3.0, Sprint 5/6: "Status und Fortschritt per Polling
  * anzeigen" + "Fehlerstatus verständlich anzeigen und manuellen Neuversuch
- * erlauben" (Nutzervorgabe, wörtlich). Kein separater "Retry"-Mechanismus
+ * erlauben" + "Renderhistorie mit Vorschau, Finalversion, Datum,
+ * Dateigröße und Kosten anzeigen" + "fertige Reels löschen und
+ * Storage-Dateien mit entfernen" + "Monatslimit und Restkontingent
+ * anzeigen" (Nutzervorgaben, wörtlich). Kein separater "Retry"-Mechanismus
  * in der Server-Action -- ein Neuversuch ist einfach ein neuer Aufruf von
  * `startRender` mit derselben Qualität, erscheint als neue Zeile in der
  * Liste (vollständige Nachvollziehbarkeit aller Versuche statt
  * In-Place-Überschreiben).
  */
 export function ReelRenderPanel({
-  projectId, reelDurationSeconds, initialRenders, startRender, pollStatus,
+  projectId, reelDurationSeconds, initialRenders, usageSummary, startRender, pollStatus, deleteRenderAction,
 }: {
   projectId: string
-  reelDurationSeconds: 15 | 30
+  reelDurationSeconds: 15 | 30 | 60
   initialRenders: ReelRenderStatus[]
+  usageSummary: { used: number; limit: number }
   startRender: StartFn
   pollStatus: PollFn
+  deleteRenderAction: DeleteFn
 }) {
   const [renders, setRenders] = useState(initialRenders)
   const [busy, setBusy] = useState<'preview_lowres' | 'final' | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const hasCompletedPreview = renders.some((r) => r.quality === 'preview_lowres' && r.status === 'completed')
   const activeIds = renders.filter((r) => r.status === 'queued' || r.status === 'rendering').map((r) => r.id)
+  const limitReached = usageSummary.used >= usageSummary.limit
 
   useEffect(() => {
     if (activeIds.length === 0) return
@@ -79,19 +92,38 @@ export function ReelRenderPanel({
     }
   }
 
+  async function handleDelete(renderRowId: string) {
+    setDeletingId(renderRowId)
+    setError(null)
+    const result = await deleteRenderAction(projectId, renderRowId)
+    setDeletingId(null)
+    setConfirmDeleteId(null)
+    if (!result.ok) {
+      setError(result.error ?? 'Löschen fehlgeschlagen.')
+      return
+    }
+    setRenders((prev) => prev.filter((r) => r.id !== renderRowId))
+  }
+
   return (
     <div className="flex flex-col gap-6">
+      <p style={{ color: 'var(--muted)', fontSize: '0.7rem' }}>
+        {usageSummary.used} von {usageSummary.limit} Renders diesen Monat genutzt
+        {limitReached ? ' -- Monatslimit erreicht.' : ` -- noch ${usageSummary.limit - usageSummary.used} übrig.`}
+      </p>
+
       <div className="flex flex-wrap gap-3">
         <button
-          type="button" onClick={() => handleStart('preview_lowres')} disabled={busy !== null}
-          style={buttonStyle(true)}
+          type="button" onClick={() => handleStart('preview_lowres')} disabled={busy !== null || limitReached}
+          style={buttonStyle(!limitReached)}
+          title={limitReached ? 'Monatslimit für Reel-Renders erreicht.' : undefined}
         >
           {busy === 'preview_lowres' ? 'Wird gestartet …' : 'Vorschau rendern'}
         </button>
         <button
-          type="button" onClick={() => handleStart('final')} disabled={busy !== null || !hasCompletedPreview}
-          style={buttonStyle(hasCompletedPreview)}
-          title={hasCompletedPreview ? undefined : 'Bitte zuerst eine Vorschau erfolgreich rendern.'}
+          type="button" onClick={() => handleStart('final')} disabled={busy !== null || !hasCompletedPreview || limitReached}
+          style={buttonStyle(hasCompletedPreview && !limitReached)}
+          title={!hasCompletedPreview ? 'Bitte zuerst eine Vorschau erfolgreich rendern.' : limitReached ? 'Monatslimit für Reel-Renders erreicht.' : undefined}
         >
           {busy === 'final' ? 'Wird gestartet …' : 'Finalversion rendern'}
         </button>
@@ -114,12 +146,33 @@ export function ReelRenderPanel({
           <p style={{ color: 'var(--muted)', fontSize: '0.78rem' }}>Noch kein Render gestartet.</p>
         )}
         {renders.map((r) => (
-          <div key={r.id} className="rounded-xl p-4 flex flex-col gap-2" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+          <div key={r.id} className="rounded-xl p-4 flex flex-col gap-2" style={{ background: 'var(--surface)', border: '1px solid var(--border)', opacity: deletingId === r.id ? 0.5 : 1 }}>
             <div className="flex items-center justify-between">
-              <span style={{ color: 'var(--foreground)', fontSize: '0.8rem' }}>{QUALITY_LABELS[r.quality] ?? r.quality}</span>
-              <span style={{ color: r.status === 'failed' ? '#c0392b' : 'var(--accent)', fontSize: '0.7rem' }}>
-                {STATUS_LABELS[r.status] ?? r.status}
-              </span>
+              <div className="flex items-center gap-2">
+                <span style={{ color: 'var(--foreground)', fontSize: '0.8rem' }}>{QUALITY_LABELS[r.quality] ?? r.quality}</span>
+                <span style={{ color: 'var(--muted)', fontSize: '0.65rem' }}>{formatDate(r.requestedAt)}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span style={{ color: r.status === 'failed' ? '#c0392b' : 'var(--accent)', fontSize: '0.7rem' }}>
+                  {STATUS_LABELS[r.status] ?? r.status}
+                </span>
+                {(r.status === 'completed' || r.status === 'failed') && (
+                  confirmDeleteId === r.id ? (
+                    <div className="flex items-center gap-1.5">
+                      <button type="button" onClick={() => handleDelete(r.id)} disabled={deletingId !== null} style={{ background: 'none', border: 'none', color: '#c0392b', fontSize: '0.68rem', cursor: 'pointer' }}>
+                        Wirklich löschen?
+                      </button>
+                      <button type="button" onClick={() => setConfirmDeleteId(null)} style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: '0.68rem', cursor: 'pointer' }}>
+                        Abbrechen
+                      </button>
+                    </div>
+                  ) : (
+                    <button type="button" onClick={() => setConfirmDeleteId(r.id)} disabled={deletingId !== null} aria-label="Löschen" style={{ background: 'none', border: 'none', padding: '2px' }}>
+                      <Trash2 size={13} strokeWidth={1.8} style={{ color: 'var(--muted)' }} />
+                    </button>
+                  )
+                )}
+              </div>
             </div>
 
             {(r.status === 'queued' || r.status === 'rendering') && (
@@ -132,7 +185,7 @@ export function ReelRenderPanel({
               <div className="flex items-center justify-between gap-2">
                 <span style={{ color: '#c0392b', fontSize: '0.72rem' }}>{r.errorMessage ?? 'Unbekannter Fehler.'}</span>
                 <button
-                  type="button" onClick={() => handleStart(r.quality)} disabled={busy !== null}
+                  type="button" onClick={() => handleStart(r.quality)} disabled={busy !== null || limitReached}
                   className="flex items-center gap-1"
                   style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: '0.72rem', cursor: 'pointer', flexShrink: 0 }}
                 >

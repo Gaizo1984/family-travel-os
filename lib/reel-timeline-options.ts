@@ -32,24 +32,28 @@ export function normalizeCameraMotion(value: string): ReelCameraMotion {
 }
 
 /**
- * §"Gesamtdauer muss exakt 15 oder 30 Sekunden bleiben" + Rebalance-Funktion
- * (siehe lib/actions/reel-timeline.ts::rebalanceScenes): die Grenzen müssen
- * so gewählt sein, dass JEDE laut Sprint 3 mögliche Szenenzahl (mindestens 3,
- * siehe reel-storyboard.ts minScenes) und jede laut "Szenen entfernen"
- * mögliche Restzahl (mindestens MIN_SCENES_REMAINING) beide Zielwerte
- * rechnerisch erreichen kann: 2 Szenen × 15s = 30s, 3 Szenen × 1s = 3s.
+ * §"Gesamtdauer muss exakt 15, 30 oder 60 Sekunden bleiben" + Rebalance-
+ * Funktion (siehe lib/actions/reel-timeline.ts::rebalanceScenes): die
+ * Grenzen müssen so gewählt sein, dass JEDE mögliche Szenenzahl (mindestens
+ * 3, siehe reel-storyboard.ts minScenes) und jede laut "Szenen entfernen"
+ * mögliche Restzahl (mindestens MIN_SCENES_REMAINING) JEDEN Zielwert
+ * rechnerisch erreichen kann. §Sprint 6 (60s-Preset ergänzt): MAX musste von
+ * 15 auf 30 angehoben werden, sonst wäre der schlechteste Fall (2 Restszenen
+ * nach "Szenen entfernen") bei 60s-Zielwert unerreichbar (2×15=30 < 60) --
+ * jetzt 2×30=60 exakt erreichbar.
  */
 export const MIN_SCENE_DURATION_SECONDS = 1
-export const MAX_SCENE_DURATION_SECONDS = 15
+export const MAX_SCENE_DURATION_SECONDS = 30
 export const MIN_SCENES_REMAINING = 2
 
-export const REEL_MUSIC_PRESET_OPTIONS = [
-  { value: 'warm_acoustic', label: 'Sanft & Warm' },
-  { value: 'upbeat_energetic', label: 'Energetisch' },
-  { value: 'cinematic_calm', label: 'Cinematic' },
-] as const
-export type ReelMusicPreset = (typeof REEL_MUSIC_PRESET_OPTIONS)[number]['value']
-
+/**
+ * §Content Studio 3.0, Sprint 6: "echte, nachweislich lizenzfreie
+ * Musik-Presets nur dann ergänzen, wenn die Audiodateien mit klarer
+ * Lizenzquelle vorliegen" (Nutzervorgabe, wörtlich) -- es liegen keine
+ * solchen Dateien vor, deshalb bewusst KEINE Preset-Liste mehr (Sprint 4/5
+ * hatten hier nur Platzhalter-Labels ohne echten Ton). Musik bleibt bis auf
+ * Weiteres ausschließlich "eigene Datei" oder "keine Musik".
+ */
 export const MAX_MUSIC_FILE_SIZE_BYTES = 15 * 1024 * 1024
 export const ALLOWED_MUSIC_MIME_TYPES = ['audio/mpeg', 'audio/mp4', 'audio/x-m4a', 'audio/wav'] as const
 export const MUSIC_EXTENSION_BY_MIME: Record<string, string> = {

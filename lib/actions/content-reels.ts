@@ -31,8 +31,8 @@ export async function startReelProject(formData: FormData) {
   if (!validStyle) redirect(`${newPath}?error=${encodeURIComponent('Bitte einen Stil auswählen.')}`)
 
   const reelDurationSeconds = Number(reelDurationRaw)
-  if (reelDurationSeconds !== 15 && reelDurationSeconds !== 30) {
-    redirect(`${newPath}?error=${encodeURIComponent('Bitte eine Dauer auswählen (15 oder 30 Sekunden).')}`)
+  if (reelDurationSeconds !== 15 && reelDurationSeconds !== 30 && reelDurationSeconds !== 60) {
+    redirect(`${newPath}?error=${encodeURIComponent('Bitte eine Dauer auswählen (15, 30 oder 60 Sekunden).')}`)
   }
 
   const supabase = await createClient()

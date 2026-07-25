@@ -18,8 +18,8 @@ export async function ReelSpikeTestCard({ lastRun }: { lastRun: DevTestRun | nul
 
   return (
     <DevTestCard
-      title="Content Studio 3.0 -- Remotion + Vercel Sandbox (Spike)"
-      description="Isolierter Infrastruktur-Test: bundelt eine minimale 9:16/15s-Komposition (zwei synthetische Testbilder, kein echtes Familienfoto), rendert sie in einer Vercel Sandbox und überträgt das Ergebnis in privaten Supabase Storage."
+      title="Content Studio 3.0 -- Remotion + Vercel Sandbox (Dev-Spike, NICHT produktiv)"
+      description="Isolierter Infrastruktur-Test, bewusst getrennt vom produktiven Reel-Flow (content-studio/reel/...): bundelt eine minimale 9:16/15s-Komposition (zwei synthetische Testbilder, kein echtes Familienfoto), rendert sie in einer Vercel Sandbox (US-Region) und überträgt das Ergebnis in den separaten content-reels-spike-Bucket. Nutzt weder die produktive Remotion-Lambda-Infrastruktur (eu-central-1) noch echte Reel-Projekte/-Drafts."
       lastRun={lastRun}
     >
       <form action={runReelSpikeTest}>

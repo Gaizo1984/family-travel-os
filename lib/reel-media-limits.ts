@@ -4,14 +4,15 @@
  * Muster wie lib/content-session-limits.ts/lib/memory-limits.ts).
  */
 
-/** §"Mindest-/Maximalanzahl je 15/30-Sekunden-Preset" (Nutzervorgabe): grobe Faustregel ~2-2.5s pro Medium. 30s-Maximum bewusst = MAX_PHOTOS_BY_FORMAT.reel aus Content Studio 2.0 (lib/content-session-limits.ts) für Konsistenz. */
-export const REEL_MEDIA_LIMITS: Record<15 | 30, { min: number; max: number }> = {
+/** §"Mindest-/Maximalanzahl je 15/30-Sekunden-Preset" (Nutzervorgabe): grobe Faustregel ~2-2.5s pro Medium. 30s-Maximum bewusst = MAX_PHOTOS_BY_FORMAT.reel aus Content Studio 2.0 (lib/content-session-limits.ts) für Konsistenz. §Sprint 6: 60s-Preset ergänzt, gleiche Faustregel fortgeführt. */
+export const REEL_MEDIA_LIMITS: Record<15 | 30 | 60, { min: number; max: number }> = {
   15: { min: 3, max: 8 },
   30: { min: 5, max: 15 },
+  60: { min: 8, max: 24 },
 }
 
 export function reelMediaLimitFor(durationSeconds: number): { min: number; max: number } {
-  return REEL_MEDIA_LIMITS[durationSeconds as 15 | 30] ?? REEL_MEDIA_LIMITS[30]
+  return REEL_MEDIA_LIMITS[durationSeconds as 15 | 30 | 60] ?? REEL_MEDIA_LIMITS[30]
 }
 
 /** §"Clip-Länge begrenzen" (Nutzervorgabe): deutlich kürzer als die Reel-Gesamtdauer -- ein einzelner Clip soll nie den ganzen Reel füllen. */

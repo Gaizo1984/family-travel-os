@@ -132,7 +132,22 @@ async function main() {
         renderUpdateError?.message,
       )
     }
+    // §Content Studio 3.0, Sprint 6: "fertige Reels löschen und
+    // Storage-Dateien mit entfernen" -- prueft das Storage-first-Loeschmuster
+    // von deleteReelRender direkt (echte Datei in content-reels, danach
+    // Storage-Entfernung + DB-Zeilen-Loeschung, beides verifiziert).
+    const outputPath = `smoke-test/${Date.now()}-delete-check.mp4`
+    const outputUp = await supabase.storage.from('content-reels').upload(outputPath, new Uint8Array([0, 0, 0, 0]), { contentType: 'video/mp4' })
+    await supabase.from('content_reel_renders').update({ output_storage_path: outputPath }).eq('id', renderRow?.id ?? '')
+    const removeResult = await supabase.storage.from('content-reels').remove([outputPath])
+    const { data: afterRemoveListing } = await supabase.storage.from('content-reels').list('smoke-test', { search: outputPath.split('/').pop() })
     await supabase.from('content_reel_renders').delete().eq('id', renderRow?.id ?? '')
+    const { data: renderAfterDelete } = await supabase.from('content_reel_renders').select('id').eq('id', renderRow?.id ?? '').maybeSingle()
+    check(
+      'deleteReelRender-Muster: Storage-Datei UND DB-Zeile entfernt',
+      !outputUp.error && !removeResult.error && !(afterRemoveListing ?? []).some((f) => outputPath.endsWith(f.name)) && !renderAfterDelete,
+      outputUp.error?.message ?? removeResult.error?.message,
+    )
 
     await supabase.from('content_drafts').delete().eq('id', draft?.id ?? '')
 

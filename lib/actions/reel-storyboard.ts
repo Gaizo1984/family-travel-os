@@ -109,7 +109,7 @@ export async function generateReelStoryboard(formData: FormData) {
   const project = await loadOwnedReelProjectWithDetails(projectId, familyId)
   if (!project || !project.trip_id) redirect(returnTo || '/content-studio')
 
-  const durationSeconds = (project.reel_duration_seconds ?? 30) as 15 | 30
+  const durationSeconds = (project.reel_duration_seconds ?? 30) as 15 | 30 | 60
   const limit = reelMediaLimitFor(durationSeconds)
   const reelStyleLabel = REEL_STYLE_LABELS[project.reel_style ?? ''] ?? project.reel_style ?? 'Family Memory'
 
@@ -197,7 +197,9 @@ export async function generateReelStoryboard(formData: FormData) {
 
   const sceneCountGuidance = durationSeconds === 15
     ? 'Nutze für dieses 15-Sekunden-Reel eine kompakte Szenenzahl (eher wenige, aber starke Szenen).'
-    : 'Nutze für dieses 30-Sekunden-Reel eine größere Szenenzahl als bei einem 15-Sekunden-Reel.'
+    : durationSeconds === 30
+      ? 'Nutze für dieses 30-Sekunden-Reel eine größere Szenenzahl als bei einem 15-Sekunden-Reel.'
+      : 'Nutze für dieses 60-Sekunden-Reel eine deutlich größere Szenenzahl als bei 15/30 Sekunden -- genug Abwechslung für die volle Länge, ohne einzelne Szenen unnötig zu strecken.'
 
   const minScenes = Math.min(3, candidates.length)
   const maxScenes = candidates.length

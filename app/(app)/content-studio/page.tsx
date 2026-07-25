@@ -202,10 +202,12 @@ export default async function ContentStudioPage() {
           </p>
         </Link>
 
-        {/* §Content Studio 3.0, Sprint 1: separater, kleinerer Einstieg -- noch
-            kein vollwertiger Flow (keine KI-Analyse/Timeline/Rendering), daher
-            bewusst nicht als primäre "Content erstellen"-Kachel, aber sichtbar
-            auffindbar. */}
+        {/* §Content Studio 3.0, Sprint 6: eigener, separater Einstieg für den
+            vollständigen Reel-Flow (Auswahl -> Storyboard -> Timeline ->
+            Render) -- bewusst weiterhin ein sekundärer Link statt einer
+            primären "Content erstellen"-Kachel, da er auf einer eigenen
+            Render-Infrastruktur (Remotion Lambda) statt reiner
+            Text-/Bild-Generierung basiert. */}
         <Link
           href="/content-studio/reel/new"
           className="flex items-center gap-3 mb-8 rounded-xl p-5"
@@ -213,7 +215,7 @@ export default async function ContentStudioPage() {
         >
           <Film size={16} strokeWidth={1.5} style={{ color: "var(--accent)", flexShrink: 0 }} />
           <div className="flex-1 min-w-0">
-            <div style={{ color: "var(--foreground)", fontSize: "0.85rem" }}>Video-Reel erstellen · Beta</div>
+            <div style={{ color: "var(--foreground)", fontSize: "0.85rem" }}>Reel erstellen</div>
             <div style={{ color: "var(--muted)", fontSize: "0.68rem" }}>Aus vorhandenen Fotos und Videos -- Stil und Dauer wählen</div>
           </div>
           <ArrowRight size={14} strokeWidth={1.5} style={{ color: "var(--accent)", flexShrink: 0 }} />

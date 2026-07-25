@@ -76,7 +76,7 @@ export default async function NewReelProjectPage({
         </Link>
 
         <div style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "12px" }}>
-          Reel erstellen · Beta
+          Reel erstellen
         </div>
         <h1 className="font-light mb-4" style={{ color: "var(--foreground)", fontSize: "1.4rem", letterSpacing: "0.01em" }}>
           Reise, Stil und Dauer

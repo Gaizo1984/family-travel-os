@@ -7,10 +7,10 @@ import { createClient } from '@/lib/supabase/client'
 import { ReelTimelineComposition, type ReelCompositionScene, type ReelStyleId } from '@/remotion/ReelTimelineComposition'
 import type { ReelStoryboardStructure } from '@/lib/reel-storyboard-types'
 import {
-  REEL_TRANSITION_OPTIONS, REEL_CAMERA_MOTION_OPTIONS, REEL_MUSIC_PRESET_OPTIONS,
+  REEL_TRANSITION_OPTIONS, REEL_CAMERA_MOTION_OPTIONS,
   MIN_SCENE_DURATION_SECONDS, MAX_SCENE_DURATION_SECONDS, MIN_SCENES_REMAINING,
   ALLOWED_MUSIC_MIME_TYPES, MAX_MUSIC_FILE_SIZE_BYTES,
-  normalizeTransition, normalizeCameraMotion, type ReelMusicPreset,
+  normalizeTransition, normalizeCameraMotion,
 } from '@/lib/reel-timeline-options'
 
 type MediaEntry = { displayUrl: string | null; playbackUrl: string }
@@ -23,7 +23,7 @@ type Actions = {
   update: (projectId: string, index: number, patch: Record<string, unknown>) => Promise<MutationResult>
   rebalance: (projectId: string) => Promise<MutationResult>
   regenerateText: (projectId: string, index: number) => Promise<MutationResult & { textOverlay?: string }>
-  updateMusic: (projectId: string, choice: { source: 'none' } | { source: 'preset'; presetKey: ReelMusicPreset }) => Promise<MutationResult>
+  updateMusic: (projectId: string, choice: { source: 'none' }) => Promise<MutationResult>
   createMusicSlot: () => Promise<{ path: string; token: string } | null>
   uploadMusic: (projectId: string, stagingPath: string, mimeType: string) => Promise<MutationResult>
   removeMusic: (projectId: string) => Promise<MutationResult>
@@ -45,7 +45,7 @@ export function ReelTimelineEditor({
   projectId, reelDurationSeconds, reelStyle, initialStructure, mediaByKey, initialMusicPreviewUrl, actions,
 }: {
   projectId: string
-  reelDurationSeconds: 15 | 30
+  reelDurationSeconds: 15 | 30 | 60
   reelStyle: ReelStyleId
   initialStructure: ReelStoryboardStructure
   mediaByKey: Record<string, MediaEntry>
@@ -102,12 +102,6 @@ export function ReelTimelineEditor({
   async function handleMusicNone() {
     setGlobalBusy(true)
     await runMutation(() => actions.updateMusic(projectId, { source: 'none' }))
-    setMusicPreviewUrl(null)
-    setGlobalBusy(false)
-  }
-  async function handleMusicPreset(presetKey: ReelMusicPreset) {
-    setGlobalBusy(true)
-    await runMutation(() => actions.updateMusic(projectId, { source: 'preset', presetKey }))
     setMusicPreviewUrl(null)
     setGlobalBusy(false)
   }
@@ -298,14 +292,6 @@ export function ReelTimelineEditor({
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={handleMusicNone} disabled={globalBusy} style={chipStyle(musicSource === 'none')}>Keine Musik</button>
-          {REEL_MUSIC_PRESET_OPTIONS.map((o) => (
-            <button
-              key={o.value} type="button" onClick={() => handleMusicPreset(o.value)} disabled={globalBusy}
-              style={chipStyle(musicSource === 'preset' && structure.music_preset_key === o.value)}
-            >
-              {o.label}
-            </button>
-          ))}
         </div>
         {musicSource === 'custom' ? (
           <div className="flex items-center justify-between">
@@ -325,8 +311,8 @@ export function ReelTimelineEditor({
           </label>
         )}
         <p style={{ color: 'var(--muted)', fontSize: '0.65rem', lineHeight: 1.5 }}>
-          Presets sind Platzhalter (Musikrichtung nur als Auswahl gespeichert) -- lizenzfreie Audiodateien werden erst mit dem echten Rendering hinterlegt.
-          Eigene Dateien werden ausschließlich privat gespeichert.
+          Ohne eigene Datei bleibt das Reel stumm -- es gibt aktuell keine Musik-Presets mit nachweislich
+          geklärter Lizenz. Eigene Dateien werden ausschließlich privat gespeichert.
         </p>
       </div>
     </div>

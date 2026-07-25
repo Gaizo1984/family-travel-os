@@ -27,6 +27,19 @@ export async function isReelRenderLimitReached(familyId: string): Promise<boolea
   return (usage?.render_count ?? 0) >= monthlyLimit
 }
 
+/** §"Monatslimit und Restkontingent anzeigen" (Nutzervorgabe, wörtlich) -- reiner Lesezugriff, erhöht den Zähler nicht. */
+export async function getReelRenderUsageSummary(familyId: string): Promise<{ used: number; limit: number }> {
+  const supabase = await createClient()
+  const monthlyLimit = Number(process.env.REEL_RENDER_MONTHLY_LIMIT ?? String(DEFAULT_MONTHLY_LIMIT))
+  const { data: usage } = await supabase
+    .from('reel_render_usage')
+    .select('render_count')
+    .eq('family_id', familyId)
+    .eq('month_key', currentMonthKey())
+    .maybeSingle()
+  return { used: usage?.render_count ?? 0, limit: monthlyLimit }
+}
+
 export async function incrementReelRenderUsage(familyId: string): Promise<void> {
   const supabase = await createClient()
   const monthKey = currentMonthKey()
