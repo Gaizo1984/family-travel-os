@@ -46,6 +46,39 @@ export type DailyForecast = {
   tempMin: number
   code: number
   precipitationProbability: number | null
+  /** §Bugfix "Content Studio geht von Dauerregen aus" (Nutzervorgabe): erste–letzte Stunde ("HH:00"–"HH:00") an DIESEM Tag, in der die stündliche Regenwahrscheinlichkeit ≥50 % liegt -- null, wenn kein zusammenhängendes Fenster erkennbar ist. Grobe Vereinfachung (wie rainStartsAt): nur EIN Fenster pro Tag, keine mehreren getrennten Schauer. */
+  rainWindow: { from: string; to: string } | null
+}
+
+/** WMO-Codes, deren Regen typischerweise kurz/lokal auftritt (Schauer, Nieselregen) statt als Dauerregen den ganzen Tag -- Grundlage für §formatDailyWeatherSummary unten. */
+const SHOWER_LIKE_WMO_CODES = new Set([51, 53, 55, 56, 57, 80, 81, 82])
+const RAIN_WMO_CODES = new Set([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99])
+
+/**
+ * §"In den Tropen hat man in der Regel immer einmal kurz am Tag Regen, das
+ * Content Studio geht aber aktuell davon aus, dass es den ganzen Tag
+ * regnet" (Nutzervorgabe, wörtlich): der bisherige Wetter-Text bestand nur
+ * aus dem TAGES-WMO-Code (z. B. "Regenschauer") -- Open-Meteo vergibt diesen
+ * Code bereits bei einem einzigen kurzen Schauer für den GESAMTEN Tag, ohne
+ * Kontext zu Dauer/Wahrscheinlichkeit. Reichert den Text jetzt mit dem
+ * bekannten Regenfenster bzw. der Tages-Regenwahrscheinlichkeit an, damit
+ * sowohl die KI-Prompts (lib/content-strategy-ai.ts) als auch Menschen
+ * erkennen können, ob es sich um einen kurzen Nachmittagsschauer oder
+ * echten Dauerregen handelt.
+ */
+export function formatDailyWeatherSummary(forecast: Pick<DailyForecast, 'tempMax' | 'code' | 'precipitationProbability' | 'rainWindow'>): string {
+  const { label } = describeWeatherCode(forecast.code)
+  const base = `${forecast.tempMax}°C, ${label}`
+  if (!RAIN_WMO_CODES.has(forecast.code)) return base
+
+  if (forecast.rainWindow) {
+    const isShowerLike = SHOWER_LIKE_WMO_CODES.has(forecast.code)
+    return isShowerLike
+      ? `${forecast.tempMax}°C, kurzer Schauer möglich ${forecast.rainWindow.from}–${forecast.rainWindow.to} Uhr, sonst überwiegend trocken`
+      : `${base} (${forecast.rainWindow.from}–${forecast.rainWindow.to} Uhr)`
+  }
+
+  return forecast.precipitationProbability !== null ? `${base} (${forecast.precipitationProbability}% Regenwahrscheinlichkeit)` : base
 }
 
 export type WeatherResult = {
@@ -105,28 +138,42 @@ async function openMeteoForecast(lat: number, lon: number): Promise<ForecastResu
     if (!res.ok) return null
     const data = await res.json()
 
+    const hourlyTimes: string[] = data.hourly?.time ?? []
+    const hourlyProb: number[] = data.hourly?.precipitation_probability ?? []
+
+    // §"Kurzer Nachmittagsschauer statt Dauerregen" (Nutzervorgabe): pro Tag
+    // (nicht mehr nur "heute") das zusammenhängende Stundenfenster ermitteln,
+    // in dem die Regenwahrscheinlichkeit ≥50 % liegt -- Grundlage für
+    // formatDailyWeatherSummary oben.
+    function rainWindowForDate(dateStr: string): { from: string; to: string } | null {
+      let from: string | null = null
+      let to: string | null = null
+      for (let i = 0; i < hourlyTimes.length; i++) {
+        if (!hourlyTimes[i].startsWith(dateStr)) continue
+        if ((hourlyProb[i] ?? 0) >= 50) {
+          const hh = hourlyTimes[i].slice(11, 16)
+          if (!from) from = hh
+          to = hh
+        }
+      }
+      return from && to ? { from, to } : null
+    }
+
     const daily: DailyForecast[] = (data.daily?.time ?? []).map((date: string, i: number) => ({
       date,
       tempMax: Math.round(data.daily.temperature_2m_max[i]),
       tempMin: Math.round(data.daily.temperature_2m_min[i]),
       code: data.daily.weather_code[i],
       precipitationProbability: data.daily.precipitation_probability_max?.[i] ?? null,
+      rainWindow: rainWindowForDate(date),
     }))
 
-    // Erste Stunde des Zielort-"heute" (erste 24 Einträge von hourly.time), ab der
-    // die stündliche Regenwahrscheinlichkeit ≥50 % erreicht — für eine zeitbezogene
+    // Erste Stunde des Zielort-"heute", ab der die stündliche
+    // Regenwahrscheinlichkeit ≥50 % erreicht — für eine zeitbezogene
     // Formulierung ("Regen ab 16:00 Uhr") statt einer reinen Tagesprozentzahl.
-    let rainStartsAt: string | null = null
-    const hourlyTimes: string[] = data.hourly?.time ?? []
-    const hourlyProb: number[] = data.hourly?.precipitation_probability ?? []
-    const todayDate = data.daily?.time?.[0]
-    for (let i = 0; i < hourlyTimes.length; i++) {
-      if (todayDate && !hourlyTimes[i].startsWith(todayDate)) continue
-      if ((hourlyProb[i] ?? 0) >= 50) {
-        rainStartsAt = hourlyTimes[i].slice(11, 16)
-        break
-      }
-    }
+    // Bleibt eigenständig neben `rainWindow` (nur "ab wann", kein "bis wann"),
+    // da bestehende Aufrufer (z. B. /today) exakt dieses Feld erwarten.
+    const rainStartsAt = daily[0]?.rainWindow?.from ?? null
 
     return {
       currentTemp: Math.round(data.current?.temperature_2m ?? daily[0]?.tempMax ?? 0),

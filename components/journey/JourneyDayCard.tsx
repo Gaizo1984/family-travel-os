@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 import { Image as ImageIcon, ListChecks } from "lucide-react";
-import { formatDateDE } from "@/lib/demo-data";
+import { formatIsoWithWeekday } from "@/lib/date-utils";
 import { BOOKING_TYPE_CONFIG, hasRealTime } from "@/lib/bookings";
 import { JOURNEY_EVENT_CATEGORIES } from "@/lib/journey-events";
 import { describeWeatherCode } from "@/lib/weather";
@@ -89,22 +89,33 @@ export function JourneyDayCard({ day, photoUrlByPhotoId, nextEventId, tripSlug }
   return (
     <div
       className="relative pl-8 pb-6"
-      style={{ opacity: day.isPast ? 0.5 : 1 }}
+      style={{
+        opacity: day.isPast ? 0.5 : 1,
+        ...(day.isToday
+          ? { background: "rgba(184,154,94,0.06)", borderRadius: "14px", marginLeft: "-12px", paddingLeft: "44px", paddingRight: "12px", paddingTop: "8px" }
+          : {}),
+      }}
     >
       <div
         className="absolute rounded-full"
         style={{
-          left: 0, top: "6px", width: "10px", height: "10px",
+          left: day.isToday ? "12px" : 0, top: day.isToday ? "14px" : "6px",
+          width: day.isToday ? "13px" : "10px", height: day.isToday ? "13px" : "10px",
           background: day.isToday ? "var(--accent)" : "transparent",
           border: `1.5px solid ${day.isToday ? "var(--accent)" : "var(--muted)"}`,
-          boxShadow: day.isToday ? "0 0 0 4px rgba(184,154,94,0.12)" : "none",
+          boxShadow: day.isToday ? "0 0 0 5px rgba(184,154,94,0.16)" : "none",
         }}
       />
-      <div className="absolute" style={{ left: "4px", top: "16px", bottom: 0, width: "1px", background: "var(--border)" }} />
+      <div className="absolute" style={{ left: day.isToday ? "16px" : "4px", top: "16px", bottom: 0, width: "1px", background: "var(--border)" }} />
 
       <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
-        <span style={{ color: day.isToday ? "var(--accent)" : "var(--muted)", fontSize: "0.68rem", letterSpacing: "0.06em" }}>
-          {formatDateDE(day.date)}
+        <span className="flex items-center gap-2" style={{ color: day.isToday ? "var(--accent)" : "var(--muted)", fontSize: "0.68rem", letterSpacing: "0.06em" }}>
+          {day.isToday && (
+            <span style={{ background: "var(--accent)", color: "var(--surface)", borderRadius: "999px", padding: "2px 9px", fontSize: "0.6rem", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+              Heute
+            </span>
+          )}
+          {formatIsoWithWeekday(day.date)}
           {day.isStageStart && " · Anreise"}
           {day.isStageEnd && !day.isStageStart && " · Abreise"}
           {dayLabel && ` · ${dayLabel}`}

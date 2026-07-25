@@ -6,6 +6,7 @@ import type { ReadinessFinding } from './readiness'
 import type { TripDateRange } from './trip-dates'
 import type { DailyForecast } from './weather'
 import { resolveTimezone } from './country-timezones'
+import { todayIsoInTimezone } from './time'
 import { hasRealTime } from './bookings'
 
 /**
@@ -256,17 +257,33 @@ export function buildJourneyOverview(params: {
     photosByDate.set(p.date, list)
   }
 
+  // §"Ortszeit statt deutsche Zeit für die Tagesanzeige" (Nutzervorgabe,
+  // wörtlich): pro Zeitzone wird "heute" nur EINMAL berechnet (nicht pro
+  // Tag neu), da `Intl.DateTimeFormat` bei vielen Etappen sonst unnötig oft
+  // liefe -- die meisten Reisen haben ohnehin nur eine Handvoll
+  // unterschiedlicher Zeitzonen.
+  const todayIsoByTimezone = new Map<string, string>()
+  function todayIsoForStage(stage: StageInput | null): string {
+    const tz = resolveTimezone(stage?.country_code)
+    const cached = todayIsoByTimezone.get(tz)
+    if (cached) return cached
+    const computed = todayIsoInTimezone(tz)
+    todayIsoByTimezone.set(tz, computed)
+    return computed
+  }
+
   const days: JourneyDayBucket[] = []
   for (const segment of segments) {
     const timelineDays: TimelineDay[] = segment.kind === 'stay' ? segment.days : [segment.day]
     for (const day of timelineDays) {
+      const localTodayIso = todayIsoForStage(day.stage)
       days.push({
         date: day.date,
         stage: day.stage,
         isStageStart: day.isStageStart,
         isStageEnd: day.isStageEnd,
-        isPast: day.date < todayIso,
-        isToday: day.date === todayIso,
+        isPast: day.date < localTodayIso,
+        isToday: day.date === localTodayIso,
         events: sortEventsWithinDay(eventsByDate.get(day.date) ?? []),
         photos: photosByDate.get(day.date) ?? [],
         weather: weatherByDate.get(day.date) ?? null,

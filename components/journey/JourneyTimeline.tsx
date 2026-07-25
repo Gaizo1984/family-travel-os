@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { JourneyDayBucket } from "@/lib/journey-events-model";
-import { formatDateDE } from "@/lib/demo-data";
+import { formatIsoWithWeekday } from "@/lib/date-utils";
 import { JourneyDayCard } from "./JourneyDayCard";
 
 /**
@@ -58,15 +58,24 @@ function groupConsecutiveFreeDays(days: JourneyDayBucket[]): TimelineRenderItem[
 
 function FreeDayGroupCard({ days }: { days: JourneyDayBucket[] }) {
   const allPast = days.every((d) => d.isPast);
+  const containsToday = days.some((d) => d.isToday);
   const firstActionableDate = days.find((d) => !d.isPast)?.date ?? days[0].date;
-  const label = `${formatDateDE(days[0].date)} – ${formatDateDE(days[days.length - 1].date)} · ${days.length} freie Tage`;
+  const label = `${formatIsoWithWeekday(days[0].date)} – ${formatIsoWithWeekday(days[days.length - 1].date)} · ${days.length} freie Tage`;
 
   return (
     <div className="relative pl-8 pb-6" style={{ opacity: allPast ? 0.5 : 1 }}>
-      <div className="absolute rounded-full" style={{ left: 0, top: "6px", width: "10px", height: "10px", background: "transparent", border: "1.5px solid var(--muted)" }} />
+      <div
+        className="absolute rounded-full"
+        style={{
+          left: 0, top: "6px", width: "10px", height: "10px",
+          background: containsToday ? "var(--accent)" : "transparent",
+          border: `1.5px solid ${containsToday ? "var(--accent)" : "var(--muted)"}`,
+          boxShadow: containsToday ? "0 0 0 4px rgba(184,154,94,0.16)" : "none",
+        }}
+      />
       <div className="absolute" style={{ left: "4px", top: "16px", bottom: 0, width: "1px", background: "var(--border)" }} />
 
-      <div className="mb-1" style={{ color: "var(--muted)", fontSize: "0.68rem", letterSpacing: "0.06em" }}>{label}</div>
+      <div className="mb-1" style={{ color: containsToday ? "var(--accent)" : "var(--muted)", fontSize: "0.68rem", letterSpacing: "0.06em" }}>{label}</div>
 
       {allPast ? (
         <div className="rounded-xl px-4 py-2" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>

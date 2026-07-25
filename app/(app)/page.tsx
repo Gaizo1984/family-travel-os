@@ -4,7 +4,8 @@ import { formatDateDE } from "@/lib/demo-data";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { buildTravelWorldForFamilyAndPersons, syncTripDerivedCountryVisits } from "@/lib/travel-world";
-import { isTripPastEnd, tripCountdownDisplay } from "@/lib/trip-status";
+import { isTripPastEnd, isTripCurrentlyRunning, tripCountdownDisplay } from "@/lib/trip-status";
+import { resolveTimezone } from "@/lib/country-timezones";
 import { deriveTripDateRange, tripDurationDays, TRIP_DATE_RANGE_OPEN_LABEL } from "@/lib/trip-dates";
 import { resolveTripImage, getHighlightPhotoByTripId, type ResolvedTripImage } from "@/lib/trip-images";
 import { computeTripReadiness, type ReadinessResult } from "@/lib/readiness";
@@ -12,10 +13,13 @@ import { SignedPhoto } from "@/components/SignedPhoto";
 import { WorldMap } from "@/components/WorldMap";
 import { WorldMapCarousel, type WorldMapPanel } from "@/components/WorldMapCarousel";
 import { resolveCurrentLocation, nearbyStageGeocodeCandidates } from "@/lib/today";
-import { getWeatherForLocation, describeWeatherCode, type WeatherResult } from "@/lib/weather";
+import { getWeatherForLocation, describeWeatherCode, type WeatherResult, type DailyForecast } from "@/lib/weather";
 import { COUNTRY_NAMES } from "@/lib/geo-suggestions";
-import { todayIsoInFamilyTimezone } from "@/lib/time";
-import type { StageInput, TimelineBooking } from "@/lib/journey";
+import { todayIsoInFamilyTimezone, todayIsoInTimezone } from "@/lib/time";
+import type { StageInput, TimelineBooking, TimelineEvent } from "@/lib/journey";
+import { buildJourneyOverview, type MemoryPhotoInput, type JourneyDayBucket } from "@/lib/journey-events-model";
+import { getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
+import { JourneyDayCard } from "@/components/journey/JourneyDayCard";
 
 type PersonRow = { id: string; name: string; initials: string; color: string };
 type TripRow = {
@@ -40,11 +44,13 @@ function readinessPill(readiness: ReadinessResult): { label: string; color: stri
 }
 
 function HeroTrip({
-  trip, img, readiness, weather,
+  trip, img, readiness, weather, isActive,
 }: {
   trip: TripRow; img: ResolvedTripImage | null; readiness: ReadinessResult | null
   /** §"Tageswetter auf dem Cover" (Nutzervorgabe) -- null, solange sich kein Standort geokodieren lässt. */
   weather: WeatherResult | null
+  /** §Bugfix "Costa Rica wird noch mit 'nächste Reise' statt 'aktive Reise' ausgewiesen" (Nutzervorgabe): Label war bisher fest auf "Nächste Reise" verdrahtet, ganz unabhängig davon, ob die Reise bereits läuft. */
+  isActive: boolean
 }) {
   const range = deriveTripDateRange(trip, trip.bookings, trip.stages);
   const duration = tripDurationDays(range);
@@ -77,7 +83,7 @@ function HeroTrip({
 
       <div className="absolute top-7 left-4 right-4 md:top-9 md:left-6 md:right-6" style={{ paddingRight: todo ? "130px" : undefined }}>
         <span className="text-[10px] font-medium" style={{ color: "var(--accent)", letterSpacing: "0.24em", textTransform: "uppercase" }}>
-          Nächste Reise
+          {isActive ? "Aktive Reise" : "Nächste Reise"}
         </span>
         <h2
           className="font-light leading-tight mt-1.5"
@@ -313,7 +319,13 @@ export default async function Dashboard() {
     .maybeSingle();
   const nextTripStages = (nextTripDetailRaw?.stages ?? []) as StageInput[];
   const nextTripBookings = (nextTripDetailRaw?.bookings ?? []) as TimelineBooking[];
-  const todayIso = todayIsoInFamilyTimezone();
+  // §"Ortszeit statt deutsche Zeit" (Nutzervorgabe): Bootstrap mit der
+  // deutschen Zeit nur, um überhaupt den aktuellen Standort zu finden --
+  // danach wird "heute" auf die Zeitzone DIESES Standorts verfeinert (gleiches
+  // Muster wie /today und die Journey), bevor "aktiv vs. bevorstehend" geprüft wird.
+  const bootstrapTodayIso = todayIsoInFamilyTimezone();
+  const bootstrapLocation = resolveCurrentLocation(nextTrip, nextTripStages, nextTripBookings, bootstrapTodayIso);
+  const todayIso = todayIsoInTimezone(resolveTimezone(bootstrapLocation.countryCode));
   const currentLocation = resolveCurrentLocation(nextTrip, nextTripStages, nextTripBookings, todayIso);
   const countryName = currentLocation.countryCode ? COUNTRY_NAMES[currentLocation.countryCode] ?? null : null;
   const weatherCandidates = [
@@ -321,17 +333,59 @@ export default async function Dashboard() {
     ...nearbyStageGeocodeCandidates(nextTripStages, currentLocation.label, currentLocation.countryCode, todayIso),
     ...(countryName && countryName !== currentLocation.label ? [{ query: countryName }] : []),
   ];
+  const isNextTripActive = isTripCurrentlyRunning(tripStatusInput(nextTrip), todayIso);
 
   // §"Weltkarte von Familie aufs Hauptdashboard": erst Gesamtkarte, danach
   // per Swipe/Dots eine Karte je Familienmitglied -- alle aus derselben
   // buildTravelWorld-Quelle wie /family/world, keine eigene Aggregation.
   // §"Ladezeit-Performance, N+1 vermeiden": EIN Aufruf statt (Anzahl Personen
   // + 1) einzelner buildTravelWorld()-Aufrufe -- siehe lib/travel-world.ts.
-  const [{ family: worldStats, byPersonId: perPersonWorlds }, nextTripReadiness, nextTripWeather] = await Promise.all([
+  // §"Direkt unter der aktiven Reise die Tagesübersicht aus der Journey, nur
+  // für den aktuellen Tag" (Nutzervorgabe, wörtlich): journey_events/
+  // memory_photos werden nur geladen, wenn die Reise gerade läuft -- für eine
+  // bevorstehende Reise gibt es noch keinen "heutigen Tag" der Reise selbst.
+  const [{ family: worldStats, byPersonId: perPersonWorlds }, nextTripReadiness, nextTripWeather, journeyEventsRaw, journeyPhotosRaw] = await Promise.all([
     buildTravelWorldForFamilyAndPersons(familyId, persons.map((p) => p.id)),
     computeTripReadiness(nextTrip.id),
     getWeatherForLocation(weatherCandidates),
+    isNextTripActive
+      ? supabase.from("journey_events").select("id, stage_id, date, time, category, title, location, status").eq("trip_id", nextTrip.id).then((r) => r.data ?? [])
+      : Promise.resolve([]),
+    isNextTripActive
+      ? supabase.from("memory_photos").select("id, stage_id, taken_at, created_at, caption, storage_path").eq("trip_id", nextTrip.id).eq("is_selected", true).then((r) => r.data ?? [])
+      : Promise.resolve([]),
   ]);
+
+  // §"Journey Journal als einzige Datenquelle" (bestehendes Prinzip, siehe
+  // trips/[id]/journey/page.tsx): dieselbe buildJourneyOverview-Funktion,
+  // hier nur auf den heutigen Tag reduziert -- keine zweite, parallele
+  // Tages-Logik. nextEventId bewusst null (kein "nächstes Ereignis"-Bold
+  // nötig für eine einzelne, isolierte Tageskarte außerhalb der vollen Timeline).
+  let todayJourneyDay: JourneyDayBucket | null = null;
+  let todayPhotoUrlByPhotoId = new Map<string, string>();
+  if (isNextTripActive) {
+    const events = journeyEventsRaw as unknown as TimelineEvent[];
+    const photos = journeyPhotosRaw as unknown as MemoryPhotoInput[];
+    const weatherByDate = new Map<string, DailyForecast>();
+    if (nextTripWeather) for (const d of nextTripWeather.daily) weatherByDate.set(d.date, d);
+    const activeTripDateRange = deriveTripDateRange(nextTrip, nextTripBookings, nextTripStages);
+    const overview = buildJourneyOverview({
+      trip: { start_date: activeTripDateRange.startDate, end_date: activeTripDateRange.endDate },
+      slug: nextTrip.slug,
+      stages: nextTripStages, bookings: nextTripBookings, events, photos,
+      readinessFindings: nextTripReadiness?.findings ?? [],
+      weatherByDate, tripDateRange: activeTripDateRange, todayIso,
+    });
+    todayJourneyDay = overview.days.find((d) => d.isToday) ?? null;
+
+    if (todayJourneyDay && todayJourneyDay.photos.length > 0) {
+      const photoDisplayByPath = await getPhotoDisplayUrls("documents", photos.map((p) => p.storage_path), "thumb400");
+      for (const p of photos) {
+        const resolved = photoDisplayByPath.get(p.storage_path);
+        if (resolved) todayPhotoUrlByPhotoId.set(p.id, resolved.url);
+      }
+    }
+  }
 
   // §"Besuchte Länder personenbezogen" (Nutzervorgabe): dieselbe
   // person_country_visits-Quelle wie /family/world, damit auch manuell
@@ -392,7 +446,21 @@ export default async function Dashboard() {
       </header>
 
       <div className="flex-1 px-5 md:px-8 pb-10 space-y-7">
-        <HeroTrip trip={nextTrip} img={tripImageById.get(nextTrip.id) ?? null} readiness={nextTripReadiness} weather={nextTripWeather} />
+        <HeroTrip trip={nextTrip} img={tripImageById.get(nextTrip.id) ?? null} readiness={nextTripReadiness} weather={nextTripWeather} isActive={isNextTripActive} />
+
+        {isNextTripActive && todayJourneyDay && (
+          <section>
+            <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+              <h2 className="text-xs font-medium" style={{ color: "var(--muted)", letterSpacing: "0.2em", textTransform: "uppercase", fontSize: "0.65rem" }}>
+                Heute
+              </h2>
+              <Link href={`/trips/${nextTrip.slug}/journey`} style={{ color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.08em", textDecoration: "none" }}>
+                Ganze Journey →
+              </Link>
+            </div>
+            <JourneyDayCard day={todayJourneyDay} photoUrlByPhotoId={todayPhotoUrlByPhotoId} nextEventId={null} tripSlug={nextTrip.slug} />
+          </section>
+        )}
 
         <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <StatTile value={worldStats.tripsCount} label="Reisen gesamt" Icon={MapIcon} href="/trips" />

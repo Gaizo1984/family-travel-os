@@ -120,7 +120,7 @@ function stageStatusLabel(stage: { start_date: string | null; end_date: string |
   return "Bevorstehend";
 }
 
-function StageCard({ stage, idx, slug, img, tripHistorical }: { stage: StageRow; idx: number; slug: string; img: ResolvedStageImage; tripHistorical: boolean }) {
+function StageCard({ stage, idx, slug, img, tripHistorical, accommodationLabel }: { stage: StageRow; idx: number; slug: string; img: ResolvedStageImage; tripHistorical: boolean; accommodationLabel: string | null }) {
   const dateRange = stage.start_date
     ? stage.end_date && stage.end_date !== stage.start_date
       ? `${formatDateDE(stage.start_date)} – ${formatDateDE(stage.end_date)}`
@@ -161,9 +161,9 @@ function StageCard({ stage, idx, slug, img, tripHistorical }: { stage: StageRow;
             <div style={{ color: "rgba(240,235,227,0.35)", fontSize: "0.6rem", letterSpacing: "0.04em" }}>
               {dateRange}
             </div>
-            {stage.accommodation && (
+            {accommodationLabel && (
               <div className="mt-0.5" style={{ color: H_MUTED, fontSize: "0.62rem" }}>
-                {stage.accommodation}
+                {accommodationLabel}
               </div>
             )}
           </div>
@@ -342,6 +342,26 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
   const members   = trip.trip_members.flatMap(tm => tm.persons ? [tm.persons] : []);
   const stages    = sortStagesChronologically(trip.stages);
   const bookings  = sortBookingsChronologically(trip.bookings);
+
+  // §Bugfix "Etappenkarte zeigt weiterhin den alten Hotelnamen": `stages.accommodation`
+  // ist reiner Freitext, der nur EINSEITIG aus einer Buchung befüllt wird
+  // (lib/actions/stages.ts::ensureAccommodationBooking) und bei manuell
+  // angelegten/bearbeiteten Etappen NIE zurücksynchronisiert wird, wenn die
+  // verknüpfte Buchung später umbenannt wird (lib/actions/bookings.ts::
+  // maybeSyncAccommodationStage rührt genau diese Etappen bewusst nicht an).
+  // Fix hier auf der Anzeige-Seite statt am Sync selbst (der bleibt so,
+  // manuelle Etappen-Edits sollen nicht automatisch überschrieben werden):
+  // eine noch bestehende, nicht stornierte Unterkunftsbuchung ist die
+  // aktuellere Quelle und gewinnt -- exakt dasselbe Muster wie
+  // lib/today.ts::resolveCurrentLocation.
+  const liveAccommodationByStageId = new Map<string, { title: string; createdAt: string }>();
+  for (const b of bookings) {
+    if (b.type !== "accommodation" || b.status === "cancelled" || !b.stage_id) continue;
+    const existing = liveAccommodationByStageId.get(b.stage_id);
+    if (!existing || b.created_at > existing.createdAt) {
+      liveAccommodationByStageId.set(b.stage_id, { title: b.title, createdAt: b.created_at });
+    }
+  }
   const journeyEvents = trip.journey_events ?? [];
   /** §"Merkliste": trip-weite Liste aller "Idee"-Termine (u.a. per LUMI "Merken" übernommene Orte), unabhängig vom Datum -- bisher gingen sie im Tages-Journey unter. */
   const ideaEvents = journeyEvents.filter((e) => e.status === "idea").sort((a, b) => a.date.localeCompare(b.date));
@@ -600,6 +620,17 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
                   : heroPrecipitation !== null && ` · ${heroPrecipitation}% Regen`}
               </div>
             )}
+            {/* §"Im Reisedashboard-Cover soll das aktuelle Hotel erscheinen"
+                (Nutzervorgabe, wörtlich): nur während die Reise tatsächlich
+                läuft UND eine echte, für heute gültige Unterkunftsbuchung
+                bekannt ist (source==='accommodation') -- sonst würde hier ein
+                irreführender Zwischenstopp/Ziel-Platzhalter statt des
+                tatsächlichen Hotels erscheinen. */}
+            {isTripCurrentlyRunning(tripStatusInput) && currentLocation.source === "accommodation" && (
+              <div className="mt-1" style={{ color: "#D8CFC0", fontSize: "0.72rem", letterSpacing: "0.02em" }}>
+                📍 {currentLocation.label}
+              </div>
+            )}
           </div>
 
           <div className="flex flex-col gap-2">
@@ -795,6 +826,7 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
                       key={stage.id} stage={stage} idx={idx} slug={trip.slug}
                       img={stageImages.get(stage.id) ?? { url: FALLBACK_STAGE_IMAGE, storagePath: null }}
                       tripHistorical={historical}
+                      accommodationLabel={liveAccommodationByStageId.get(stage.id)?.title ?? stage.accommodation}
                     />
                   ))}
                 </div>

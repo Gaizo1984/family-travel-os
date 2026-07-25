@@ -5,7 +5,7 @@ import { sortStagesChronologically, buildJourneyTimeline } from './journey'
 import type { StageInput, TimelineBooking, TimelineEvent, TimelineDay } from './journey'
 import { sortBookingsChronologically } from './bookings'
 import { resolveCurrentLocation, nearbyStageGeocodeCandidates, buildTodayTimelineItems, detectDayHighlight } from './today'
-import { getWeatherForLocation, describeWeatherCode } from './weather'
+import { getWeatherForLocation, describeWeatherCode, formatDailyWeatherSummary } from './weather'
 import type { WeatherLocationCandidate } from './weather'
 import { COUNTRY_NAMES } from './geo-suggestions'
 import { todayIsoInFamilyTimezone } from './time'
@@ -203,7 +203,7 @@ export async function buildContentPostingPlanContext(familyId: string): Promise<
     let weatherSummary: string | null = null
     if (weather && dayLocation.label === todayLocation.label) {
       const forecastDay = weather.daily.find((d) => d.date === dateIso)
-      if (forecastDay) weatherSummary = `${forecastDay.tempMax}°C, ${describeWeatherCode(forecastDay.code).label}`
+      if (forecastDay) weatherSummary = formatDailyWeatherSummary(forecastDay)
       else if (dateIso === todayIso) weatherSummary = `${weather.currentTemp}°C, ${describeWeatherCode(weather.currentCode).label}`
     }
 

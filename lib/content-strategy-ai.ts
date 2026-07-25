@@ -59,6 +59,7 @@ export async function generateContentStrategy(context: {
 ${context.weatherSummary ? `Wetter heute: ${context.weatherSummary}.` : 'Wetterdaten nicht verfügbar.'}
 Bereits bekannter Tagesplan: ${context.knownPlanText || 'Noch nichts Festes geplant.'}
 ${highlightInstruction}
+§Wichtig zur Wetter-Einordnung: Ein genanntes Regenfenster (z. B. "kurzer Schauer möglich 15:00–17:00 Uhr") oder eine Regenwahrscheinlichkeit ist KEIN Dauerregen -- gerade in tropischen/subtropischen Zielen ist ein kurzer Nachmittagsschauer normal, der Rest des Tages bleibt meist trocken. Plane Content, der auch bei einem kurzen Schauer funktioniert (flexible Zeitfenster, Rückzugsorte in der Nähe), statt automatisch auf reinen Innen-/Regen-Content umzuschwenken -- außer die Wetterangabe nennt ausdrücklich Dauerregen, eine sehr hohe Regenwahrscheinlichkeit oder ein Unwetter/Gewitter.
 ${context.regenerate ? 'Die Familie möchte eine ANDERE Strategie als zuvor — schlage eine spürbar unterschiedliche Herangehensweise vor.' : ''}
 
 Entwickle GENAU EINE konkrete, umsetzbare Content-Strategie für heute — keine mehreren konkurrierenden Vorschläge. Erfinde keine konkreten Preise, Öffnungszeiten oder Orte, die nicht gegeben sind. Schreibe auf Deutsch, konkret und direkt umsetzbar.`

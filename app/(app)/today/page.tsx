@@ -23,7 +23,8 @@ import { COUNTRY_STAGE_IMAGES, FALLBACK_STAGE_IMAGE, resolveStageImages } from "
 import { getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
 import { SignedPhoto } from "@/components/SignedPhoto";
 import { COUNTRY_NAMES } from "@/lib/geo-suggestions";
-import { todayIsoInFamilyTimezone, nowHHMMInFamilyTimezone } from "@/lib/time";
+import { todayIsoInFamilyTimezone, nowHHMMInFamilyTimezone, todayIsoInTimezone, nowHHMMInTimezone } from "@/lib/time";
+import { resolveTimezone } from "@/lib/country-timezones";
 import type { BookingType, BookingStatus } from "@/lib/supabase/types";
 import type { JourneyEventCategory, JourneyEventStatus } from "@/lib/journey-events";
 import { computeTripRequirements } from "@/lib/travel-requirements";
@@ -400,9 +401,16 @@ export default async function TodayPage({
   const family = await getFamily();
   const familyId = family.id;
 
-  const todayIso = todayIsoInFamilyTimezone();
-  const tomorrowIso = addDaysIso(todayIso, 1);
-  const nowHHMM = nowHHMMInFamilyTimezone();
+  // §"LUMI/heutiger Tag soll die Zeit vor Ort verwenden, nicht die deutsche
+  // Zeit" (Nutzervorgabe, wörtlich): diese vier Werte starten als Bootstrap
+  // mit der deutschen Zeit -- nur um überhaupt die aktive Reise/Etappe zu
+  // finden (Reisezeiträume sind lang genug, dass ein Berlin/Ortszeit-
+  // Unterschied von wenigen Stunden hier so gut wie nie die falsche Reise
+  // wählt) -- und werden weiter unten, sobald die aktive Etappe bekannt ist,
+  // auf deren Zielort-Zeitzone verfeinert (siehe "Aktive Reise"-Abschnitt).
+  let todayIso = todayIsoInFamilyTimezone();
+  let tomorrowIso = addDaysIso(todayIso, 1);
+  let nowHHMM = nowHHMMInFamilyTimezone();
 
   const [{ data: trips }, onThisDayMemories, dna, { data: pastTripsForAvoid }] = await Promise.all([
     supabase
@@ -452,7 +460,7 @@ export default async function TodayPage({
     : [];
 
   const greeting = family?.name ? `Hallo ${family.name}` : "Schön, dass ihr da seid.";
-  const dateLabel = new Date(todayIso).toLocaleDateString("de-DE", {
+  let dateLabel = new Date(todayIso).toLocaleDateString("de-DE", {
     weekday: "long", day: "2-digit", month: "long", year: "numeric",
   });
 
@@ -601,6 +609,22 @@ export default async function TodayPage({
   }
 
   // ── Aktive Reise: Journey Journal als einzige Datenquelle ──
+  // §Ortszeit-Verfeinerung (siehe Kommentar bei der ersten todayIso-Zuweisung
+  // oben): die aktive Etappe ist jetzt bekannt, "heute"/"jetzt" gilt ab hier
+  // für die Zeitzone DIESES Reiseziels statt für Berlin. Nutzt exakt dasselbe
+  // resolveTimezone(country_code)-Muster wie die Journey (lib/journey-events-model.ts).
+  const stagesForTimezone = sortStagesChronologically(activeTrip.stages) as StageInput[];
+  const currentStageForTimezone = stagesForTimezone.find(
+    (s) => s.start_date && s.end_date && s.start_date <= todayIso && todayIso <= s.end_date,
+  );
+  const destinationTimezone = resolveTimezone(currentStageForTimezone?.country_code);
+  todayIso = todayIsoInTimezone(destinationTimezone);
+  tomorrowIso = addDaysIso(todayIso, 1);
+  nowHHMM = nowHHMMInTimezone(destinationTimezone);
+  dateLabel = new Date(todayIso).toLocaleDateString("de-DE", {
+    weekday: "long", day: "2-digit", month: "long", year: "numeric",
+  });
+
   const stages = sortStagesChronologically(activeTrip.stages) as StageInput[];
   const bookings = sortBookingsChronologically(activeTrip.bookings) as TimelineBooking[];
   const events = (activeTrip.journey_events ?? []) as TimelineEvent[];

@@ -5,20 +5,32 @@
  * "completed" gesetzt wurde (z. B. Sardinien 2024 mit status='planned').
  * Wiederverwendet von Home-Dashboard, Trip-Detailseite, Familienseite und
  * Reisegeschichte, damit alle Stellen exakt dieselbe Einordnung treffen.
+ *
+ * §Root-Cause-Fix (Ready-to-Travel/Journey-Bugfix): der `todayIso`-
+ * Default-Parameter lieferte bisher `new Date().toISOString().slice(0,10)`
+ * -- das ist der UTC-Kalendertag, nicht der deutsche. Zwischen 22:00 und
+ * 23:59 UTC (00:00–01:59 deutscher Sommerzeit) zeigte UTC noch den
+ * VORHERIGEN Tag, während mehrere Aufrufer (u. a. ready-to-travel/page.tsx,
+ * journey/page.tsx) `todayIso` gar nicht explizit übergaben und sich daher
+ * genau in diesem täglichen ~2-Stunden-Fenster inkonsistent zu /today
+ * verhielten (das seinerseits korrekt `todayIsoInFamilyTimezone()`
+ * verwendet). Der Default wird jetzt hier zentral korrigiert, statt an
+ * jeder Aufrufstelle einzeln nachzuziehen.
  */
+import { todayIsoInFamilyTimezone } from './time'
 
 export type TripStatusLike = { status: string; start_date: string | null; end_date: string | null }
 
-export function isTripPastEnd(trip: TripStatusLike, todayIso: string = new Date().toISOString().slice(0, 10)): boolean {
+export function isTripPastEnd(trip: TripStatusLike, todayIso: string = todayIsoInFamilyTimezone()): boolean {
   return Boolean(trip.end_date && todayIso > trip.end_date)
 }
 
-export function isTripCurrentlyRunning(trip: TripStatusLike, todayIso: string = new Date().toISOString().slice(0, 10)): boolean {
+export function isTripCurrentlyRunning(trip: TripStatusLike, todayIso: string = todayIsoInFamilyTimezone()): boolean {
   return Boolean(trip.start_date && trip.end_date && todayIso >= trip.start_date && todayIso <= trip.end_date)
 }
 
 /** Reisen, die in Reisegeschichte/Weltkarte als "erlebt" gelten — abgeschlossen ODER Enddatum vergangen. */
-export function isTripHistorical(trip: TripStatusLike, todayIso: string = new Date().toISOString().slice(0, 10)): boolean {
+export function isTripHistorical(trip: TripStatusLike, todayIso: string = todayIsoInFamilyTimezone()): boolean {
   return trip.status === 'completed' || (trip.status !== 'archived' && isTripPastEnd(trip, todayIso))
 }
 
@@ -34,7 +46,7 @@ export type TripCountdownDisplay = { value: string; label: string }
 export function tripCountdownDisplay(
   trip: TripStatusLike,
   duration: number,
-  todayIso: string = new Date().toISOString().slice(0, 10),
+  todayIso: string = todayIsoInFamilyTimezone(),
 ): TripCountdownDisplay {
   if (isTripPastEnd(trip, todayIso)) {
     return { value: '—', label: 'Abgeschlossen' }
