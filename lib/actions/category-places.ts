@@ -57,8 +57,11 @@ export async function searchCategoryCandidates(origin: LumiContext['origin'], co
 
   if (!rawResults || rawResults.length === 0) return { ok: false, message: 'Keine Treffer gefunden -- bitte später erneut versuchen.' }
 
-  // §Bugfix "Aktivitäten enthalten zu viele Strände": siehe places-provider.ts::isPlainBeach.
-  const filteredResults = config.placesCategory === 'attraction' ? rawResults.filter((p) => !isPlainBeach(p.types)) : rawResults
+  // §Bugfix "Aktivitäten und Natur enthalten zu viele Strände -- das ist
+  // dann doppelt zu 'Strände', lieber andere passende Vorschläge"
+  // (Nutzervorgabe, wörtlich): siehe places-provider.ts::isPlainBeach.
+  const BEACH_FILTERED_CATEGORIES = new Set(['attraction', 'nature'])
+  const filteredResults = BEACH_FILTERED_CATEGORIES.has(config.placesCategory) ? rawResults.filter((p) => !isPlainBeach(p.types)) : rawResults
   if (filteredResults.length === 0) return { ok: false, message: 'Keine Treffer gefunden -- bitte später erneut versuchen.' }
 
   const seenIds = new Set<string>()

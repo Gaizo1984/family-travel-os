@@ -8,9 +8,15 @@ import { buildContentStrategyContext } from "@/lib/content-strategy-context";
 import { getCachedContentStrategy, generateAndCacheContentStrategy } from "@/lib/content-strategy";
 import { regenerateContentStrategy } from "@/lib/actions/content-strategy-actions";
 import { deleteContentSessionProject } from "@/lib/actions/content-sessions";
+import { deleteReelProject } from "@/lib/actions/content-reels";
 import { CONTENT_FORMAT_LABELS } from "@/lib/content-session-limits";
+import { REEL_STYLE_LABELS } from "@/lib/ai-style-guidelines";
 import { cleanupExpiredContentSessionPhotos } from "@/lib/content-session-cleanup";
 import { cleanupExpiredReelVideos } from "@/lib/reel-video-cleanup";
+
+const REEL_PROJECT_STATUS_LABELS: Record<string, string> = {
+  uploading: "Medienauswahl", draft_created: "Storyboard erstellt",
+};
 
 const STEPS = [
   { Icon: MapPin, label: "Reise & Format wählen" },
@@ -49,12 +55,23 @@ export default async function ContentStudioPage() {
   // erstellen" gekoppelt) zeigt der Hub jetzt offene Content-Sessions als
   // "Entwürfe fortsetzen" -- alle drei Abfragen hängen nur von familyId ab,
   // parallel statt seriell geladen.
-  const [{ data: openSessions }, { data: recentIdeas }, strategyContext] = await Promise.all([
+  const [{ data: openSessions }, { data: reelProjects }, { data: recentIdeas }, strategyContext] = await Promise.all([
     supabase
       .from("content_projects")
       .select("id, title, trip_id, output_format, status, updated_at, trips(title)")
       .eq("family_id", familyId)
       .eq("project_type", "session")
+      .order("updated_at", { ascending: false })
+      .limit(6),
+    // §"Angefangene oder abgeschlossene Reel-Projekte sollten erneut
+    // aufrufbar sein" (Nutzervorgabe, wörtlich): bisher gab es dafür gar
+    // keine Übersicht -- jeder Klick auf "Reel erstellen" legte ein neues,
+    // unabhängiges Projekt an, ohne je zu bereits begonnenen zurückzufinden.
+    supabase
+      .from("content_projects")
+      .select("id, title, trip_id, reel_style, reel_duration_seconds, status, updated_at, trips(title)")
+      .eq("family_id", familyId)
+      .eq("project_type", "reel")
       .order("updated_at", { ascending: false })
       .limit(6),
     supabase
@@ -265,6 +282,52 @@ export default async function ContentStudioPage() {
                   </form>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {(reelProjects ?? []).length > 0 && (
+          <div className="mb-8">
+            <h2 className="mb-4" style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase" }}>
+              Reel-Projekte fortsetzen
+            </h2>
+            <div className="grid grid-cols-1 gap-2">
+              {(reelProjects ?? []).map((project) => {
+                const step = project.status === "draft_created" ? "timeline" : "media";
+                return (
+                  <div
+                    key={project.id}
+                    className="flex items-center justify-between p-4 rounded-xl gap-3"
+                    style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+                  >
+                    <Link
+                      href={`/content-studio/reel/${project.id}/${step}`}
+                      className="flex-1 min-w-0"
+                      style={{ textDecoration: "none" }}
+                    >
+                      <div style={{ color: "var(--foreground)", fontSize: "0.82rem" }}>
+                        {(project.trips as unknown as { title: string } | null)?.title ?? project.title}
+                        {" · "}{REEL_STYLE_LABELS[project.reel_style ?? ""] ?? project.reel_style}
+                        {" · "}{project.reel_duration_seconds}s
+                      </div>
+                      <span style={{ color: "var(--muted)", fontSize: "0.68rem" }}>
+                        {REEL_PROJECT_STATUS_LABELS[project.status] ?? project.status}
+                      </span>
+                    </Link>
+                    <form action={deleteReelProject}>
+                      <input type="hidden" name="project_id" value={project.id} />
+                      <input type="hidden" name="return_to" value="/content-studio" />
+                      <button
+                        type="submit"
+                        aria-label="Reel-Projekt löschen"
+                        style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: "10px", margin: "-6px", color: "#B5624A" }}
+                      >
+                        <Trash2 size={14} strokeWidth={1.6} />
+                      </button>
+                    </form>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}

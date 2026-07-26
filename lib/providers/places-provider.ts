@@ -55,14 +55,16 @@ const CATEGORY_RADIUS_METERS: Record<PlacesCategory, number> = {
 const MAX_GOOGLE_RESULT_COUNT = 20
 
 /**
- * §Bugfix "Aktivitäten enthalten zu viele Strände": eine reine
- * Sehenswürdigkeiten-Suche liefert von Google oft auch Strände als Treffer.
+ * §Bugfix "Aktivitäten UND Natur enthalten zu viele Strände, das ist
+ * doppelt zu 'Strände'" (Nutzervorgabe): eine reine Sehenswürdigkeiten-
+ * oder Naturziele-Suche liefert von Google oft auch Strände als Treffer.
  * Um trotz des nachträglichen Herausfilterns (siehe `isPlainBeach` unten)
- * noch genug Aktivitäten-Treffer übrig zu behalten, wird für diese Kategorie
- * direkt das Google-Maximum abgefragt statt der sonst üblichen 8.
+ * noch genug ANDERE, passende Treffer übrig zu behalten ("mehr Auswahl"),
+ * wird für beide Kategorien direkt das Google-Maximum abgefragt statt der
+ * sonst üblichen 8.
  */
 const RESULT_COUNT_PER_CATEGORY: Record<PlacesCategory, number> = {
-  restaurant: 8, attraction: MAX_GOOGLE_RESULT_COUNT, beach: 8, nature: 8,
+  restaurant: 8, attraction: MAX_GOOGLE_RESULT_COUNT, beach: 8, nature: MAX_GOOGLE_RESULT_COUNT,
 }
 
 const PLACES_FIELD_MASK = [
@@ -82,10 +84,11 @@ const BEACH_TYPE = 'beach'
 const BEACH_ACTIVITY_TYPES = new Set(['water_park', 'amusement_park', 'marina', 'fishing_charter', 'fishing_pier'])
 
 /**
- * §Bugfix "Aktivitäten enthalten zu viele Strände": ein Treffer gilt als
- * "reiner Strand" (gehört ausschließlich unter "Strände", nicht unter
- * "Aktivitäten"), wenn er den Google-Typ `beach` trägt, aber keinen der
- * Typen, die auf eine eigenständig buchbare Aktivität dort hindeuten.
+ * §Bugfix "Aktivitäten und Natur enthalten zu viele Strände": ein Treffer
+ * gilt als "reiner Strand" (gehört ausschließlich unter "Strände", nicht
+ * unter "Aktivitäten"/"Natur"), wenn er den Google-Typ `beach` trägt, aber
+ * keinen der Typen, die auf eine eigenständig buchbare Aktivität dort
+ * hindeuten.
  */
 export function isPlainBeach(types: string[]): boolean {
   return types.includes(BEACH_TYPE) && !types.some((t) => BEACH_ACTIVITY_TYPES.has(t))

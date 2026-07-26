@@ -55,3 +55,56 @@ export async function startReelProject(formData: FormData) {
 
   redirect(`/content-studio/reel/${project.id}/media`)
 }
+
+/**
+ * §"Angefangene oder abgeschlossene Projekte sollten erneut aufrufbar sein.
+ * Löschung kann/soll manuell erfolgen." (Nutzervorgabe, wörtlich): explizite,
+ * manuelle Löschaktion -- es gibt keine automatische Aufräumung für
+ * Reel-Projekte. `content_drafts`/`content_reel_media_items`/
+ * `content_reel_renders` hängen per `ON DELETE CASCADE` an `content_projects`
+ * und werden beim Löschen der Projekt-Zeile automatisch mitentfernt -- das
+ * gilt aber NUR für die Datenbank-Zeilen, nicht für Storage-Dateien (kein
+ * DB-Cascade kann Supabase-Storage-Objekte löschen). Storage-first (etabliertes
+ * Muster): erst fertige Render-Ausgaben (content-reels) und eigene
+ * Musikdateien (documents) entfernen, danach erst die Projekt-Zeile.
+ */
+export async function deleteReelProject(formData: FormData) {
+  const projectId = String(formData.get('project_id') ?? '')
+  const returnTo = String(formData.get('return_to') ?? '/content-studio').trim() || '/content-studio'
+
+  const supabase = await createClient()
+  const { id: familyId } = await getFamily()
+
+  const { data: project } = await supabase
+    .from('content_projects')
+    .select('id')
+    .eq('id', projectId).eq('family_id', familyId).eq('project_type', 'reel')
+    .maybeSingle()
+  if (!project) redirect(returnTo)
+
+  const { data: drafts } = await supabase
+    .from('content_drafts')
+    .select('id, structure')
+    .eq('project_id', projectId)
+
+  const draftIds = (drafts ?? []).map((d) => d.id)
+  const customMusicPaths = (drafts ?? [])
+    .map((d) => (d.structure as unknown as { music_storage_path?: string | null } | null)?.music_storage_path)
+    .filter((p): p is string => Boolean(p))
+
+  let renderOutputPaths: string[] = []
+  if (draftIds.length > 0) {
+    const { data: renders } = await supabase
+      .from('content_reel_renders')
+      .select('output_storage_path')
+      .in('draft_id', draftIds)
+    renderOutputPaths = (renders ?? []).map((r) => r.output_storage_path).filter((p): p is string => Boolean(p))
+  }
+
+  if (renderOutputPaths.length > 0) await supabase.storage.from('content-reels').remove(renderOutputPaths)
+  if (customMusicPaths.length > 0) await supabase.storage.from('documents').remove(customMusicPaths)
+
+  await supabase.from('content_projects').delete().eq('id', projectId)
+
+  redirect(returnTo)
+}
