@@ -307,25 +307,12 @@ function CategoryGrid() {
   );
 }
 
-/** §Frag LUMI aus dem Kachelraster gelöst: breite Premium-Card, verlinkt weiterhin nur auf die bestehende /concierge-Seite. */
-function FragLumiCard() {
+/** §"Frag LUMI ist keine einzelne Kachel mehr, bitte rückgängig machen" (Nutzervorgabe, wörtlich): Revert der breiten Premium-Card aus Commit 0c0552e -- wieder eine normale Kachel, wie die übrigen im Kachelraster, weiterhin verlinkt auf die bestehende /concierge-Seite. */
+function FragLumiTile() {
   return (
-    <Link
-      href="/concierge"
-      className="flex items-center gap-4 rounded-xl p-5 transition-opacity hover:opacity-90"
-      style={{ background: "var(--surface-2)", border: "1px solid rgba(184,154,94,0.35)", textDecoration: "none" }}
-    >
-      <div className="shrink-0 flex items-center justify-center rounded-full" style={{ width: 44, height: 44, background: "var(--accent-subtle)" }}>
-        <Sparkles size={20} strokeWidth={1.4} style={{ color: "var(--accent)" }} />
-      </div>
-      <div className="flex-1 min-w-0">
-        <div style={{ color: "var(--foreground)", fontSize: "0.95rem", marginBottom: "3px" }}>Frag LUMI</div>
-        <p style={{ color: "var(--muted)", fontSize: "0.78rem", lineHeight: 1.5 }}>
-          Plane euren Tag, kläre offene Fragen oder erhalte persönliche Empfehlungen für diese Reise.
-        </p>
-      </div>
-      <ChevronRight size={18} strokeWidth={1.5} style={{ color: "var(--accent)", flexShrink: 0 }} />
-    </Link>
+    <div className="grid grid-cols-3 gap-3">
+      <GridTile href="/concierge" label="Frag LUMI" Icon={Sparkles} />
+    </div>
   );
 }
 
@@ -363,7 +350,7 @@ function LumiHauptbereich() {
     <>
       <CategoryGrid />
       <section className="mb-8">
-        <FragLumiCard />
+        <FragLumiTile />
         <UnserePraeferenzenLink />
       </section>
       <NextTripShortcutsGrid />

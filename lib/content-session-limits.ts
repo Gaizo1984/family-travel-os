@@ -12,6 +12,9 @@ export const MAX_PHOTOS_BY_FORMAT: Record<string, number> = {
 }
 export const DEFAULT_MAX_PHOTOS = 15
 
+/** §"Bild-Check": maximal 5 Fotos je Analyse-Durchlauf (Nutzervorgabe, wörtlich). */
+export const MAX_IMAGE_CHECK_PHOTOS = 5
+
 /** §"Beitrag": aus bis zu 15 hochgeladenen Bildern wählt LUMI maximal 7 für den finalen Post aus. */
 export const MAX_SELECTED_FOR_CAROUSEL = 7
 

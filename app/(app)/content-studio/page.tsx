@@ -3,7 +3,7 @@ import { after } from "next/server";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowRight, ImagePlus, Settings, MapPin, Wand2, Clapperboard, Clock, Gauge, Film,
-  LayoutGrid, Image as ImageIcon, FolderOpen,
+  LayoutGrid, Image as ImageIcon, FolderOpen, ScanSearch,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
@@ -19,16 +19,24 @@ const STEPS = [
   { Icon: Wand2, label: "KI erstellt Entwurf" },
 ];
 
-/** §"Icons oberhalb des Content-Fahrplans" + "Entwürfe fortsetzen als eigenes
- * Icon" (Nutzervorgabe, wörtlich): vier visuelle Einstiegskacheln analog zum
- * LUMI-Bereich. Story/Beitrag routen ins bestehende Session-Formular (Format
- * per Query-Param vorausgewählt), Reel bleibt der eigene, bestehende Flow,
- * Entwürfe führt auf die neue, vollständige Übersicht (app/(app)/content-studio/entwuerfe). */
-const FORMAT_TILES: { key: string; label: string; href: string; Icon: LucideIcon }[] = [
+/** §"Icons oberhalb des Content-Fahrplans" (Nutzervorgabe, wörtlich):
+ * visuelle Einstiegskacheln analog zum LUMI-Bereich, in zwei Reihen getrennt
+ * nach Zweck. Story/Beitrag routen ins bestehende Session-Formular (Format
+ * per Query-Param vorausgewählt), Reel bleibt der eigene, bestehende Flow. */
+const CONTENT_FORMAT_TILES: { key: string; label: string; href: string; Icon: LucideIcon }[] = [
   { key: "story", label: "Story", href: "/content-studio/session/new?format=story", Icon: ImageIcon },
   { key: "carousel", label: "Beitrag", href: "/content-studio/session/new?format=carousel", Icon: LayoutGrid },
   { key: "reel", label: "Reel", href: "/content-studio/reel/new", Icon: Film },
+];
+
+/** §"Entwürfe fortsetzen als eigenes Icon" + "Bild-Check als neues Tool/neue
+ * Kachel" (Nutzervorgabe, wörtlich): zweite Reihe für Werkzeuge, getrennt von
+ * den Content-Format-Kacheln oben. Entwürfe führt auf die vollständige
+ * Übersicht (app/(app)/content-studio/entwuerfe), Bild-Check auf den neuen
+ * Foto-Bewertungs-Flow (app/(app)/content-studio/bild-check). */
+const TOOL_TILES: { key: string; label: string; href: string; Icon: LucideIcon }[] = [
   { key: "entwuerfe", label: "Entwürfe", href: "/content-studio/entwuerfe", Icon: FolderOpen },
+  { key: "bild-check", label: "Bild-Check", href: "/content-studio/bild-check/new", Icon: ScanSearch },
 ];
 
 /** §"Vorschlag umsetzen": ordnet den KI-Freitext-Content-Typ (z.B. "Reel", "Carousel", "Foto-Story") einem der drei bestehenden Einstiege zu -- Beitrag als sicherer Standardfall. */
@@ -110,10 +118,24 @@ export default async function ContentStudioPage() {
         </div>
 
         {/* §"Icons oberhalb des Content-Fahrplans setzen" (Nutzervorgabe,
-            wörtlich): die vier Einstiegskacheln stehen jetzt ganz oben, noch
-            vor der Content-erstellen/Content-Fahrplan-Tableiste. */}
-        <div className="grid grid-cols-4 gap-2.5 mb-8">
-          {FORMAT_TILES.map(({ key, label, href, Icon }) => (
+            wörtlich): die Einstiegskacheln stehen jetzt ganz oben, noch vor
+            der Content-erstellen/Content-Fahrplan-Tableiste -- zwei Reihen,
+            oben Content erzeugen, unten Werkzeuge. */}
+        <div className="grid grid-cols-3 gap-2.5 mb-2.5">
+          {CONTENT_FORMAT_TILES.map(({ key, label, href, Icon }) => (
+            <Link
+              key={key}
+              href={href}
+              className="flex flex-col items-center justify-center gap-1.5 rounded-xl text-center transition-opacity hover:opacity-80"
+              style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none", minHeight: 80, padding: "12px" }}
+            >
+              <Icon size={18} strokeWidth={1.3} style={{ color: "var(--accent)" }} />
+              <span style={{ color: "var(--foreground)", fontSize: "0.68rem", fontWeight: 300 }}>{label}</span>
+            </Link>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 gap-2.5 mb-8">
+          {TOOL_TILES.map(({ key, label, href, Icon }) => (
             <Link
               key={key}
               href={href}
