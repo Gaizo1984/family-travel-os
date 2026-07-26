@@ -43,6 +43,13 @@ export async function startContentSession(formData: FormData) {
 
   if (!tripId) redirect(`${newPath}?error=${encodeURIComponent('Bitte eine Reise auswählen.')}`)
 
+  // §"Hub-Kacheln Story/Beitrag setzen das Format direkt": optionaler
+  // Hidden-Field-Wert aus der Kachel-Query (?format=story/carousel) -- ohne
+  // gültigen Wert bleibt output_format wie bisher unbesetzt, die
+  // "Content-Art"-Karte auf der nächsten Seite fragt dann wie gehabt danach.
+  const requestedFormat = String(formData.get('output_format') ?? '').trim()
+  const outputFormat = requestedFormat && requestedFormat in CONTENT_FORMAT_SCHEMAS ? requestedFormat : null
+
   const supabase = await createClient()
   const { id: familyId } = await getFamily()
   const { data: trip } = await supabase.from('trips').select('title').eq('id', tripId).maybeSingle()
@@ -54,6 +61,7 @@ export async function startContentSession(formData: FormData) {
     status: 'uploading',
     project_type: 'session',
     stage_id: stageId,
+    output_format: outputFormat,
   }).select('id').single()
 
   if (error || !project)

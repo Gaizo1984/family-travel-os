@@ -45,15 +45,15 @@ export function languageInstruction(language: string): string {
 
 /** §"Geführter Content-Kontext": kompakte Fokus-Auswahl vor der Content-Erstellung -- fließt in die Passungsprüfung und den Generierungs-Prompt ein. */
 export const CONTENT_FOCUS_OPTIONS = [
-  { value: 'ausflug', label: 'Ausflug' },
+  { value: 'ausflug', label: 'Ausflug/Highlight' },
   { value: 'strandtag', label: 'Strandtag' },
-  { value: 'hotelmoment', label: 'Hotelmoment' },
-  { value: 'familienmoment', label: 'Familienmoment' },
-  { value: 'essen', label: 'Essen oder Restaurant' },
+  { value: 'hotelmoment', label: 'Hotel' },
+  { value: 'familienmoment', label: 'Familie' },
+  { value: 'essen', label: 'Essen' },
   { value: 'natur', label: 'Natur' },
   { value: 'tagesrueckblick', label: 'Tagesrückblick' },
   { value: 'mix', label: 'Mix' },
-  { value: 'custom', label: 'Eigener Fokus' },
+  { value: 'custom', label: 'Freie Eingabe' },
 ] as const
 export const CONTENT_FOCUS_LABELS: Record<string, string> = Object.fromEntries(
   CONTENT_FOCUS_OPTIONS.map((o) => [o.value, o.label]),

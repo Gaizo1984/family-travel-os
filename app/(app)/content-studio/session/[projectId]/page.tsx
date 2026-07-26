@@ -27,7 +27,14 @@ const FIELD_STYLE: React.CSSProperties = {
   fontSize: "0.9rem", fontWeight: 300, outline: "none",
 };
 
-const SELECTABLE_FORMATS = ["carousel", "story", "reel", "day_recap", "highlight", "hotel_content", "package"] as const;
+// §"Formatauswahl bereinigen" (Nutzervorgabe): Tagesrückblick/Ausflug-Highlight/
+// Hotel-Content/Content-Paket sind jetzt als Content-Fokus wählbar (siehe
+// CONTENT_FOCUS_OPTIONS), nicht mehr als eigenes Format. "Reel" läuft
+// ausschließlich über den dedizierten Reel-Flow (/content-studio/reel/new),
+// nicht mehr über diesen reinen Text-Storyboard-Pfad. CONTENT_FORMAT_LABELS/
+// CONTENT_FORMAT_SCHEMAS behalten alle Werte -- bestehende Sessions/Drafts mit
+// altem Format zeigen weiterhin korrekt an, nur die Neuauswahl schrumpft.
+const SELECTABLE_FORMATS = ["carousel", "story"] as const;
 
 const DRAFT_TYPE_LABELS: Record<string, string> = {
   carousel_plan: "Beitrag", story_plan: "Story", reel_plan: "Reel",

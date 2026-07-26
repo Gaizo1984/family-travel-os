@@ -1,9 +1,12 @@
 import Link from "next/link";
 import { after } from "next/server";
-import { ArrowRight, ImagePlus, Settings, MapPin, Wand2, Clapperboard, Clock, Gauge, Trash2, Film } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import {
+  ArrowRight, ImagePlus, Settings, MapPin, Wand2, Clapperboard, Clock, Gauge, Trash2, Film,
+  LayoutGrid, Image as ImageIcon, FileText,
+} from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
-import { WhatCanAI } from "./WhatCanAI";
 import { buildContentStrategyContext } from "@/lib/content-strategy-context";
 import { getCachedContentStrategy, generateAndCacheContentStrategy } from "@/lib/content-strategy";
 import { regenerateContentStrategy } from "@/lib/actions/content-strategy-actions";
@@ -19,7 +22,7 @@ const REEL_PROJECT_STATUS_LABELS: Record<string, string> = {
 };
 
 const STEPS = [
-  { Icon: MapPin, label: "Reise & Format wählen" },
+  { Icon: MapPin, label: "Format & Reise wählen" },
   { Icon: ImagePlus, label: "Bilder hochladen" },
   { Icon: Wand2, label: "KI erstellt Entwurf" },
 ];
@@ -27,6 +30,39 @@ const STEPS = [
 const SESSION_STATUS_LABELS: Record<string, string> = {
   uploading: "Fotos werden hochgeladen", ready_for_analysis: "Bereit zur Analyse",
   analyzing: "Wird analysiert", draft_created: "Entwurf erstellt", images_deleted: "Bilder gelöscht",
+};
+
+/** §"Drei visuelle Einstiegskacheln analog zum LUMI-Bereich": Beitrag/Story
+ * routen ins bestehende Session-Formular (Format per Query-Param
+ * vorausgewählt), Reel bleibt der eigene, bestehende Flow. */
+const FORMAT_TILES: { key: string; label: string; href: string; Icon: LucideIcon }[] = [
+  { key: "story", label: "Story", href: "/content-studio/session/new?format=story", Icon: ImageIcon },
+  { key: "carousel", label: "Beitrag", href: "/content-studio/session/new?format=carousel", Icon: LayoutGrid },
+  { key: "reel", label: "Reel", href: "/content-studio/reel/new", Icon: Film },
+];
+
+/** Icon je Format für die zusammengeführte Entwürfe-Liste -- Alt-Formate (Tagesrückblick/Ausflug/Hotel/Paket/Reel-Textplan) fallen auf ein neutrales Icon zurück. */
+function iconForSessionFormat(outputFormat: string | null): LucideIcon {
+  if (outputFormat === "carousel") return LayoutGrid;
+  if (outputFormat === "story") return ImageIcon;
+  return FileText;
+}
+
+function formatDateDE(iso: string): string {
+  return new Date(iso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+/** §"Vorschlag umsetzen": ordnet den KI-Freitext-Content-Typ (z.B. "Reel", "Carousel", "Foto-Story") einem der drei bestehenden Einstiege zu -- Beitrag als sicherer Standardfall. */
+function resolveStrategyEntryHref(contentType: string): string {
+  const lower = contentType.toLowerCase();
+  if (lower.includes("reel")) return "/content-studio/reel/new";
+  if (lower.includes("story")) return "/content-studio/session/new?format=story";
+  return "/content-studio/session/new?format=carousel";
+}
+
+type DraftListItem = {
+  id: string; kind: "session" | "reel"; href: string; Icon: LucideIcon;
+  tripLabel: string; typeLabel: string; statusLabel: string; updatedAt: string;
 };
 
 export default async function ContentStudioPage() {
@@ -83,6 +119,31 @@ export default async function ContentStudioPage() {
     buildContentStrategyContext(familyId),
   ]);
 
+  // §"Entwürfe fortsetzen und Reel-Projekte fortsetzen in einer gemeinsamen
+  // Sektion zusammenführen" (Nutzervorgabe, wörtlich): beide Abfragen bleiben
+  // unverändert (unterschiedliche project_type-Filter), nur die Anzeige wird
+  // zu EINER, nach Bearbeitungsdatum sortierten Liste gemappt.
+  const draftItems: DraftListItem[] = [
+    ...(openSessions ?? []).map((s): DraftListItem => ({
+      id: s.id, kind: "session", href: `/content-studio/session/${s.id}`,
+      Icon: iconForSessionFormat(s.output_format),
+      tripLabel: (s.trips as unknown as { title: string } | null)?.title ?? s.title,
+      typeLabel: s.output_format ? (CONTENT_FORMAT_LABELS[s.output_format] ?? s.output_format) : "Format offen",
+      statusLabel: SESSION_STATUS_LABELS[s.status] ?? s.status,
+      updatedAt: s.updated_at,
+    })),
+    ...(reelProjects ?? []).map((p): DraftListItem => {
+      const step = p.status === "draft_created" ? "timeline" : "media";
+      return {
+        id: p.id, kind: "reel", href: `/content-studio/reel/${p.id}/${step}`, Icon: Film,
+        tripLabel: (p.trips as unknown as { title: string } | null)?.title ?? p.title,
+        typeLabel: `${REEL_STYLE_LABELS[p.reel_style ?? ""] ?? p.reel_style} · ${p.reel_duration_seconds}s`,
+        statusLabel: REEL_PROJECT_STATUS_LABELS[p.status] ?? p.status,
+        updatedAt: p.updated_at,
+      };
+    }),
+  ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+
   // §"Vom Ideengenerator zum Content Director": nur EINE "Today's Content
   // Strategy" gleichzeitig, einmal pro Tag generiert und zwischengespeichert
   // (wie die Heute-Tagesplanung) — nur relevant, wenn gerade eine Reise läuft.
@@ -134,7 +195,7 @@ export default async function ContentStudioPage() {
               <div className="flex items-center gap-2">
                 <Clapperboard size={14} strokeWidth={1.5} style={{ color: "var(--accent)" }} />
                 <span style={{ color: "var(--accent)", fontSize: "0.58rem", letterSpacing: "0.16em", textTransform: "uppercase" }}>
-                  Today&apos;s Content Strategy · {strategy.contentType}
+                  Heute empfiehlt LUMI · {strategy.contentType}
                 </span>
               </div>
             </div>
@@ -169,26 +230,38 @@ export default async function ContentStudioPage() {
               </div>
             </div>
 
-            <form action={regenerateContentStrategy}>
-              <input type="hidden" name="family_id" value={familyId} />
-              <input type="hidden" name="trip_id" value={strategyContext.tripId} />
-              <input type="hidden" name="for_date" value={strategyContext.forDate} />
-              <input type="hidden" name="date_label" value={strategyContext.dateLabel} />
-              <input type="hidden" name="location_label" value={strategyContext.locationLabel} />
-              <input type="hidden" name="weather_summary" value={strategyContext.weatherSummary ?? ""} />
-              <input type="hidden" name="known_plan_text" value={strategyContext.knownPlanText} />
-              <input type="hidden" name="highlight_title" value={strategyContext.highlightTitle ?? ""} />
-              <button
-                type="submit"
+            <div className="flex items-center gap-3 flex-wrap">
+              <Link
+                href={resolveStrategyEntryHref(strategy.contentType)}
                 style={{
-                  background: "transparent", color: "var(--accent)", border: "1px solid rgba(184,154,94,0.4)",
-                  borderRadius: "6px", padding: "8px 16px", fontSize: "0.62rem", letterSpacing: "0.1em",
-                  textTransform: "uppercase", cursor: "pointer", WebkitAppearance: "none", appearance: "none",
+                  background: "var(--accent)", color: "var(--surface)", border: "1px solid var(--accent)",
+                  borderRadius: "6px", padding: "9px 16px", fontSize: "0.62rem", letterSpacing: "0.1em",
+                  textTransform: "uppercase", textDecoration: "none",
                 }}
               >
-                Andere Strategie
-              </button>
-            </form>
+                Vorschlag umsetzen
+              </Link>
+              <form action={regenerateContentStrategy}>
+                <input type="hidden" name="family_id" value={familyId} />
+                <input type="hidden" name="trip_id" value={strategyContext.tripId} />
+                <input type="hidden" name="for_date" value={strategyContext.forDate} />
+                <input type="hidden" name="date_label" value={strategyContext.dateLabel} />
+                <input type="hidden" name="location_label" value={strategyContext.locationLabel} />
+                <input type="hidden" name="weather_summary" value={strategyContext.weatherSummary ?? ""} />
+                <input type="hidden" name="known_plan_text" value={strategyContext.knownPlanText} />
+                <input type="hidden" name="highlight_title" value={strategyContext.highlightTitle ?? ""} />
+                <button
+                  type="submit"
+                  style={{
+                    background: "transparent", color: "var(--accent)", border: "1px solid rgba(184,154,94,0.4)",
+                    borderRadius: "6px", padding: "8px 16px", fontSize: "0.62rem", letterSpacing: "0.1em",
+                    textTransform: "uppercase", cursor: "pointer", WebkitAppearance: "none", appearance: "none",
+                  }}
+                >
+                  Andere Strategie
+                </button>
+              </form>
+            </div>
           </div>
         )}
 
@@ -209,68 +282,50 @@ export default async function ContentStudioPage() {
           ))}
         </div>
 
-        <Link
-          href="/content-studio/session/new"
-          className="block rounded-xl p-7 mb-8"
-          style={{ background: "var(--foreground)", textDecoration: "none" }}
-        >
-          <div className="flex items-center gap-3 mb-2">
-            <ImagePlus size={16} strokeWidth={1.5} style={{ color: "var(--surface)" }} />
-            <span style={{ color: "var(--surface)", fontSize: "1rem", fontWeight: 400 }}>Content erstellen</span>
-          </div>
-          <p style={{ color: "var(--surface)", opacity: 0.7, fontSize: "0.76rem" }}>
-            Reise und Format wählen, Content-Fokus und Stimmung angeben, Bilder hochladen (automatische Löschung
-            nach 24h) -- LUMI erstellt daraus Beitrag, Story oder Reel inkl. Hook, Caption und Hashtags. Ausgewählte
-            Bilder lassen sich optional dauerhaft behalten.
-          </p>
-        </Link>
+        {/* §"Drei zentrale, visuelle Einstiegskacheln mit Icons analog zum
+            LUMI-Bereich: Story, Beitrag, Reel" (Nutzervorgabe, wörtlich):
+            ersetzt die frühere generische "Content erstellen"-Kachel und die
+            separate "Reel erstellen"-Zeile. */}
+        <div className="grid grid-cols-3 gap-3 mb-8">
+          {FORMAT_TILES.map(({ key, label, href, Icon }) => (
+            <Link
+              key={key}
+              href={href}
+              className="flex flex-col items-center justify-center gap-2 rounded-xl text-center transition-opacity hover:opacity-80"
+              style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none", minHeight: 92, padding: "16px" }}
+            >
+              <Icon size={20} strokeWidth={1.3} style={{ color: "var(--accent)" }} />
+              <span style={{ color: "var(--foreground)", fontSize: "0.72rem", fontWeight: 300 }}>{label}</span>
+            </Link>
+          ))}
+        </div>
 
-        {/* §Content Studio 3.0, Sprint 6: eigener, separater Einstieg für den
-            vollständigen Reel-Flow (Auswahl -> Storyboard -> Timeline ->
-            Render) -- bewusst weiterhin ein sekundärer Link statt einer
-            primären "Content erstellen"-Kachel, da er auf einer eigenen
-            Render-Infrastruktur (Remotion Lambda) statt reiner
-            Text-/Bild-Generierung basiert. */}
-        <Link
-          href="/content-studio/reel/new"
-          className="flex items-center gap-3 mb-8 rounded-xl p-5"
-          style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}
-        >
-          <Film size={16} strokeWidth={1.5} style={{ color: "var(--accent)", flexShrink: 0 }} />
-          <div className="flex-1 min-w-0">
-            <div style={{ color: "var(--foreground)", fontSize: "0.85rem" }}>Reel erstellen</div>
-            <div style={{ color: "var(--muted)", fontSize: "0.68rem" }}>Aus vorhandenen Fotos und Videos -- Stil und Dauer wählen</div>
-          </div>
-          <ArrowRight size={14} strokeWidth={1.5} style={{ color: "var(--accent)", flexShrink: 0 }} />
-        </Link>
-
-        {(openSessions ?? []).length > 0 && (
+        {/* §"Entwürfe fortsetzen und Reel-Projekte fortsetzen in einer
+            gemeinsamen Sektion zusammenführen" (Nutzervorgabe, wörtlich):
+            eine Liste, ein Kartenmuster, Icon je Format. */}
+        {draftItems.length > 0 && (
           <div className="mb-8">
             <h2 className="mb-4" style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase" }}>
               Entwürfe fortsetzen
             </h2>
             <div className="grid grid-cols-1 gap-2">
-              {(openSessions ?? []).map((session) => (
+              {draftItems.map((item) => (
                 <div
-                  key={session.id}
-                  className="flex items-center justify-between p-4 rounded-xl gap-3"
+                  key={`${item.kind}-${item.id}`}
+                  className="flex items-center p-4 rounded-xl gap-3"
                   style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
                 >
-                  <Link
-                    href={`/content-studio/session/${session.id}`}
-                    className="flex-1 min-w-0"
-                    style={{ textDecoration: "none" }}
-                  >
+                  <item.Icon size={16} strokeWidth={1.5} style={{ color: "var(--accent)", flexShrink: 0 }} />
+                  <Link href={item.href} className="flex-1 min-w-0" style={{ textDecoration: "none" }}>
                     <div style={{ color: "var(--foreground)", fontSize: "0.82rem" }}>
-                      {(session.trips as unknown as { title: string } | null)?.title ?? session.title}
-                      {session.output_format && ` · ${CONTENT_FORMAT_LABELS[session.output_format] ?? session.output_format}`}
+                      {item.tripLabel} · {item.typeLabel}
                     </div>
                     <span style={{ color: "var(--muted)", fontSize: "0.68rem" }}>
-                      {SESSION_STATUS_LABELS[session.status] ?? session.status}
+                      {item.statusLabel} · {formatDateDE(item.updatedAt)}
                     </span>
                   </Link>
-                  <form action={deleteContentSessionProject}>
-                    <input type="hidden" name="project_id" value={session.id} />
+                  <form action={item.kind === "reel" ? deleteReelProject : deleteContentSessionProject}>
+                    <input type="hidden" name="project_id" value={item.id} />
                     <input type="hidden" name="return_to" value="/content-studio" />
                     <button
                       type="submit"
@@ -286,78 +341,31 @@ export default async function ContentStudioPage() {
           </div>
         )}
 
-        {(reelProjects ?? []).length > 0 && (
-          <div className="mb-8">
-            <h2 className="mb-4" style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase" }}>
-              Reel-Projekte fortsetzen
-            </h2>
-            <div className="grid grid-cols-1 gap-2">
-              {(reelProjects ?? []).map((project) => {
-                const step = project.status === "draft_created" ? "timeline" : "media";
-                return (
-                  <div
-                    key={project.id}
-                    className="flex items-center justify-between p-4 rounded-xl gap-3"
-                    style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
-                  >
-                    <Link
-                      href={`/content-studio/reel/${project.id}/${step}`}
-                      className="flex-1 min-w-0"
-                      style={{ textDecoration: "none" }}
-                    >
-                      <div style={{ color: "var(--foreground)", fontSize: "0.82rem" }}>
-                        {(project.trips as unknown as { title: string } | null)?.title ?? project.title}
-                        {" · "}{REEL_STYLE_LABELS[project.reel_style ?? ""] ?? project.reel_style}
-                        {" · "}{project.reel_duration_seconds}s
-                      </div>
-                      <span style={{ color: "var(--muted)", fontSize: "0.68rem" }}>
-                        {REEL_PROJECT_STATUS_LABELS[project.status] ?? project.status}
-                      </span>
-                    </Link>
-                    <form action={deleteReelProject}>
-                      <input type="hidden" name="project_id" value={project.id} />
-                      <input type="hidden" name="return_to" value="/content-studio" />
-                      <button
-                        type="submit"
-                        aria-label="Reel-Projekt löschen"
-                        style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: "10px", margin: "-6px", color: "#B5624A" }}
-                      >
-                        <Trash2 size={14} strokeWidth={1.6} />
-                      </button>
-                    </form>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        <div className="flex items-center justify-between mb-4">
-          <h2 style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase" }}>
-            Frühere Ideen (Archiv)
-          </h2>
-          <Link href="/content-studio/ideas" style={{ color: "var(--accent)", fontSize: "0.65rem", letterSpacing: "0.08em", textDecoration: "none" }}>
-            Alle Ideen ansehen →
-          </Link>
-        </div>
-
-        {(recentIdeas ?? []).length === 0 ? (
-          <WhatCanAI />
-        ) : (
-          <div className="grid grid-cols-1 gap-2">
-            {(recentIdeas ?? []).map((idea) => (
-              <Link
-                key={idea.id}
-                href={`/content-studio/ideas/${idea.id}`}
-                className="flex items-center justify-between p-4 rounded-xl"
-                style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}
-              >
-                <span style={{ color: "var(--foreground)", fontSize: "0.82rem" }}>
-                  {(idea.trips as unknown as { title: string } | null)?.title ?? "Reise"}{idea.content_goal ? ` · ${idea.content_goal}` : ""}
-                </span>
-                <ArrowRight size={12} strokeWidth={1.5} style={{ color: "var(--accent)" }} />
+        {(recentIdeas ?? []).length > 0 && (
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h2 style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase" }}>
+                Frühere Ideen (Archiv)
+              </h2>
+              <Link href="/content-studio/ideas" style={{ color: "var(--accent)", fontSize: "0.65rem", letterSpacing: "0.08em", textDecoration: "none" }}>
+                Alle Ideen ansehen →
               </Link>
-            ))}
+            </div>
+            <div className="grid grid-cols-1 gap-2">
+              {(recentIdeas ?? []).map((idea) => (
+                <Link
+                  key={idea.id}
+                  href={`/content-studio/ideas/${idea.id}`}
+                  className="flex items-center justify-between p-4 rounded-xl"
+                  style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}
+                >
+                  <span style={{ color: "var(--foreground)", fontSize: "0.82rem" }}>
+                    {(idea.trips as unknown as { title: string } | null)?.title ?? "Reise"}{idea.content_goal ? ` · ${idea.content_goal}` : ""}
+                  </span>
+                  <ArrowRight size={12} strokeWidth={1.5} style={{ color: "var(--accent)" }} />
+                </Link>
+              ))}
+            </div>
           </div>
         )}
       </div>

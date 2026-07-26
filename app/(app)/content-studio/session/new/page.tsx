@@ -26,9 +26,9 @@ const FIELD_STYLE: React.CSSProperties = {
 export default async function NewContentSessionPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; format?: string }>;
 }) {
-  const { error } = await searchParams;
+  const { error, format } = await searchParams;
 
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
@@ -87,6 +87,7 @@ export default async function NewContentSessionPage({
         <form action={startContentSession}>
           <div className="rounded-xl p-8" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
             {error && <Banner variant="error">{error}</Banner>}
+            {format && <input type="hidden" name="output_format" value={format} />}
 
             <div className="mb-8">
               <label htmlFor="cs-trip" style={LABEL_STYLE}>Reise *</label>
