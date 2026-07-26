@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { searchPlaces, distanceKm, isPlainBeach, type PlaceResult } from '@/lib/providers/places-provider'
+import { searchPlaces, distanceKm, isPlainBeach, isLodging, type PlaceResult } from '@/lib/providers/places-provider'
 import { computeRouteMatrix, type RouteMatrixElement } from '@/lib/providers/routes-provider'
 import { ProviderConfigError } from '@/lib/providers/provider-errors'
 import { generateFiveRecommendations } from '@/lib/concierge-ai'
@@ -58,10 +58,13 @@ export async function searchCategoryCandidates(origin: LumiContext['origin'], co
   if (!rawResults || rawResults.length === 0) return { ok: false, message: 'Keine Treffer gefunden -- bitte später erneut versuchen.' }
 
   // §Bugfix "Aktivitäten und Natur enthalten zu viele Strände -- das ist
-  // dann doppelt zu 'Strände', lieber andere passende Vorschläge"
-  // (Nutzervorgabe, wörtlich): siehe places-provider.ts::isPlainBeach.
-  const BEACH_FILTERED_CATEGORIES = new Set(['attraction', 'nature'])
-  const filteredResults = BEACH_FILTERED_CATEGORIES.has(config.placesCategory) ? rawResults.filter((p) => !isPlainBeach(p.types)) : rawResults
+  // dann doppelt zu 'Strände', lieber andere passende Vorschläge" +
+  // "Bei Natur dürfen ebenfalls keine Hotels/Villen und Lodges erscheinen"
+  // (Nutzervorgabe, wörtlich, beide Male): siehe places-provider.ts::isPlainBeach/isLodging.
+  const BEACH_AND_LODGING_FILTERED_CATEGORIES = new Set(['attraction', 'nature'])
+  const filteredResults = BEACH_AND_LODGING_FILTERED_CATEGORIES.has(config.placesCategory)
+    ? rawResults.filter((p) => !isPlainBeach(p.types, p.name) && !isLodging(p.types))
+    : rawResults
   if (filteredResults.length === 0) return { ok: false, message: 'Keine Treffer gefunden -- bitte später erneut versuchen.' }
 
   const seenIds = new Set<string>()

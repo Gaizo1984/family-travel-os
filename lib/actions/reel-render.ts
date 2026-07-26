@@ -161,65 +161,82 @@ export async function startReelRender(projectId: string, quality: 'preview_lowre
     return { ok: false, error: 'Rendering ist aktuell nicht konfiguriert.' }
   }
 
-  const ctx = await loadOwnedRenderContext(projectId)
-  if (!ctx) return { ok: false, error: 'Projekt/Storyboard nicht gefunden.' }
-
-  const target = ctx.project.reel_duration_seconds ?? 30
-  const total = ctx.structure.scenes.reduce((sum, s) => sum + s.duration_seconds, 0)
-  if (Math.abs(total - target) > 0.05)
-    return { ok: false, error: `Die Gesamtdauer der Timeline (${total.toFixed(1)}s) weicht von ${target}s ab. Bitte zuerst in der Timeline ausgleichen.` }
-
-  if (quality === 'final') {
-    const { count: previewCount } = await ctx.supabase.from('content_reel_renders')
-      .select('id', { count: 'exact', head: true }).eq('draft_id', ctx.draftId).eq('quality', 'preview_lowres').eq('status', 'completed')
-    if (!previewCount) return { ok: false, error: 'Bitte zuerst eine Vorschau erfolgreich rendern.' }
-  }
-
-  if (await isReelRenderLimitReached(ctx.familyId)) return { ok: false, error: 'Monatslimit für Reel-Renders erreicht.' }
-
-  const compositionId = REMOTION_LAMBDA_COMPOSITION_BY_STYLE[ctx.project.reel_style ?? ''] ?? 'FamilyMemoryReel'
-  const resolved = await resolveScenesForRender(ctx.supabase, ctx.structure, quality === 'final' ? 'original' : 'thumb800')
-  if (!resolved) return { ok: false, error: 'Mindestens ein Medium konnte nicht geladen werden. Bitte gleich noch einmal versuchen.' }
-
-  const { data: renderRow, error: insertError } = await ctx.supabase.from('content_reel_renders').insert({
-    draft_id: ctx.draftId, quality, status: 'queued', provider: 'remotion_lambda', attempt_count: 1, max_attempts: 2,
-  }).select('id').single()
-  if (insertError || !renderRow) return { ok: false, error: 'Speicherfehler.' }
-
-  // §Zähler wird schon HIER erhöht, nicht erst bei Erfolg -- jeder Versuch
-  // verursacht echte AWS-Kosten unabhängig vom Ausgang (siehe reel-render-usage.ts).
-  await incrementReelRenderUsage(ctx.familyId)
-
-  if (!existsSync(BUNDLE_DIR)) {
-    await ctx.supabase.from('content_reel_renders').update({ status: 'failed', error_message: 'Render-Bundle nicht gefunden.' }).eq('id', renderRow.id)
-    return { ok: false, error: 'Rendering ist aktuell nicht verfügbar.' }
-  }
-
+  // §Root-Cause-Fix "Seite stürzt beim Rendern ab" (Nutzer-Feedback): früher
+  // lag der komplette Ablauf NACH der obigen Konfigurationsprüfung
+  // außerhalb jeder Absicherung, nur die eigentlichen AWS-Aufrufe waren in
+  // einem eigenen try/catch. Ein unerwarteter Fehler davor (z. B. ein
+  // Storyboard in einem älteren/unerwarteten Format) flog dadurch ungefangen
+  // bis zum Client durch -- ein Server-Action-Fehler, den die aufrufende
+  // Komponente (components/ReelRenderPanel.tsx) nicht abfängt, landet in
+  // Next.js als kompletter Seitenabsturz ("A server error occurred"), statt
+  // als normale Fehlermeldung im UI. Jetzt umschließt EIN try/catch den
+  // gesamten Ablauf -- jeder unerwartete Fehler wird zu einer kontrollierten
+  // Rückgabe statt eines Absturzes.
+  let ctx: Awaited<ReturnType<typeof loadOwnedRenderContext>> | null = null
   try {
-    const { functionName } = await deployFunction({
-      region: REMOTION_LAMBDA_REGION, createCloudWatchLogGroup: true, memorySizeInMb: 2048, diskSizeInMb: 2048, timeoutInSeconds: 120,
-    })
-    const { bucketName } = await getOrCreateBucket({ region: REMOTION_LAMBDA_REGION, enableFolderExpiry: true })
-    const { serveUrl } = await deploySiteFromBundle({
-      bucketName, region: REMOTION_LAMBDA_REGION, bundleDir: BUNDLE_DIR, siteName: REMOTION_LAMBDA_SITE_NAME,
-    })
+    ctx = await loadOwnedRenderContext(projectId)
+    if (!ctx) return { ok: false, error: 'Projekt/Storyboard nicht gefunden.' }
 
-    const isPreview = quality === 'preview_lowres'
-    const renderResult = await renderMediaOnLambda({
-      region: REMOTION_LAMBDA_REGION, functionName, serveUrl, composition: compositionId,
-      codec: 'h264', deleteAfter: REMOTION_LAMBDA_DELETE_AFTER, concurrency: 1,
-      inputProps: { scenes: resolved.scenes, style: ctx.project.reel_style ?? 'family_memory', musicUrl: resolved.musicUrl },
-      scale: isPreview ? 0.5 : 1, jpegQuality: isPreview ? 60 : 90,
-    })
+    const target = ctx.project.reel_duration_seconds ?? 30
+    const total = ctx.structure.scenes.reduce((sum, s) => sum + s.duration_seconds, 0)
+    if (Math.abs(total - target) > 0.05)
+      return { ok: false, error: `Die Gesamtdauer der Timeline (${total.toFixed(1)}s) weicht von ${target}s ab. Bitte zuerst in der Timeline ausgleichen.` }
 
-    await ctx.supabase.from('content_reel_renders').update({
-      status: 'rendering', provider_job_id: renderResult.renderId, aws_bucket_name: bucketName, aws_function_name: functionName,
-    }).eq('id', renderRow.id)
+    if (quality === 'final') {
+      const { count: previewCount } = await ctx.supabase.from('content_reel_renders')
+        .select('id', { count: 'exact', head: true }).eq('draft_id', ctx.draftId).eq('quality', 'preview_lowres').eq('status', 'completed')
+      if (!previewCount) return { ok: false, error: 'Bitte zuerst eine Vorschau erfolgreich rendern.' }
+    }
 
-    return { ok: true, renderRowId: renderRow.id }
-  } catch {
-    await ctx.supabase.from('content_reel_renders').update({ status: 'failed', error_message: 'Render konnte nicht gestartet werden.' }).eq('id', renderRow.id)
-    return { ok: false, error: 'Render konnte nicht gestartet werden. Bitte gleich noch einmal versuchen.' }
+    if (await isReelRenderLimitReached(ctx.familyId)) return { ok: false, error: 'Monatslimit für Reel-Renders erreicht.' }
+
+    const compositionId = REMOTION_LAMBDA_COMPOSITION_BY_STYLE[ctx.project.reel_style ?? ''] ?? 'FamilyMemoryReel'
+    const resolved = await resolveScenesForRender(ctx.supabase, ctx.structure, quality === 'final' ? 'original' : 'thumb800')
+    if (!resolved) return { ok: false, error: 'Mindestens ein Medium konnte nicht geladen werden. Bitte gleich noch einmal versuchen.' }
+
+    const { data: renderRow, error: insertError } = await ctx.supabase.from('content_reel_renders').insert({
+      draft_id: ctx.draftId, quality, status: 'queued', provider: 'remotion_lambda', attempt_count: 1, max_attempts: 2,
+    }).select('id').single()
+    if (insertError || !renderRow) return { ok: false, error: 'Speicherfehler.' }
+
+    // §Zähler wird schon HIER erhöht, nicht erst bei Erfolg -- jeder Versuch
+    // verursacht echte AWS-Kosten unabhängig vom Ausgang (siehe reel-render-usage.ts).
+    await incrementReelRenderUsage(ctx.familyId)
+
+    if (!existsSync(BUNDLE_DIR)) {
+      await ctx.supabase.from('content_reel_renders').update({ status: 'failed', error_message: 'Render-Bundle nicht gefunden.' }).eq('id', renderRow.id)
+      return { ok: false, error: 'Rendering ist aktuell nicht verfügbar.' }
+    }
+
+    try {
+      const { functionName } = await deployFunction({
+        region: REMOTION_LAMBDA_REGION, createCloudWatchLogGroup: true, memorySizeInMb: 2048, diskSizeInMb: 2048, timeoutInSeconds: 120,
+      })
+      const { bucketName } = await getOrCreateBucket({ region: REMOTION_LAMBDA_REGION, enableFolderExpiry: true })
+      const { serveUrl } = await deploySiteFromBundle({
+        bucketName, region: REMOTION_LAMBDA_REGION, bundleDir: BUNDLE_DIR, siteName: REMOTION_LAMBDA_SITE_NAME,
+      })
+
+      const isPreview = quality === 'preview_lowres'
+      const renderResult = await renderMediaOnLambda({
+        region: REMOTION_LAMBDA_REGION, functionName, serveUrl, composition: compositionId,
+        codec: 'h264', deleteAfter: REMOTION_LAMBDA_DELETE_AFTER, concurrency: 1,
+        inputProps: { scenes: resolved.scenes, style: ctx.project.reel_style ?? 'family_memory', musicUrl: resolved.musicUrl },
+        scale: isPreview ? 0.5 : 1, jpegQuality: isPreview ? 60 : 90,
+      })
+
+      await ctx.supabase.from('content_reel_renders').update({
+        status: 'rendering', provider_job_id: renderResult.renderId, aws_bucket_name: bucketName, aws_function_name: functionName,
+      }).eq('id', renderRow.id)
+
+      return { ok: true, renderRowId: renderRow.id }
+    } catch {
+      await ctx.supabase.from('content_reel_renders').update({ status: 'failed', error_message: 'Render konnte nicht gestartet werden.' }).eq('id', renderRow.id)
+      return { ok: false, error: 'Render konnte nicht gestartet werden. Bitte gleich noch einmal versuchen.' }
+    }
+  } catch (e) {
+    console.error('[reel-render] startReelRender: unerwarteter Fehler', e instanceof Error ? e.message : e)
+    return { ok: false, error: 'Render konnte nicht gestartet werden (unerwarteter Fehler). Bitte gleich noch einmal versuchen.' }
   }
 }
 
@@ -276,70 +293,80 @@ export async function deleteReelRender(projectId: string, renderRowId: string): 
  * separater Hintergrundschritt.
  */
 export async function pollReelRenderStatus(projectId: string, renderRowId: string): Promise<PollResult> {
-  const ctx = await loadOwnedRenderContext(projectId)
-  if (!ctx) return { ok: false, error: 'Projekt/Storyboard nicht gefunden.' }
-
-  const { data: row } = await ctx.supabase.from('content_reel_renders').select('*').eq('id', renderRowId).eq('draft_id', ctx.draftId).maybeSingle()
-  if (!row) return { ok: false, error: 'Render nicht gefunden.' }
-
-  if (row.status === 'completed' || row.status === 'failed' || !row.provider_job_id || !row.aws_bucket_name || !row.aws_function_name) {
-    return { ok: true, render: await toRenderStatus(ctx.supabase, row) }
-  }
-
-  let progress
+  // §Gleiche Absicherung wie bei startReelRender (siehe dortiger Kommentar):
+  // der komplette Poll-Tick läuft in einem äußeren try/catch, damit ein
+  // unerwarteter Fehler nie unabgefangen zum Client durchreicht (Polling
+  // läuft alle 3s im Hintergrund -- ein Absturz hier würde die Seite exakt
+  // beim nächsten Tick zum Abstürzen bringen).
   try {
-    progress = await getRenderProgress({
-      renderId: row.provider_job_id, bucketName: row.aws_bucket_name, functionName: row.aws_function_name, region: REMOTION_LAMBDA_REGION,
-    })
-  } catch {
-    // §Transienter Netzwerk-/AWS-Fehler beim Abfragen selbst -- kein Status-Wechsel, der nächste Poll-Tick versucht es erneut.
-    return { ok: true, render: await toRenderStatus(ctx.supabase, row) }
-  }
+    const ctx = await loadOwnedRenderContext(projectId)
+    if (!ctx) return { ok: false, error: 'Projekt/Storyboard nicht gefunden.' }
 
-  if (progress.fatalErrorEncountered) {
-    const message = (progress.errors ?? []).map((e) => e.message).filter(Boolean).join('; ').slice(0, MAX_ERROR_MESSAGE_LENGTH) || 'Unbekannter Renderfehler.'
-    await ctx.supabase.from('content_reel_renders').update({ status: 'failed', error_message: message, completed_at: new Date().toISOString() }).eq('id', renderRowId)
-    return { ok: true, render: await toRenderStatus(ctx.supabase, { ...row, status: 'failed', error_message: message }) }
-  }
+    const { data: row } = await ctx.supabase.from('content_reel_renders').select('*').eq('id', renderRowId).eq('draft_id', ctx.draftId).maybeSingle()
+    if (!row) return { ok: false, error: 'Render nicht gefunden.' }
 
-  if (!progress.done) {
-    const percent = Math.round((progress.overallProgress ?? 0) * 100)
-    await ctx.supabase.from('content_reel_renders').update({ progress_percent: percent }).eq('id', renderRowId)
-    return { ok: true, render: await toRenderStatus(ctx.supabase, { ...row, progress_percent: percent }) }
-  }
+    if (row.status === 'completed' || row.status === 'failed' || !row.provider_job_id || !row.aws_bucket_name || !row.aws_function_name) {
+      return { ok: true, render: await toRenderStatus(ctx.supabase, row) }
+    }
 
-  const tmpPath = path.join(os.tmpdir(), `reel-render-${renderRowId}.mp4`)
-  try {
-    await downloadMedia({ region: REMOTION_LAMBDA_REGION, bucketName: row.aws_bucket_name, renderId: row.provider_job_id, outPath: tmpPath })
-    const fileBuffer = readFileSync(tmpPath)
-    const outputPath = `${ctx.familyId}/${projectId}/${ctx.draftId}/${row.quality}-${renderRowId}.mp4`
-    const { error: uploadError } = await ctx.supabase.storage.from(OUTPUT_BUCKET).upload(outputPath, fileBuffer, { contentType: 'video/mp4', upsert: true })
+    let progress
+    try {
+      progress = await getRenderProgress({
+        renderId: row.provider_job_id, bucketName: row.aws_bucket_name, functionName: row.aws_function_name, region: REMOTION_LAMBDA_REGION,
+      })
+    } catch {
+      // §Transienter Netzwerk-/AWS-Fehler beim Abfragen selbst -- kein Status-Wechsel, der nächste Poll-Tick versucht es erneut.
+      return { ok: true, render: await toRenderStatus(ctx.supabase, row) }
+    }
 
-    if (uploadError) {
-      const message = 'Übernahme nach Supabase Storage fehlgeschlagen.'
-      await ctx.supabase.from('content_reel_renders').update({ status: 'failed', error_message: message }).eq('id', renderRowId)
+    if (progress.fatalErrorEncountered) {
+      const message = (progress.errors ?? []).map((e) => e.message).filter(Boolean).join('; ').slice(0, MAX_ERROR_MESSAGE_LENGTH) || 'Unbekannter Renderfehler.'
+      await ctx.supabase.from('content_reel_renders').update({ status: 'failed', error_message: message, completed_at: new Date().toISOString() }).eq('id', renderRowId)
       return { ok: true, render: await toRenderStatus(ctx.supabase, { ...row, status: 'failed', error_message: message }) }
     }
 
-    // §Löschung NUR nach erfolgreicher Übernahme, Fehler dabei sind nicht fatal (deleteAfter-Lifecycle-Regel bleibt als Sicherheitsnetz).
-    await deleteRender({ region: REMOTION_LAMBDA_REGION, bucketName: row.aws_bucket_name, renderId: row.provider_job_id }).catch(() => null)
-
-    const requestedAtMs = new Date(row.requested_at).getTime()
-    const renderDurationSeconds = Math.round((Date.now() - requestedAtMs) / 100) / 10
-    const outputDurationSeconds = ctx.structure.scenes.reduce((sum, s) => sum + s.duration_seconds, 0)
-
-    const updatePayload = {
-      status: 'completed', progress_percent: 100, output_storage_path: outputPath, output_duration_seconds: outputDurationSeconds,
-      cost_estimate_usd: progress.costs?.accruedSoFar ?? null, output_size_bytes: progress.outputSizeInBytes ?? null,
-      render_duration_seconds: renderDurationSeconds, completed_at: new Date().toISOString(),
+    if (!progress.done) {
+      const percent = Math.round((progress.overallProgress ?? 0) * 100)
+      await ctx.supabase.from('content_reel_renders').update({ progress_percent: percent }).eq('id', renderRowId)
+      return { ok: true, render: await toRenderStatus(ctx.supabase, { ...row, progress_percent: percent }) }
     }
-    await ctx.supabase.from('content_reel_renders').update(updatePayload).eq('id', renderRowId)
-    return { ok: true, render: await toRenderStatus(ctx.supabase, { ...row, ...updatePayload }) }
-  } catch {
-    const message = 'Übernahme des Renders fehlgeschlagen.'
-    await ctx.supabase.from('content_reel_renders').update({ status: 'failed', error_message: message }).eq('id', renderRowId)
-    return { ok: true, render: await toRenderStatus(ctx.supabase, { ...row, status: 'failed', error_message: message }) }
-  } finally {
-    if (existsSync(tmpPath)) unlinkSync(tmpPath)
+
+    const tmpPath = path.join(os.tmpdir(), `reel-render-${renderRowId}.mp4`)
+    try {
+      await downloadMedia({ region: REMOTION_LAMBDA_REGION, bucketName: row.aws_bucket_name, renderId: row.provider_job_id, outPath: tmpPath })
+      const fileBuffer = readFileSync(tmpPath)
+      const outputPath = `${ctx.familyId}/${projectId}/${ctx.draftId}/${row.quality}-${renderRowId}.mp4`
+      const { error: uploadError } = await ctx.supabase.storage.from(OUTPUT_BUCKET).upload(outputPath, fileBuffer, { contentType: 'video/mp4', upsert: true })
+
+      if (uploadError) {
+        const message = 'Übernahme nach Supabase Storage fehlgeschlagen.'
+        await ctx.supabase.from('content_reel_renders').update({ status: 'failed', error_message: message }).eq('id', renderRowId)
+        return { ok: true, render: await toRenderStatus(ctx.supabase, { ...row, status: 'failed', error_message: message }) }
+      }
+
+      // §Löschung NUR nach erfolgreicher Übernahme, Fehler dabei sind nicht fatal (deleteAfter-Lifecycle-Regel bleibt als Sicherheitsnetz).
+      await deleteRender({ region: REMOTION_LAMBDA_REGION, bucketName: row.aws_bucket_name, renderId: row.provider_job_id }).catch(() => null)
+
+      const requestedAtMs = new Date(row.requested_at).getTime()
+      const renderDurationSeconds = Math.round((Date.now() - requestedAtMs) / 100) / 10
+      const outputDurationSeconds = ctx.structure.scenes.reduce((sum, s) => sum + s.duration_seconds, 0)
+
+      const updatePayload = {
+        status: 'completed', progress_percent: 100, output_storage_path: outputPath, output_duration_seconds: outputDurationSeconds,
+        cost_estimate_usd: progress.costs?.accruedSoFar ?? null, output_size_bytes: progress.outputSizeInBytes ?? null,
+        render_duration_seconds: renderDurationSeconds, completed_at: new Date().toISOString(),
+      }
+      await ctx.supabase.from('content_reel_renders').update(updatePayload).eq('id', renderRowId)
+      return { ok: true, render: await toRenderStatus(ctx.supabase, { ...row, ...updatePayload }) }
+    } catch {
+      const message = 'Übernahme des Renders fehlgeschlagen.'
+      await ctx.supabase.from('content_reel_renders').update({ status: 'failed', error_message: message }).eq('id', renderRowId)
+      return { ok: true, render: await toRenderStatus(ctx.supabase, { ...row, status: 'failed', error_message: message }) }
+    } finally {
+      if (existsSync(tmpPath)) unlinkSync(tmpPath)
+    }
+  } catch (e) {
+    console.error('[reel-render] pollReelRenderStatus: unerwarteter Fehler', e instanceof Error ? e.message : e)
+    return { ok: false, error: 'Status konnte nicht abgerufen werden (unerwarteter Fehler).' }
   }
 }

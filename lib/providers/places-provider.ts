@@ -84,14 +84,33 @@ const BEACH_TYPE = 'beach'
 const BEACH_ACTIVITY_TYPES = new Set(['water_park', 'amusement_park', 'marina', 'fishing_charter', 'fishing_pier'])
 
 /**
+ * §Bugfix "Aktivitäten enthalten immer noch Strände" (Nutzervorgabe, wörtlich,
+ * NACH dem ersten -- unzureichenden -- Fix): Google vergibt den Typ `beach`
+ * längst nicht für jeden reinen Strand-Treffer, oft läuft ein Strand nur als
+ * `natural_feature`/`tourist_attraction`/`point_of_interest` (keinerlei
+ * eindeutiges Typ-Signal). Der reine Typ-Check allein greift deshalb zu
+ * selten. Namens-Fallback (Playa/Praia/Plage/Spiaggia/Strand/Beach) fängt
+ * genau diese Fälle zusätzlich ab -- aber NUR, wenn kein Aktivitäts-Typ
+ * vorliegt (sonst würde ein legitimer "Beach Club"/"Beach Volleyball Center"
+ * fälschlich verworfen).
+ */
+const BEACH_NAME_PATTERN = /\b(playa|praia|plage|spiaggia|strand|beach)\b/i
+/** Google-Typen, die typischerweise auf einen reinen Landschafts-/Aussichtspunkt statt eine buchbare Aktivität hindeuten -- Voraussetzung für den Namens-Fallback, damit dieser nicht zu breit greift. */
+const AMBIGUOUS_NATURAL_TYPES = new Set(['natural_feature', 'tourist_attraction', 'point_of_interest', 'establishment'])
+
+/**
  * §Bugfix "Aktivitäten und Natur enthalten zu viele Strände": ein Treffer
  * gilt als "reiner Strand" (gehört ausschließlich unter "Strände", nicht
- * unter "Aktivitäten"/"Natur"), wenn er den Google-Typ `beach` trägt, aber
- * keinen der Typen, die auf eine eigenständig buchbare Aktivität dort
- * hindeuten.
+ * unter "Aktivitäten"/"Natur"), wenn er den Google-Typ `beach` trägt ODER
+ * sein Name eindeutig auf einen Strand hindeutet -- in beiden Fällen nur,
+ * wenn keiner der Typen vorliegt, die auf eine eigenständig buchbare
+ * Aktivität dort hindeuten.
  */
-export function isPlainBeach(types: string[]): boolean {
-  return types.includes(BEACH_TYPE) && !types.some((t) => BEACH_ACTIVITY_TYPES.has(t))
+export function isPlainBeach(types: string[], name?: string): boolean {
+  if (types.some((t) => BEACH_ACTIVITY_TYPES.has(t))) return false
+  if (types.includes(BEACH_TYPE)) return true
+  if (name && BEACH_NAME_PATTERN.test(name) && types.every((t) => AMBIGUOUS_NATURAL_TYPES.has(t))) return true
+  return false
 }
 
 /**
@@ -216,6 +235,19 @@ export async function searchPlaces(params: PlacesSearchParams): Promise<PlaceRes
 const PLACE_LOOKUP_FIELD_MASK = 'places.id,places.displayName,places.formattedAddress,places.location,places.types'
 /** Google-Places-Typ für Unterkünfte -- einziges verlässliches Signal, dass ein Text-Search-Treffer tatsächlich ein Hotel ist (nicht nur irgendein Ort/Adresse mit ähnlichem Namen). */
 const LODGING_TYPE = 'lodging'
+
+/**
+ * §Bugfix "Bei Natur dürfen ebenfalls keine Hotels/Villen und Lodges
+ * erscheinen" (Nutzervorgabe, wörtlich): Aktivitäten-/Natur-Suchen liefern
+ * gelegentlich Unterkünfte (private Villen, Lodges, Resorts) als Treffer --
+ * dieselbe Filterlogik wie bei `searchLodging`/`fetchLodgingPage` (Google-Typ
+ * `lodging` als einziges verlässliches Signal), hier nur umgekehrt zum
+ * Ausschließen statt Einschließen genutzt. Siehe `isPlainBeach` für das
+ * analoge Strand-Pendant.
+ */
+export function isLodging(types: string[]): boolean {
+  return types.includes(LODGING_TYPE)
+}
 
 export type LodgingResult = PlaceResult & { priceLevel: string | null; websiteUri: string | null }
 

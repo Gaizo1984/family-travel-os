@@ -60,10 +60,21 @@ export function ReelRenderPanel({
     if (activeIds.length === 0) return
     const interval = setInterval(async () => {
       for (const id of activeIds) {
-        const result = await pollStatus(projectId, id)
-        if (result.ok && result.render) {
-          const updated = result.render
-          setRenders((prev) => prev.map((r) => (r.id === id ? updated : r)))
+        // §Bugfix "Seite stürzt beim Rendern ab" (Nutzer-Feedback): die
+        // Server Actions selbst fangen inzwischen jeden unerwarteten Fehler
+        // ab (siehe lib/actions/reel-render.ts), aber ein Transportfehler
+        // (z. B. Netzwerkabbruch beim Aufruf der Server Action) kann trotzdem
+        // eine unbehandelte Promise-Ablehnung erzeugen -- das würde die
+        // gesamte Seite über Next.js' Error-Boundary abstürzen lassen, exakt
+        // das gemeldete Symptom. Zweite Absicherungsebene hier im Client.
+        try {
+          const result = await pollStatus(projectId, id)
+          if (result.ok && result.render) {
+            const updated = result.render
+            setRenders((prev) => prev.map((r) => (r.id === id ? updated : r)))
+          }
+        } catch {
+          // §Nächster Poll-Tick versucht es erneut -- kein Status-Wechsel, kein Absturz.
         }
       }
     }, 3000)
@@ -74,21 +85,26 @@ export function ReelRenderPanel({
   async function handleStart(quality: 'preview_lowres' | 'final') {
     setBusy(quality)
     setError(null)
-    const result = await startRender(projectId, quality)
-    setBusy(null)
-    if (!result.ok) {
-      setError(result.error ?? 'Render konnte nicht gestartet werden.')
-      return
-    }
-    if (result.renderRowId) {
-      setRenders((prev) => [
-        {
-          id: result.renderRowId!, quality, status: 'queued', progressPercent: 0, errorMessage: null,
-          downloadUrl: null, costDisplay: null, outputSizeBytes: null, renderDurationSeconds: null,
-          requestedAt: new Date().toISOString(),
-        },
-        ...prev,
-      ])
+    try {
+      const result = await startRender(projectId, quality)
+      setBusy(null)
+      if (!result.ok) {
+        setError(result.error ?? 'Render konnte nicht gestartet werden.')
+        return
+      }
+      if (result.renderRowId) {
+        setRenders((prev) => [
+          {
+            id: result.renderRowId!, quality, status: 'queued', progressPercent: 0, errorMessage: null,
+            downloadUrl: null, costDisplay: null, outputSizeBytes: null, renderDurationSeconds: null,
+            requestedAt: new Date().toISOString(),
+          },
+          ...prev,
+        ])
+      }
+    } catch {
+      setBusy(null)
+      setError('Render konnte nicht gestartet werden (Verbindungsfehler). Bitte gleich noch einmal versuchen.')
     }
   }
 
