@@ -2,24 +2,16 @@ import Link from "next/link";
 import { after } from "next/server";
 import type { LucideIcon } from "lucide-react";
 import {
-  ArrowRight, ImagePlus, Settings, MapPin, Wand2, Clapperboard, Clock, Gauge, Trash2, Film,
-  LayoutGrid, Image as ImageIcon, FileText,
+  ArrowRight, ImagePlus, Settings, MapPin, Wand2, Clapperboard, Clock, Gauge, Film,
+  LayoutGrid, Image as ImageIcon, FolderOpen,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
 import { buildContentStrategyContext } from "@/lib/content-strategy-context";
 import { getCachedContentStrategy, generateAndCacheContentStrategy } from "@/lib/content-strategy";
 import { regenerateContentStrategy } from "@/lib/actions/content-strategy-actions";
-import { deleteContentSessionProject } from "@/lib/actions/content-sessions";
-import { deleteReelProject } from "@/lib/actions/content-reels";
-import { CONTENT_FORMAT_LABELS } from "@/lib/content-session-limits";
-import { REEL_STYLE_LABELS } from "@/lib/ai-style-guidelines";
 import { cleanupExpiredContentSessionPhotos } from "@/lib/content-session-cleanup";
 import { cleanupExpiredReelVideos } from "@/lib/reel-video-cleanup";
-
-const REEL_PROJECT_STATUS_LABELS: Record<string, string> = {
-  uploading: "Medienauswahl", draft_created: "Storyboard erstellt",
-};
 
 const STEPS = [
   { Icon: MapPin, label: "Format & Reise wählen" },
@@ -27,30 +19,17 @@ const STEPS = [
   { Icon: Wand2, label: "KI erstellt Entwurf" },
 ];
 
-const SESSION_STATUS_LABELS: Record<string, string> = {
-  uploading: "Fotos werden hochgeladen", ready_for_analysis: "Bereit zur Analyse",
-  analyzing: "Wird analysiert", draft_created: "Entwurf erstellt", images_deleted: "Bilder gelöscht",
-};
-
-/** §"Drei visuelle Einstiegskacheln analog zum LUMI-Bereich": Beitrag/Story
- * routen ins bestehende Session-Formular (Format per Query-Param
- * vorausgewählt), Reel bleibt der eigene, bestehende Flow. */
+/** §"Icons oberhalb des Content-Fahrplans" + "Entwürfe fortsetzen als eigenes
+ * Icon" (Nutzervorgabe, wörtlich): vier visuelle Einstiegskacheln analog zum
+ * LUMI-Bereich. Story/Beitrag routen ins bestehende Session-Formular (Format
+ * per Query-Param vorausgewählt), Reel bleibt der eigene, bestehende Flow,
+ * Entwürfe führt auf die neue, vollständige Übersicht (app/(app)/content-studio/entwuerfe). */
 const FORMAT_TILES: { key: string; label: string; href: string; Icon: LucideIcon }[] = [
   { key: "story", label: "Story", href: "/content-studio/session/new?format=story", Icon: ImageIcon },
   { key: "carousel", label: "Beitrag", href: "/content-studio/session/new?format=carousel", Icon: LayoutGrid },
   { key: "reel", label: "Reel", href: "/content-studio/reel/new", Icon: Film },
+  { key: "entwuerfe", label: "Entwürfe", href: "/content-studio/entwuerfe", Icon: FolderOpen },
 ];
-
-/** Icon je Format für die zusammengeführte Entwürfe-Liste -- Alt-Formate (Tagesrückblick/Ausflug/Hotel/Paket/Reel-Textplan) fallen auf ein neutrales Icon zurück. */
-function iconForSessionFormat(outputFormat: string | null): LucideIcon {
-  if (outputFormat === "carousel") return LayoutGrid;
-  if (outputFormat === "story") return ImageIcon;
-  return FileText;
-}
-
-function formatDateDE(iso: string): string {
-  return new Date(iso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
-}
 
 /** §"Vorschlag umsetzen": ordnet den KI-Freitext-Content-Typ (z.B. "Reel", "Carousel", "Foto-Story") einem der drei bestehenden Einstiege zu -- Beitrag als sicherer Standardfall. */
 function resolveStrategyEntryHref(contentType: string): string {
@@ -59,11 +38,6 @@ function resolveStrategyEntryHref(contentType: string): string {
   if (lower.includes("story")) return "/content-studio/session/new?format=story";
   return "/content-studio/session/new?format=carousel";
 }
-
-type DraftListItem = {
-  id: string; kind: "session" | "reel"; href: string; Icon: LucideIcon;
-  tripLabel: string; typeLabel: string; statusLabel: string; updatedAt: string;
-};
 
 export default async function ContentStudioPage() {
   const supabase = await createClient();
@@ -86,30 +60,10 @@ export default async function ContentStudioPage() {
     }
   });
 
-  // §"Nur noch EIN Einstieg 'Content erstellen'": statt eines separaten
-  // "aktives Projekt"-Blocks (früher an die jetzt entfernte "Content-Idee
-  // erstellen" gekoppelt) zeigt der Hub jetzt offene Content-Sessions als
-  // "Entwürfe fortsetzen" -- alle drei Abfragen hängen nur von familyId ab,
-  // parallel statt seriell geladen.
-  const [{ data: openSessions }, { data: reelProjects }, { data: recentIdeas }, strategyContext] = await Promise.all([
-    supabase
-      .from("content_projects")
-      .select("id, title, trip_id, output_format, status, updated_at, trips(title)")
-      .eq("family_id", familyId)
-      .eq("project_type", "session")
-      .order("updated_at", { ascending: false })
-      .limit(6),
-    // §"Angefangene oder abgeschlossene Reel-Projekte sollten erneut
-    // aufrufbar sein" (Nutzervorgabe, wörtlich): bisher gab es dafür gar
-    // keine Übersicht -- jeder Klick auf "Reel erstellen" legte ein neues,
-    // unabhängiges Projekt an, ohne je zu bereits begonnenen zurückzufinden.
-    supabase
-      .from("content_projects")
-      .select("id, title, trip_id, reel_style, reel_duration_seconds, status, updated_at, trips(title)")
-      .eq("family_id", familyId)
-      .eq("project_type", "reel")
-      .order("updated_at", { ascending: false })
-      .limit(6),
+  // §"Entwürfe fortsetzen jetzt über eigene Kachel/Seite" (Nutzervorgabe):
+  // der Hub selbst braucht Sessions/Reel-Projekte nicht mehr direkt -- die
+  // vollständige Liste lebt jetzt in app/(app)/content-studio/entwuerfe.
+  const [{ data: recentIdeas }, strategyContext] = await Promise.all([
     supabase
       .from("content_ideas")
       .select("id, content_goal, status, trip_id, trips(title)")
@@ -118,31 +72,6 @@ export default async function ContentStudioPage() {
       .limit(3),
     buildContentStrategyContext(familyId),
   ]);
-
-  // §"Entwürfe fortsetzen und Reel-Projekte fortsetzen in einer gemeinsamen
-  // Sektion zusammenführen" (Nutzervorgabe, wörtlich): beide Abfragen bleiben
-  // unverändert (unterschiedliche project_type-Filter), nur die Anzeige wird
-  // zu EINER, nach Bearbeitungsdatum sortierten Liste gemappt.
-  const draftItems: DraftListItem[] = [
-    ...(openSessions ?? []).map((s): DraftListItem => ({
-      id: s.id, kind: "session", href: `/content-studio/session/${s.id}`,
-      Icon: iconForSessionFormat(s.output_format),
-      tripLabel: (s.trips as unknown as { title: string } | null)?.title ?? s.title,
-      typeLabel: s.output_format ? (CONTENT_FORMAT_LABELS[s.output_format] ?? s.output_format) : "Format offen",
-      statusLabel: SESSION_STATUS_LABELS[s.status] ?? s.status,
-      updatedAt: s.updated_at,
-    })),
-    ...(reelProjects ?? []).map((p): DraftListItem => {
-      const step = p.status === "draft_created" ? "timeline" : "media";
-      return {
-        id: p.id, kind: "reel", href: `/content-studio/reel/${p.id}/${step}`, Icon: Film,
-        tripLabel: (p.trips as unknown as { title: string } | null)?.title ?? p.title,
-        typeLabel: `${REEL_STYLE_LABELS[p.reel_style ?? ""] ?? p.reel_style} · ${p.reel_duration_seconds}s`,
-        statusLabel: REEL_PROJECT_STATUS_LABELS[p.status] ?? p.status,
-        updatedAt: p.updated_at,
-      };
-    }),
-  ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 
   // §"Vom Ideengenerator zum Content Director": nur EINE "Today's Content
   // Strategy" gleichzeitig, einmal pro Tag generiert und zwischengespeichert
@@ -178,6 +107,23 @@ export default async function ContentStudioPage() {
           <Link href="/content-studio/settings" style={{ color: "var(--muted)" }}>
             <Settings size={16} strokeWidth={1.5} />
           </Link>
+        </div>
+
+        {/* §"Icons oberhalb des Content-Fahrplans setzen" (Nutzervorgabe,
+            wörtlich): die vier Einstiegskacheln stehen jetzt ganz oben, noch
+            vor der Content-erstellen/Content-Fahrplan-Tableiste. */}
+        <div className="grid grid-cols-4 gap-2.5 mb-8">
+          {FORMAT_TILES.map(({ key, label, href, Icon }) => (
+            <Link
+              key={key}
+              href={href}
+              className="flex flex-col items-center justify-center gap-1.5 rounded-xl text-center transition-opacity hover:opacity-80"
+              style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none", minHeight: 80, padding: "12px" }}
+            >
+              <Icon size={18} strokeWidth={1.3} style={{ color: "var(--accent)" }} />
+              <span style={{ color: "var(--foreground)", fontSize: "0.68rem", fontWeight: 300 }}>{label}</span>
+            </Link>
+          ))}
         </div>
 
         <div className="flex items-center gap-6 mb-8" style={{ borderBottom: "1px solid var(--border)", paddingBottom: "14px" }}>
@@ -281,65 +227,6 @@ export default async function ContentStudioPage() {
             </div>
           ))}
         </div>
-
-        {/* §"Drei zentrale, visuelle Einstiegskacheln mit Icons analog zum
-            LUMI-Bereich: Story, Beitrag, Reel" (Nutzervorgabe, wörtlich):
-            ersetzt die frühere generische "Content erstellen"-Kachel und die
-            separate "Reel erstellen"-Zeile. */}
-        <div className="grid grid-cols-3 gap-3 mb-8">
-          {FORMAT_TILES.map(({ key, label, href, Icon }) => (
-            <Link
-              key={key}
-              href={href}
-              className="flex flex-col items-center justify-center gap-2 rounded-xl text-center transition-opacity hover:opacity-80"
-              style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none", minHeight: 92, padding: "16px" }}
-            >
-              <Icon size={20} strokeWidth={1.3} style={{ color: "var(--accent)" }} />
-              <span style={{ color: "var(--foreground)", fontSize: "0.72rem", fontWeight: 300 }}>{label}</span>
-            </Link>
-          ))}
-        </div>
-
-        {/* §"Entwürfe fortsetzen und Reel-Projekte fortsetzen in einer
-            gemeinsamen Sektion zusammenführen" (Nutzervorgabe, wörtlich):
-            eine Liste, ein Kartenmuster, Icon je Format. */}
-        {draftItems.length > 0 && (
-          <div className="mb-8">
-            <h2 className="mb-4" style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase" }}>
-              Entwürfe fortsetzen
-            </h2>
-            <div className="grid grid-cols-1 gap-2">
-              {draftItems.map((item) => (
-                <div
-                  key={`${item.kind}-${item.id}`}
-                  className="flex items-center p-4 rounded-xl gap-3"
-                  style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
-                >
-                  <item.Icon size={16} strokeWidth={1.5} style={{ color: "var(--accent)", flexShrink: 0 }} />
-                  <Link href={item.href} className="flex-1 min-w-0" style={{ textDecoration: "none" }}>
-                    <div style={{ color: "var(--foreground)", fontSize: "0.82rem" }}>
-                      {item.tripLabel} · {item.typeLabel}
-                    </div>
-                    <span style={{ color: "var(--muted)", fontSize: "0.68rem" }}>
-                      {item.statusLabel} · {formatDateDE(item.updatedAt)}
-                    </span>
-                  </Link>
-                  <form action={item.kind === "reel" ? deleteReelProject : deleteContentSessionProject}>
-                    <input type="hidden" name="project_id" value={item.id} />
-                    <input type="hidden" name="return_to" value="/content-studio" />
-                    <button
-                      type="submit"
-                      aria-label="Entwurf löschen"
-                      style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: "10px", margin: "-6px", color: "#B5624A" }}
-                    >
-                      <Trash2 size={14} strokeWidth={1.6} />
-                    </button>
-                  </form>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {(recentIdeas ?? []).length > 0 && (
           <div>
