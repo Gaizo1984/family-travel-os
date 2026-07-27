@@ -87,6 +87,8 @@ export function BookingForm({
   existingStoragePath,
   participants,
   selectedParticipantIds,
+  tripMinIso,
+  tripMaxIso,
 }: {
   config: BookingTypeConfig;
   action: (formData: FormData) => void | Promise<void>;
@@ -105,6 +107,9 @@ export function BookingForm({
   participants?: BookingParticipantOption[];
   /** §"Standardmäßig alle Reiseteilnehmer vorauswählen, aber frei änderbar" (Nutzervorgabe, wörtlich) -- beim Neuanlegen alle Reiseteilnehmer, beim Bearbeiten die bereits gespeicherte (gegen gelöschte Personen gefilterte) Auswahl. */
   selectedParticipantIds?: string[];
+  /** §"Buchungsdatum auf den Reisezeitraum begrenzen" (Nutzervorgabe, wörtlich) -- an BookingDateFields durchgereicht, für ALLE Buchungsarten. `null`, wenn der Reisezeitraum (noch) nicht ableitbar ist -- dann bleiben die Felder wie bisher unbegrenzt. */
+  tripMinIso?: string | null;
+  tripMaxIso?: string | null;
 }) {
   const start = splitDateTime(values?.start_datetime ?? null);
   const end = splitDateTime(values?.end_datetime ?? null);
@@ -235,6 +240,8 @@ export function BookingForm({
           defaultEndDate={end.date}
           defaultEndTime={end.time}
           showNightsHelper={config.value === "accommodation"}
+          minIso={tripMinIso}
+          maxIso={tripMaxIso}
         />
 
         {/* Buchungsnummer */}

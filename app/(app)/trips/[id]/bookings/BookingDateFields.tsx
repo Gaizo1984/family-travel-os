@@ -36,6 +36,13 @@ function nightsBetween(startIso: string, endIso: string): number | null {
  * <select>-Feldern nicht mehr über ein natives `min`-Attribut erzwingen —
  * das war ohnehin nur eine Browser-Komfortprüfung, die serverseitige
  * Validierung in lib/actions/bookings.ts bleibt unverändert bestehen.
+ *
+ * §"Buchungsdatum auf den Reisezeitraum begrenzen" (Nutzervorgabe, wörtlich,
+ * ursprünglich am Beispiel Mietwagen gemeldet -- gilt aber für jede
+ * Buchungsart gleichermaßen, da alle dieselbe Komponente nutzen): `minIso`/
+ * `maxIso` werden 1:1 an DateSelectFields durchgereicht (dort bereits
+ * unterstützt, bisher aber nirgends für Buchungen genutzt) -- Optionen
+ * außerhalb des Reisezeitraums bleiben sichtbar, aber deaktiviert.
  */
 export function BookingDateFields({
   showEnd,
@@ -46,6 +53,8 @@ export function BookingDateFields({
   defaultEndDate,
   defaultEndTime,
   showNightsHelper,
+  minIso,
+  maxIso,
 }: {
   showEnd: boolean
   startLabel: string
@@ -61,6 +70,9 @@ export function BookingDateFields({
    * Dropdown"), das Nächte-Feld ist nur eine Komfort-Hilfe, keine Pflicht.
    */
   showNightsHelper?: boolean
+  /** Reisezeitraum -- `null`/`undefined` lässt die Felder wie bisher unbegrenzt (z.B. wenn der Zeitraum noch offen ist). */
+  minIso?: string | null
+  maxIso?: string | null
 }) {
   const [startIso, setStartIso] = useState<string | null>(defaultStartDate || null)
   const [nights, setNights] = useState<number | null>(
@@ -86,7 +98,7 @@ export function BookingDateFields({
       <div>
         <DateSelectFields
           label={`${startLabel} *`} namePrefix="start_date" defaultIso={defaultStartDate || null}
-          range={RANGE} quickActions
+          range={RANGE} quickActions minIso={minIso} maxIso={maxIso}
           onChange={(iso) => { setStartIso(iso); if (iso && nights) applyNights(nights, iso) }}
         />
         <label htmlFor="bk-start-time" style={LABEL_STYLE}>Uhrzeit</label>
@@ -113,7 +125,7 @@ export function BookingDateFields({
           <DateSelectFields
             key={endKey}
             label={showNightsHelper ? `${endLabel} *` : endLabel} namePrefix="end_date" defaultIso={endIso}
-            range={RANGE} quickActions
+            range={RANGE} quickActions minIso={minIso} maxIso={maxIso}
           />
           <label htmlFor="bk-end-time" style={LABEL_STYLE}>Uhrzeit</label>
           <input id="bk-end-time" name="end_time" type="time" defaultValue={defaultEndTime} style={FIELD_STYLE} />

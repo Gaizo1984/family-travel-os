@@ -184,6 +184,11 @@ const IMAGE_CHECK_PROMPT =
   'Eignung. Erkenne Fotos, die einem anderen sehr ähnlich sind (z.B. Serienaufnahme) oder klar schwächer als der Rest. ' +
   'Gib zu jedem Foto eine kurze, konkrete Begründung und maximal drei konkrete, direkt umsetzbare Verbesserungshinweise ' +
   '(z.B. Zuschnitt, Horizont begradigen, Helligkeit, Schatten aufhellen, Farbtemperatur, Motivposition). ' +
+  'Jedes Bild wird dir exakt in seinem tatsächlichen Original-Seitenverhältnis übergeben (z.B. auch hochformatige 9:16- ' +
+  'oder andere untypische Formate) -- gehe NIEMALS von einem Standardformat wie 4:3 oder 1:1 aus. Behaupte "abgeschnitten" ' +
+  'oder "beschnitten" nur, wenn im Bild selbst tatsächlich sichtbar Bildinhalt am Rand fehlt (z.B. ein Kopf, der wirklich ' +
+  'nur zur Hälfte im Bild ist) -- eine knappe, aber vollständige Rahmung nah am Bildrand ist KEIN Zuschnitt und darf nicht ' +
+  'fälschlich als "abgeschnitten" bezeichnet werden. ' +
   'Erzeuge NIEMALS Reichweiten-, Like-, Follower- oder Engagement-Prognosen -- bewerte ausschließlich das Bild selbst.'
 
 function clampScore(n: number): number {

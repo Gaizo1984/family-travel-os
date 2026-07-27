@@ -9,6 +9,7 @@ import { BOOKING_TYPE_ORDER, BOOKING_TYPE_CONFIG, BOOKING_CATEGORIES } from "@/l
 import type { BookingCategory } from "@/lib/bookings";
 import type { BookingType } from "@/lib/supabase/types";
 import { loadTripParticipantOptions } from "@/lib/trip-participants";
+import { deriveTripDateRange } from "@/lib/trip-dates";
 import { BookingForm } from "../BookingForm";
 
 type BookingDraft = {
@@ -45,11 +46,22 @@ export default async function NewBookingPage({
   const supabase = await createClient();
   const { data: trip } = await supabase
     .from("trips")
-    .select("id, slug, title")
+    .select(`
+      id, slug, title, start_date, end_date,
+      stages ( start_date, end_date ),
+      bookings ( type, status, start_datetime, end_datetime )
+    `)
     .eq("slug", id)
     .maybeSingle();
 
   if (!trip) notFound();
+
+  // §"Mietwagen-Datum auf den Reisezeitraum begrenzen" (Nutzervorgabe,
+  // wörtlich) -- gilt über BookingDateFields für ALLE Buchungsarten
+  // gleichermaßen (gemeinsame Komponente, kein mietwagen-spezifischer Code).
+  // Bei noch offenem Zeitraum (keine Reisedaten/Etappen/Buchungen ableitbar)
+  // bleiben die Felder wie bisher unbegrenzt.
+  const tripDateRange = deriveTripDateRange(trip, trip.bookings, trip.stages);
 
   const categoryConfig = category ? BOOKING_CATEGORIES[category as BookingCategory] : undefined;
   const config = type ? BOOKING_TYPE_CONFIG[type as BookingType] : undefined;
@@ -163,6 +175,8 @@ export default async function NewBookingPage({
           values={draft ?? undefined}
           participants={participants}
           selectedParticipantIds={participants.map((p) => p.id)}
+          tripMinIso={tripDateRange.startDate}
+          tripMaxIso={tripDateRange.endDate}
         />
       </div>
     </div>
