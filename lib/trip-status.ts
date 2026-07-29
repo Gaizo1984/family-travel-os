@@ -18,6 +18,7 @@
  * jeder Aufrufstelle einzeln nachzuziehen.
  */
 import { todayIsoInFamilyTimezone } from './time'
+import { tripDayNumber } from './date-utils'
 
 export type TripStatusLike = { status: string; start_date: string | null; end_date: string | null }
 
@@ -52,9 +53,7 @@ export function tripCountdownDisplay(
     return { value: '—', label: 'Abgeschlossen' }
   }
   if (trip.start_date && trip.end_date && isTripCurrentlyRunning(trip, todayIso)) {
-    const dayNumber = Math.floor(
-      (new Date(todayIso + 'T00:00:00Z').getTime() - new Date(trip.start_date + 'T00:00:00Z').getTime()) / 86400000,
-    ) + 1
+    const dayNumber = tripDayNumber(todayIso, trip.start_date)
     return { value: `${dayNumber}/${duration}`, label: 'Reisetag' }
   }
   if (trip.start_date) {
@@ -65,4 +64,18 @@ export function tripCountdownDisplay(
     return { value: days.toLocaleString('de-DE'), label: 'Tage bis zur Abreise' }
   }
   return { value: '—', label: 'Tage bis zur Abreise' }
+}
+
+/**
+ * §"Bei laufender Reise heutigen Reisetag vorauswählen, vor Reisebeginn den
+ * ersten Reisetag" (Nutzervorgabe, wörtlich) -- Vorauswahl für neue
+ * reisebezogene Buchungen (siehe components/TripDateField.tsx). Für den vom
+ * Nutzer nicht spezifizierten Fall "Reise bereits vorbei" gilt dieselbe
+ * Regel wie "vor Reisebeginn" (erster Reisetag) -- eine bewusste Annahme,
+ * keine Herleitung aus einer expliziten Vorgabe.
+ */
+export function defaultTripDayIso(tripStartIso: string, tripEndIso: string): string {
+  const todayIso = todayIsoInFamilyTimezone()
+  if (isTripCurrentlyRunning({ status: '', start_date: tripStartIso, end_date: tripEndIso }, todayIso)) return todayIso
+  return tripStartIso
 }

@@ -192,16 +192,19 @@ export interface Database {
           id: string; trip_id: string; stage_id: string | null; date: string; time: string | null
           category: string; title: string; location: string | null; notes: string | null
           status: string; metadata: Json | null; created_at: string; updated_at: string
+          participant_person_ids: string[] | null
         }
         Insert: {
           id?: string; trip_id: string; stage_id?: string | null; date: string; time?: string | null
           category: string; title: string; location?: string | null; notes?: string | null
           status?: string; metadata?: Json | null; created_at?: string; updated_at?: string
+          participant_person_ids?: string[] | null
         }
         Update: {
           id?: string; trip_id?: string; stage_id?: string | null; date?: string; time?: string | null
           category?: string; title?: string; location?: string | null; notes?: string | null
           status?: string; metadata?: Json | null; created_at?: string; updated_at?: string
+          participant_person_ids?: string[] | null
         }
         Relationships: [
           { foreignKeyName: "journey_events_trip_id_fkey";  columns: ["trip_id"];  isOneToOne: false; referencedRelation: "trips";  referencedColumns: ["id"] },

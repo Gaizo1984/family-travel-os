@@ -48,7 +48,7 @@ export default async function NewBookingPage({
     .from("trips")
     .select(`
       id, slug, title, start_date, end_date,
-      stages ( start_date, end_date ),
+      stages ( id, title, location, start_date, end_date, sort_order ),
       bookings ( type, status, start_datetime, end_datetime )
     `)
     .eq("slug", id)
@@ -177,6 +177,7 @@ export default async function NewBookingPage({
           selectedParticipantIds={participants.map((p) => p.id)}
           tripMinIso={tripDateRange.startDate}
           tripMaxIso={tripDateRange.endDate}
+          stages={trip.stages}
         />
       </div>
     </div>

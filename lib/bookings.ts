@@ -83,6 +83,20 @@ export const BOOKING_TYPE_ORDER: BookingType[] = [
   'restaurant', 'train', 'ferry', 'insurance', 'other',
 ]
 
+/**
+ * §"Datumsauswahl für alle reisebezogenen Buchungen auf den Reisezeitraum
+ * begrenzen" (Nutzervorgabe, wörtlich) -- explizit OHNE Flug/Unterkunft
+ * (spannen den Reisezeitraum über `deriveTripDateRange` selbst mit auf,
+ * eine Begrenzung darauf wäre zirkulär) und OHNE Versicherung (oft
+ * reiseübergreifende Gültigkeit). Einzige Quelle der Wahrheit für diese
+ * Typmenge -- von components/TripDateField.tsx (Client) UND
+ * lib/actions/bookings.ts (Server-Validierung) importiert, damit beide
+ * Seiten nie auseinanderlaufen können.
+ */
+export const TRIP_BOUNDED_BOOKING_TYPES: BookingType[] = [
+  'activity', 'restaurant', 'rental_car', 'transfer', 'train', 'ferry', 'other',
+]
+
 export type BookingCategory = 'flight' | 'accommodation' | 'activity' | 'more'
 
 export type BookingCategoryConfig = {

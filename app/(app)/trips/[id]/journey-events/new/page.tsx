@@ -3,7 +3,9 @@ import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { createJourneyEvent } from "@/lib/actions/journey-events";
-import { getJourneyEventDateRange } from "@/lib/documents";
+import { getNarrowTripDateRange } from "@/lib/documents";
+import { getFamily } from "@/lib/family";
+import { loadTripParticipantOptions } from "@/lib/trip-participants";
 import { DaySelectField } from "@/components/DaySelectField";
 import { TimeSelectField } from "@/components/TimeSelectField";
 import { Banner } from "@/components/Banner";
@@ -48,6 +50,12 @@ export default async function NewJourneyEventPage({
     .order("sort_order");
 
   const cancelHref = return_to || `/trips/${trip.slug}`;
+
+  // §"Teilnehmer auch bei Journey-Terminen auswählbar, standardmäßig alle
+  // vorausgewählt" (Nutzervorgabe, wörtlich) -- gleiche Quelle/Vorbefüllung
+  // wie bei Aktivitätsbuchungen (BookingForm.tsx).
+  const { id: familyId } = await getFamily();
+  const participants = await loadTripParticipantOptions(supabase, trip.id, familyId);
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -108,8 +116,32 @@ export default async function NewJourneyEventPage({
               </div>
             </div>
 
+            {participants.length > 0 && (
+              <div className="mb-5">
+                <label style={LABEL_STYLE}>Teilnehmer</label>
+                <div className="flex flex-wrap gap-2">
+                  {participants.map((p) => (
+                    <label
+                      key={p.id}
+                      className="flex items-center gap-2 rounded-lg px-3 py-2 cursor-pointer"
+                      style={{ background: "var(--background)", border: "1px solid var(--border)" }}
+                    >
+                      <input type="checkbox" name="participant_person_ids" value={p.id} defaultChecked />
+                      <span
+                        className="inline-flex items-center justify-center rounded-full"
+                        style={{ width: "18px", height: "18px", background: p.color, color: "#fff", fontSize: "0.55rem" }}
+                      >
+                        {p.initials}
+                      </span>
+                      <span style={{ color: "var(--foreground)", fontSize: "0.78rem" }}>{p.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <DaySelectField label="Datum *" namePrefix="date" defaultIso={date ?? null} {...getJourneyEventDateRange(trip.start_date, trip.end_date, date ?? null)} />
+              <DaySelectField label="Datum *" namePrefix="date" defaultIso={date ?? null} {...getNarrowTripDateRange(trip.start_date, trip.end_date, date ?? null)} />
               <TimeSelectField id="je-time" label="Uhrzeit (optional)" name="time" />
             </div>
 

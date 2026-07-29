@@ -209,7 +209,7 @@ export function getTripDateFieldRange(startDate: string | null, endDate: string 
   }
 }
 
-const JOURNEY_EVENT_DATE_MARGIN_DAYS = 2
+const NARROW_TRIP_DATE_MARGIN_DAYS = 2
 
 /**
  * §"Maximal 2 Tage vor/nach der Reise, sonst verliert man bei der
@@ -221,13 +221,17 @@ const JOURNEY_EVENT_DATE_MARGIN_DAYS = 2
  * bestehenden Eintrags dessen Datum immer auswählbar, auch falls es
  * (z. B. nach nachträglicher Änderung der Reisedaten) außerhalb des
  * eigentlichen ±2-Tage-Fensters liegen sollte.
+ *
+ * Ursprünglich nur für Journey-Termine gebaut (daher der Name), inzwischen
+ * ebenso für Aktivitäts-/Restaurant-Buchungen genutzt (BookingDateFields.tsx)
+ * -- eine Reise, ein Zeitfenster, eine Ableitung.
  */
-export function getJourneyEventDateRange(startDate: string | null, endDate: string | null, keepIso?: string | null): { minIso: string; maxIso: string } {
+export function getNarrowTripDateRange(startDate: string | null, endDate: string | null, keepIso?: string | null): { minIso: string; maxIso: string } {
   const today = isoToday()
   const start = startDate ?? today
   const end = endDate ?? start
-  let minIso = addDaysIso(start, -JOURNEY_EVENT_DATE_MARGIN_DAYS)
-  let maxIso = addDaysIso(end, JOURNEY_EVENT_DATE_MARGIN_DAYS)
+  let minIso = addDaysIso(start, -NARROW_TRIP_DATE_MARGIN_DAYS)
+  let maxIso = addDaysIso(end, NARROW_TRIP_DATE_MARGIN_DAYS)
   if (keepIso && keepIso < minIso) minIso = keepIso
   if (keepIso && keepIso > maxIso) maxIso = keepIso
   return { minIso, maxIso }

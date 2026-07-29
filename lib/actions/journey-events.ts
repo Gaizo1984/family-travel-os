@@ -5,6 +5,12 @@ import { redirect } from 'next/navigation'
 import { combineIsoDate } from '@/lib/documents'
 import type { JourneyEventCategory, JourneyEventStatus } from '@/lib/journey-events'
 
+/** §"Teilnehmer auch bei Journey-Terminen auswählbar" (Nutzervorgabe, wörtlich): gleiche Dedupliziert-Lesung wie bookings.ts::readParticipantPersonIds, hier ungated (jede Kategorie, nicht nur 'activity'). */
+function readParticipantPersonIds(formData: FormData): string[] {
+  const raw = formData.getAll('participant_person_ids').map(String).filter(Boolean)
+  return [...new Set(raw)]
+}
+
 function readCommonFields(formData: FormData) {
   const tripId    = String(formData.get('trip_id') ?? '')
   const stageId   = String(formData.get('stage_id') ?? '').trim()
@@ -41,6 +47,7 @@ export async function createJourneyEvent(formData: FormData) {
   if (!f.date)
     redirect(`${newPath}?error=${encodeURIComponent('Bitte ein Datum auswählen')}`)
 
+  const participantIds = readParticipantPersonIds(formData)
   const supabase = await createClient()
 
   const { error } = await supabase.from('journey_events').insert({
@@ -53,6 +60,7 @@ export async function createJourneyEvent(formData: FormData) {
     location: f.location || null,
     notes: f.notes || null,
     status: f.status,
+    participant_person_ids: participantIds.length > 0 ? participantIds : null,
   })
 
   if (error)
@@ -78,6 +86,7 @@ export async function updateJourneyEvent(formData: FormData) {
   if (!f.date)
     redirect(`${editPath}?error=${encodeURIComponent('Bitte ein Datum auswählen')}`)
 
+  const participantIds = readParticipantPersonIds(formData)
   const supabase = await createClient()
 
   const { error } = await supabase.from('journey_events').update({
@@ -89,6 +98,7 @@ export async function updateJourneyEvent(formData: FormData) {
     location: f.location || null,
     notes: f.notes || null,
     status: f.status,
+    participant_person_ids: participantIds.length > 0 ? participantIds : null,
   }).eq('id', eventId)
 
   if (error)

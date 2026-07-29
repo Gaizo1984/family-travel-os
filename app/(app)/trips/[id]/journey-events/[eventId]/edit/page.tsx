@@ -3,7 +3,9 @@ import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { updateJourneyEvent, deleteJourneyEvent } from "@/lib/actions/journey-events";
-import { getJourneyEventDateRange } from "@/lib/documents";
+import { getNarrowTripDateRange } from "@/lib/documents";
+import { getFamily } from "@/lib/family";
+import { loadTripParticipantOptions } from "@/lib/trip-participants";
 import { DaySelectField } from "@/components/DaySelectField";
 import { TimeSelectField } from "@/components/TimeSelectField";
 import { Banner } from "@/components/Banner";
@@ -43,12 +45,20 @@ export default async function EditJourneyEventPage({
 
   const { data: event } = await supabase
     .from("journey_events")
-    .select("id, trip_id, stage_id, date, time, category, title, location, notes, status")
+    .select("id, trip_id, stage_id, date, time, category, title, location, notes, status, participant_person_ids")
     .eq("id", eventId)
     .eq("trip_id", trip.id)
     .maybeSingle();
 
   if (!event) notFound();
+
+  // §"Teilnehmer auch bei Journey-Terminen auswählbar, gelöschte Personen
+  // defensiv ignorieren" (Nutzervorgabe, wörtlich) -- gleiches Muster wie
+  // bei Aktivitätsbuchungen (bookings/[bookingId]/edit/page.tsx).
+  const { id: familyId } = await getFamily();
+  const participants = await loadTripParticipantOptions(supabase, trip.id, familyId);
+  const validParticipantIds = new Set(participants.map((p) => p.id));
+  const selectedParticipantIds = (event.participant_person_ids ?? []).filter((id) => validParticipantIds.has(id));
 
   const { data: stages } = await supabase
     .from("stages")
@@ -117,8 +127,32 @@ export default async function EditJourneyEventPage({
               </div>
             </div>
 
+            {participants.length > 0 && (
+              <div className="mb-5">
+                <label style={LABEL_STYLE}>Teilnehmer</label>
+                <div className="flex flex-wrap gap-2">
+                  {participants.map((p) => (
+                    <label
+                      key={p.id}
+                      className="flex items-center gap-2 rounded-lg px-3 py-2 cursor-pointer"
+                      style={{ background: "var(--background)", border: "1px solid var(--border)" }}
+                    >
+                      <input type="checkbox" name="participant_person_ids" value={p.id} defaultChecked={selectedParticipantIds.includes(p.id)} />
+                      <span
+                        className="inline-flex items-center justify-center rounded-full"
+                        style={{ width: "18px", height: "18px", background: p.color, color: "#fff", fontSize: "0.55rem" }}
+                      >
+                        {p.initials}
+                      </span>
+                      <span style={{ color: "var(--foreground)", fontSize: "0.78rem" }}>{p.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <DaySelectField label="Datum *" namePrefix="date" defaultIso={event.date} {...getJourneyEventDateRange(trip.start_date, trip.end_date, event.date)} />
+              <DaySelectField label="Datum *" namePrefix="date" defaultIso={event.date} {...getNarrowTripDateRange(trip.start_date, trip.end_date, event.date)} />
               <TimeSelectField id="je-time" label="Uhrzeit (optional)" name="time" defaultValue={event.time} />
             </div>
 

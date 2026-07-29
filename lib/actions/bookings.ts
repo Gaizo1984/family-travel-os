@@ -2,9 +2,10 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { BOOKING_TYPE_CONFIG, combineDateTime, AUTO_STAGE_NOTE_LAYOVER } from '@/lib/bookings'
+import { BOOKING_TYPE_CONFIG, TRIP_BOUNDED_BOOKING_TYPES, BOOKING_CATEGORIES, combineDateTime, AUTO_STAGE_NOTE_LAYOVER } from '@/lib/bookings'
 import { suggestCountryCode } from '@/lib/geo-suggestions'
-import { readDateGroupFromFormData } from '@/lib/documents'
+import { readDateGroupFromFormData, getNarrowTripDateRange } from '@/lib/documents'
+import { deriveTripDateRange } from '@/lib/trip-dates'
 import { getFamily } from '@/lib/family'
 import { maybeSuggestActivityPreference } from '@/lib/actions/activity-preference-learning'
 import type { BookingType, BookingStatus, PaymentStatus } from '@/lib/supabase/types'
@@ -287,6 +288,52 @@ function redirectWithDraft(pathWithTrailingSeparator: string, error: string, f: 
   redirect(`${pathWithTrailingSeparator}error=${encodeURIComponent(error)}&draft=${encodeURIComponent(JSON.stringify(draft))}`)
 }
 
+/**
+ * §"Reisezeitraum-Grenze zusätzlich serverseitig absichern" (Nutzervorgabe,
+ * wörtlich): clientseitig (TripDateField/BookingDateFields.tsx) ist die
+ * Auswahl für TRIP_BOUNDED_BOOKING_TYPES bereits auf den Reisezeitraum
+ * begrenzt -- das ist aber nur eine deaktivierte `<option>`, kein Schutz
+ * gegen eine direkt eingereichte Formular-Anfrage. Prüft dieselbe Regel
+ * hier noch einmal serverseitig (±2 Tage nur bei activity/restaurant, siehe
+ * getNarrowTripDateRange). Gibt `null` zurück, wenn der Typ nicht
+ * betroffen ist oder der Reisezeitraum (noch) nicht ableitbar ist ("offen"
+ * -- dann gibt es nichts, wogegen zu prüfen wäre, wie clientseitig auch).
+ */
+async function checkTripBoundedDateRange(
+  supabase: SupabaseClient,
+  tripId: string,
+  type: BookingType,
+  startDate: string,
+  endDate: string,
+): Promise<string | null> {
+  if (!TRIP_BOUNDED_BOOKING_TYPES.includes(type)) return null
+
+  const { data: trip } = await supabase
+    .from('trips')
+    .select(`
+      id, start_date, end_date,
+      stages ( start_date, end_date ),
+      bookings ( type, status, start_datetime, end_datetime )
+    `)
+    .eq('id', tripId)
+    .maybeSingle()
+  if (!trip) return null
+
+  const range = deriveTripDateRange(trip, trip.bookings, trip.stages)
+  if (range.isOpen || !range.startDate || !range.endDate) return null
+
+  const { minIso, maxIso } = BOOKING_CATEGORIES.activity.types.includes(type)
+    ? getNarrowTripDateRange(range.startDate, range.endDate)
+    : { minIso: range.startDate, maxIso: range.endDate }
+
+  if (startDate < minIso || startDate > maxIso)
+    return `Datum liegt außerhalb des Reisezeitraums (${minIso} – ${maxIso})`
+  if (endDate && (endDate < minIso || endDate > maxIso))
+    return `Datum liegt außerhalb des Reisezeitraums (${minIso} – ${maxIso})`
+
+  return null
+}
+
 export async function createBooking(formData: FormData) {
   const tripId   = String(formData.get('trip_id') ?? '')
   const slug     = String(formData.get('slug') ?? '')
@@ -333,6 +380,10 @@ export async function createBooking(formData: FormData) {
     redirectWithDraft(newPath, 'Enddatum darf nicht vor dem Startdatum liegen', f)
 
   const supabase = await createClient()
+
+  const rangeError = await checkTripBoundedDateRange(supabase, tripId, f.type, f.startDate, f.endDate)
+  if (rangeError) redirectWithDraft(newPath, rangeError, f)
+
   // §Bugfix "Etappe wird nur für das erste von mehreren Hotels gebildet": bei
   // Unterkünften bewusst NICHT `suggestStageId` (breite Datumsbereich-
   // Überlappung) nutzen -- eine Unterkunftsbuchung, deren Check-in exakt auf
@@ -435,6 +486,9 @@ export async function updateBooking(formData: FormData) {
 
   if (endDatetime && startDatetime && new Date(endDatetime) < new Date(startDatetime))
     redirectWithDraft(editPath, 'Enddatum darf nicht vor dem Startdatum liegen', f)
+
+  const rangeError = tripId ? await checkTripBoundedDateRange(supabase, tripId, f.type, f.startDate, f.endDate) : null
+  if (rangeError) redirectWithDraft(editPath, rangeError, f)
 
   let stageId = existing?.stage_id ?? null
   // §Wie in createBooking: für Unterkünfte keine breite Datumsbereich-

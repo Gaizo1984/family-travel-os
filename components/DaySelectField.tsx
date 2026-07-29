@@ -17,9 +17,10 @@ const FIELD_STYLE: React.CSSProperties = {
 /**
  * §"Nur anhand des Datums verliert man schnell den Überblick, Wochentag
  * fehlt" (Nutzervorgabe, wörtlich): ersetzt die generische
- * `DateSelectFields` (Tag/Monat/Jahr-Dropdowns über beliebige Jahre) für
- * Journey-Termine durch EINE Liste der tatsächlich sinnvollen Tage
- * (`minIso`…`maxIso`, siehe `getJourneyEventDateRange`) inklusive
+ * `DateSelectFields` (Tag/Monat/Jahr-Dropdowns über beliebige Jahre) für an
+ * eine Reise gebundene, eng befristete Termine (Journey-Termine, Aktivitäts-/
+ * Restaurant-Buchungen) durch EINE Liste der tatsächlich sinnvollen Tage
+ * (`minIso`…`maxIso`, siehe `getNarrowTripDateRange`) inklusive
  * Wochentag -- bei einer kurzen Reise sind das ohnehin nur eine Handvoll
  * Optionen, eine einzelne durchsuchbare Liste ist da übersichtlicher als
  * drei gekoppelte Dropdowns. Sendet dieselben `${namePrefix}_day/_month/_year`-

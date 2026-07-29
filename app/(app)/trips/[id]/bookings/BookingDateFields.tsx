@@ -2,7 +2,12 @@
 
 import { useState } from 'react'
 import { DateSelectFields } from '@/components/DateSelectFields'
+import { TripDateField } from '@/components/TripDateField'
 import { getDateFieldRange } from '@/lib/documents'
+import { TRIP_BOUNDED_BOOKING_TYPES, BOOKING_CATEGORIES } from '@/lib/bookings'
+import { defaultTripDayIso } from '@/lib/trip-status'
+import type { BookingType } from '@/lib/supabase/types'
+import type { StageDateLookupInput } from '@/lib/journey'
 
 const FIELD_STYLE: React.CSSProperties = {
   width: '100%', padding: '14px 16px', background: 'var(--background)',
@@ -37,14 +42,18 @@ function nightsBetween(startIso: string, endIso: string): number | null {
  * das war ohnehin nur eine Browser-Komfortprüfung, die serverseitige
  * Validierung in lib/actions/bookings.ts bleibt unverändert bestehen.
  *
- * §"Buchungsdatum auf den Reisezeitraum begrenzen" (Nutzervorgabe, wörtlich,
- * ursprünglich am Beispiel Mietwagen gemeldet -- gilt aber für jede
- * Buchungsart gleichermaßen, da alle dieselbe Komponente nutzen): `minIso`/
- * `maxIso` werden 1:1 an DateSelectFields durchgereicht (dort bereits
- * unterstützt, bisher aber nirgends für Buchungen genutzt) -- Optionen
- * außerhalb des Reisezeitraums bleiben sichtbar, aber deaktiviert.
+ * §"Reisebezogene Buchungen: eine Datumsauswahl statt drei Dropdowns, auf
+ * den Reisezeitraum begrenzt" (Nutzervorgabe, wörtlich): für die in
+ * `TRIP_BOUNDED_BOOKING_TYPES` gelisteten Typen (Aktivität, Restaurant,
+ * Mietwagen, Transfer, Zug, Fähre, Sonstiges) übernimmt `TripDateField` die
+ * Datumsauswahl, sobald der Reisezeitraum bekannt ist. Flug/Unterkunft/
+ * Versicherung bleiben bewusst außen vor (spannen den Zeitraum selbst mit
+ * auf bzw. haben eigene Gültigkeit) -- für sie bleibt `DateSelectFields`
+ * unverändert UND unbegrenzt (kein `minIso`/`maxIso` mehr durchgereicht),
+ * auch wenn der Reisezeitraum bekannt ist.
  */
 export function BookingDateFields({
+  bookingType,
   showEnd,
   startLabel,
   endLabel,
@@ -55,7 +64,9 @@ export function BookingDateFields({
   showNightsHelper,
   minIso,
   maxIso,
+  stages,
 }: {
+  bookingType: BookingType
   showEnd: boolean
   startLabel: string
   endLabel: string
@@ -73,7 +84,18 @@ export function BookingDateFields({
   /** Reisezeitraum -- `null`/`undefined` lässt die Felder wie bisher unbegrenzt (z.B. wenn der Zeitraum noch offen ist). */
   minIso?: string | null
   maxIso?: string | null
+  /** Optional: für "· Ort"-Suffix je Reisetag in TripDateField, siehe buildStageByDateMap. */
+  stages?: StageDateLookupInput[]
 }) {
+  const isTripBounded = TRIP_BOUNDED_BOOKING_TYPES.includes(bookingType)
+  // §"Flug/Unterkunft/Versicherung nicht mehr auf den Reisezeitraum
+  // begrenzen" (heutige Nutzerentscheidung, engt die frühere, für ALLE
+  // Buchungsarten geltende Regel bewusst ein): DateSelectFields bekommt für
+  // diese drei Typen gar keine Schranken mehr durchgereicht.
+  const dateSelectMinIso = isTripBounded ? minIso : undefined
+  const dateSelectMaxIso = isTripBounded ? maxIso : undefined
+  const marginDays = BOOKING_CATEGORIES.activity.types.includes(bookingType) ? 2 : 0
+
   const [startIso, setStartIso] = useState<string | null>(defaultStartDate || null)
   const [nights, setNights] = useState<number | null>(
     showNightsHelper && defaultStartDate && defaultEndDate ? nightsBetween(defaultStartDate, defaultEndDate) : null,
@@ -96,11 +118,21 @@ export function BookingDateFields({
   return (
     <div className={`grid grid-cols-1 ${showEnd ? 'sm:grid-cols-2' : 'sm:grid-cols-1'} gap-4 mb-5`}>
       <div>
-        <DateSelectFields
-          label={`${startLabel} *`} namePrefix="start_date" defaultIso={defaultStartDate || null}
-          range={RANGE} quickActions minIso={minIso} maxIso={maxIso}
-          onChange={(iso) => { setStartIso(iso); if (iso && nights) applyNights(nights, iso) }}
-        />
+        {isTripBounded && minIso && maxIso ? (
+          <TripDateField
+            label={`${startLabel} *`} namePrefix="start_date"
+            defaultIso={defaultStartDate || defaultTripDayIso(minIso, maxIso)}
+            tripStartIso={minIso} tripEndIso={maxIso} marginDays={marginDays}
+            stages={stages} quickActions
+            onChange={(iso) => { setStartIso(iso); if (iso && nights) applyNights(nights, iso) }}
+          />
+        ) : (
+          <DateSelectFields
+            label={`${startLabel} *`} namePrefix="start_date" defaultIso={defaultStartDate || null}
+            range={RANGE} quickActions minIso={dateSelectMinIso} maxIso={dateSelectMaxIso}
+            onChange={(iso) => { setStartIso(iso); if (iso && nights) applyNights(nights, iso) }}
+          />
+        )}
         <label htmlFor="bk-start-time" style={LABEL_STYLE}>Uhrzeit</label>
         <input id="bk-start-time" name="start_time" type="time" defaultValue={defaultStartTime} style={FIELD_STYLE} />
       </div>
@@ -122,11 +154,28 @@ export function BookingDateFields({
               </select>
             </div>
           )}
-          <DateSelectFields
-            key={endKey}
-            label={showNightsHelper ? `${endLabel} *` : endLabel} namePrefix="end_date" defaultIso={endIso}
-            range={RANGE} quickActions minIso={minIso} maxIso={maxIso}
-          />
+          {/* §"Mietwagen/Transfer: Rückgabe/Ankunft darf nicht vor Abholung/
+              Abfahrt liegen, beide Daten im Reisezeitraum" (Nutzervorgabe,
+              wörtlich): `earliestIso` koppelt die untere Schranke des
+              Enddatums an das aktuell gewählte Startdatum -- ein Verstoß wird
+              (wie Reisezeitraum-Verstöße auch) nie automatisch geändert,
+              sondern nur mit Warnung angezeigt (siehe TripDateField). Ende
+              bleibt wie bisher optional (kein `required`). */}
+          {isTripBounded && minIso && maxIso ? (
+            <TripDateField
+              key={endKey}
+              label={showNightsHelper ? `${endLabel} *` : endLabel} namePrefix="end_date"
+              defaultIso={endIso} required={false}
+              tripStartIso={minIso} tripEndIso={maxIso} marginDays={0}
+              earliestIso={startIso ?? minIso} stages={stages}
+            />
+          ) : (
+            <DateSelectFields
+              key={endKey}
+              label={showNightsHelper ? `${endLabel} *` : endLabel} namePrefix="end_date" defaultIso={endIso}
+              range={RANGE} quickActions minIso={dateSelectMinIso} maxIso={dateSelectMaxIso}
+            />
+          )}
           <label htmlFor="bk-end-time" style={LABEL_STYLE}>Uhrzeit</label>
           <input id="bk-end-time" name="end_time" type="time" defaultValue={defaultEndTime} style={FIELD_STYLE} />
         </div>

@@ -39,6 +39,16 @@ export function formatIsoWithWeekday(iso: string): string {
   return new Date(`${iso}T00:00:00Z`).toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: 'long', timeZone: 'UTC' })
 }
 
+/** Voller deutscher Wochentag + Tag + Monat + Jahr, z. B. "Sonntag, 26. Juli 2026" -- für die Vollanzeige nach Datumsauswahl (siehe components/TripDateField.tsx). `timeZone: 'UTC'` wie bei `formatIsoWithWeekday` zwingend, sonst Tagesverschiebung je nach Gerätezeitzone. */
+export function formatIsoFullDE(iso: string): string {
+  return new Date(`${iso}T00:00:00Z`).toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })
+}
+
+/** Reisetag-Nummer eines Datums relativ zum Reisebeginn (Tag 1 = Anreisetag), z. B. für "Reisetag 4"-Anzeigen. Negative/über die Reisedauer hinausgehende Werte sind normal (Tage außerhalb des Reisezeitraums, z. B. ±2-Tage-Puffer). */
+export function tripDayNumber(iso: string, tripStartIso: string): number {
+  return Math.floor((new Date(`${iso}T00:00:00Z`).getTime() - new Date(`${tripStartIso}T00:00:00Z`).getTime()) / 86400000) + 1
+}
+
 /** true, wenn `a` (ISO yyyy-mm-dd) strikt vor `b` liegt. */
 export function isBeforeIso(a: string, b: string): boolean {
   return a < b

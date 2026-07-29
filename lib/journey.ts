@@ -53,6 +53,45 @@ function eachDateInRange(start: string, end: string): string[] {
   return dates
 }
 
+/** Schmalere Teilmenge von `StageInput` für die reine Datum→Etappe-Zuordnung (siehe `buildStageByDateMap`) -- erspart Aufrufstellen wie components/TripDateField.tsx, `nights`/`accommodation` mit zu selektieren, obwohl sie dafür nicht gebraucht werden. */
+export type StageDateLookupInput = {
+  id: string
+  title: string
+  location: string | null
+  start_date: string | null
+  end_date: string | null
+  sort_order: number
+}
+
+/**
+ * Jedem Tag in `[rangeStart, letztes Etappenende]` genau eine Etappe zuordnen
+ * -- chronologisch je Etappe, mit einem Cursor, der nie zurückspringt, damit
+ * eine Etappe garantiert einen einzigen zusammenhängenden Abschnitt bekommt,
+ * auch wenn sich Etappen-Datumsbereiche in echten (unsauberen) Daten
+ * überschneiden. Aus `buildJourneyTimeline` extrahiert, damit andere Stellen
+ * (z. B. components/TripDateField.tsx, "welche Etappe ist an diesem
+ * Reisetag aktiv") dieselbe, überlappungssichere Logik wiederverwenden
+ * statt der naiven `.find()`-Variante, die anderswo (lib/today.ts) noch
+ * für einen einzelnen Tag genügt, bei einem ganzen Datumsbereich aber
+ * überlappende Etappen falsch zuordnen kann. Sortiert die Eingabe selbst,
+ * damit Aufrufer keine bestimmte Reihenfolge garantieren müssen.
+ */
+export function buildStageByDateMap<T extends StageDateLookupInput>(stagesInput: T[], rangeStart: string): Map<string, T> {
+  const stages = sortStagesChronologically(stagesInput)
+  const stageByDate = new Map<string, T>()
+  let cursor = rangeStart
+  for (const stage of stages) {
+    if (!stage.start_date || !stage.end_date) continue
+    const effectiveStart = stage.start_date > cursor ? stage.start_date : cursor
+    if (effectiveStart > stage.end_date) continue // vollständig von einer früheren Etappe überdeckt
+    for (const date of eachDateInRange(effectiveStart, stage.end_date)) {
+      stageByDate.set(date, stage)
+    }
+    cursor = addDaysIso(stage.end_date, 1)
+  }
+  return stageByDate
+}
+
 export type TimelineBooking = {
   id: string
   type: BookingType
@@ -155,23 +194,7 @@ export function buildJourneyTimeline(
     eventsByDate.set(e.date, list)
   }
 
-  // Jedem Tag genau eine Etappe zuordnen — chronologisch je Etappe, mit einem
-  // "Cursor", der nie zurückspringt. So bekommt jede Etappe garantiert einen
-  // einzigen zusammenhängenden Abschnitt, auch wenn sich Etappen-Datumsbereiche
-  // in echten (unsauberen) Daten überschneiden (z. B. Anreisetag der nächsten
-  // Etappe noch innerhalb des Datumsbereichs der vorherigen) — sonst würde eine
-  // Etappe in zwei getrennte Stay-Container zerfallen.
-  const stageByDate = new Map<string, StageInput>()
-  let cursor = rangeStart
-  for (const stage of stages) {
-    if (!stage.start_date || !stage.end_date) continue
-    const effectiveStart = stage.start_date > cursor ? stage.start_date : cursor
-    if (effectiveStart > stage.end_date) continue // vollständig von einer früheren Etappe überdeckt
-    for (const date of eachDateInRange(effectiveStart, stage.end_date)) {
-      stageByDate.set(date, stage)
-    }
-    cursor = addDaysIso(stage.end_date, 1)
-  }
+  const stageByDate = buildStageByDateMap(stages, rangeStart)
 
   const days: TimelineDay[] = allDates.map((date) => {
     const stage = stageByDate.get(date) ?? null

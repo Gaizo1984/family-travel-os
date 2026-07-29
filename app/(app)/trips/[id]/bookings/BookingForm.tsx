@@ -12,6 +12,7 @@ import { BookingDateFields } from "./BookingDateFields";
 import { CollapsibleDetailGroup } from "./CollapsibleDetailGroup";
 import { ExtractSubmitButton } from "@/components/ExtractSubmitButton";
 import { SaveSubmitButton } from "@/components/SaveSubmitButton";
+import type { StageDateLookupInput } from "@/lib/journey";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -89,6 +90,7 @@ export function BookingForm({
   selectedParticipantIds,
   tripMinIso,
   tripMaxIso,
+  stages,
 }: {
   config: BookingTypeConfig;
   action: (formData: FormData) => void | Promise<void>;
@@ -107,9 +109,11 @@ export function BookingForm({
   participants?: BookingParticipantOption[];
   /** §"Standardmäßig alle Reiseteilnehmer vorauswählen, aber frei änderbar" (Nutzervorgabe, wörtlich) -- beim Neuanlegen alle Reiseteilnehmer, beim Bearbeiten die bereits gespeicherte (gegen gelöschte Personen gefilterte) Auswahl. */
   selectedParticipantIds?: string[];
-  /** §"Buchungsdatum auf den Reisezeitraum begrenzen" (Nutzervorgabe, wörtlich) -- an BookingDateFields durchgereicht, für ALLE Buchungsarten. `null`, wenn der Reisezeitraum (noch) nicht ableitbar ist -- dann bleiben die Felder wie bisher unbegrenzt. */
+  /** §"Reisebezogene Buchungen auf den Reisezeitraum begrenzen" (Nutzervorgabe, wörtlich) -- an BookingDateFields durchgereicht, dort nur für die in TRIP_BOUNDED_BOOKING_TYPES gelisteten Typen wirksam. `null`, wenn der Reisezeitraum (noch) nicht ableitbar ist -- dann bleiben die Felder wie bisher unbegrenzt. */
   tripMinIso?: string | null;
   tripMaxIso?: string | null;
+  /** Optional: für "· Ort"-Suffix je Reisetag in TripDateField (BookingDateFields.tsx), siehe buildStageByDateMap. */
+  stages?: StageDateLookupInput[];
 }) {
   const start = splitDateTime(values?.start_datetime ?? null);
   const end = splitDateTime(values?.end_datetime ?? null);
@@ -232,6 +236,7 @@ export function BookingForm({
 
         {/* Start-/Enddatum */}
         <BookingDateFields
+          bookingType={config.value}
           showEnd={config.showEnd}
           startLabel={config.startLabel}
           endLabel={config.endLabel}
@@ -242,6 +247,7 @@ export function BookingForm({
           showNightsHelper={config.value === "accommodation"}
           minIso={tripMinIso}
           maxIso={tripMaxIso}
+          stages={stages}
         />
 
         {/* Buchungsnummer */}

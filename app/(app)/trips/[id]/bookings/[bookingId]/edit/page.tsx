@@ -8,6 +8,7 @@ import { extractBookingData } from "@/lib/actions/booking-extraction";
 import { BOOKING_TYPE_CONFIG } from "@/lib/bookings";
 import type { BookingType } from "@/lib/supabase/types";
 import { loadTripParticipantOptions } from "@/lib/trip-participants";
+import { deriveTripDateRange } from "@/lib/trip-dates";
 import { BookingForm } from "../../BookingForm";
 
 type BookingDraft = {
@@ -39,11 +40,21 @@ export default async function EditBookingPage({
   const supabase = await createClient();
   const { data: trip } = await supabase
     .from("trips")
-    .select("id, slug, title")
+    .select(`
+      id, slug, title, start_date, end_date,
+      stages ( id, title, location, start_date, end_date, sort_order ),
+      bookings ( type, status, start_datetime, end_datetime )
+    `)
     .eq("slug", id)
     .maybeSingle();
 
   if (!trip) notFound();
+
+  // §"Buchungsdatum auf den Reisezeitraum begrenzen" (Nutzervorgabe,
+  // wörtlich) gilt auch beim Bearbeiten -- bislang nur beim Neuanlegen
+  // (bookings/new/page.tsx) verdrahtet, was Aktivitäts-/Restaurant-Buchungen
+  // beim Bearbeiten ohne den engen ±2-Tage-Wochentag-Picker zurückließ.
+  const tripDateRange = deriveTripDateRange(trip, trip.bookings, trip.stages);
 
   const { data: booking } = await supabase
     .from("bookings")
@@ -115,6 +126,9 @@ export default async function EditBookingPage({
           }}
           participants={participants}
           selectedParticipantIds={selectedParticipantIds}
+          tripMinIso={tripDateRange.startDate}
+          tripMaxIso={tripDateRange.endDate}
+          stages={trip.stages}
         />
 
         <div
