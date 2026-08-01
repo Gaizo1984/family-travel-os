@@ -339,6 +339,18 @@ export function BookingForm({
           </div>
         )}
 
+        {/* §"Belege bei Aktivitäten lassen sich scheinbar nicht hochladen"
+            (Live-Test-Feedback): der Upload existiert bereits, aber erst auf
+            der Buchungsseite nach dem Speichern (Abschnitt "Dokumente",
+            typunabhängig) -- hier fehlt nur eine KI-Auslesung, die für diese
+            Typen ohnehin wenig Sinn ergibt. Kurzer Hinweis statt stiller
+            Lücke. */}
+        {!config.supportsExtraction && (
+          <p className="mb-8" style={{ color: "var(--muted)", fontSize: "0.7rem" }}>
+            Belege oder Tickets kannst du nach dem Speichern auf der Buchungsseite hochladen (Abschnitt "Dokumente").
+          </p>
+        )}
+
         <div className="flex items-center justify-between flex-wrap gap-3" style={{ borderTop: "1px solid var(--border)", paddingTop: "24px" }}>
           <Link href={cancelHref} style={{ color: "var(--muted)", fontSize: "0.7rem", letterSpacing: "0.1em", textDecoration: "none" }}>
             Abbrechen

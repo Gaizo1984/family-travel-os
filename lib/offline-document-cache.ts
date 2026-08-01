@@ -75,8 +75,8 @@ export type CachedDocumentMeta = {
   keepLonger: boolean
   policy: OfflineCachePolicy
   tripId: string | null
-  /** §"gruppiert nach Boardingpässe/Gepäckbelege/ESTA/ETA" (Nutzervorgabe): Dokumenttyp fürs Gruppieren im Offline-Dokumente-Tab, ohne dafür jedes Mal eine zusätzliche Supabase-Abfrage zu brauchen. */
-  docType: 'boarding_pass' | 'baggage_tag' | 'esta' | 'eta'
+  /** §"gruppiert nach Boardingpässe/Gepäckbelege/Belege & Tickets/ESTA/ETA" (Nutzervorgabe): Dokumenttyp fürs Gruppieren im Offline-Dokumente-Tab, ohne dafür jedes Mal eine zusätzliche Supabase-Abfrage zu brauchen. `booking_document` (Buchungsbestätigungen, u. a. Aktivitäts-Tickets) nutzt dieselbe `'standard'`-Policy wie Boardingpass/Gepäckbeleg. */
+  docType: 'boarding_pass' | 'baggage_tag' | 'booking_document' | 'esta' | 'eta'
   /** Anzeige-Titel (z. B. Personenname oder "Koffer 1") -- gleiche Werte wie bereits im jeweiligen Viewer verwendet. */
   label: string
 }

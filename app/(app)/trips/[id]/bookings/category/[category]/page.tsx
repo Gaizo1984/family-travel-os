@@ -6,6 +6,7 @@ import { BOOKING_CATEGORIES, sortBookingsChronologically } from "@/lib/bookings"
 import type { BookingCategory } from "@/lib/bookings";
 import type { BookingType, BookingStatus } from "@/lib/supabase/types";
 import { BookingRowItem } from "../../BookingRowItem";
+import { JourneyEventRowItem, type JourneyEventRowData } from "@/app/(app)/trips/[id]/journey-events/JourneyEventRowItem";
 
 type BookingWithStage = {
   id: string;
@@ -46,6 +47,30 @@ export default async function BookingCategoryPage({
 
   const bookings = sortBookingsChronologically((data ?? []) as unknown as BookingWithStage[]);
 
+  // §"Journal-Einträge zusätzlich in der Aktivitäten-Liste zeigen, klar
+  // markiert -- Flüge/Unterkünfte/Etappen bleiben davon unberührt"
+  // (Nutzervorgabe, wörtlich): nur für die "Aktivitäten"-Kategorie, da nur
+  // journey_events.category die Werte 'activity'/'restaurant' überhaupt
+  // kennt (dieselben String-Werte wie BOOKING_CATEGORIES.activity.types).
+  let journeyEvents: JourneyEventRowData[] = [];
+  if (categoryConfig.value === "activity") {
+    const { data: journeyEventsRaw } = await supabase
+      .from("journey_events")
+      .select("id, date, time, category, title, location, status")
+      .eq("trip_id", trip.id)
+      .in("category", categoryConfig.types);
+    journeyEvents = (journeyEventsRaw ?? []) as unknown as JourneyEventRowData[];
+  }
+
+  type CombinedRow =
+    | { kind: "booking"; sortKey: string; booking: BookingWithStage }
+    | { kind: "journey_event"; sortKey: string; event: JourneyEventRowData };
+
+  const combinedRows: CombinedRow[] = [
+    ...bookings.map((booking): CombinedRow => ({ kind: "booking", sortKey: booking.start_datetime ?? booking.created_at, booking })),
+    ...journeyEvents.map((event): CombinedRow => ({ kind: "journey_event", sortKey: `${event.date}T${event.time ?? "00:00"}`, event })),
+  ].sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+
   const addHref = categoryConfig.pickerTypes.length === 1
     ? `/trips/${trip.slug}/bookings/new?type=${categoryConfig.pickerTypes[0]}&category=${categoryConfig.value}`
     : `/trips/${trip.slug}/bookings/new?category=${categoryConfig.value}`;
@@ -77,15 +102,19 @@ export default async function BookingCategoryPage({
           </Link>
         </div>
 
-        {bookings.length > 0 ? (
+        {combinedRows.length > 0 ? (
           <div className="space-y-2">
-            {bookings.map((booking) => (
-              <BookingRowItem
-                key={booking.id}
-                booking={booking}
-                slug={trip.slug}
-                stageTitle={booking.stages?.title ?? null}
-              />
+            {combinedRows.map((row) => (
+              row.kind === "booking" ? (
+                <BookingRowItem
+                  key={`booking-${row.booking.id}`}
+                  booking={row.booking}
+                  slug={trip.slug}
+                  stageTitle={row.booking.stages?.title ?? null}
+                />
+              ) : (
+                <JourneyEventRowItem key={`journey-event-${row.event.id}`} event={row.event} slug={trip.slug} />
+              )
             ))}
           </div>
         ) : (

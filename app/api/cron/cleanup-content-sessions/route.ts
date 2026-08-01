@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cleanupExpiredContentSessionPhotos } from '@/lib/content-session-cleanup'
 import { cleanupExpiredReelVideos } from '@/lib/reel-video-cleanup'
+import { cleanupExpiredBookingDocuments } from '@/lib/booking-document-cleanup'
 
 export const maxDuration = 60
 
@@ -14,10 +15,11 @@ export const maxDuration = 60
  * (kein Fallback auf "offen"), damit ein vergessenes Setup nicht zu einem
  * unbeabsichtigt öffentlichen Lösch-Endpunkt wird.
  *
- * §Bewusst UM den Reel-Video-Cleanup erweitert statt eines eigenen dritten
- * Cron-Eintrags (Vercel begrenzt die Anzahl der Cron-Jobs je nach Plan) --
- * beide räumen "temporäre Content-Studio-Dateien" auf, ein fehlgeschlagener
- * Teil blockiert den anderen nicht.
+ * §Bewusst UM Reel-Video- UND Buchungsbeleg-Cleanup erweitert statt eigener
+ * weiterer Cron-Einträge (Vercel begrenzt die Anzahl der Cron-Jobs je nach
+ * Plan) -- alle drei räumen "temporäre/nach Ablauf nicht mehr benötigte
+ * Dateien" auf (Content-Studio-Fotos/-Videos bzw. Buchungsbelege 2 Tage
+ * nach Reiseende), ein fehlgeschlagener Teil blockiert die anderen nicht.
  */
 export async function GET(request: NextRequest) {
   const expectedSecret = process.env.CRON_SECRET
@@ -31,16 +33,19 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
-  const [photosResult, videosResult] = await Promise.allSettled([
+  const [photosResult, videosResult, bookingDocumentsResult] = await Promise.allSettled([
     cleanupExpiredContentSessionPhotos(),
     cleanupExpiredReelVideos(),
+    cleanupExpiredBookingDocuments(),
   ])
   if (photosResult.status === 'rejected') console.error('[cron:cleanup-content-sessions] Foto-Cleanup fehlgeschlagen', photosResult.reason)
   if (videosResult.status === 'rejected') console.error('[cron:cleanup-content-sessions] Video-Cleanup fehlgeschlagen', videosResult.reason)
+  if (bookingDocumentsResult.status === 'rejected') console.error('[cron:cleanup-content-sessions] Buchungsbeleg-Cleanup fehlgeschlagen', bookingDocumentsResult.reason)
 
   return NextResponse.json({
-    ok: photosResult.status === 'fulfilled' && videosResult.status === 'fulfilled',
+    ok: photosResult.status === 'fulfilled' && videosResult.status === 'fulfilled' && bookingDocumentsResult.status === 'fulfilled',
     photos: photosResult.status === 'fulfilled' ? photosResult.value : null,
     videos: videosResult.status === 'fulfilled' ? videosResult.value : null,
+    bookingDocuments: bookingDocumentsResult.status === 'fulfilled' ? bookingDocumentsResult.value : null,
   })
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plane, Hotel, Ticket, Luggage, FileCheck2, Trash2 } from 'lucide-react'
+import { Plane, Hotel, Ticket, Luggage, FileText, FileCheck2, Trash2 } from 'lucide-react'
 import {
   listTripSnapshots, listCachedDocumentsForTrip, removeCachedDocument, removeOfflineTrip,
   type OfflineTripSnapshot, type CachedDocumentMeta,
@@ -21,13 +21,14 @@ const TABS: Array<{ key: Tab; label: string }> = [
 const DOC_GROUP_LABELS: Record<CachedDocumentMeta['docType'], string> = {
   boarding_pass: 'Boardingpässe',
   baggage_tag: 'Gepäckbelege',
+  booking_document: 'Belege & Tickets',
   esta: 'ESTA',
   eta: 'ETA',
 }
 const DOC_GROUP_ICONS: Record<CachedDocumentMeta['docType'], typeof Ticket> = {
-  boarding_pass: Ticket, baggage_tag: Luggage, esta: FileCheck2, eta: FileCheck2,
+  boarding_pass: Ticket, baggage_tag: Luggage, booking_document: FileText, esta: FileCheck2, eta: FileCheck2,
 }
-const DOC_GROUP_ORDER: CachedDocumentMeta['docType'][] = ['boarding_pass', 'baggage_tag', 'esta', 'eta']
+const DOC_GROUP_ORDER: CachedDocumentMeta['docType'][] = ['boarding_pass', 'baggage_tag', 'booking_document', 'esta', 'eta']
 
 function TabBar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void }) {
   return (

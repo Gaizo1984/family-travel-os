@@ -107,29 +107,32 @@ export type OfflineCacheableDocument = {
   fileName: string
   mimeType: string
   isPdf: boolean
-  docType: 'boarding_pass' | 'baggage_tag'
+  docType: 'boarding_pass' | 'baggage_tag' | 'booking_document'
   label: string
   referenceDateIso: string
 }
 
 /**
- * §"cached zusätzlich alle vorhandenen Boardingpässe/Gepäckbelege dieser Reise
- * in einem Rutsch" (Plan, Abschnitt 1): liefert nur die Metadaten + Signed
- * URLs -- das eigentliche Herunterladen/Cachen passiert client-seitig in
- * `components/SaveTripOfflineButton.tsx` (IndexedDB ist Browser-only). ESTA/
- * ETA sind hier bewusst nicht enthalten, die brauchen weiterhin den
- * expliziten Zustimmungsschritt pro Dokument (siehe OfflineDocumentViewer,
- * policy: 'sensitive').
+ * §"cached zusätzlich alle vorhandenen Boardingpässe/Gepäckbelege/
+ * Buchungsbestätigungen dieser Reise in einem Rutsch" (Plan, Abschnitt 1+2):
+ * liefert nur die Metadaten + Signed URLs -- das eigentliche Herunterladen/
+ * Cachen passiert client-seitig in `components/SaveTripOfflineButton.tsx`
+ * (IndexedDB ist Browser-only). ESTA/ETA sind hier bewusst nicht enthalten,
+ * die brauchen weiterhin den expliziten Zustimmungsschritt pro Dokument
+ * (siehe OfflineDocumentViewer, policy: 'sensitive'). Die Buchungs-Abfrage
+ * für `referenceDateIso` deckt bewusst ALLE Buchungstypen ab (nicht nur
+ * Flug wie zuvor), da `booking_document` an jeden Buchungstyp hängen kann
+ * (z. B. ein Aktivitäts-Ticket) und sonst auf "jetzt" zurückfiele.
  */
 export async function fetchTripDocumentsForOfflineCache(tripId: string): Promise<OfflineCacheableDocument[]> {
   const supabase = await createClient()
-  const { data: booking } = await supabase.from('bookings').select('id, start_datetime, end_datetime').eq('trip_id', tripId).eq('type', 'flight')
+  const { data: booking } = await supabase.from('bookings').select('id, start_datetime, end_datetime').eq('trip_id', tripId)
 
   const { data: docsRaw } = await supabase
     .from('documents')
     .select('id, label, storage_path, doc_type, booking_id, person_id, persons ( id, name )')
     .eq('trip_id', tripId)
-    .in('doc_type', ['boarding_pass', 'baggage_tag'])
+    .in('doc_type', ['boarding_pass', 'baggage_tag', 'booking_document'])
 
   const bookingById = new Map((booking ?? []).map((b) => [b.id, b]))
 
@@ -140,8 +143,8 @@ export async function fetchTripDocumentsForOfflineCache(tripId: string): Promise
       const person = d.persons as unknown as { id: string; name: string } | null
       const relatedBooking = d.booking_id ? bookingById.get(d.booking_id) : null
       const referenceDateIso = relatedBooking?.end_datetime ?? relatedBooking?.start_datetime ?? new Date().toISOString()
-      const docType = d.doc_type as 'boarding_pass' | 'baggage_tag'
-      const label = d.label ?? (docType === 'boarding_pass' ? 'Boardingpass' : 'Gepäckbeleg')
+      const docType = d.doc_type as 'boarding_pass' | 'baggage_tag' | 'booking_document'
+      const label = d.label ?? (docType === 'boarding_pass' ? 'Boardingpass' : docType === 'baggage_tag' ? 'Gepäckbeleg' : 'Beleg')
       return {
         documentId: d.id, url, fileName: `${docType}-${d.id}${isPdf ? '.pdf' : ''}`,
         mimeType: isPdf ? 'application/pdf' : 'image/jpeg', isPdf, docType, label, referenceDateIso,
