@@ -293,3 +293,9 @@ export function buildBookingStoragePath(bookingId: string, fileName: string): st
   const ext = fileName.includes('.') ? fileName.split('.').pop()!.toLowerCase() : 'bin'
   return `bookings/${bookingId}/${crypto.randomUUID()}.${ext}`
 }
+
+/** §"Journal-Terminen eigenen Dokumenten-Upload geben" (Nutzervorgabe): gleiches Muster wie buildBookingStoragePath, für Belege an Journal-Terminen (journey_events) statt Buchungen. */
+export function buildJourneyEventStoragePath(journeyEventId: string, fileName: string): string {
+  const ext = fileName.includes('.') ? fileName.split('.').pop()!.toLowerCase() : 'bin'
+  return `journey-events/${journeyEventId}/${crypto.randomUUID()}.${ext}`
+}

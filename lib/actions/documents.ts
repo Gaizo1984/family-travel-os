@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { ALLOWED_DOCUMENT_MIME_TYPES, MAX_DOCUMENT_FILE_SIZE, buildStoragePath, buildBookingStoragePath, readDateGroupFromFormData } from '@/lib/documents'
+import { ALLOWED_DOCUMENT_MIME_TYPES, MAX_DOCUMENT_FILE_SIZE, buildStoragePath, buildBookingStoragePath, buildJourneyEventStoragePath, readDateGroupFromFormData } from '@/lib/documents'
 import type { DocumentType, DocumentDetails } from '@/lib/documents'
 
 const readDateGroup = readDateGroupFromFormData
@@ -403,6 +403,81 @@ export async function deleteBookingDocument(formData: FormData) {
   const slug        = String(formData.get('slug') ?? '')
   const bookingId   = String(formData.get('booking_id') ?? '')
   const detailPath  = `/trips/${slug}/bookings/${bookingId}`
+
+  const supabase = await createClient()
+
+  if (storagePath) {
+    const { error: storageError } = await supabase.storage.from('documents').remove([storagePath])
+    if (storageError)
+      redirect(`${detailPath}?error=${encodeURIComponent('Datei konnte nicht gelöscht werden: ' + storageError.message)}`)
+  }
+
+  const { error } = await supabase.from('documents').delete().eq('id', documentId)
+  if (error)
+    redirect(`${detailPath}?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)
+
+  redirect(detailPath)
+}
+
+/**
+ * §"Journal-Terminen eigenen Dokumenten-Upload geben, analog zu Buchungen"
+ * (Nutzervorgabe, wörtlich): 1:1 Kopie von uploadBookingDocument mit
+ * journey_event_id statt booking_id. `doc_type` bleibt bewusst
+ * 'booking_document' (kein neuer Enum-Wert) -- dadurch greifen Offline-Cache
+ * und der 2-Tage-nach-Reiseende-Cleanup (beide filtern nur nach doc_type +
+ * trip_id) ohne weitere Änderung auch für Journal-Belege.
+ */
+export async function uploadJourneyEventDocument(formData: FormData) {
+  const tripId        = String(formData.get('trip_id') ?? '')
+  const journeyEventId = String(formData.get('journey_event_id') ?? '')
+  const slug           = String(formData.get('slug') ?? '')
+  const label           = String(formData.get('label') ?? '').trim()
+  const detailPath      = `/trips/${slug}/journey-events/${journeyEventId}/edit`
+
+  const { error: fileError, file } = validateFile(formData.get('file'), true)
+  if (fileError)
+    redirect(`${detailPath}?error=${encodeURIComponent(fileError)}`)
+  if (!file)
+    redirect(`${detailPath}?error=${encodeURIComponent('Datei fehlt')}`)
+  if (label.length < 2)
+    redirect(`${detailPath}?error=${encodeURIComponent('Dokumentname: mindestens 2 Zeichen erforderlich')}`)
+
+  const supabase = await createClient()
+
+  const storagePath = buildJourneyEventStoragePath(journeyEventId, file.name)
+  const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
+    contentType: file.type,
+    cacheControl: '31536000',
+  })
+  if (uploadError)
+    redirect(`${detailPath}?error=${encodeURIComponent('Upload fehlgeschlagen: ' + uploadError.message)}`)
+
+  const { error: insertError } = await supabase.from('documents').insert({
+    trip_id: tripId,
+    journey_event_id: journeyEventId,
+    person_id: null,
+    doc_type: 'booking_document',
+    label,
+    details: { source: 'manual' },
+    storage_provider: 'supabase_storage',
+    storage_bucket: 'documents',
+    storage_path: storagePath,
+  })
+
+  if (insertError) {
+    await supabase.storage.from('documents').remove([storagePath])
+    redirect(`${detailPath}?error=${encodeURIComponent('Speicherfehler: ' + insertError.message)}`)
+  }
+
+  redirect(detailPath)
+}
+
+export async function deleteJourneyEventDocument(formData: FormData) {
+  const documentId     = String(formData.get('document_id') ?? '')
+  const storagePath    = String(formData.get('storage_path') ?? '')
+  const slug            = String(formData.get('slug') ?? '')
+  const journeyEventId = String(formData.get('journey_event_id') ?? '')
+  const detailPath      = `/trips/${slug}/journey-events/${journeyEventId}/edit`
 
   const supabase = await createClient()
 

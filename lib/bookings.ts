@@ -264,12 +264,15 @@ export const BOOKING_TYPE_CONFIG: Record<BookingType, BookingTypeConfig> = {
   },
 }
 
-export const BOOKING_STATUS_ORDER: BookingStatus[] = ['pending', 'reserved', 'confirmed', 'cancelled']
+// §"Gebucht statt Reserviert, dauerhaft" (Nutzervorgabe, wörtlich): 'reserved'
+// entfernt (siehe Migration 20260801000001_normalize_booking_journey_status.sql,
+// bestehende Zeilen wurden vorher auf 'pending' migriert); 'confirmed' heißt
+// jetzt "Gebucht" statt "Bestätigt" -- reine Umbenennung, kein neuer Wert.
+export const BOOKING_STATUS_ORDER: BookingStatus[] = ['pending', 'confirmed', 'cancelled']
 
 export const BOOKING_STATUS_LABELS: Record<BookingStatus, string> = {
   pending: 'Angefragt',
-  reserved: 'Reserviert',
-  confirmed: 'Bestätigt',
+  confirmed: 'Gebucht',
   cancelled: 'Storniert',
 }
 

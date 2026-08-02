@@ -167,6 +167,11 @@ export default async function NewJourneyEventPage({
               <textarea id="je-notes" name="notes" rows={3} style={{ ...FIELD_STYLE, resize: "none" }} />
             </div>
 
+            {/* §"Journal-Terminen eigenen Dokumenten-Upload geben" (Nutzervorgabe): erst nach dem Speichern möglich (keine ID), wie im Buchungsformular. */}
+            <p className="mb-8" style={{ color: "var(--muted)", fontSize: "0.7rem" }}>
+              Belege oder Tickets kannst du nach dem Speichern hier hochladen.
+            </p>
+
             <div className="flex items-center justify-between flex-wrap gap-3" style={{ borderTop: "1px solid var(--border)", paddingTop: "24px" }}>
               <Link href={cancelHref} style={{ color: "var(--muted)", fontSize: "0.7rem", letterSpacing: "0.1em", textDecoration: "none" }}>
                 Abbrechen

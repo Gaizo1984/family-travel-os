@@ -8,7 +8,7 @@ export type Json =
 
 export type BookingType     = 'flight' | 'accommodation' | 'rental_car' | 'transfer' | 'activity'
                              | 'restaurant' | 'train' | 'ferry' | 'insurance' | 'other'
-export type BookingStatus   = 'pending' | 'confirmed' | 'cancelled' | 'reserved'
+export type BookingStatus   = 'pending' | 'confirmed' | 'cancelled'
 export type PaymentStatus   = 'unpaid' | 'partial' | 'paid' | 'refunded'
 /** §Phase B "Gemerkt/Ausgewählt/Gebucht" (Nutzervorgabe, Statuswerte wörtlich englisch): Lebenszyklus für saved_flight_options/saved_hotel_options. 'selected' ist nur eine Zwischenstufe, 'booked' wird ausschließlich von createBooking gesetzt, nie von einem reinen UI-Klick. */
 export type SavedOptionStatus = 'saved' | 'selected' | 'booked'
@@ -239,26 +239,30 @@ export interface Database {
       documents: {
         Row: {
           id: string; trip_id: string | null; person_id: string | null; booking_id: string | null
+          journey_event_id: string | null
           doc_type: string; label: string | null; expires_at: string | null
           storage_provider: StorageProvider; storage_bucket: string; storage_path: string
           details: Json | null; notes: string | null; created_at: string
         }
         Insert: {
           id?: string; trip_id?: string | null; person_id?: string | null; booking_id?: string | null
+          journey_event_id?: string | null
           doc_type: string; label?: string | null; expires_at?: string | null
           storage_provider?: StorageProvider; storage_bucket: string; storage_path: string
           details?: Json | null; notes?: string | null; created_at?: string
         }
         Update: {
           id?: string; trip_id?: string | null; person_id?: string | null; booking_id?: string | null
+          journey_event_id?: string | null
           doc_type?: string; label?: string | null; expires_at?: string | null
           storage_provider?: StorageProvider; storage_bucket?: string; storage_path?: string
           details?: Json | null; notes?: string | null; created_at?: string
         }
         Relationships: [
-          { foreignKeyName: "documents_trip_id_fkey";    columns: ["trip_id"];    isOneToOne: false; referencedRelation: "trips";    referencedColumns: ["id"] },
-          { foreignKeyName: "documents_person_id_fkey";  columns: ["person_id"];  isOneToOne: false; referencedRelation: "persons";  referencedColumns: ["id"] },
-          { foreignKeyName: "documents_booking_id_fkey"; columns: ["booking_id"]; isOneToOne: false; referencedRelation: "bookings"; referencedColumns: ["id"] }
+          { foreignKeyName: "documents_trip_id_fkey";           columns: ["trip_id"];           isOneToOne: false; referencedRelation: "trips";          referencedColumns: ["id"] },
+          { foreignKeyName: "documents_person_id_fkey";         columns: ["person_id"];         isOneToOne: false; referencedRelation: "persons";        referencedColumns: ["id"] },
+          { foreignKeyName: "documents_booking_id_fkey";        columns: ["booking_id"];        isOneToOne: false; referencedRelation: "bookings";       referencedColumns: ["id"] },
+          { foreignKeyName: "documents_journey_event_id_fkey";  columns: ["journey_event_id"];  isOneToOne: false; referencedRelation: "journey_events"; referencedColumns: ["id"] }
         ]
       }
       document_trips: {

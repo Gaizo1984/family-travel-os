@@ -103,8 +103,11 @@ export function bookingsToJourneyEvents(
   })
 }
 
+// §"Geplant entfernt" (Nutzervorgabe): JourneyEventStatus kennt nur noch
+// 'idea'/'reserved' (lib/journey-events.ts), der frühere 'planned'-Zweig
+// ist damit unerreichbar geworden.
 function journeyEventStatusToUnified(status: JourneyEventStatus): JourneyEventStatusUnified {
-  return status === 'idea' ? 'idea' : status === 'reserved' ? 'confirmed' : 'planned'
+  return status === 'idea' ? 'idea' : 'confirmed'
 }
 
 export function journeyEventEntriesToJourneyEvents(events: TimelineEvent[], slug: string): JourneyEvent[] {

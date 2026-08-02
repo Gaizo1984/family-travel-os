@@ -122,19 +122,25 @@ export type OfflineCacheableDocument = {
  * (siehe OfflineDocumentViewer, policy: 'sensitive'). Die Buchungs-Abfrage
  * für `referenceDateIso` deckt bewusst ALLE Buchungstypen ab (nicht nur
  * Flug wie zuvor), da `booking_document` an jeden Buchungstyp hängen kann
- * (z. B. ein Aktivitäts-Ticket) und sonst auf "jetzt" zurückfiele.
+ * (z. B. ein Aktivitäts-Ticket) und sonst auf "jetzt" zurückfiele. Ebenso für
+ * Journal-Termine (`journey_event_id` statt `booking_id`, z. B. ein an einen
+ * Journal-Eintrag gehängtes Ticket) -- sonst dasselbe "jetzt"-Problem.
  */
 export async function fetchTripDocumentsForOfflineCache(tripId: string): Promise<OfflineCacheableDocument[]> {
   const supabase = await createClient()
-  const { data: booking } = await supabase.from('bookings').select('id, start_datetime, end_datetime').eq('trip_id', tripId)
+  const [{ data: booking }, { data: journeyEvent }] = await Promise.all([
+    supabase.from('bookings').select('id, start_datetime, end_datetime').eq('trip_id', tripId),
+    supabase.from('journey_events').select('id, date, time').eq('trip_id', tripId),
+  ])
 
   const { data: docsRaw } = await supabase
     .from('documents')
-    .select('id, label, storage_path, doc_type, booking_id, person_id, persons ( id, name )')
+    .select('id, label, storage_path, doc_type, booking_id, journey_event_id, person_id, persons ( id, name )')
     .eq('trip_id', tripId)
     .in('doc_type', ['boarding_pass', 'baggage_tag', 'booking_document'])
 
   const bookingById = new Map((booking ?? []).map((b) => [b.id, b]))
+  const journeyEventById = new Map((journeyEvent ?? []).map((e) => [e.id, e]))
 
   const results = await Promise.all(
     (docsRaw ?? []).map(async (d) => {
@@ -142,7 +148,10 @@ export async function fetchTripDocumentsForOfflineCache(tripId: string): Promise
       const isPdf = d.storage_path.toLowerCase().endsWith('.pdf')
       const person = d.persons as unknown as { id: string; name: string } | null
       const relatedBooking = d.booking_id ? bookingById.get(d.booking_id) : null
-      const referenceDateIso = relatedBooking?.end_datetime ?? relatedBooking?.start_datetime ?? new Date().toISOString()
+      const relatedJourneyEvent = d.journey_event_id ? journeyEventById.get(d.journey_event_id) : null
+      const referenceDateIso = relatedBooking?.end_datetime ?? relatedBooking?.start_datetime
+        ?? (relatedJourneyEvent ? `${relatedJourneyEvent.date}T${(relatedJourneyEvent.time ?? '00:00').slice(0, 5)}:00` : null)
+        ?? new Date().toISOString()
       const docType = d.doc_type as 'boarding_pass' | 'baggage_tag' | 'booking_document'
       const label = d.label ?? (docType === 'boarding_pass' ? 'Boardingpass' : docType === 'baggage_tag' ? 'Gepäckbeleg' : 'Beleg')
       return {

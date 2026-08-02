@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, FileText, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { updateJourneyEvent, deleteJourneyEvent } from "@/lib/actions/journey-events";
+import { uploadJourneyEventDocument, deleteJourneyEventDocument } from "@/lib/actions/documents";
 import { getNarrowTripDateRange } from "@/lib/documents";
 import { getFamily } from "@/lib/family";
 import { loadTripParticipantOptions } from "@/lib/trip-participants";
+import { getCachedSignedUrl } from "@/lib/signed-storage-url";
 import { DaySelectField } from "@/components/DaySelectField";
 import { TimeSelectField } from "@/components/TimeSelectField";
 import { Banner } from "@/components/Banner";
@@ -65,6 +67,20 @@ export default async function EditJourneyEventPage({
     .select("id, title")
     .eq("trip_id", trip.id)
     .order("sort_order");
+
+  // §"Journal-Terminen eigenen Dokumenten-Upload geben, analog zu
+  // Buchungen" (Nutzervorgabe, wörtlich) -- gleiches Muster wie die
+  // Dokumente-Sektion auf der Buchungsdetailseite.
+  const { data: journeyEventDocsRaw } = await supabase
+    .from("documents")
+    .select("id, label, storage_path")
+    .eq("journey_event_id", event.id);
+  const journeyEventDocuments = await Promise.all(
+    (journeyEventDocsRaw ?? []).map(async (d) => ({
+      id: d.id, label: d.label ?? "Dokument", storage_path: d.storage_path,
+      url: await getCachedSignedUrl("documents", d.storage_path),
+    })),
+  );
 
   const cancelHref = return_to || `/trips/${trip.slug}`;
 
@@ -196,6 +212,72 @@ export default async function EditJourneyEventPage({
             </div>
           </div>
         </form>
+
+        <div
+          className="rounded-xl p-6 mt-6"
+          style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+        >
+          <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: "12px" }}>
+            Dokumente
+          </div>
+
+          {journeyEventDocuments.length > 0 ? (
+            <div className="mb-4">
+              {journeyEventDocuments.map((doc) => (
+                <div key={doc.id} className="flex items-center gap-3 py-2" style={{ borderBottom: "1px solid var(--border)" }}>
+                  <FileText size={13} strokeWidth={1.4} style={{ color: "var(--accent)", flexShrink: 0 }} />
+                  {doc.url ? (
+                    <a href={doc.url} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-0 truncate" style={{ color: "var(--foreground)", fontSize: "0.82rem", textDecoration: "none" }}>
+                      {doc.label}
+                    </a>
+                  ) : (
+                    <span className="flex-1 min-w-0 truncate" style={{ color: "var(--foreground)", fontSize: "0.82rem" }}>{doc.label}</span>
+                  )}
+                  <form action={deleteJourneyEventDocument}>
+                    <input type="hidden" name="document_id" value={doc.id} />
+                    <input type="hidden" name="storage_path" value={doc.storage_path} />
+                    <input type="hidden" name="slug" value={trip.slug} />
+                    <input type="hidden" name="journey_event_id" value={event.id} />
+                    <button type="submit" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", display: "flex" }} aria-label="Dokument löschen">
+                      <Trash2 size={13} strokeWidth={1.4} />
+                    </button>
+                  </form>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mb-4" style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
+              Noch keine Unterlagen zu diesem Termin.
+            </p>
+          )}
+
+          <form action={uploadJourneyEventDocument} encType="multipart/form-data" className="flex items-end gap-3 flex-wrap">
+            <input type="hidden" name="trip_id" value={trip.id} />
+            <input type="hidden" name="journey_event_id" value={event.id} />
+            <input type="hidden" name="slug" value={trip.slug} />
+            <div className="flex-1 min-w-[160px]">
+              <label htmlFor="je-doc-label" style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: "6px" }}>
+                Bezeichnung
+              </label>
+              <input
+                id="je-doc-label" name="label" type="text" required placeholder="z. B. Ticket"
+                style={{ width: "100%", padding: "9px 12px", background: "var(--background)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)", fontSize: "0.82rem", fontWeight: 300, outline: "none" }}
+              />
+            </div>
+            <div className="flex-1 min-w-[160px]">
+              <label htmlFor="je-doc-file" style={{ display: "block", color: "var(--muted)", fontSize: "0.55rem", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: "6px" }}>
+                Datei
+              </label>
+              <input id="je-doc-file" name="file" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" required style={{ width: "100%", fontSize: "0.75rem", color: "var(--muted)" }} />
+            </div>
+            <button
+              type="submit"
+              style={{ background: "var(--foreground)", color: "var(--surface)", border: "none", borderRadius: "6px", padding: "10px 18px", fontSize: "0.62rem", letterSpacing: "0.14em", textTransform: "uppercase", cursor: "pointer", whiteSpace: "nowrap" }}
+            >
+              Hinzufügen
+            </button>
+          </form>
+        </div>
 
         <div
           className="rounded-xl p-6 mt-6 flex items-center justify-between flex-wrap gap-3"

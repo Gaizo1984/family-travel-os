@@ -58,9 +58,14 @@ export default async function TripDocumentsPage({
     computeTripRequirements(trip.id),
     // Zentrale Versicherungen, die dieser Reise zugeordnet sind.
     supabase.from("insurance_policy_trips").select("insurance_policies ( id, label, provider )").eq("trip_id", trip.id),
-    // Buchungsunterlagen (§11 Dokumenten-Hub): dieselbe Datei, die auf der jeweiligen
-    // Buchungsdetailseite hochgeladen wurde — hier nur referenziert, kein zweiter Upload.
-    supabase.from("documents").select("id, label, booking_id, bookings ( id, title, type )").eq("trip_id", trip.id).not("booking_id", "is", null),
+    // Buchungsunterlagen (§11 Dokumenten-Hub): dieselbe Datei, die auf der
+    // jeweiligen Buchungs- ODER Journal-Termin-Seite hochgeladen wurde — hier
+    // nur referenziert, kein zweiter Upload. `doc_type='booking_document'`
+    // deckt beide Quellen ab (siehe uploadBookingDocument/
+    // uploadJourneyEventDocument, lib/actions/documents.ts).
+    supabase.from("documents")
+      .select("id, label, booking_id, journey_event_id, bookings ( id, title, type ), journey_events ( id, title, category )")
+      .eq("trip_id", trip.id).eq("doc_type", "booking_document"),
   ]);
 
   const passportByPerson = new Map<string, string>();
@@ -87,13 +92,32 @@ export default async function TripDocumentsPage({
     .map((r) => r.insurance_policies as unknown as Policy | null)
     .filter((p): p is Policy => p !== null);
 
-  const bookingDocuments = (bookingDocRows ?? [])
-    .map((row) => {
+  type TripDocumentRow =
+    | { id: string; label: string; kind: "booking"; href: string; bookingType: BookingType; subtitle: string }
+    | { id: string; label: string; kind: "journey_event"; href: string; subtitle: string };
+
+  const bookingDocuments: TripDocumentRow[] = (bookingDocRows ?? [])
+    .map((row): TripDocumentRow | null => {
       const booking = row.bookings as unknown as { id: string; title: string; type: string } | null;
-      if (!booking) return null;
-      return { id: row.id, label: row.label ?? "Dokument", bookingId: booking.id, bookingTitle: booking.title, bookingType: booking.type };
+      if (booking) {
+        const config = BOOKING_TYPE_CONFIG[booking.type as BookingType];
+        return {
+          id: row.id, label: row.label ?? "Dokument", kind: "booking",
+          href: `/trips/${trip.slug}/bookings/${booking.id}`,
+          bookingType: booking.type as BookingType, subtitle: `${config?.label ?? booking.type} · ${booking.title}`,
+        };
+      }
+      const journeyEvent = row.journey_events as unknown as { id: string; title: string; category: string } | null;
+      if (journeyEvent) {
+        return {
+          id: row.id, label: row.label ?? "Dokument", kind: "journey_event",
+          href: `/trips/${trip.slug}/journey-events/${journeyEvent.id}/edit`,
+          subtitle: `Journal · ${journeyEvent.title}`,
+        };
+      }
+      return null;
     })
-    .filter((d): d is { id: string; label: string; bookingId: string; bookingTitle: string; bookingType: string } => d !== null);
+    .filter((d): d is TripDocumentRow => d !== null);
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -123,12 +147,11 @@ export default async function TripDocumentsPage({
           {bookingDocuments.length > 0 ? (
             <div className="space-y-2">
               {bookingDocuments.map((doc) => {
-                const config = BOOKING_TYPE_CONFIG[doc.bookingType as BookingType];
-                const Icon = config?.icon;
+                const Icon = doc.kind === "booking" ? BOOKING_TYPE_CONFIG[doc.bookingType]?.icon : BadgeCheck;
                 return (
                   <Link
                     key={doc.id}
-                    href={`/trips/${trip.slug}/bookings/${doc.bookingId}`}
+                    href={doc.href}
                     className="flex items-center gap-4 p-4 rounded-xl"
                     style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}
                   >
@@ -136,7 +159,7 @@ export default async function TripDocumentsPage({
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium truncate" style={{ color: "var(--foreground)" }}>{doc.label}</div>
                       <div className="text-xs mt-0.5" style={{ color: "var(--muted)", fontSize: "0.7rem" }}>
-                        {config?.label ?? doc.bookingType} · {doc.bookingTitle}
+                        {doc.subtitle}
                       </div>
                     </div>
                   </Link>

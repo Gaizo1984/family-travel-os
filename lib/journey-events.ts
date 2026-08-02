@@ -4,7 +4,11 @@ import { UtensilsCrossed, Sparkles, Dumbbell, Baby, Compass, User, StickyNote } 
 export type JourneyEventCategory =
   | 'restaurant' | 'spa' | 'golf_sport' | 'kids_club' | 'activity' | 'personal' | 'note'
 
-export type JourneyEventStatus = 'idea' | 'planned' | 'reserved'
+// §"Geplant entfernt, Reserviert -> Gebucht, dauerhaft" (Nutzervorgabe,
+// wörtlich): 'planned' entfernt (siehe Migration
+// 20260801000001_normalize_booking_journey_status.sql, bestehende Zeilen
+// wurden vorher auf 'reserved' migriert); 'reserved' heißt jetzt "Gebucht".
+export type JourneyEventStatus = 'idea' | 'reserved'
 
 export type JourneyEventCategoryConfig = {
   value: JourneyEventCategory
@@ -26,17 +30,15 @@ export const JOURNEY_EVENT_CATEGORIES: Record<JourneyEventCategory, JourneyEvent
   note:        { value: 'note',        label: 'Freie Notiz',       icon: StickyNote },
 }
 
-export const JOURNEY_EVENT_STATUS_ORDER: JourneyEventStatus[] = ['idea', 'planned', 'reserved']
+export const JOURNEY_EVENT_STATUS_ORDER: JourneyEventStatus[] = ['idea', 'reserved']
 
 export const JOURNEY_EVENT_STATUS_LABELS: Record<JourneyEventStatus, string> = {
   idea: 'Idee',
-  planned: 'Geplant',
-  reserved: 'Reserviert',
+  reserved: 'Gebucht',
 }
 
 export const JOURNEY_EVENT_STATUS_COLORS: Record<JourneyEventStatus, string> = {
   idea: 'var(--muted)',
-  planned: '#B89A5E',
   reserved: '#4C7A5D',
 }
 
