@@ -290,13 +290,47 @@ const METERS_PER_DEGREE_LAT = 111_320
  * (verhindert weiterhin Nachbarort-Vermischung bei kleinen Zielen) und
  * `MAX_LODGING_RADIUS_METERS` (Google-Maximum) begrenzt.
  */
+function viewportHalfDiagonalMeters(lat: number, viewport: NonNullable<GeocodeResult['viewport']>): number {
+  const metersPerDegreeLng = METERS_PER_DEGREE_LAT * Math.cos((lat * Math.PI) / 180)
+  const latSpanMeters = Math.abs(viewport.neLat - viewport.swLat) * METERS_PER_DEGREE_LAT
+  const lngSpanMeters = Math.abs(viewport.neLng - viewport.swLng) * metersPerDegreeLng
+  return Math.max(latSpanMeters, lngSpanMeters) / 2
+}
+
 export function computeLodgingRadiusMeters(geo: GeocodeResult): number {
   if (!geo.viewport) return MIN_LODGING_RADIUS_METERS
-  const metersPerDegreeLng = METERS_PER_DEGREE_LAT * Math.cos((geo.lat * Math.PI) / 180)
-  const latSpanMeters = Math.abs(geo.viewport.neLat - geo.viewport.swLat) * METERS_PER_DEGREE_LAT
-  const lngSpanMeters = Math.abs(geo.viewport.neLng - geo.viewport.swLng) * metersPerDegreeLng
-  const halfDiagonal = Math.max(latSpanMeters, lngSpanMeters) / 2
+  const halfDiagonal = viewportHalfDiagonalMeters(geo.lat, geo.viewport)
   return Math.min(MAX_LODGING_RADIUS_METERS, Math.max(MIN_LODGING_RADIUS_METERS, halfDiagonal))
+}
+
+type LodgingLocationBias =
+  | { circle: { center: { latitude: number; longitude: number }; radius: number } }
+  | { rectangle: { low: { latitude: number; longitude: number }; high: { latitude: number; longitude: number } } }
+
+/**
+ * §"Radius allein reicht für sehr weit verstreute Ziele nicht" (Nutzervorgabe,
+ * Malediven-Livetest -- kaum Ergebnisse, mehrere bekannte Top-Resorts
+ * fehlten): `computeLodgingRadiusMeters` deckelt bei
+ * `MAX_LODGING_RADIUS_METERS` (Google-API-Grenze für
+ * `locationBias.circle.radius`, siehe dort) -- für ein Ziel, dessen
+ * Viewport-Diagonale darüber liegt (z. B. ein über hunderte Kilometer
+ * verstreutes Inselarchipel), deckt selbst der maximale Kreis um einen
+ * einzigen Punkt nur einen Bruchteil ab. In diesem Fall wird stattdessen
+ * Googles eigene Viewport-Bounding-Box direkt als `locationBias.rectangle`
+ * übergeben -- deckt die tatsächliche Ausdehnung ab, ohne weitere
+ * Places-Aufrufe. Für alle anderen (kompakteren) Ziele bleibt der bewährte
+ * Kreis unverändert (identisches Verhalten zu vorher).
+ */
+function buildLodgingLocationBias(lat: number, lng: number, radiusMeters: number, viewport?: GeocodeResult['viewport']): LodgingLocationBias {
+  if (viewport && viewportHalfDiagonalMeters(lat, viewport) > MAX_LODGING_RADIUS_METERS) {
+    return {
+      rectangle: {
+        low: { latitude: viewport.swLat, longitude: viewport.swLng },
+        high: { latitude: viewport.neLat, longitude: viewport.neLng },
+      },
+    }
+  }
+  return { circle: { center: { latitude: lat, longitude: lng }, radius: radiusMeters } }
 }
 
 // §Bugfix "Berühmte Einzelhotels (Belmond, Fasano, ...) fehlen in
@@ -315,7 +349,7 @@ const LODGING_QUERY_TEMPLATES = (locationName: string): string[] => [
   `Luxushotels und 5-Sterne-Resorts in ${locationName}`,
 ]
 
-async function fetchLodgingPageRaw(textQuery: string, lat: number, lng: number, radiusMeters: number, apiKey: string): Promise<LodgingResult[]> {
+async function fetchLodgingPageRaw(textQuery: string, locationBias: LodgingLocationBias, apiKey: string): Promise<LodgingResult[]> {
   const res = await fetch(PLACES_SEARCH_URL, {
     method: 'POST',
     headers: {
@@ -327,7 +361,7 @@ async function fetchLodgingPageRaw(textQuery: string, lat: number, lng: number, 
       textQuery,
       languageCode: 'de',
       maxResultCount: LODGING_MAX_RESULT_COUNT,
-      locationBias: { circle: { center: { latitude: lat, longitude: lng }, radius: radiusMeters } },
+      locationBias,
     }),
     cache: 'no-store',
   })
@@ -355,16 +389,32 @@ async function fetchLodgingPageRaw(textQuery: string, lat: number, lng: number, 
   }))
 }
 
-async function fetchLodgingPage(textQuery: string, lat: number, lng: number, radiusMeters: number, apiKey: string): Promise<LodgingResult[]> {
-  const raw = await fetchLodgingPageRaw(textQuery, lat, lng, radiusMeters, apiKey)
+/**
+ * §"Sichtbarkeit auf lautlos verworfene Treffer" (Nutzervorgabe,
+ * Malediven-Livetest): ein Resort, das Google nicht mit dem Typ `lodging`
+ * taggt (z. B. nur `tourist_attraction`), wurde bisher ohne jede Spur
+ * verworfen -- Warnung statt blinder Filterlockerung (ein falscher
+ * Ersatz-Typ könnte genauso leicht neue Falschtreffer einschleusen). Dient
+ * als Grundlage für eine spätere, faktenbasierte Nachjustierung.
+ */
+function logDroppedNonLodgingCandidates(raw: LodgingResult[]): void {
+  const dropped = raw.filter((p) => !p.types.includes(LODGING_TYPE))
+  if (dropped.length > 0) {
+    console.warn('[hotel-search] Treffer ohne lodging-Typ verworfen', dropped.map((p) => ({ name: p.name, types: p.types })))
+  }
+}
+
+async function fetchLodgingPage(textQuery: string, locationBias: LodgingLocationBias, apiKey: string): Promise<LodgingResult[]> {
+  const raw = await fetchLodgingPageRaw(textQuery, locationBias, apiKey)
+  logDroppedNonLodgingCandidates(raw)
   return raw.filter((p) => p.types.includes(LODGING_TYPE))
 }
 
 async function runLodgingQueries(
-  locationName: string, lat: number, lng: number, radiusMeters: number, apiKey: string,
+  locationName: string, locationBias: LodgingLocationBias, apiKey: string,
   fetchPage: typeof fetchLodgingPage,
 ): Promise<LodgingResult[]> {
-  const pages = await Promise.all(LODGING_QUERY_TEMPLATES(locationName).map((textQuery) => fetchPage(textQuery, lat, lng, radiusMeters, apiKey)))
+  const pages = await Promise.all(LODGING_QUERY_TEMPLATES(locationName).map((textQuery) => fetchPage(textQuery, locationBias, apiKey)))
   const seenIds = new Set<string>()
   const merged: LodgingResult[] = []
   for (const page of pages) {
@@ -382,10 +432,12 @@ async function runLodgingQueries(
  * ist optional -- wird es nicht mitgegeben (z. B. wenn der Aufrufer bereits
  * selbst geokodiert hat), berechnet diese Funktion es intern über
  * `computeLodgingRadiusMeters`. Aufrufer, die schon ein `GeocodeResult` mit
- * Viewport haben (z. B. `getOrSearchHotelOptions`), sollten den Radius direkt
- * mitgeben, um den zusätzlichen Geocoding-Aufruf zu sparen.
+ * Viewport haben (z. B. `getOrSearchHotelOptions`), sollten den Radius UND
+ * `viewport` direkt mitgeben -- letzteres spart nicht nur den zusätzlichen
+ * Geocoding-Aufruf, sondern aktiviert für sehr weit verstreute Ziele (siehe
+ * `buildLodgingLocationBias`) den Rechteck- statt Kreis-Bias.
  */
-export async function searchLodging(params: { locationName: string; lat?: number; lng?: number; radiusMeters?: number }): Promise<LodgingResult[] | null> {
+export async function searchLodging(params: { locationName: string; lat?: number; lng?: number; radiusMeters?: number; viewport?: GeocodeResult['viewport'] }): Promise<LodgingResult[] | null> {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY
   if (!apiKey) {
     const err = new ProviderConfigError('places', 'lodging_search')
@@ -396,17 +448,20 @@ export async function searchLodging(params: { locationName: string; lat?: number
   let lat = params.lat
   let lng = params.lng
   let radiusMeters = params.radiusMeters
+  let viewport = params.viewport
   if (lat === undefined || lng === undefined) {
     const geo = await googleGeocode(params.locationName)
     if (!geo) return null
     lat = geo.lat
     lng = geo.lng
     radiusMeters = radiusMeters ?? computeLodgingRadiusMeters(geo)
+    viewport = viewport ?? geo.viewport ?? undefined
   }
   radiusMeters = radiusMeters ?? MIN_LODGING_RADIUS_METERS
+  const locationBias = buildLodgingLocationBias(lat, lng, radiusMeters, viewport)
 
   try {
-    return await runLodgingQueries(params.locationName, lat, lng, radiusMeters, apiKey, fetchLodgingPage)
+    return await runLodgingQueries(params.locationName, locationBias, apiKey, fetchLodgingPage)
   } catch (e) {
     if (e instanceof ProviderConfigError || e instanceof ProviderRequestError) throw e
     const err = new ProviderRequestError('places', 'lodging_search', 0)
@@ -423,7 +478,7 @@ export async function searchLodging(params: { locationName: string; lat?: number
  * überhaupt findet, aber mit einem anderen Google-Typ (z. B. `tourist_
  * attraction`) kategorisiert und deshalb bisher stillschweigend verworfen hat.
  */
-export async function searchLodgingRaw(params: { locationName: string; lat?: number; lng?: number; radiusMeters?: number }): Promise<LodgingResult[] | null> {
+export async function searchLodgingRaw(params: { locationName: string; lat?: number; lng?: number; radiusMeters?: number; viewport?: GeocodeResult['viewport'] }): Promise<LodgingResult[] | null> {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY
   if (!apiKey) {
     const err = new ProviderConfigError('places', 'lodging_search')
@@ -434,17 +489,20 @@ export async function searchLodgingRaw(params: { locationName: string; lat?: num
   let lat = params.lat
   let lng = params.lng
   let radiusMeters = params.radiusMeters
+  let viewport = params.viewport
   if (lat === undefined || lng === undefined) {
     const geo = await googleGeocode(params.locationName)
     if (!geo) return null
     lat = geo.lat
     lng = geo.lng
     radiusMeters = radiusMeters ?? computeLodgingRadiusMeters(geo)
+    viewport = viewport ?? geo.viewport ?? undefined
   }
   radiusMeters = radiusMeters ?? MIN_LODGING_RADIUS_METERS
+  const locationBias = buildLodgingLocationBias(lat, lng, radiusMeters, viewport)
 
   try {
-    return await runLodgingQueries(params.locationName, lat, lng, radiusMeters, apiKey, fetchLodgingPageRaw)
+    return await runLodgingQueries(params.locationName, locationBias, apiKey, fetchLodgingPageRaw)
   } catch (e) {
     if (e instanceof ProviderConfigError || e instanceof ProviderRequestError) throw e
     const err = new ProviderRequestError('places', 'lodging_search', 0)

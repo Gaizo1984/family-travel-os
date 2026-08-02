@@ -49,6 +49,9 @@ const LUXURY_HOTEL_BRANDS: Array<{ keywords: string[]; tier: LuxuryHotelTier }> 
       'ritz-carlton', 'ritz carlton', 'waldorf astoria', 'park hyatt', 'jw marriott',
       'rosewood', 'raffles', 'capella', 'como hotel', 'como shambhala', 'como uma',
       'auberge resort', 'oetker collection', 'fasano',
+      // §"Malediven-Markenlücke" (Nutzervorgabe): Schwestermarke von Capella
+      // (bereits oben gelistet), vergleichbares Niveau.
+      'patina',
       // §"Auch Safari-/Lodge-Marken abdecken, nicht nur Stadt-/Resort-Ketten"
       // (Nutzervorgabe): ohne diese Marken fallen Safari-Lodges komplett auf
       // die Heuristik zurück, die bei Google oft an fehlendem `priceLevel`
@@ -67,6 +70,10 @@ const LUXURY_HOTEL_BRANDS: Array<{ keywords: string[]; tier: LuxuryHotelTier }> 
       'one&only', 'one & only', 'four seasons', 'mandarin oriental', 'aman',
       'cheval blanc', 'six senses', 'belmond', 'nihi',
       'singita', 'oberoi',
+      // §"Malediven-Markenlücke" (Nutzervorgabe): sehr exklusive
+      // Privatinsel-Resorts, fielen bisher ohne Markenerkennung oft an der
+      // Rezensionsanzahl-Heuristik durch.
+      'soneva',
     ],
   },
 ]

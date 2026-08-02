@@ -92,11 +92,25 @@ export function classifyAndQualify(hotel: LodgingResult): HotelQualification {
 export type TierComposition = { upperUpscale: number; premiumLuxury: number; ultraLuxury: number; iconic: number }
 
 /**
- * §"Gehobene 5 Sterne auf bis zu 5, Premium auf 4, Ultra auf 3, Iconic auf 2"
- * (Nutzervorgabe, 2026-07-17 nachjustiert nach Mauritius-Livetest -- die
- * meisten echten Treffer liegen typischerweise im Einstiegssegment).
+ * §"Gehobene 5 Sterne auf bis zu 7, Premium auf 4, Ultra auf 3, Iconic auf 2"
+ * (Nutzervorgabe, 2026-07-17 nachjustiert nach Mauritius-Livetest, `upperUpscale`
+ * 2026-08-01 von 5 auf 7 angehoben nach Malediven-Livetest -- ein Land mit
+ * überproportional vielen echten 5-Sterne-Resorts kappte hier bereits echte,
+ * qualifizierte Treffer vor der KI-Auswahl weg. Die meisten echten Treffer
+ * liegen typischerweise im Einstiegssegment).
  */
-export const DEFAULT_TIER_COMPOSITION: TierComposition = { upperUpscale: 5, premiumLuxury: 4, ultraLuxury: 3, iconic: 2 }
+export const DEFAULT_TIER_COMPOSITION: TierComposition = { upperUpscale: 7, premiumLuxury: 4, ultraLuxury: 3, iconic: 2 }
+
+/**
+ * §"Genuine Überschuss darf nicht komplett verloren gehen" (Nutzervorgabe,
+ * Malediven-Livetest): reicht selbst die reguläre Kapazitätsweitergabe
+ * zwischen den Stufen nicht aus (alle Slots voll, aber weiterhin echte,
+ * bereits qualifizierte Kandidaten übrig), dürfen bis zu so viele weitere
+ * gezeigt werden -- weiterhin ausschließlich echte, qualifizierte
+ * Kandidaten in derselben Prioritätsreihenfolge, keine künstliche
+ * Auffüllung.
+ */
+const MAX_TIER_OVERFLOW = 6
 
 /**
  * §"Nicht nur nach einer einzelnen höchsten Stufe sortieren, sondern
@@ -163,6 +177,18 @@ export function selectBalancedQualified(
   for (const pool of [iconicPool, byTier.ultra_luxury, byTier.premium_luxury, byTier.upper_upscale]) {
     if (selected.length >= totalCap) break
     takeFrom(pool, totalCap - selected.length)
+  }
+
+  // §"Genuine Überschuss darf nicht komplett verloren gehen" (Nutzervorgabe,
+  // Malediven-Livetest): sind nach der regulären Kapazitätsweitergabe alle
+  // Slots voll UND weiterhin echte, bereits qualifizierte Kandidaten übrig,
+  // wird die Obergrenze um bis zu MAX_TIER_OVERFLOW weitere angehoben --
+  // gleiche Prioritätsreihenfolge, gleiche Regel (keine künstliche
+  // Auffüllung, `takeFrom` überspringt bereits ausgewählte IDs).
+  const extendedCap = totalCap + MAX_TIER_OVERFLOW
+  for (const pool of [iconicPool, byTier.ultra_luxury, byTier.premium_luxury, byTier.upper_upscale]) {
+    if (selected.length >= extendedCap) break
+    takeFrom(pool, extendedCap - selected.length)
   }
 
   return selected

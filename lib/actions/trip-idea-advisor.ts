@@ -6,7 +6,7 @@ import { geocodeLocation, searchLodging, computeLodgingRadiusMeters, type Lodgin
 import { computeRouteMatrix } from '@/lib/providers/routes-provider'
 import { ProviderConfigError } from '@/lib/providers/provider-errors'
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt } from '@/lib/family-dna'
-import { selectHotelShortlist, generateBudgetBreakdown, generateTripVariants as generateTripVariantsAi, type HotelCandidateFact } from '@/lib/trip-idea-advisor-ai'
+import { selectHotelShortlist, matchHotelPicksToFacts, generateBudgetBreakdown, generateTripVariants as generateTripVariantsAi, type HotelCandidateFact } from '@/lib/trip-idea-advisor-ai'
 import { classifyAndQualify, selectHotelDisplayList } from '@/lib/hotel-qualification'
 import type { HotelShortlist } from '@/lib/trip-idea-hotel-types'
 
@@ -92,7 +92,7 @@ export async function generateHotelShortlist(formData: FormData) {
 
   let candidates: LodgingResult[] | null
   try {
-    candidates = await searchLodging({ locationName: idea.destination, lat: destGeo.lat, lng: destGeo.lng, radiusMeters: computeLodgingRadiusMeters(destGeo) })
+    candidates = await searchLodging({ locationName: idea.destination, lat: destGeo.lat, lng: destGeo.lng, radiusMeters: computeLodgingRadiusMeters(destGeo), viewport: destGeo.viewport })
   } catch {
     redirect(`${returnTo}?error=${encodeURIComponent('Die Hotelsuche ist gerade fehlgeschlagen -- bitte in Kürze erneut versuchen.')}`)
   }
@@ -170,30 +170,29 @@ export async function generateHotelShortlist(formData: FormData) {
   if (!picks || picks.length === 0)
     redirect(`${returnTo}?error=${encodeURIComponent('Die Hotelauswahl ist gerade nicht verfügbar -- bitte in Kürze erneut versuchen.')}`)
 
-  const pickByName = new Map(picks.map((p) => [p.placeName, p]))
-
-  // §Defensive zweite Absicherung neben dem Schema: jeder KI-Name ohne
-  // Fakten-Treffer in der echten Kandidatenliste wird verworfen.
-  const shortlist = withFacts
-    .filter((r) => pickByName.has(r.candidate.name))
-    .map((r) => {
-      const pick = pickByName.get(r.candidate.name)!
-      const qualification = qualificationByPlaceId.get(r.candidate.id)!
+  // §"KI-Namensabgleich verliert Treffer lautlos" (Nutzervorgabe,
+  // Malediven-Livetest): matchHotelPicksToFacts (lib/trip-idea-advisor-ai.ts)
+  // ersetzt den bisherigen reinen Namens-Abgleich, der einen Kandidaten bei
+  // nur leicht abweichender KI-Schreibweise lautlos verwarf -- gleiche
+  // Funktion wie in lib/actions/hotel-search.ts, keine zweite Kopie.
+  const shortlist = matchHotelPicksToFacts(withFacts, picks)
+    .map(({ candidate, durationMinutes, pick }) => {
+      const qualification = qualificationByPlaceId.get(candidate.id)!
       const unverifiedFields: string[] = []
-      if (r.candidate.rating === null) unverifiedFields.push('rating')
-      if (!r.candidate.priceLevel) unverifiedFields.push('priceLevel')
-      if (!r.candidate.websiteUri) unverifiedFields.push('website')
-      if (r.durationMinutes === null) unverifiedFields.push('transferMinutes')
+      if (candidate.rating === null) unverifiedFields.push('rating')
+      if (!candidate.priceLevel) unverifiedFields.push('priceLevel')
+      if (!candidate.websiteUri) unverifiedFields.push('website')
+      if (durationMinutes === null) unverifiedFields.push('transferMinutes')
       return {
-        placeId: r.candidate.id,
-        name: r.candidate.name,
-        address: r.candidate.formattedAddress,
-        rating: r.candidate.rating,
-        reviewCount: r.candidate.userRatingCount,
-        priceLevel: r.candidate.priceLevel,
-        photoName: r.candidate.photoName,
-        websiteUri: r.candidate.websiteUri,
-        transferMinutes: r.durationMinutes,
+        placeId: candidate.id,
+        name: candidate.name,
+        address: candidate.formattedAddress,
+        rating: candidate.rating,
+        reviewCount: candidate.userRatingCount,
+        priceLevel: candidate.priceLevel,
+        photoName: candidate.photoName,
+        websiteUri: candidate.websiteUri,
+        transferMinutes: durationMinutes,
         familyFitReasoning: pick.familyFitReasoning,
         styleImpression: pick.styleImpression,
         bestFor: pick.bestFor,

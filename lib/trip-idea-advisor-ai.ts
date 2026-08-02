@@ -38,6 +38,60 @@ export type HotelPick = {
 }
 
 /**
+ * §"KI-Namensabgleich verliert Treffer lautlos" (Nutzervorgabe,
+ * Malediven-Livetest): das Schema in `buildHotelShortlistSchema` erzwingt
+ * bereits genau einen Pick pro Kandidat (`minItems === maxItems ===
+ * availableCount`) -- schreibt die KI einen Namen nur leicht anders (z. B.
+ * ohne "The", andere Schreibweise), fiel der reale, bereits qualifizierte
+ * Kandidat bisher trotzdem komplett und ohne jede Spur raus. Erster Versuch
+ * weiterhin per exaktem Namen (robustestes Signal, verhindert Verwechslung
+ * bei mehreren ähnlichen Kandidaten); für den Rest -- durch die
+ * Schema-Garantie auf beiden Seiten dieselbe Anzahl übrig -- Zuordnung per
+ * verbleibender Listenreihenfolge, mit Warnung statt stillem Drop. Gemeinsam
+ * genutzt von `lib/actions/hotel-search.ts` und
+ * `lib/actions/trip-idea-advisor.ts` (identisches Muster, keine zweite Kopie
+ * dieser Zuordnungslogik).
+ */
+export function matchHotelPicksToFacts<TCandidate extends { name: string }>(
+  withFacts: Array<{ candidate: TCandidate; durationMinutes: number | null }>,
+  picks: HotelPick[],
+): Array<{ candidate: TCandidate; durationMinutes: number | null; pick: HotelPick }> {
+  const unmatchedCandidateIndexes = new Set(withFacts.map((_, i) => i))
+  const pickByCandidateIndex = new Map<number, HotelPick>()
+  const unmatchedPicks: HotelPick[] = []
+
+  for (const pick of picks) {
+    const idx = withFacts.findIndex((r, i) => unmatchedCandidateIndexes.has(i) && r.candidate.name === pick.placeName)
+    if (idx !== -1) {
+      pickByCandidateIndex.set(idx, pick)
+      unmatchedCandidateIndexes.delete(idx)
+    } else {
+      unmatchedPicks.push(pick)
+    }
+  }
+
+  if (unmatchedPicks.length > 0) {
+    const remainingIndexes = [...unmatchedCandidateIndexes].sort((a, b) => a - b)
+    if (unmatchedPicks.length === remainingIndexes.length) {
+      console.warn('[hotel-search] KI-Namen ohne exakten Treffer, per verbleibender Reihenfolge zugeordnet', {
+        picked: unmatchedPicks.map((p) => p.placeName),
+        candidates: remainingIndexes.map((i) => withFacts[i].candidate.name),
+      })
+      unmatchedPicks.forEach((pick, i) => pickByCandidateIndex.set(remainingIndexes[i], pick))
+    } else {
+      console.warn('[hotel-search] KI-Picks/Kandidaten-Anzahl nach Namensabgleich uneinheitlich -- nicht zugeordnete Picks werden verworfen', {
+        unmatchedPicks: unmatchedPicks.map((p) => p.placeName),
+        remainingCandidates: remainingIndexes.map((i) => withFacts[i].candidate.name),
+      })
+    }
+  }
+
+  return withFacts
+    .map((r, i) => ({ ...r, pick: pickByCandidateIndex.get(i) }))
+    .filter((r): r is typeof r & { pick: HotelPick } => Boolean(r.pick))
+}
+
+/**
  * §Bugfix "7 qualifizierte Hotels, aber nur 4 angezeigt" (Mauritius-
  * Livetest, 2026-07-17): `selectHotelDisplayList`/`selectBalancedQualified`
  * haben die Auswahl (WELCHE Hotels gezeigt werden, ausgewogen nach Stufe)
