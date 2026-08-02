@@ -4,7 +4,7 @@ import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { BOOKING_CATEGORIES, sortBookingsChronologically } from "@/lib/bookings";
 import type { BookingCategory } from "@/lib/bookings";
-import type { BookingType, BookingStatus } from "@/lib/supabase/types";
+import type { BookingType, BookingStatus, PaymentStatus } from "@/lib/supabase/types";
 import { BookingRowItem } from "../../BookingRowItem";
 import { JourneyEventRowItem, type JourneyEventRowData } from "@/app/(app)/trips/[id]/journey-events/JourneyEventRowItem";
 
@@ -14,6 +14,7 @@ type BookingWithStage = {
   title: string;
   provider: string | null;
   status: BookingStatus;
+  payment_status: PaymentStatus;
   amount: number | null;
   currency: string;
   start_datetime: string | null;
@@ -41,7 +42,7 @@ export default async function BookingCategoryPage({
 
   const { data } = await supabase
     .from("bookings")
-    .select("id, type, title, provider, status, amount, currency, start_datetime, created_at, stages ( title )")
+    .select("id, type, title, provider, status, payment_status, amount, currency, start_datetime, created_at, stages ( title )")
     .eq("trip_id", trip.id)
     .in("type", categoryConfig.types);
 

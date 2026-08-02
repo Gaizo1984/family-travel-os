@@ -112,7 +112,6 @@ export default async function BookingDetailPage({
     list.push(doc);
     boardingPassesByPerson.set(doc.person_id, list);
   }
-  const boardingPassByPerson = new Map(boardingPassDocs.map((d) => [d.person_id, d]));
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>

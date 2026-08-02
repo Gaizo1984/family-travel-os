@@ -214,6 +214,11 @@ function readCommonFields(formData: FormData) {
   const amountRaw         = String(formData.get('amount') ?? '').trim()
   const currency          = String(formData.get('currency') ?? '').trim() || 'EUR'
   const notes             = String(formData.get('notes') ?? '').trim()
+  // §Aus einer vorangegangenen KI-Auslesung (booking-extraction.ts) bereits
+  // hochgeladene Datei -- wird bei erfolgreichem Speichern unten in eine
+  // echte documents-Zeile umgewandelt, sonst bliebe sie als Storage-Leiche
+  // liegen (siehe createBooking/updateBooking).
+  const existingStoragePath = String(formData.get('existing_storage_path') ?? '').trim()
 
   // §Bewusst nicht werfen wie combineIsoDate es sonst tut: readCommonFields
   // darf bei einem ungültigen Datum nicht mitten im Einlesen abbrechen, sonst
@@ -257,6 +262,7 @@ function readCommonFields(formData: FormData) {
   return {
     type, config, title, provider, stageId, bookingReference, status, paymentStatus,
     amountRaw, currency, notes, startDate, startTime, endDate, endTime, details, dateError,
+    existingStoragePath,
   }
 }
 
@@ -285,7 +291,13 @@ function redirectWithDraft(pathWithTrailingSeparator: string, error: string, f: 
     notes: f.notes || null,
     details: Object.keys(f.details).length > 0 ? f.details : null,
   }
-  redirect(`${pathWithTrailingSeparator}error=${encodeURIComponent(error)}&draft=${encodeURIComponent(JSON.stringify(draft))}`)
+  // §Bereits per KI-Auslesung hochgeladene Datei nicht verlieren: ohne
+  // storage_path im Redirect würde das Formular existingStoragePath leer
+  // rendern und der Nutzer müsste nach einem Validierungsfehler erneut
+  // hochladen -- die zuvor hochgeladene Datei bliebe zusätzlich als
+  // Storage-Leiche liegen, weil nichts mehr auf sie verweist.
+  const storagePathParam = f.existingStoragePath ? `&storage_path=${encodeURIComponent(f.existingStoragePath)}` : ''
+  redirect(`${pathWithTrailingSeparator}error=${encodeURIComponent(error)}&draft=${encodeURIComponent(JSON.stringify(draft))}${storagePathParam}`)
 }
 
 /**
@@ -332,6 +344,38 @@ async function checkTripBoundedDateRange(
     return `Datum liegt außerhalb des Reisezeitraums (${minIso} – ${maxIso})`
 
   return null
+}
+
+/**
+ * §OCR-Zwischenupload nicht verwaisen lassen: booking-extraction.ts lädt die
+ * Datei bereits vor der eigentlichen Buchungsanlage hoch (nur für die
+ * KI-Auslesung) -- erst hier, nach erfolgreichem Anlegen/Bearbeiten der
+ * Buchung, wird daraus eine echte documents-Zeile (gleiches Muster wie
+ * uploadBookingDocument in lib/actions/documents.ts). Ohne diesen Schritt
+ * bliebe die Datei für immer als Storage-Leiche liegen -- keine
+ * documents-Zeile verweist auf sie, also greift auch der 2-Tage-
+ * Post-Trip-Cleanup nie. Best effort: ein Fehler hier darf die bereits
+ * gespeicherte Buchung nicht ungültig machen.
+ */
+async function attachExtractedDocument(
+  supabase: SupabaseClient,
+  tripId: string,
+  bookingId: string,
+  storagePath: string,
+  label: string,
+): Promise<void> {
+  const { error } = await supabase.from('documents').insert({
+    trip_id: tripId,
+    booking_id: bookingId,
+    person_id: null,
+    doc_type: 'booking_document',
+    label,
+    details: { source: 'extracted' },
+    storage_provider: 'supabase_storage',
+    storage_bucket: 'documents',
+    storage_path: storagePath,
+  })
+  if (error) console.error('[booking-extraction] Ausgelesenes Dokument konnte nicht verknüpft werden:', error.message)
 }
 
 export async function createBooking(formData: FormData) {
@@ -415,6 +459,9 @@ export async function createBooking(formData: FormData) {
 
   if (error)
     redirectWithDraft(newPath, 'Speicherfehler: ' + error.message, f)
+
+  if (f.existingStoragePath && created)
+    await attachExtractedDocument(supabase, tripId, created.id, f.existingStoragePath, f.title)
 
   // §"So lernt LUMI Brain automatisch auch die Vorlieben" (Nutzervorgabe) --
   // nur bei Neuanlage (nicht bei updateBooking, keine Vorschlags-Flut durch
@@ -534,6 +581,9 @@ export async function updateBooking(formData: FormData) {
 
   if (error)
     redirectWithDraft(editPath, 'Speicherfehler: ' + error.message, f)
+
+  if (f.existingStoragePath && tripId)
+    await attachExtractedDocument(supabase, tripId, bookingId, f.existingStoragePath, f.title)
 
   redirect(`/trips/${slug}/bookings/${bookingId}`)
 }

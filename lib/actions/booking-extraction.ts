@@ -195,11 +195,18 @@ export async function extractBookingData(formData: FormData) {
     })
     parsed = JSON.parse(response.output_text) as ExtractionResult
   } catch {
+    // §Storage-Leiche vermeiden: die Datei wurde oben bereits hochgeladen,
+    // ohne verwertbares Ergebnis entsteht aber nie eine documents-Zeile, die
+    // sie referenziert -- ohne dieses Aufräumen bliebe sie für immer liegen
+    // (createBooking/updateBooking übernehmen storage_path nur bei Erfolg).
+    await supabase.storage.from('documents').remove([storagePath])
     fail('Die KI-Auslesung ist gerade nicht verfügbar (Fehler oder Zeitüberschreitung). Bitte manuell fortfahren.')
   }
 
-  if (!parsed.readable)
+  if (!parsed.readable) {
+    await supabase.storage.from('documents').remove([storagePath])
     fail('Das Dokument konnte nicht zuverlässig ausgelesen werden. Bitte ein anderes Foto/PDF hochladen oder die Daten manuell eingeben.')
+  }
 
   const draft = buildDraft(type, parsed)
 

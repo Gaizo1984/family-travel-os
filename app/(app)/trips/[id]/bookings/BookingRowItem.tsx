@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { BOOKING_TYPE_CONFIG, BOOKING_STATUS_LABELS, formatDateTimeDE } from "@/lib/bookings";
+import { BOOKING_TYPE_CONFIG, BOOKING_STATUS_LABELS, PAYMENT_STATUS_LABELS, formatDateTimeDE } from "@/lib/bookings";
 import { formatCurrencyDE } from "@/lib/demo-data";
-import type { BookingType, BookingStatus } from "@/lib/supabase/types";
+import type { BookingType, BookingStatus, PaymentStatus } from "@/lib/supabase/types";
 
 export type BookingRowData = {
   id: string;
@@ -9,6 +9,7 @@ export type BookingRowData = {
   title: string;
   provider: string | null;
   status: BookingStatus;
+  payment_status: PaymentStatus;
   amount: number | null;
   currency: string;
   start_datetime: string | null;
@@ -51,10 +52,27 @@ export function BookingRowItem({
         </div>
       </div>
       <div className="text-right shrink-0">
-        {/* §Punkt 8 "Kein sichtbarer Status": bei Flug/Hotel/Mietwagen auch in Listenzeilen ausgeblendet. */}
-        {config.visibleFields.status && (
-          <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+        {/*
+          §Punkt 8 "Kein sichtbarer Status": bei Flug/Hotel/Mietwagen auch in
+          Listenzeilen ausgeblendet -- ABER eine Stornierung (toggleBookingCancelled)
+          muss trotzdem sichtbar bleiben, sonst sieht eine stornierte Buchung in
+          jeder Liste identisch zu einer aktiven aus (Bugfix, siehe
+          bookings/[bookingId]/page.tsx für dieselbe Rot-Farbe #B5624A).
+        */}
+        {(config.visibleFields.status || booking.status === "cancelled") && (
+          <div
+            style={{
+              color: booking.status === "cancelled" ? "#B5624A" : "var(--muted)",
+              fontSize: "0.6rem", letterSpacing: "0.1em", textTransform: "uppercase",
+            }}
+          >
             {BOOKING_STATUS_LABELS[booking.status]}
+          </div>
+        )}
+        {/* Zahlungsstatus nur bei Typen mit editierbarem Feld, "Bezahlt" bleibt unauffällig -- nur offene/teilweise/erstattete Zahlungen sollen in der Liste auffallen. */}
+        {config.visibleFields.paymentStatus && booking.payment_status !== "paid" && (
+          <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+            {PAYMENT_STATUS_LABELS[booking.payment_status]}
           </div>
         )}
         {booking.amount !== null && (
