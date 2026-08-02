@@ -206,7 +206,19 @@ export async function getOrSearchHotelOptions(params: {
     },
     { onConflict: 'family_id,search_key' },
   )
-  if (upsertError) console.error('[hotel_search_cache] Speicherfehler:', upsertError.message)
+  // §Bugfix "Suche zeigt Ergebnis, aber hotel_search_cache bleibt beim alten
+  // Stand" (Malediven-Livetest, 2026-08-02): ein Speicherfehler wurde bisher
+  // nur nach console.error geloggt, die Funktion gab trotzdem 'ok' mit den
+  // frisch berechneten Treffern zurück -- der Nutzer sah ein scheinbar
+  // funktionierendes Ergebnis, das aber beim nächsten Aufruf über search_key
+  // (z. B. nach dem Redirect direkt hier, oder aus "Zuletzt gesucht")
+  // spurlos wieder verschwand, weil nie etwas geschrieben wurde. Ein
+  // Speicherfehler muss sichtbar sein statt eine falsche Erfolgsmeldung zu
+  // erzeugen.
+  if (upsertError) {
+    console.error('[hotel_search_cache] Speicherfehler:', upsertError.message)
+    return { status: 'error', message: 'Ergebnis konnte nicht gespeichert werden: ' + upsertError.message }
+  }
 
   return { status: 'ok', searchKey, items, belowStandard: belowStandardMode, limitedInventory, searchedAt }
 }
