@@ -1114,6 +1114,60 @@ export interface Database {
           { foreignKeyName: "signed_url_cache_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }
         ]
       }
+      trip_hints: {
+        Row: {
+          id: string; family_id: string; trip_id: string; booking_id: string | null
+          document_id: string | null; journey_event_id: string | null; hint_type: string
+          priority: string; title: string; reasoning: string; relevant_at: string | null
+          action_label: string; action_href: string; status: string
+          content_hash: string; dedupe_key: string
+          created_at: string; updated_at: string; dismissed_at: string | null
+        }
+        Insert: {
+          id?: string; family_id: string; trip_id: string; booking_id?: string | null
+          document_id?: string | null; journey_event_id?: string | null; hint_type: string
+          priority: string; title: string; reasoning: string; relevant_at?: string | null
+          action_label: string; action_href: string; status?: string
+          content_hash: string; dedupe_key: string
+          created_at?: string; updated_at?: string; dismissed_at?: string | null
+        }
+        Update: {
+          id?: string; family_id?: string; trip_id?: string; booking_id?: string | null
+          document_id?: string | null; journey_event_id?: string | null; hint_type?: string
+          priority?: string; title?: string; reasoning?: string; relevant_at?: string | null
+          action_label?: string; action_href?: string; status?: string
+          content_hash?: string; dedupe_key?: string
+          created_at?: string; updated_at?: string; dismissed_at?: string | null
+        }
+        Relationships: [
+          { foreignKeyName: "trip_hints_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] },
+          { foreignKeyName: "trip_hints_trip_id_fkey"; columns: ["trip_id"]; isOneToOne: false; referencedRelation: "trips"; referencedColumns: ["id"] },
+          { foreignKeyName: "trip_hints_booking_id_fkey"; columns: ["booking_id"]; isOneToOne: false; referencedRelation: "bookings"; referencedColumns: ["id"] },
+          { foreignKeyName: "trip_hints_document_id_fkey"; columns: ["document_id"]; isOneToOne: false; referencedRelation: "documents"; referencedColumns: ["id"] },
+          { foreignKeyName: "trip_hints_journey_event_id_fkey"; columns: ["journey_event_id"]; isOneToOne: false; referencedRelation: "journey_events"; referencedColumns: ["id"] }
+        ]
+      }
+      trip_debriefs: {
+        Row: {
+          id: string; family_id: string; trip_id: string; status: string
+          current_step: string | null; answers: Json
+          created_at: string; updated_at: string
+        }
+        Insert: {
+          id?: string; family_id: string; trip_id: string; status?: string
+          current_step?: string | null; answers?: Json
+          created_at?: string; updated_at?: string
+        }
+        Update: {
+          id?: string; family_id?: string; trip_id?: string; status?: string
+          current_step?: string | null; answers?: Json
+          created_at?: string; updated_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "trip_debriefs_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] },
+          { foreignKeyName: "trip_debriefs_trip_id_fkey"; columns: ["trip_id"]; isOneToOne: false; referencedRelation: "trips"; referencedColumns: ["id"] }
+        ]
+      }
     }
     Views: { [_ in never]: never }
     Functions: { [_ in never]: never }
