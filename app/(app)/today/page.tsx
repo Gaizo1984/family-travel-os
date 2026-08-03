@@ -31,6 +31,10 @@ import { computeTripRequirements } from "@/lib/travel-requirements";
 import type { TravelRequirement } from "@/lib/travel-requirements";
 import { computeTripReadiness } from "@/lib/readiness";
 import type { ReadinessFinding } from "@/lib/readiness";
+import { loadTopTripHints, TRIP_HINT_PRIORITY_LABELS } from "@/lib/trip-hints";
+import type { TripHint } from "@/lib/trip-hints";
+import { dismissTripHint, completeTripHint } from "@/lib/actions/trip-hints";
+import { loadActiveDebriefsForFamily } from "@/lib/trip-debriefs";
 import { askConcierge, refreshConciergeMessage, commitConciergeAction, deleteConciergeMessage, deleteAllConciergeMessages } from "@/lib/actions/concierge-actions";
 import { listFamilyMemories } from "@/lib/family-memories";
 import type { FamilyMemory } from "@/lib/family-memories";
@@ -180,6 +184,64 @@ function PersonalisierteHinweiseSection({ findings, tripSlug }: { findings: Read
         >
           Alle Punkte ansehen <ChevronRight size={12} strokeWidth={1.6} />
         </Link>
+      </Card>
+    </section>
+  );
+}
+
+const HINT_PRIORITY_COLORS: Record<TripHint["priority"], string> = {
+  critical: "#B5624A",
+  upcoming: "var(--accent)",
+  recommendation: "var(--muted)",
+};
+
+/**
+ * §"Proaktiver Reiseassistent" (Nutzervorgabe): reiner Lesepfad auf bereits
+ * vom Cron generierte, priorisierte Hinweise (lib/hint-generation.ts) --
+ * maximal 3, gruppiert nach Priorität (Heute wichtig/Demnächst/Empfehlung).
+ * "Zur Buchung"/"Im Tagesplan anzeigen" ist die vom Hinweis selbst
+ * mitgelieferte action_href, "Als erledigt markieren"/"Ausblenden" sind
+ * reine Status-Übergänge (lib/actions/trip-hints.ts).
+ */
+function ProaktiverReiseassistentSection({ hints }: { hints: TripHint[] }) {
+  if (hints.length === 0) return null;
+  return (
+    <section className="mb-8">
+      <SectionLabel>LUMI hat das für euch bemerkt</SectionLabel>
+      <Card>
+        <div className="space-y-4">
+          {hints.map((hint) => (
+            <div key={hint.id} style={{ borderBottom: "1px solid var(--border)", paddingBottom: "14px" }} className="last:border-0 last:pb-0">
+              <div
+                className="mb-1"
+                style={{ color: HINT_PRIORITY_COLORS[hint.priority], fontSize: "0.6rem", letterSpacing: "0.14em", textTransform: "uppercase" }}
+              >
+                {TRIP_HINT_PRIORITY_LABELS[hint.priority]}
+              </div>
+              <div style={{ color: "var(--foreground)", fontSize: "0.85rem", marginBottom: "3px" }}>{hint.title}</div>
+              <p style={{ color: "var(--muted)", fontSize: "0.76rem", lineHeight: 1.5 }}>{hint.reasoning}</p>
+              <div className="flex items-center gap-4 flex-wrap mt-2.5">
+                <Link href={hint.actionHref} style={{ color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.04em", textDecoration: "none" }}>
+                  {hint.actionLabel}
+                </Link>
+                <form action={completeTripHint}>
+                  <input type="hidden" name="hint_id" value={hint.id} />
+                  <input type="hidden" name="return_to" value="/today" />
+                  <button type="submit" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "var(--muted)", fontSize: "0.68rem", letterSpacing: "0.04em" }}>
+                    Als erledigt markieren
+                  </button>
+                </form>
+                <form action={dismissTripHint}>
+                  <input type="hidden" name="hint_id" value={hint.id} />
+                  <input type="hidden" name="return_to" value="/today" />
+                  <button type="submit" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "var(--muted)", fontSize: "0.68rem", letterSpacing: "0.04em" }}>
+                    Ausblenden
+                  </button>
+                </form>
+              </div>
+            </div>
+          ))}
+        </div>
       </Card>
     </section>
   );
@@ -399,7 +461,7 @@ export default async function TodayPage({
   let tomorrowIso = addDaysIso(todayIso, 1);
   let nowHHMM = nowHHMMInFamilyTimezone();
 
-  const [{ data: trips }, onThisDayMemories, dna, { data: pastTripsForAvoid }] = await Promise.all([
+  const [{ data: trips }, onThisDayMemories, dna, { data: pastTripsForAvoid }, tripHints, activeDebriefs] = await Promise.all([
     supabase
       .from("trips")
       .select(`
@@ -413,6 +475,8 @@ export default async function TodayPage({
     findOnThisDayMemories(familyId, todayIso),
     buildFamilyDnaSummary(familyId),
     supabase.from("past_trips").select("country_or_region").eq("family_id", familyId),
+    loadTopTripHints(supabase, familyId),
+    loadActiveDebriefsForFamily(supabase, familyId),
   ]);
 
   // §"Egress-Analyse 2026-07-16": 120×120-Kachel -- Thumbnail statt Original, gecachte Signed URL statt Neusignierung bei jedem Dashboard-Aufruf.
@@ -465,6 +529,26 @@ export default async function TodayPage({
     </Link>
   );
 
+  // §"Nachreise-Dialog" (Nutzervorgabe): kompakter Einstieg, sobald ein
+  // Trigger-Cron (lib/trip-debrief-generation.ts) einen aktiven Dialog
+  // angelegt hat -- familienweit, nicht auf die aktuell laufende Reise
+  // beschränkt (der betroffene Trip ist per Definition bereits beendet).
+  const firstActiveDebrief = activeDebriefs[0];
+  const debriefTrip = firstActiveDebrief ? allTrips.find((t) => t.id === firstActiveDebrief.tripId) : null;
+  const debriefBanner = debriefTrip && (
+    <Link
+      href={`/trips/${debriefTrip.slug}/debrief`}
+      className="flex items-center gap-3 px-5 md:px-8 py-3"
+      style={{ background: "var(--surface)", borderBottom: "1px solid var(--border)", textDecoration: "none" }}
+    >
+      <Heart size={15} strokeWidth={1.6} style={{ flexShrink: 0, color: "var(--accent)" }} />
+      <span className="flex-1 min-w-0 truncate" style={{ color: "var(--foreground)", fontSize: "0.8rem", letterSpacing: "0.02em" }}>
+        Wie war "{debriefTrip.title}"? Kurzer Rückblick wartet
+      </span>
+      <ChevronRight size={14} strokeWidth={1.6} style={{ flexShrink: 0, color: "var(--muted)" }} />
+    </Link>
+  );
+
   // ── Kein aktiver Reisetag, aber eine bevorstehende Reise: Wetter zuerst ──
   if (!activeTrip && nextTrip) {
     const nextContext = await resolveTripAiContext(nextTrip, false, todayIso);
@@ -477,6 +561,7 @@ export default async function TodayPage({
     return (
       <div className="flex-1 flex flex-col" style={{ background: "var(--background)" }}>
         {flightBanner}
+        {debriefBanner}
 
         {/* ── Hero: Wetter/Ort zuerst, ganz oben ── */}
         <div className="relative" style={{ height: "320px", flexShrink: 0 }}>
@@ -528,6 +613,8 @@ export default async function TodayPage({
             </section>
           )}
 
+          <ProaktiverReiseassistentSection hints={tripHints} />
+
           <Link
             href={`/trips/${nextTrip.slug}`}
             className="flex items-center gap-3 p-4 rounded-xl mb-8"
@@ -569,6 +656,7 @@ export default async function TodayPage({
     return (
       <div className="flex-1 flex flex-col" style={{ background: "var(--background)" }}>
         {flightBanner}
+        {debriefBanner}
         <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-9 w-full">
           {error && <Banner variant="error">{error}</Banner>}
           <div style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "12px" }}>
@@ -743,6 +831,7 @@ export default async function TodayPage({
   return (
     <div className="flex-1 flex flex-col" style={{ background: "var(--background)" }}>
       {flightBanner}
+      {debriefBanner}
 
       {/* ── Hero: Wetter/Ort zuerst, ganz oben ── */}
       <div className="relative" style={{ height: "420px", flexShrink: 0 }}>
@@ -810,6 +899,7 @@ export default async function TodayPage({
         </section>
 
         <PersonalisierteHinweiseSection findings={readiness.findings} tripSlug={activeTrip.slug} />
+        <ProaktiverReiseassistentSection hints={tripHints} />
 
         {/* ── Timeline: Reservierungen/Tagesprogramm ── */}
         <section className="mb-8">
