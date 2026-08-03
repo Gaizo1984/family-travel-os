@@ -99,11 +99,9 @@ export default async function FamilyHistoryPage({
                     <div style={{ color: "var(--muted)", fontSize: "0.7rem" }}>{entry.subtitle}</div>
                   </div>
                 </div>
-                {entry.editHref && (
-                  <Link href={entry.editHref} style={{ color: "var(--muted)", fontSize: "0.68rem", textDecoration: "none" }}>
-                    Bearbeiten
-                  </Link>
-                )}
+                <Link href={entry.viewHref} style={{ color: "var(--muted)", fontSize: "0.68rem", textDecoration: "none" }}>
+                  {entry.kind === "trip" ? "Reise ansehen" : "Details ansehen"}
+                </Link>
               </div>
             ))}
           </div>

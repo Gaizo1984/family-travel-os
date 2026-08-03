@@ -191,15 +191,9 @@ export default async function FamilyWorldPage({
                       </div>
                     </div>
                   </div>
-                  {entry.tripHref ? (
-                    <Link href={entry.tripHref} style={{ color: "var(--muted)", fontSize: "0.68rem", textDecoration: "none", flexShrink: 0 }}>
-                      Reise ansehen
-                    </Link>
-                  ) : (
-                    <Link href={entry.editHref ?? historyHref} style={{ color: "var(--muted)", fontSize: "0.68rem", textDecoration: "none", flexShrink: 0 }}>
-                      Details ergänzen
-                    </Link>
-                  )}
+                  <Link href={entry.viewHref} style={{ color: "var(--muted)", fontSize: "0.68rem", textDecoration: "none", flexShrink: 0 }}>
+                    {entry.kind === "trip" ? "Reise ansehen" : "Details ansehen"}
+                  </Link>
                 </div>
               ))}
             </div>
