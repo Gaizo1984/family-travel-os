@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/cleanup-caches",
       "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/cron/generate-trip-hints",
+      "schedule": "0 * * * *"
     }
   ]
 }

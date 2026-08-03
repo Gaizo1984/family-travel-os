@@ -31,6 +31,9 @@ import { computeTripRequirements } from "@/lib/travel-requirements";
 import type { TravelRequirement } from "@/lib/travel-requirements";
 import { computeTripReadiness } from "@/lib/readiness";
 import type { ReadinessFinding } from "@/lib/readiness";
+import { loadTopTripHints, TRIP_HINT_PRIORITY_LABELS } from "@/lib/trip-hints";
+import type { TripHint } from "@/lib/trip-hints";
+import { dismissTripHint, completeTripHint } from "@/lib/actions/trip-hints";
 import { askConcierge, refreshConciergeMessage, commitConciergeAction, deleteConciergeMessage, deleteAllConciergeMessages } from "@/lib/actions/concierge-actions";
 import { listFamilyMemories } from "@/lib/family-memories";
 import type { FamilyMemory } from "@/lib/family-memories";
@@ -180,6 +183,64 @@ function PersonalisierteHinweiseSection({ findings, tripSlug }: { findings: Read
         >
           Alle Punkte ansehen <ChevronRight size={12} strokeWidth={1.6} />
         </Link>
+      </Card>
+    </section>
+  );
+}
+
+const HINT_PRIORITY_COLORS: Record<TripHint["priority"], string> = {
+  critical: "#B5624A",
+  upcoming: "var(--accent)",
+  recommendation: "var(--muted)",
+};
+
+/**
+ * §"Proaktiver Reiseassistent" (Nutzervorgabe): reiner Lesepfad auf bereits
+ * vom Cron generierte, priorisierte Hinweise (lib/hint-generation.ts) --
+ * maximal 3, gruppiert nach Priorität (Heute wichtig/Demnächst/Empfehlung).
+ * "Zur Buchung"/"Im Tagesplan anzeigen" ist die vom Hinweis selbst
+ * mitgelieferte action_href, "Als erledigt markieren"/"Ausblenden" sind
+ * reine Status-Übergänge (lib/actions/trip-hints.ts).
+ */
+function ProaktiverReiseassistentSection({ hints }: { hints: TripHint[] }) {
+  if (hints.length === 0) return null;
+  return (
+    <section className="mb-8">
+      <SectionLabel>LUMI hat das für euch bemerkt</SectionLabel>
+      <Card>
+        <div className="space-y-4">
+          {hints.map((hint) => (
+            <div key={hint.id} style={{ borderBottom: "1px solid var(--border)", paddingBottom: "14px" }} className="last:border-0 last:pb-0">
+              <div
+                className="mb-1"
+                style={{ color: HINT_PRIORITY_COLORS[hint.priority], fontSize: "0.6rem", letterSpacing: "0.14em", textTransform: "uppercase" }}
+              >
+                {TRIP_HINT_PRIORITY_LABELS[hint.priority]}
+              </div>
+              <div style={{ color: "var(--foreground)", fontSize: "0.85rem", marginBottom: "3px" }}>{hint.title}</div>
+              <p style={{ color: "var(--muted)", fontSize: "0.76rem", lineHeight: 1.5 }}>{hint.reasoning}</p>
+              <div className="flex items-center gap-4 flex-wrap mt-2.5">
+                <Link href={hint.actionHref} style={{ color: "var(--accent)", fontSize: "0.68rem", letterSpacing: "0.04em", textDecoration: "none" }}>
+                  {hint.actionLabel}
+                </Link>
+                <form action={completeTripHint}>
+                  <input type="hidden" name="hint_id" value={hint.id} />
+                  <input type="hidden" name="return_to" value="/today" />
+                  <button type="submit" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "var(--muted)", fontSize: "0.68rem", letterSpacing: "0.04em" }}>
+                    Als erledigt markieren
+                  </button>
+                </form>
+                <form action={dismissTripHint}>
+                  <input type="hidden" name="hint_id" value={hint.id} />
+                  <input type="hidden" name="return_to" value="/today" />
+                  <button type="submit" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "var(--muted)", fontSize: "0.68rem", letterSpacing: "0.04em" }}>
+                    Ausblenden
+                  </button>
+                </form>
+              </div>
+            </div>
+          ))}
+        </div>
       </Card>
     </section>
   );
@@ -399,7 +460,7 @@ export default async function TodayPage({
   let tomorrowIso = addDaysIso(todayIso, 1);
   let nowHHMM = nowHHMMInFamilyTimezone();
 
-  const [{ data: trips }, onThisDayMemories, dna, { data: pastTripsForAvoid }] = await Promise.all([
+  const [{ data: trips }, onThisDayMemories, dna, { data: pastTripsForAvoid }, tripHints] = await Promise.all([
     supabase
       .from("trips")
       .select(`
@@ -413,6 +474,7 @@ export default async function TodayPage({
     findOnThisDayMemories(familyId, todayIso),
     buildFamilyDnaSummary(familyId),
     supabase.from("past_trips").select("country_or_region").eq("family_id", familyId),
+    loadTopTripHints(supabase, familyId),
   ]);
 
   // §"Egress-Analyse 2026-07-16": 120×120-Kachel -- Thumbnail statt Original, gecachte Signed URL statt Neusignierung bei jedem Dashboard-Aufruf.
@@ -527,6 +589,8 @@ export default async function TodayPage({
               </Card>
             </section>
           )}
+
+          <ProaktiverReiseassistentSection hints={tripHints} />
 
           <Link
             href={`/trips/${nextTrip.slug}`}
@@ -810,6 +874,7 @@ export default async function TodayPage({
         </section>
 
         <PersonalisierteHinweiseSection findings={readiness.findings} tripSlug={activeTrip.slug} />
+        <ProaktiverReiseassistentSection hints={tripHints} />
 
         {/* ── Timeline: Reservierungen/Tagesprogramm ── */}
         <section className="mb-8">

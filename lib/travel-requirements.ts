@@ -128,8 +128,8 @@ export function resolveWaypointCountry(text: string | null | undefined): 'US' | 
  * können), alle Personendokumente der Mitreisenden (nicht nur Einreise-
  * dokumente — auch für z. B. die Reisepass-Regel wiederverwendbar).
  */
-async function buildRequirementContext(tripId: string, returnTo?: string): Promise<RequirementContext | null> {
-  const supabase = await createClient()
+async function buildRequirementContext(tripId: string, returnTo?: string, supabaseOverride?: SupabaseClient): Promise<RequirementContext | null> {
+  const supabase = supabaseOverride ?? await createClient()
   const { data: trip } = await supabase.from('trips').select('slug, end_date').eq('id', tripId).maybeSingle()
   if (!trip?.end_date) return null
 
@@ -283,9 +283,16 @@ const REGISTERED_RULES: RequirementRule[] = [passportRule, estaRule, etaRule]
  *
  * `returnTo` steuert, wohin ein "Dokument hinzufügen"-Flow nach dem
  * Speichern zurückführt (Default: die Reisedokumente-Übersicht selbst).
+ *
+ * `supabaseOverride` erlaubt den Aufruf aus einem sitzungslosen Kontext
+ * (z. B. dem Hinweis-Generierungs-Cron, lib/hints/rules/document-expiring.ts)
+ * mit einem Service-Role-Client -- ohne diesen Parameter würde der
+ * cookie-basierte Default-Client (lib/supabase/server.ts) dort mangels
+ * Nutzer-Session jede Abfrage still auf 0 Zeilen filtern (siehe Kommentar in
+ * lib/supabase/service-role.ts).
  */
-export async function computeTripRequirements(tripId: string, returnTo?: string): Promise<TravelRequirement[]> {
-  const ctx = await buildRequirementContext(tripId, returnTo)
+export async function computeTripRequirements(tripId: string, returnTo?: string, supabaseOverride?: SupabaseClient): Promise<TravelRequirement[]> {
+  const ctx = await buildRequirementContext(tripId, returnTo, supabaseOverride)
   if (!ctx) return []
 
   const results = await Promise.all(REGISTERED_RULES.map((rule) => rule.evaluate(ctx)))
