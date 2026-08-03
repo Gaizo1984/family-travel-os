@@ -163,18 +163,30 @@ function PlannedCard({ trip, img }: { trip: TripRow; img: ResolvedTripImage | nu
 
         <div className="mb-4" style={{ height: "1px", background: H_BORDER }} />
 
-        <div className="flex items-end justify-between gap-3" style={{ flexWrap: "nowrap" }}>
-          <div className="flex gap-4 min-w-0" style={{ overflow: "hidden" }}>
+        {/*
+          §Bugfix "Datum bei kommenden Reisen wegen 'Tage bis zum Abflug'
+          abgeschnitten" (Nutzer-Feedback): dieselbe Ursache wie in
+          app/(app)/page.tsx (HeroTrip) -- ohne shrink-0 durften die drei
+          Stat-Blöcke (u. a. "Abflug"/Datum) per Flexbox-Default unter ihre
+          Inhaltsbreite schrumpfen, der lange Countdown-Text bei
+          bevorstehenden Reisen ("Tage bis zur Abreise") drängte sie dorthin,
+          und ohne textOverflow wurde hart statt mit "…" abgeschnitten.
+          flexWrap: "wrap" auf beiden Ebenen lässt bei zu wenig Platz
+          umbrechen statt zu quetschen; shrink-0 + ellipsis bleiben als
+          zusätzliche Absicherung.
+        */}
+        <div className="flex items-end justify-between gap-3" style={{ flexWrap: "wrap", rowGap: "12px" }}>
+          <div className="flex gap-4 min-w-0" style={{ overflow: "hidden", flexWrap: "wrap", rowGap: "8px" }}>
             {[
               { label: "Abflug",   value: range.startDate ? formatDateDE(range.startDate) : TRIP_DATE_RANGE_OPEN_LABEL },
               { label: "Dauer",    value: duration ? `${duration} Tage` : "—" },
               { label: "Etappen",  value: stageCount > 0 ? String(stageCount) : "—" },
             ].map(({ label, value }) => (
-              <div key={label} style={{ whiteSpace: "nowrap" }}>
+              <div key={label} className="shrink-0" style={{ whiteSpace: "nowrap", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis" }}>
                 <div style={{ color: H_MUTED, fontSize: "0.58rem", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "4px" }}>
                   {label}
                 </div>
-                <div className="text-sm font-light" style={{ color: H_FG, fontSize: "0.82rem" }}>{value}</div>
+                <div className="text-sm font-light" style={{ color: H_FG, fontSize: "0.82rem", overflow: "hidden", textOverflow: "ellipsis" }}>{value}</div>
               </div>
             ))}
           </div>
