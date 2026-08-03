@@ -108,10 +108,22 @@ function HeroTrip({
       </div>
 
       <div className="absolute inset-x-0 bottom-0 px-4 pb-4 md:px-6 md:pb-6">
-        <div className="flex items-center justify-between gap-1.5" style={{ flexWrap: "nowrap" }}>
+        {/*
+          §Bugfix "Datum bei kommenden Reisen wegen 'Tage bis zum Abflug'
+          abgeschnitten" (Nutzer-Feedback): der lange Countdown-Text bei
+          bevorstehenden Reisen (lib/trip-status.ts::tripCountdownDisplay,
+          "Tage bis zur Abreise" -- deutlich länger als "Reisetag"/
+          "Abgeschlossen") drängte das Datum in seiner flex-1-Box unter dessen
+          Inhaltsbreite, die dann mangels textOverflow hart (ohne "…")
+          abgeschnitten wurde. flexWrap: "wrap" lässt die Countdown-Gruppe bei
+          zu wenig Platz in eine eigene Zeile umbrechen, statt das Datum zu
+          quetschen; textOverflow: "ellipsis" bleibt als Sicherheitsnetz für
+          den verbleibenden Fall (extrem schmales Gerät).
+        */}
+        <div className="flex items-center justify-between gap-1.5" style={{ flexWrap: "wrap", rowGap: "6px" }}>
           <div
             className="min-w-0 flex-1"
-            style={{ color: "#D8CFC0", letterSpacing: "0.01em", fontSize: "0.6rem", whiteSpace: "nowrap", overflow: "hidden" }}
+            style={{ color: "#D8CFC0", letterSpacing: "0.01em", fontSize: "0.6rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
           >
             {range.startDate ? formatDateDE(range.startDate) : TRIP_DATE_RANGE_OPEN_LABEL}
             {" · "}
