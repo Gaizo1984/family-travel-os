@@ -26,12 +26,14 @@ type LegacyPastTripPhoto = { id: string; country_or_region: string; places: stri
  * hier bewusst eine schlanke, nicht-interaktive Kachel statt PhotoCard,
  * damit vergangene Reisen in der Galerie sichtbar sind, ohne Funktionen
  * vorzutäuschen (Highlight/Löschen/Titelbild), die es für sie nicht gibt.
+ * §Bugfix "Reisegeschichte ist fehlgeleitet": führt jetzt auf die eigene
+ * Detailansicht statt direkt auf die Bearbeiten-Seite.
  */
 function LegacyPastTripTile({ entry, url }: { entry: LegacyPastTripPhoto; url: string | null }) {
   if (!url) return null;
   return (
     <Link
-      href={`/family/history/${entry.id}/edit`}
+      href={`/family/history/${entry.id}`}
       className="relative block rounded-lg overflow-hidden mb-4 break-inside-avoid"
       style={{ aspectRatio: "1/1" }}
     >

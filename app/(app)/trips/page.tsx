@@ -331,16 +331,17 @@ type LegacyPastTripRow = {
  * §Punkt 6 "Reisehistorie-Konsistenz": manuell erfasste vergangene Reisen
  * (past_trips) müssen hier genauso auftauchen wie in Unsere Welt/Timeline
  * (lib/travel-world.ts, family/history/page.tsx) -- gleiche Kartenoptik wie
- * PastCard, aber auf die schlankere past_trips-Datenform zugeschnitten
- * (kein Slug/keine Etappen, Link führt auf die Bearbeiten-Seite statt auf
- * eine Reisedetailseite, die für diese Einträge nicht existiert).
+ * PastCard, aber auf die schlankere past_trips-Datenform zugeschnitten (kein
+ * Slug/keine Etappen). §Bugfix "Reisegeschichte ist fehlgeleitet": führt
+ * jetzt auf die eigene Detailansicht (app/(app)/family/history/[pastTripId]/page.tsx)
+ * statt direkt auf die Bearbeiten-Seite.
  */
 function LegacyPastCard({ entry, url, resolvedPath, members }: { entry: LegacyPastTripRow; url: string | null; resolvedPath: string | null; members: PersonRow[] }) {
   const subtitle = [entry.places, entry.duration_days ? `${entry.duration_days} Tage` : null].filter(Boolean).join(" · ") || `${entry.year}`;
 
   return (
     <Link
-      href={`/family/history/${entry.id}/edit`}
+      href={`/family/history/${entry.id}`}
       className="group relative block overflow-hidden rounded-xl"
       style={{ height: "320px" }}
     >

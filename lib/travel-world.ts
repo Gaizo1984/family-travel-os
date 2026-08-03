@@ -13,6 +13,15 @@ export type TravelWorldTimelineEntry = {
   isCurrent: boolean
   editHref: string | null
   tripHref: string | null
+  /**
+   * §Bugfix "Reisegeschichte ist fehlgeleitet" (Nutzer-Feedback): jeder
+   * Timeline-Eintrag bekommt jetzt EINEN Lesezugriffspunkt -- für `trip`
+   * dieselbe Reisedetailseite wie `tripHref`, für `past_trip` die neue
+   * Detailansicht `/family/history/{id}` (vorher gab es dafür keine Seite,
+   * jeder Link führte direkt auf die Bearbeiten-Seite). `editHref`/`tripHref`
+   * bleiben unverändert für Konsumenten, die gezielt danach unterscheiden.
+   */
+  viewHref: string
 }
 
 export type TravelWorld = {
@@ -134,6 +143,7 @@ function computeTravelWorld(raw: TravelWorldRawData, options: { personId?: strin
         isCurrent: isTripCurrentlyRunning(tripStatusInput(t)),
         editHref: null,
         tripHref: `/trips/${t.slug}`,
+        viewHref: `/trips/${t.slug}`,
       }
     }),
     ...pastTrips.map((p) => ({
@@ -147,6 +157,7 @@ function computeTravelWorld(raw: TravelWorldRawData, options: { personId?: strin
       isCurrent: false,
       editHref: `/family/history/${p.id}/edit`,
       tripHref: null,
+      viewHref: `/family/history/${p.id}`,
     })),
   ].sort((a, b) => (a.year ?? 0) - (b.year ?? 0))
 
