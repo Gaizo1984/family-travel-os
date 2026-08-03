@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/generate-trip-hints",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/trigger-trip-debriefs",
+      "schedule": "0 5 * * *"
     }
   ]
 }
