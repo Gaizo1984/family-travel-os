@@ -6,9 +6,12 @@ export const maxDuration = 60
 /**
  * §"Proaktiver Reiseassistent" (Nutzervorgabe): gleiches Schutzmuster wie
  * cleanup-caches/cleanup-content-sessions (CRON_SECRET-Bearer, keine
- * Öffnung ohne gesetztes Secret). Läuft öfter als die bestehenden
- * Täglich-Crons (siehe vercel.json), da ein "Check-in öffnet in 2h"-Hinweis
- * sonst bis zu einen Zyklus lang veraltet sein könnte.
+ * Öffnung ohne gesetztes Secret). Läuft täglich (siehe vercel.json) --
+ * ursprünglich stündlich geplant, damit ein "Check-in öffnet in 2h"-Hinweis
+ * nicht bis zu einen Zyklus lang veraltet ist, aber der Vercel-Hobby-Plan
+ * erlaubt keine häufigeren Cron-Läufe. Ein zeitkritischer Hinweis kann
+ * dadurch bis zu 24h alt sein, bevor er erscheint -- bekannte Einschränkung,
+ * kein Bug. Bei einem Plan-Upgrade genügt eine Änderung des Schedule-Strings.
  */
 export async function GET(request: NextRequest) {
   const expectedSecret = process.env.CRON_SECRET
