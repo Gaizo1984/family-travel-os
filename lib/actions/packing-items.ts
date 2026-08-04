@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import type { PackingStatus, LuggageAssignment } from '@/lib/packing-list'
 import { PACKING_STATUS_ORDER, LUGGAGE_ASSIGNMENT_ORDER } from '@/lib/packing-list'
@@ -84,4 +85,16 @@ export async function deletePackingItem(formData: FormData) {
   await supabase.from('packing_items').delete().eq('id', itemId)
 
   revalidatePath(packingPath(slug))
+}
+
+/** §"Löschbutton für die Packliste" (Nutzervorgabe): löscht ALLE Gegenstände (manuell UND KI-generierte) dieser Reise plus einen ggf. offenen Aktualisierungs-Entwurf -- eigene Bestätigungsseite (app/(app)/trips/[id]/packing/delete/page.tsx), gleiches Muster wie das endgültige Löschen einer Reise (app/(app)/trips/[id]/delete/page.tsx). */
+export async function deletePackingList(formData: FormData) {
+  const tripId = String(formData.get('trip_id') ?? '')
+  const slug = String(formData.get('slug') ?? '')
+
+  const supabase = await createClient()
+  await supabase.from('packing_items').delete().eq('trip_id', tripId)
+  await supabase.from('packing_list_drafts').delete().eq('trip_id', tripId)
+
+  redirect(packingPath(slug))
 }
