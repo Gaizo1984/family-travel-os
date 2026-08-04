@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
-import { assignMemoryPhotoToTrip } from "@/lib/actions/memories";
+import { assignMemoryPhotoToTrip, assignMemoryPhotoToAnyTrip } from "@/lib/actions/memories";
 import { deriveTripDateRange, type TripDateRange } from "@/lib/trip-dates";
 import { formatDateDE } from "@/lib/demo-data";
 import { Banner } from "@/components/Banner";
@@ -11,6 +11,8 @@ import { getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
 
 type PhotoRow = { id: string; storage_path: string; caption: string | null; taken_at: string | null; created_at: string };
 type TripCandidate = { id: string; title: string; range: TripDateRange };
+type PastTripCandidate = { id: string; label: string; year: number };
+type Suggestion = { kind: "trip"; trip: TripCandidate; reason: string } | { kind: "past_trip"; pastTrip: PastTripCandidate; reason: string };
 
 function daysBetween(a: string, b: string): number {
   return Math.round((new Date(b + "T00:00:00Z").getTime() - new Date(a + "T00:00:00Z").getTime()) / 86400000);
@@ -38,6 +40,21 @@ function suggestTrip(takenAt: string | null, trips: TripCandidate[]): { trip: Tr
   return { trip: best.t, reason: `${best.distance} ${best.distance === 1 ? "Tag" : "Tage"} Abstand zum Reisezeitraum` };
 }
 
+/**
+ * §Bugfix "Fotos manuell erfassten Reisen (past_trips) nicht zuordenbar"
+ * (Nutzer-Feedback): past_trips haben kein exaktes Datum, nur `year` -- ein
+ * Vorschlag ist deshalb nur möglich, wenn das Aufnahmejahr zu GENAU einer
+ * past_trip der Familie passt (z. B. bei zwei Reisen desselben Jahres, wie
+ * "Beide aus 2021", bleibt es bewusst bei "keine sichere Zuordnung", siehe
+ * auch der manuelle Zuordnungs-Picker weiter unten für diese Fälle).
+ */
+function suggestPastTrip(takenAt: string | null, pastTrips: PastTripCandidate[]): { pastTrip: PastTripCandidate; reason: string } | null {
+  if (!takenAt) return null;
+  const year = Number(takenAt.slice(0, 4));
+  const matches = pastTrips.filter((pt) => pt.year === year);
+  return matches.length === 1 ? { pastTrip: matches[0], reason: `Aufnahmejahr ${year} passt zu dieser Reise` } : null;
+}
+
 export default async function UnassignedMemoriesPage({
   searchParams,
 }: {
@@ -48,12 +65,13 @@ export default async function UnassignedMemoriesPage({
   const { id: familyId } = await getFamily();
   const returnTo = "/memories/unzugeordnet";
 
-  const [{ data: photosRaw }, { data: tripsRaw }] = await Promise.all([
+  const [{ data: photosRaw }, { data: tripsRaw }, { data: pastTripsRaw }] = await Promise.all([
     supabase
       .from("memory_photos")
       .select("id, storage_path, caption, taken_at, created_at")
       .eq("family_id", familyId)
       .is("trip_id", null)
+      .is("past_trip_id", null)
       .order("taken_at", { ascending: false, nullsFirst: false }),
     supabase
       .from("trips")
@@ -63,18 +81,27 @@ export default async function UnassignedMemoriesPage({
         bookings ( type, status, start_datetime, end_datetime )
       `)
       .eq("family_id", familyId),
+    supabase.from("past_trips").select("id, country_or_region, year").eq("family_id", familyId),
   ]);
 
   const photos = (photosRaw ?? []) as PhotoRow[];
   const trips: TripCandidate[] = (tripsRaw ?? []).map((t) => ({
     id: t.id, title: t.title, range: deriveTripDateRange(t, t.bookings, t.stages),
   }));
+  const pastTrips: PastTripCandidate[] = (pastTripsRaw ?? []).map((pt) => ({
+    id: pt.id, label: `${pt.country_or_region} ${pt.year}`, year: pt.year,
+  }));
 
   // §"Egress-Analyse 2026-07-16": 72×72-Kachel -- Thumbnail statt Original.
   const displayByPath = await getPhotoDisplayUrls("documents", photos.map((p) => p.storage_path), "thumb400");
   const photosWithUrls = photos.map((p) => {
     const resolved = displayByPath.get(p.storage_path);
-    return { photo: p, url: resolved?.url ?? null, resolvedPath: resolved?.resolvedPath ?? p.storage_path, suggestion: suggestTrip(p.taken_at, trips) };
+    const tripSuggestion = suggestTrip(p.taken_at, trips);
+    const pastTripSuggestion = !tripSuggestion ? suggestPastTrip(p.taken_at, pastTrips) : null;
+    const suggestion: Suggestion | null = tripSuggestion
+      ? { kind: "trip", ...tripSuggestion }
+      : pastTripSuggestion ? { kind: "past_trip", ...pastTripSuggestion } : null;
+    return { photo: p, url: resolved?.url ?? null, resolvedPath: resolved?.resolvedPath ?? p.storage_path, suggestion };
   });
 
   return (
@@ -121,7 +148,8 @@ export default async function UnassignedMemoriesPage({
                   {photo.caption && <div style={{ color: "var(--muted)", fontSize: "0.7rem" }}>{photo.caption}</div>}
                   {suggestion ? (
                     <div className="mt-1" style={{ color: "var(--accent)", fontSize: "0.7rem" }}>
-                      Vorschlag: {suggestion.trip.title} <span style={{ color: "var(--muted)" }}>({suggestion.reason})</span>
+                      Vorschlag: {suggestion.kind === "trip" ? suggestion.trip.title : suggestion.pastTrip.label}{" "}
+                      <span style={{ color: "var(--muted)" }}>({suggestion.reason})</span>
                     </div>
                   ) : (
                     <div className="mt-1" style={{ color: "var(--muted)", fontSize: "0.7rem", fontStyle: "italic" }}>
@@ -129,23 +157,79 @@ export default async function UnassignedMemoriesPage({
                     </div>
                   )}
                 </div>
-                {suggestion && (
-                  <form action={assignMemoryPhotoToTrip}>
-                    <input type="hidden" name="photo_id" value={photo.id} />
-                    <input type="hidden" name="trip_id" value={suggestion.trip.id} />
-                    <input type="hidden" name="return_to" value={returnTo} />
-                    <button
-                      type="submit"
-                      style={{
-                        background: "transparent", color: "var(--accent)", border: "1px solid rgba(184,154,94,0.4)",
-                        borderRadius: "6px", padding: "9px 16px", fontSize: "0.62rem", letterSpacing: "0.08em",
-                        textTransform: "uppercase", cursor: "pointer", whiteSpace: "nowrap", WebkitAppearance: "none", appearance: "none",
-                      }}
-                    >
-                      Dieser Reise zuordnen
-                    </button>
-                  </form>
-                )}
+                <div className="flex items-center gap-2 flex-wrap shrink-0">
+                  {suggestion && suggestion.kind === "trip" && (
+                    <form action={assignMemoryPhotoToTrip}>
+                      <input type="hidden" name="photo_id" value={photo.id} />
+                      <input type="hidden" name="trip_id" value={suggestion.trip.id} />
+                      <input type="hidden" name="return_to" value={returnTo} />
+                      <button
+                        type="submit"
+                        style={{
+                          background: "transparent", color: "var(--accent)", border: "1px solid rgba(184,154,94,0.4)",
+                          borderRadius: "6px", padding: "9px 16px", fontSize: "0.62rem", letterSpacing: "0.08em",
+                          textTransform: "uppercase", cursor: "pointer", whiteSpace: "nowrap", WebkitAppearance: "none", appearance: "none",
+                        }}
+                      >
+                        Dieser Reise zuordnen
+                      </button>
+                    </form>
+                  )}
+                  {suggestion && suggestion.kind === "past_trip" && (
+                    <form action={assignMemoryPhotoToAnyTrip}>
+                      <input type="hidden" name="photo_id" value={photo.id} />
+                      <input type="hidden" name="target" value={`past_trip:${suggestion.pastTrip.id}`} />
+                      <input type="hidden" name="return_to" value={returnTo} />
+                      <button
+                        type="submit"
+                        style={{
+                          background: "transparent", color: "var(--accent)", border: "1px solid rgba(184,154,94,0.4)",
+                          borderRadius: "6px", padding: "9px 16px", fontSize: "0.62rem", letterSpacing: "0.08em",
+                          textTransform: "uppercase", cursor: "pointer", whiteSpace: "nowrap", WebkitAppearance: "none", appearance: "none",
+                        }}
+                      >
+                        Dieser Reise zuordnen
+                      </button>
+                    </form>
+                  )}
+                  {(trips.length > 0 || pastTrips.length > 0) && (
+                    <form action={assignMemoryPhotoToAnyTrip} className="flex items-center gap-1.5">
+                      <input type="hidden" name="photo_id" value={photo.id} />
+                      <input type="hidden" name="return_to" value={returnTo} />
+                      <select
+                        name="target"
+                        defaultValue=""
+                        required
+                        style={{
+                          background: "var(--background)", color: "var(--foreground)", border: "1px solid var(--border)",
+                          borderRadius: "6px", padding: "8px 10px", fontSize: "0.68rem", maxWidth: "160px",
+                        }}
+                      >
+                        <option value="" disabled>Andere Reise wählen …</option>
+                        {trips.length > 0 && (
+                          <optgroup label="Reisen">
+                            {trips.map((t) => <option key={t.id} value={`trip:${t.id}`}>{t.title}</option>)}
+                          </optgroup>
+                        )}
+                        {pastTrips.length > 0 && (
+                          <optgroup label="Reisegeschichte">
+                            {pastTrips.map((pt) => <option key={pt.id} value={`past_trip:${pt.id}`}>{pt.label}</option>)}
+                          </optgroup>
+                        )}
+                      </select>
+                      <button
+                        type="submit"
+                        style={{
+                          background: "transparent", color: "var(--muted)", border: "1px solid var(--border)",
+                          borderRadius: "6px", padding: "8px 12px", fontSize: "0.62rem", letterSpacing: "0.04em",
+                          cursor: "pointer", whiteSpace: "nowrap", WebkitAppearance: "none", appearance: "none",
+                        }}
+                      >
+                        Zuordnen
+                      </button>
+                    </form>
+                  )}
+                </div>
               </div>
             ))}
           </div>

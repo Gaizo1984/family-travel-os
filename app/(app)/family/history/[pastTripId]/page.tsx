@@ -1,8 +1,26 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, Pencil } from "lucide-react";
+import { ChevronLeft, Pencil, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { getPhotoDisplayUrl } from "@/lib/photo-thumbnails";
+import { getFamily } from "@/lib/family";
+import { getPhotoDisplayUrl, getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
+import { uploadMemoryPhotos, createMemoryUploadSlots, deleteMemoryPhoto } from "@/lib/actions/memories";
+import { DirectPhotoUploadForm } from "@/components/DirectPhotoUploadForm";
+import { MultiPhotoFilePreview } from "@/components/MultiPhotoFilePreview";
+import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
+import { Banner } from "@/components/Banner";
+import { SignedPhoto } from "@/components/SignedPhoto";
+import { PhotoLightbox } from "@/components/PhotoLightbox";
+
+const LABEL_STYLE: React.CSSProperties = {
+  display: "block", color: "var(--muted)", fontSize: "0.55rem",
+  letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px",
+};
+const FIELD_STYLE: React.CSSProperties = {
+  width: "100%", padding: "12px 16px", background: "var(--background)",
+  border: "1px solid var(--border)", borderRadius: "8px", color: "var(--foreground)",
+  fontSize: "0.9rem", fontWeight: 300, outline: "none",
+};
 
 /**
  * §Bugfix "Reisegeschichte ist fehlgeleitet" (Nutzer-Feedback): bisher
@@ -18,15 +36,27 @@ import { getPhotoDisplayUrl } from "@/lib/photo-thumbnails";
  * supabase/migrations/20260711000013_phase7_family_content_ideas.sql). Diese
  * Seite macht das jetzt sichtbar, statt die Erwartung stillschweigend zu
  * enttäuschen.
+ *
+ * §Bugfix "Fotos aus Travel Memory sind hier nicht zuordenbar" (Nutzer-
+ * Feedback): past_trips hatten bisher nur EIN einzelnes Titelbild
+ * (`photo_storage_path`, siehe Bearbeiten-Seite) -- `memory_photos` konnte
+ * strukturell nie auf eine past_trip zeigen. Jetzt zusätzlich eine echte
+ * Mehrfoto-Galerie über `memory_photos.past_trip_id` (Migration
+ * 20260803000003), direkt von hier hoch- oder zuordenbar.
  */
 export default async function PastTripDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ pastTripId: string }>;
+  searchParams: Promise<{ error?: string; uploaded?: string }>;
 }) {
   const { pastTripId } = await params;
+  const { error, uploaded } = await searchParams;
+  const returnTo = `/family/history/${pastTripId}`;
 
   const supabase = await createClient();
+  const { id: familyId } = await getFamily();
   const { data: pastTrip } = await supabase
     .from("past_trips")
     .select("id, family_id, country_or_region, year, places, duration_days, note, photo_storage_path")
@@ -35,13 +65,25 @@ export default async function PastTripDetailPage({
 
   if (!pastTrip) notFound();
 
-  const { data: travelerRows } = await supabase
-    .from("past_trip_travelers")
-    .select("persons ( id, name, initials, color )")
-    .eq("past_trip_id", pastTripId);
+  const [{ data: travelerRows }, { data: galleryPhotosRaw }] = await Promise.all([
+    supabase.from("past_trip_travelers").select("persons ( id, name, initials, color )").eq("past_trip_id", pastTripId),
+    supabase
+      .from("memory_photos")
+      .select("id, storage_path, caption")
+      .eq("past_trip_id", pastTripId)
+      .order("sort_order", { ascending: true })
+      .order("taken_at", { ascending: false, nullsFirst: false }),
+  ]);
   const travelers = (travelerRows ?? [])
     .map((t) => t.persons as unknown as { id: string; name: string; initials: string; color: string } | null)
     .filter((p): p is { id: string; name: string; initials: string; color: string } => Boolean(p));
+
+  const galleryPhotos = galleryPhotosRaw ?? [];
+  const galleryUrlByPath = await getPhotoDisplayUrls("documents", galleryPhotos.map((p) => p.storage_path), "thumb400");
+  const galleryWithUrls = galleryPhotos.map((p) => {
+    const resolved = galleryUrlByPath.get(p.storage_path);
+    return { photo: p, url: resolved?.url ?? null, resolvedPath: resolved?.resolvedPath ?? p.storage_path };
+  });
 
   const photoUrl = pastTrip.photo_storage_path
     ? (await getPhotoDisplayUrl("documents", pastTrip.photo_storage_path, "thumb800"))?.url ?? null
@@ -115,7 +157,8 @@ export default async function PastTripDetailPage({
             >
               <p style={{ color: "var(--muted)", fontSize: "0.72rem", lineHeight: 1.5 }}>
                 Diese Reise wurde vor der Nutzung von LUMI unternommen und manuell erfasst — Flüge, Aktivitäten, Buchungen und Tagesplanung
-                sind für solche Einträge nicht verfügbar. Nur Land/Region, Jahr, Reisende, ein Foto und eine Notiz werden gespeichert.
+                sind für solche Einträge nicht verfügbar. Land/Region, Jahr, Reisende, ein Titelbild, eine Notiz und beliebig viele
+                Erinnerungsfotos werden gespeichert.
               </p>
             </div>
 
@@ -132,6 +175,57 @@ export default async function PastTripDetailPage({
               Bearbeiten
             </Link>
           </div>
+        </div>
+
+        {/* ── Erinnerungsfotos (Travel Memory) ── */}
+        <div className="rounded-xl p-6 md:p-8" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+          <div style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "12px" }}>
+            Erinnerungsfotos
+          </div>
+
+          {uploaded && <Banner variant="success">{uploaded} Foto(s) gespeichert.</Banner>}
+          {error && <Banner variant="error">{error}</Banner>}
+
+          <DirectPhotoUploadForm action={uploadMemoryPhotos} createSlots={createMemoryUploadSlots} fileInputName="files">
+            <input type="hidden" name="family_id" value={familyId} />
+            <input type="hidden" name="past_trip_id" value={pastTrip.id} />
+            <input type="hidden" name="return_to" value={returnTo} />
+            <div className="mb-4">
+              <label htmlFor="pt-caption" style={LABEL_STYLE}>Notiz (optional)</label>
+              <input id="pt-caption" name="caption" type="text" style={FIELD_STYLE} />
+            </div>
+            <div className="mb-4">
+              <label htmlFor="pt-files" style={LABEL_STYLE}>Fotos</label>
+              <MultiPhotoFilePreview inputId="pt-files" inputName="files" fieldStyle={FIELD_STYLE} />
+            </div>
+            <SubmitButtonWithProgress label="Fotos speichern" pendingLabel="Fotos werden gespeichert …" />
+          </DirectPhotoUploadForm>
+
+          {galleryWithUrls.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-6">
+              {galleryWithUrls.map(({ photo, url, resolvedPath }) => {
+                if (!url) return null;
+                return (
+                  <div key={photo.id} className="relative rounded-lg overflow-hidden group" style={{ aspectRatio: "1/1" }}>
+                    <PhotoLightbox url={url} alt={photo.caption ?? ""}>
+                      <SignedPhoto storagePath={resolvedPath} initialUrl={url} alt={photo.caption ?? ""} loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
+                    </PhotoLightbox>
+                    <form
+                      action={deleteMemoryPhoto}
+                      className="absolute top-1 right-1"
+                      style={{ zIndex: 2 }}
+                    >
+                      <input type="hidden" name="photo_id" value={photo.id} />
+                      <input type="hidden" name="return_to" value={returnTo} />
+                      <button type="submit" aria-label="Löschen" style={{ background: "rgba(10,9,7,0.5)", border: "none", borderRadius: "6px", cursor: "pointer", display: "flex", padding: "6px" }}>
+                        <Trash2 size={13} strokeWidth={1.8} style={{ color: "#F0EBE3" }} />
+                      </button>
+                    </form>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>

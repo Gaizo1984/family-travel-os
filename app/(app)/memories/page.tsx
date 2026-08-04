@@ -10,7 +10,7 @@ import { SignedPhoto } from "@/components/SignedPhoto";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
 
 type PhotoRow = {
-  id: string; trip_id: string | null; uploaded_by_person_id: string | null
+  id: string; trip_id: string | null; past_trip_id: string | null; uploaded_by_person_id: string | null
   storage_path: string; taken_at: string | null; caption: string | null
   created_at: string; sort_order: number
   is_selected: boolean; is_duplicate_of: string | null; quality_score: number | null
@@ -134,7 +134,7 @@ export default async function MemoriesPage({
   const [{ data: photoMetaRaw }, { data: personsRaw }, { data: tripsRaw }, { data: pastTripsRaw }] = await Promise.all([
     supabase
       .from("memory_photos")
-      .select("id, trip_id, taken_at, created_at, is_selected")
+      .select("id, trip_id, past_trip_id, taken_at, created_at, is_selected")
       .eq("family_id", familyId),
     supabase.from("persons").select("id, name").eq("family_id", familyId),
     supabase
@@ -145,13 +145,19 @@ export default async function MemoriesPage({
         bookings ( type, status, start_datetime, end_datetime )
       `)
       .eq("family_id", familyId),
-    supabase.from("past_trips").select("id, country_or_region, year, places, photo_storage_path").eq("family_id", familyId).not("photo_storage_path", "is", null),
+    // §Bugfix "Fotos aus Travel Memory sind past_trips nicht zuordenbar":
+    // ALLE past_trips der Familie werden geladen (nicht mehr nur die mit
+    // eigenem photo_storage_path) -- auch eine Reise ohne eigenes Titelbild
+    // kann jetzt über memory_photos.past_trip_id zugeordnete Galeriefotos haben.
+    supabase.from("past_trips").select("id, country_or_region, year, places, photo_storage_path").eq("family_id", familyId),
   ]);
 
   const trips = tripsRaw ?? [];
   const tripById = new Map(trips.map((t) => [t.id, t]));
   const tripRangeById = new Map(trips.map((t) => [t.id, deriveTripDateRange(t, t.bookings, t.stages)]));
   const coverPhotoIds = new Set(trips.flatMap((t) => (t.cover_photo_id ? [t.cover_photo_id] : [])));
+  const pastTrips = pastTripsRaw ?? [];
+  const pastTripById = new Map(pastTrips.map((pt) => [pt.id, pt]));
 
   const allPhotoMeta = photoMetaRaw ?? [];
   const selectedPhotoMeta = allPhotoMeta.filter((p) => p.is_selected);
@@ -159,13 +165,15 @@ export default async function MemoriesPage({
   const persons = personsRaw ?? [];
   const personNameById = new Map(persons.map((p) => [p.id, p.name]));
 
-  function yearOfPhoto(p: { trip_id: string | null; taken_at: string | null; created_at: string }): number {
+  function yearOfPhoto(p: { trip_id: string | null; past_trip_id: string | null; taken_at: string | null; created_at: string }): number {
     const fallbackDate = (p.taken_at ?? p.created_at).slice(0, 10);
     if (p.trip_id) {
       const range = tripRangeById.get(p.trip_id);
       const sortKey = range?.startDate ?? fallbackDate;
       return new Date(sortKey + "T00:00:00Z").getUTCFullYear();
     }
+    // §past_trips haben kein exaktes Datum, nur `year`.
+    if (p.past_trip_id) return pastTripById.get(p.past_trip_id)?.year ?? new Date(fallbackDate).getUTCFullYear();
     return new Date(fallbackDate).getUTCFullYear();
   }
 
@@ -174,7 +182,7 @@ export default async function MemoriesPage({
     const y = yearOfPhoto(p);
     photoCountByYear.set(y, (photoCountByYear.get(y) ?? 0) + 1);
   }
-  const legacyEntries = (pastTripsRaw ?? []).filter((p): p is typeof p & { photo_storage_path: string } => Boolean(p.photo_storage_path));
+  const legacyEntries = pastTrips.filter((p): p is typeof p & { photo_storage_path: string } => Boolean(p.photo_storage_path));
   for (const p of legacyEntries) photoCountByYear.set(p.year, (photoCountByYear.get(p.year) ?? 0) + 1);
 
   const allYears = [...photoCountByYear.keys()].sort((a, b) => b - a);
@@ -185,7 +193,7 @@ export default async function MemoriesPage({
   const { data: photosRaw } = photoIdsInSelectedYear.length > 0
     ? await supabase
       .from("memory_photos")
-      .select("id, trip_id, uploaded_by_person_id, storage_path, taken_at, caption, created_at, sort_order, is_selected, is_duplicate_of, quality_score")
+      .select("id, trip_id, past_trip_id, uploaded_by_person_id, storage_path, taken_at, caption, created_at, sort_order, is_selected, is_duplicate_of, quality_score")
       .in("id", photoIdsInSelectedYear)
       .order("taken_at", { ascending: false, nullsFirst: false })
     : { data: [] };
@@ -217,6 +225,20 @@ export default async function MemoriesPage({
         cuts.set(key, {
           key, year: selectedYear, sortKey,
           label: `${monthYearLabel(sortKey)} · ${trip?.title ?? "Reise"}`,
+          entries: [],
+        });
+      }
+      cuts.get(key)!.entries.push(entry);
+    } else if (p.past_trip_id) {
+      // §Bugfix "Fotos aus Travel Memory sind past_trips nicht zuordenbar":
+      // eigener Cut je manuell erfasster Reise, wie bei `trips` -- nur ohne
+      // Monat (past_trips kennen kein exaktes Datum, nur `year`).
+      const key = `past-trip-${p.past_trip_id}`;
+      if (!cuts.has(key)) {
+        const pastTrip = pastTripById.get(p.past_trip_id);
+        cuts.set(key, {
+          key, year: selectedYear, sortKey: `${pastTrip?.year ?? selectedYear}-01-01`,
+          label: pastTrip ? `${pastTrip.year} · ${pastTrip.country_or_region}` : "Reisegeschichte",
           entries: [],
         });
       }
