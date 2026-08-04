@@ -43,13 +43,17 @@ function Badge({ children }: { children: React.ReactNode }) {
  * try/catch als zweite Absicherungsebene neben der serverseitigen Kapselung.
  */
 export function ImageCheckPanel({
-  projectId, photos, runAnalysis, adoptToSession, adoptToReel,
+  projectId, photos, runAnalysis, adoptToSession, adoptToReel, markForVacationPost, hasTrip, alreadyMarkedPhotoIds,
 }: {
   projectId: string
   photos: Photo[]
   runAnalysis: (projectId: string) => Promise<ImageCheckResult>
   adoptToSession: AdoptAction
   adoptToReel: AdoptAction
+  /** §"Vormerkung muss immer einer konkreten Reise zugeordnet sein" (Nutzervorgabe): Button entfällt ganz, wenn das Bild-Check-Projekt keine trip_id hat. */
+  markForVacationPost?: AdoptAction
+  hasTrip?: boolean
+  alreadyMarkedPhotoIds?: Set<string>
 }) {
   const [results, setResults] = useState<ImageCheckResultItem[] | null>(null)
   const [analyzing, setAnalyzing] = useState(false)
@@ -168,6 +172,22 @@ export function ImageCheckPanel({
                     <input type="hidden" name="project_id" value={projectId} />
                     <button type="submit" style={adoptButtonStyle}>→ Reel</button>
                   </form>
+                  {markForVacationPost && hasTrip && (
+                    alreadyMarkedPhotoIds?.has(r.photoId) ? (
+                      <span style={{ ...adoptButtonStyle, border: '1px solid rgba(76,122,93,0.4)', color: '#4C7A5D', cursor: 'default' }}>
+                        ✓ Für Urlaubsbeitrag vorgemerkt
+                      </span>
+                    ) : (
+                      <form action={markForVacationPost}>
+                        <input type="hidden" name="photo_id" value={r.photoId} />
+                        <input type="hidden" name="project_id" value={projectId} />
+                        <input type="hidden" name="score" value={Math.round(r.socialMediaFit)} />
+                        <input type="hidden" name="reasoning" value={r.reasoning} />
+                        <input type="hidden" name="is_similar_or_weaker" value={String(r.isSimilarOrWeaker)} />
+                        <button type="submit" style={adoptButtonStyle}>★ Für Urlaubsbeitrag vormerken</button>
+                      </form>
+                    )
+                  )}
                 </div>
               </div>
             )

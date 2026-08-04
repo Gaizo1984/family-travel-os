@@ -8,6 +8,11 @@ import { parseStagedPaths } from '@/lib/staged-paths'
 import { compressImageForStorage } from '@/lib/image-compression'
 import { assessImageCheckBatch, compressForAiAnalysis, type ImageCheckAssessment } from '@/lib/photo-quality-analysis'
 import { MAX_IMAGE_CHECK_PHOTOS, MAX_RETAINED_MEMORIES_PER_TRIP } from '@/lib/content-session-limits'
+import { buildTripDigest } from '@/lib/trip-digest'
+import {
+  computeVacationPostExpiresAt, curateVacationPostSelection, MAX_VACATION_POST_PHOTOS,
+  type VacationPostCandidate,
+} from '@/lib/vacation-post-curation'
 
 const TEMP_IMAGE_TTL_HOURS = 24
 
@@ -286,4 +291,214 @@ export async function adoptImageCheckPhotoToReel(formData: FormData) {
   }
 
   redirect('/content-studio/reel/new')
+}
+
+/**
+ * §"Nach der Analyse eines Bildes zusätzlich die Aktion 'Für Urlaubsbeitrag
+ * vormerken' anbieten. Die Vormerkung muss immer einer konkreten Reise
+ * zugeordnet sein" (Nutzervorgabe, wörtlich): schreibt das Bild-Check-
+ * Ergebnis (bisher rein Client-State, siehe runImageCheckAnalysis) erstmals
+ * dauerhaft auf die bestehende Foto-Zeile -- kein neuer Upload, keine neue
+ * Tabelle. Überschreibt zugleich die ursprüngliche 24h-Upload-TTL mit
+ * Reiseende+7 Tage, damit der bestehende Cleanup-Cron
+ * (cleanupExpiredContentSessionPhotos) die Löschung automatisch übernimmt.
+ */
+export async function markImageCheckPhotoForVacationPost(formData: FormData) {
+  const photoId = String(formData.get('photo_id') ?? '')
+  const projectId = String(formData.get('project_id') ?? '')
+  const scoreRaw = Number(formData.get('score') ?? NaN)
+  const reasoning = String(formData.get('reasoning') ?? '').trim()
+  const isSimilarOrWeaker = formData.get('is_similar_or_weaker') === 'true'
+  const returnPath = `/content-studio/bild-check/${projectId}`
+  if (!photoId || !projectId) redirect(returnPath)
+
+  const supabase = await createClient()
+  const { id: familyId } = await getFamily()
+
+  const { data: bildCheckProject } = await supabase
+    .from('content_projects').select('id, trip_id')
+    .eq('id', projectId).eq('family_id', familyId).eq('project_type', 'image_check').maybeSingle()
+  if (!bildCheckProject?.trip_id) redirect(`${returnPath}?error=${encodeURIComponent('Diese Auswahl ist keiner Reise zugeordnet.')}`)
+
+  const { data: photo } = await supabase
+    .from('content_project_photos').select('id').eq('id', photoId).eq('project_id', projectId).maybeSingle()
+  if (!photo) redirect(`${returnPath}?error=${encodeURIComponent('Foto nicht gefunden.')}`)
+
+  const { data: trip } = await supabase.from('trips').select('end_date').eq('id', bildCheckProject.trip_id).maybeSingle()
+
+  const reasoningText = [reasoning || null, isSimilarOrWeaker ? 'Ähnlich zu einem anderen Foto der Auswahl.' : null]
+    .filter(Boolean).join(' ') || null
+
+  const { error } = await supabase.from('content_project_photos').update({
+    vacation_post_marked_at: new Date().toISOString(),
+    vacation_post_score: Number.isFinite(scoreRaw) ? Math.round(scoreRaw) : null,
+    vacation_post_reasoning: reasoningText,
+    temporary: true,
+    expires_at: computeVacationPostExpiresAt(trip?.end_date ?? null),
+  }).eq('id', photoId)
+
+  if (error) redirect(`${returnPath}?error=${encodeURIComponent('Vormerken fehlgeschlagen: ' + error.message)}`)
+
+  redirect(`${returnPath}?marked=1`)
+}
+
+/** Gegenstück zu markImageCheckPhotoForVacationPost -- entfernt die Vormerkung wieder (setzt keinen neuen Ablauf, das bisherige expires_at bleibt bestehen). */
+export async function unmarkImageCheckPhotoForVacationPost(formData: FormData) {
+  const photoId = String(formData.get('photo_id') ?? '')
+  const projectId = String(formData.get('project_id') ?? '')
+  const returnPath = String(formData.get('return_to') ?? `/content-studio/bild-check/${projectId}`)
+  if (!photoId) redirect(returnPath)
+
+  const supabase = await createClient()
+  await supabase.from('content_project_photos').update({
+    vacation_post_marked_at: null, vacation_post_score: null, vacation_post_reasoning: null,
+    vacation_post_rank: null, vacation_post_pinned: false,
+  }).eq('id', photoId)
+
+  redirect(returnPath)
+}
+
+// ─────────────────────────── Urlaubsbeitrag-Verwaltung ───────────────────────────
+// §"Bilder fixieren, entfernen, austauschen, Reihenfolge ändern, Auswahl neu
+// kuratieren lassen, weniger als 15 Bilder verwenden, gesamte temporäre
+// Auswahl löschen" (Nutzervorgabe, wörtlich): siehe
+// app/(app)/content-studio/urlaubsbeitrag/[tripId]/page.tsx.
+
+async function loadImageCheckProjectIdsForTrip(supabase: Awaited<ReturnType<typeof createClient>>, tripId: string): Promise<string[]> {
+  const { data } = await supabase.from('content_projects').select('id').eq('trip_id', tripId).eq('project_type', 'image_check')
+  return (data ?? []).map((p) => p.id)
+}
+
+/** §"Bilder entfernen"/"austauschen"/"weniger als 15 verwenden": EIN Umschalt-Button je Foto -- aus der finalen Auswahl entfernen (rank->null, bleibt weiter im vorgemerkten Pool) oder aus dem Pool in die Auswahl aufnehmen (nächster freier Platz bis MAX_VACATION_POST_PHOTOS). "Austauschen" ergibt sich aus zwei solchen Klicks (eins raus, eins rein). */
+export async function toggleVacationPostSelection(formData: FormData) {
+  const photoId = String(formData.get('photo_id') ?? '')
+  const tripId = String(formData.get('trip_id') ?? '')
+  const returnPath = `/content-studio/urlaubsbeitrag/${tripId}`
+  if (!photoId || !tripId) redirect(returnPath)
+
+  const supabase = await createClient()
+  const { data: photo } = await supabase.from('content_project_photos').select('id, vacation_post_rank').eq('id', photoId).maybeSingle()
+  if (!photo) redirect(returnPath)
+
+  if (photo.vacation_post_rank !== null) {
+    await supabase.from('content_project_photos').update({ vacation_post_rank: null }).eq('id', photoId)
+    redirect(returnPath)
+  }
+
+  const projectIds = await loadImageCheckProjectIdsForTrip(supabase, tripId)
+  const { data: rankedRows } = await supabase
+    .from('content_project_photos').select('vacation_post_rank').in('project_id', projectIds).not('vacation_post_rank', 'is', null)
+  const usedRanks = new Set((rankedRows ?? []).map((r) => r.vacation_post_rank as number))
+  let nextRank = 1
+  while (usedRanks.has(nextRank) && nextRank <= MAX_VACATION_POST_PHOTOS) nextRank++
+  if (nextRank > MAX_VACATION_POST_PHOTOS) redirect(`${returnPath}?error=${encodeURIComponent(`Es sind bereits ${MAX_VACATION_POST_PHOTOS} Bilder ausgewählt -- bitte zuerst eins entfernen.`)}`)
+
+  await supabase.from('content_project_photos').update({ vacation_post_rank: nextRank }).eq('id', photoId)
+  redirect(returnPath)
+}
+
+/** §"Bilder fixieren": geschützt vor Überschreiben durch eine erneute KI-Kuration (siehe mergeCurationWithPinned). */
+export async function toggleVacationPostPinned(formData: FormData) {
+  const photoId = String(formData.get('photo_id') ?? '')
+  const tripId = String(formData.get('trip_id') ?? '')
+  const returnPath = `/content-studio/urlaubsbeitrag/${tripId}`
+  if (!photoId) redirect(returnPath)
+
+  const supabase = await createClient()
+  const { data: photo } = await supabase.from('content_project_photos').select('vacation_post_pinned').eq('id', photoId).maybeSingle()
+  if (!photo) redirect(returnPath)
+
+  await supabase.from('content_project_photos').update({ vacation_post_pinned: !photo.vacation_post_pinned }).eq('id', photoId)
+  redirect(returnPath)
+}
+
+/** §"Reihenfolge... ändern" -- gleiches Auf-/Ab-Muster wie reorderMemoryPhoto/moveContentSessionDraftItem, kein Drag-and-Drop (Nutzer-Entscheidung, kein neues Paket). */
+export async function reorderVacationPostSelection(formData: FormData) {
+  const photoId = String(formData.get('photo_id') ?? '')
+  const tripId = String(formData.get('trip_id') ?? '')
+  const direction = String(formData.get('direction') ?? '')
+  const returnPath = `/content-studio/urlaubsbeitrag/${tripId}`
+  if (!photoId || !tripId) redirect(returnPath)
+
+  const supabase = await createClient()
+  const projectIds = await loadImageCheckProjectIdsForTrip(supabase, tripId)
+  const { data: rowsRaw } = await supabase
+    .from('content_project_photos').select('id, vacation_post_rank')
+    .in('project_id', projectIds).not('vacation_post_rank', 'is', null)
+    .order('vacation_post_rank', { ascending: true })
+  const rows = rowsRaw ?? []
+
+  const index = rows.findIndex((r) => r.id === photoId)
+  const swapWith = direction === 'up' ? index - 1 : index + 1
+  if (index === -1 || swapWith < 0 || swapWith >= rows.length) redirect(returnPath)
+
+  await Promise.all([
+    supabase.from('content_project_photos').update({ vacation_post_rank: rows[swapWith].vacation_post_rank }).eq('id', rows[index].id),
+    supabase.from('content_project_photos').update({ vacation_post_rank: rows[index].vacation_post_rank }).eq('id', rows[swapWith].id),
+  ])
+  redirect(returnPath)
+}
+
+/**
+ * §"Auswahl neu kuratieren lassen": manueller Aufruf derselben
+ * Kurationslogik wie der automatische Reiseende-Trigger
+ * (triggerDueVacationPostCuration, lib/trip-debrief-generation.ts) -- hier
+ * bewusst mit dem cookie-basierten Nutzer-Client statt Service-Role (läuft
+ * interaktiv, nicht im Cron), deshalb eigenständig statt geteilter Funktion
+ * über die beiden unterschiedlichen Client-Typen hinweg.
+ */
+export async function recurateVacationPostSelectionNow(formData: FormData) {
+  const tripId = String(formData.get('trip_id') ?? '')
+  const returnPath = `/content-studio/urlaubsbeitrag/${tripId}`
+  if (!tripId) redirect('/content-studio')
+  if (!process.env.OPENAI_API_KEY) redirect(`${returnPath}?error=${encodeURIComponent('Die Kuration ist aktuell nicht konfiguriert.')}`)
+
+  const supabase = await createClient()
+  const { data: trip } = await supabase.from('trips').select('end_date').eq('id', tripId).maybeSingle()
+  const projectIds = await loadImageCheckProjectIdsForTrip(supabase, tripId)
+
+  const { data: candidateRows } = projectIds.length > 0
+    ? await supabase
+      .from('content_project_photos')
+      .select('id, vacation_post_score, vacation_post_reasoning, vacation_post_rank, vacation_post_pinned')
+      .in('project_id', projectIds).not('vacation_post_marked_at', 'is', null)
+    : { data: [] }
+  const candidates = candidateRows ?? []
+  if (candidates.length === 0) redirect(`${returnPath}?error=${encodeURIComponent('Keine vorgemerkten Bilder vorhanden.')}`)
+
+  const tripDigest = await buildTripDigest(tripId)
+  const vacationPostCandidates: VacationPostCandidate[] = candidates.map((c) => ({
+    photoId: c.id, score: c.vacation_post_score, reasoning: c.vacation_post_reasoning,
+    pinned: c.vacation_post_pinned, existingRank: c.vacation_post_rank,
+  }))
+  const selection = await curateVacationPostSelection(vacationPostCandidates, tripDigest)
+  if (!selection) redirect(`${returnPath}?error=${encodeURIComponent('Die Kuration ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.')}`)
+
+  const rankByPhotoId = new Map(selection.map((s) => [s.photoId, s.rank]))
+  const expiresAt = computeVacationPostExpiresAt(trip?.end_date ?? null)
+  await Promise.all(candidates.map((c) =>
+    supabase.from('content_project_photos').update({
+      vacation_post_rank: rankByPhotoId.get(c.id) ?? null,
+      expires_at: expiresAt,
+    }).eq('id', c.id),
+  ))
+
+  redirect(returnPath)
+}
+
+/** §"Gesamte temporäre Auswahl löschen": entfernt die Vormerkung ALLER Bilder dieser Reise (nicht nur die finale Auswahl) -- die Fotos selbst und ihre Bild-Check-Projekte bleiben unangetastet, nur die Urlaubsbeitrag-Zuordnung verschwindet. */
+export async function deleteVacationPostSelection(formData: FormData) {
+  const tripId = String(formData.get('trip_id') ?? '')
+  if (!tripId) redirect('/content-studio')
+
+  const supabase = await createClient()
+  const projectIds = await loadImageCheckProjectIdsForTrip(supabase, tripId)
+  if (projectIds.length > 0) {
+    await supabase.from('content_project_photos').update({
+      vacation_post_marked_at: null, vacation_post_score: null, vacation_post_reasoning: null,
+      vacation_post_rank: null, vacation_post_pinned: false,
+    }).in('project_id', projectIds).not('vacation_post_marked_at', 'is', null)
+  }
+
+  redirect('/content-studio')
 }
