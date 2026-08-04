@@ -664,6 +664,93 @@ function buildDraftStructure(format: string, result: Record<string, unknown>): R
   return { text: result.caption, hashtags, quality_check: qualityCheck }
 }
 
+/**
+ * §"Beim Klick den bestehenden Workflow 'Beitrag' öffnen und bereits
+ * übergeben: Reise, ausgewählte Bilder, empfohlene Reihenfolge, vorhandene
+ * Bildanalysen und Scores... Keine parallele Beitragserstellung bauen"
+ * (Nutzervorgabe, wörtlich): ruft dieselbe `generateFormatContent` wie jeder
+ * andere Content-Studio-Pfad auf -- übersprungen wird NUR Stufe 1
+ * (KI-Neubewertung der Bilder), weil die Bild-Check-Bewertungen
+ * (`vacation_post_score`/`vacation_post_reasoning`) bereits vorliegen.
+ * Gleiches Re-Parenting-Muster wie `adoptImageCheckPhotoToSession` (UPDATE
+ * project_id, kein erneuter Upload/keine zweite Kompression) -- einmal
+ * umgehängt, verlassen die Fotos automatisch den Urlaubsbeitrag-
+ * Kurationspool (der nur image_check-Projekte durchsucht), ohne dass ihre
+ * vacation_post_*-Felder eigens zurückgesetzt werden müssten.
+ */
+export async function createContentSessionFromVacationPostSelection(formData: FormData) {
+  const tripId = String(formData.get('trip_id') ?? '')
+  const returnPath = `/content-studio/urlaubsbeitrag/${tripId}`
+  if (!tripId) redirect('/content-studio')
+  if (!process.env.OPENAI_API_KEY)
+    redirect(`${returnPath}?error=${encodeURIComponent('Die Content-KI ist aktuell nicht konfiguriert.')}`)
+
+  const supabase = await createClient()
+  const { id: familyId } = await getFamily()
+
+  const { data: trip } = await supabase.from('trips').select('title').eq('id', tripId).maybeSingle()
+  if (!trip) redirect('/content-studio')
+
+  const { data: projectRows } = await supabase
+    .from('content_projects').select('id').eq('trip_id', tripId).eq('project_type', 'image_check')
+  const projectIds = (projectRows ?? []).map((p) => p.id)
+
+  const { data: selectedRaw } = projectIds.length > 0
+    ? await supabase
+      .from('content_project_photos')
+      .select('id, vacation_post_rank, vacation_post_score, vacation_post_reasoning')
+      .in('project_id', projectIds)
+      .not('vacation_post_rank', 'is', null)
+      .order('vacation_post_rank', { ascending: true })
+    : { data: [] }
+
+  const selected = selectedRaw ?? []
+  if (selected.length === 0)
+    redirect(`${returnPath}?error=${encodeURIComponent('Es ist noch keine kuratierte Auswahl vorhanden.')}`)
+
+  const { data: newSession, error: sessionError } = await supabase.from('content_projects').insert({
+    family_id: familyId, trip_id: tripId, title: `Urlaubsbeitrag · ${trip.title}`,
+    status: 'ready_for_analysis', project_type: 'session', output_format: 'carousel',
+  }).select('id').single()
+  if (sessionError || !newSession)
+    redirect(`${returnPath}?error=${encodeURIComponent('Speicherfehler: ' + (sessionError?.message ?? 'unbekannt'))}`)
+
+  const expiresAt = new Date(Date.now() + TEMP_IMAGE_TTL_HOURS * 60 * 60 * 1000).toISOString()
+  await supabase.from('content_project_photos')
+    .update({ project_id: newSession.id, temporary: true, expires_at: expiresAt })
+    .in('id', selected.map((s) => s.id))
+
+  const manifestText = selected
+    .map((s) => `Foto-ID ${s.id}: ${s.vacation_post_score !== null ? `Instagram-Score ${s.vacation_post_score}/10. ` : ''}${s.vacation_post_reasoning ?? ''}`)
+    .join('\n')
+  const orderText = selected.map((s, i) => `${i + 1}. Foto-ID ${s.id}`).join(', ')
+
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  const tripDigest = await buildTripDigest(tripId)
+  const guidedContext = { focusLabel: 'Urlaubsabschluss-Beitrag', moodLabels: [], hint: null, forceCreate: true }
+  const extraInstruction =
+    `Die Fotoauswahl wurde bereits durch eine separate Kuration in dieser empfohlenen Reihenfolge vorbereitet: ${orderText}. ` +
+    'Übernimm diese Auswahl und Reihenfolge als cover_photo_id/slides, außer es gibt einen zwingenden inhaltlichen Grund für eine andere Anordnung.'
+
+  let contentResult: Record<string, unknown>
+  try {
+    contentResult = await generateFormatContent(openai, 'carousel', tripDigest, manifestText, null, 'de', guidedContext, extraInstruction)
+  } catch {
+    redirect(`${returnPath}?error=${encodeURIComponent('Die Beitragserstellung ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.')}`)
+  }
+
+  const structure = buildDraftStructure('carousel', contentResult)
+  const { data: draft, error: draftError } = await supabase.from('content_drafts').insert({
+    project_id: newSession.id, draft_type: 'carousel_plan', structure: structure as Json,
+  }).select('id').single()
+  if (draftError || !draft)
+    redirect(`${returnPath}?error=${encodeURIComponent('Speicherfehler: ' + (draftError?.message ?? 'unbekannt'))}`)
+
+  await supabase.from('content_projects').update({ status: 'draft_created' }).eq('id', newSession.id)
+
+  redirect(`/content-studio/drafts/${draft.id}`)
+}
+
 /** Baut das Foto-Manifest für eine Regenerierung aus bereits gespeicherten Bewertungen (kein erneuter Bild-Upload/keine erneute Bildanalyse nötig). */
 async function rebuildManifestForProject(
   supabase: Awaited<ReturnType<typeof createClient>>, projectId: string, restrictToPhotoIds?: string[],
