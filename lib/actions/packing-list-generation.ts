@@ -9,8 +9,10 @@ import { todayIsoInFamilyTimezone } from '@/lib/time'
 import { getWeatherForLocation, formatDailyWeatherSummary } from '@/lib/weather'
 import { loadRelevantMemories } from '@/lib/family-memories'
 import { loadPackingItems } from '@/lib/packing-list'
+import { computeTripRequirements } from '@/lib/travel-requirements'
 import {
   buildPackingPrompt, parseGeneratedItems, computeRegenerationDiff, reasoningWithCheckNotice,
+  buildReadyPassportPersonKeys, initialStatusForItem, reasoningWithReadinessNotice,
   PACKING_ITEM_SCHEMA, type PackingFollowUpAnswers, type PackStyle, type PackingGenerationContext,
 } from '@/lib/packing-list-generation'
 
@@ -147,13 +149,22 @@ export async function generatePackingList(formData: FormData) {
   if (!hasExistingGenerated) {
     // §"Erststart: reines Einfügen, noch kein Abgleich nötig" (Architekturplan) -- keine bestehenden KI-Zeilen, mit denen kollidiert werden könnte.
     const personIdByName = new Map(participants.map((p) => [p.name.toLowerCase(), p.id]))
-    const rows = parsedItems.map((item, index) => ({
-      trip_id: tripId,
-      person_id: item.personKey.toLowerCase() === 'gemeinsam' ? null : (personIdByName.get(item.personKey.toLowerCase()) ?? null),
-      label: item.label, category: item.category, quantity: item.quantity, is_essential: item.isEssential,
-      reasoning: reasoningWithCheckNotice(item), source: item.source, source_key: item.sourceKey,
-      status: 'offen', luggage_assignment: 'unassigned', sort_order: index,
-    }))
+    // §"Reisepässe können bereits abgehakt sein, wenn diese in der App
+    // hinterlegt und aktuell sind" (Nutzer-Feedback): dieselbe Travel-
+    // Requirements-Engine wie Ready to Travel, keine zweite Prüfung.
+    const requirements = await computeTripRequirements(tripId)
+    const readyPassportPersonKeys = buildReadyPassportPersonKeys(requirements, participants)
+    const rows = parsedItems.map((item, index) => {
+      const status = initialStatusForItem(item, readyPassportPersonKeys)
+      return {
+        trip_id: tripId,
+        person_id: item.personKey.toLowerCase() === 'gemeinsam' ? null : (personIdByName.get(item.personKey.toLowerCase()) ?? null),
+        label: item.label, category: item.category, quantity: item.quantity, is_essential: item.isEssential,
+        reasoning: reasoningWithReadinessNotice(reasoningWithCheckNotice(item), status === 'eingepackt'),
+        source: item.source, source_key: item.sourceKey,
+        status, luggage_assignment: 'unassigned', sort_order: index,
+      }
+    })
     await supabase.from('packing_items').insert(rows)
     redirect(packingPath(slug))
   }
@@ -190,11 +201,17 @@ export async function applyPackingListDiff(formData: FormData) {
   const toRemove = diff.filter((d) => d.bucket === 'nicht_mehr_erforderlich' && approvedKeys.has(d.key) && d.existingItemId)
 
   if (toInsert.length > 0) {
-    await supabase.from('packing_items').insert(toInsert.map((d) => ({
-      trip_id: tripId, person_id: d.personId, label: d.label, category: d.category, quantity: d.quantity,
-      is_essential: d.isEssential, reasoning: d.reasoning, source: d.source, source_key: d.sourceKey,
-      status: 'offen', luggage_assignment: 'unassigned',
-    })))
+    const requirements = await computeTripRequirements(tripId)
+    const readyPassportPersonKeys = buildReadyPassportPersonKeys(requirements, participants)
+    await supabase.from('packing_items').insert(toInsert.map((d) => {
+      const status = initialStatusForItem({ category: d.category, label: d.label, personKey: d.personLabel }, readyPassportPersonKeys)
+      return {
+        trip_id: tripId, person_id: d.personId, label: d.label, category: d.category, quantity: d.quantity,
+        is_essential: d.isEssential, reasoning: reasoningWithReadinessNotice(d.reasoning, status === 'eingepackt'),
+        source: d.source, source_key: d.sourceKey,
+        status, luggage_assignment: 'unassigned',
+      }
+    }))
   }
   for (const d of toUpdate) {
     await supabase.from('packing_items').update({
