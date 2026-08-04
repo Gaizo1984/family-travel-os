@@ -14,6 +14,7 @@ export const DEBRIEF_STEPS = [
   'person_highlights',
   'would_revisit',
   'highlight_photos',
+  'packing_feedback',
   'summary',
 ] as const
 
@@ -27,6 +28,7 @@ export const DEBRIEF_STEP_LABELS: Record<DebriefStep, string> = {
   person_highlights: 'Persönliche Highlights',
   would_revisit: 'Wiederbesuch',
   highlight_photos: 'Highlight-Fotos',
+  packing_feedback: 'Packliste',
   summary: 'Zusammenfassung',
 }
 
@@ -48,6 +50,7 @@ export type DebriefAnswers = {
   worst_moment?: { text: string }
   person_highlights?: Record<string, string>
   would_revisit?: { value: 'yes' | 'no' | 'maybe' }
+  packing_feedback?: { missing?: string; unnecessary?: string; always_pack?: string; person_id?: string }
 }
 
 export type TripDebrief = {
@@ -148,6 +151,40 @@ export function buildDebriefMemoryCandidates(
       summary: `${person.name} mochte bei "${tripTitle}" besonders: ${text}`,
       structuredValue: { tripTitle, note: text },
     })
+  }
+
+  // §"Nachreise-Dialog speist kontrolliert in die Packliste zurück" (Nutzervorgabe):
+  // wie bei person_highlights bestätigt hier der Mensch selbst im Dialog, was in
+  // die Zusammenfassung kommt -- kein Mehrfach-Reisen-Gate für diese drei Felder
+  // (anders als der zukünftige automatische Mehrfach-Reisen-Mustererkenner,
+  // lib/actions/packing-preference-learning.ts, Fast-Follow, noch nicht gebaut).
+  if (answers.packing_feedback) {
+    const { missing, unnecessary, always_pack, person_id } = answers.packing_feedback
+    const person = person_id ? participants.find((p) => p.id === person_id) : null
+    const personId = person?.id ?? null
+    const personPrefix = person ? `${person.name}: ` : ''
+
+    if (missing) {
+      candidates.push({
+        personId, category: 'packing', memoryType: person ? 'family_member_preference' : 'confirmed_preference',
+        summary: `${personPrefix}Bei "${tripTitle}" hat gefehlt: ${missing}`,
+        structuredValue: { tripTitle, kind: 'missing', note: missing },
+      })
+    }
+    if (unnecessary) {
+      candidates.push({
+        personId, category: 'packing', memoryType: person ? 'family_member_preference' : 'confirmed_preference',
+        summary: `${personPrefix}Bei "${tripTitle}" war unnötig eingepackt: ${unnecessary}`,
+        structuredValue: { tripTitle, kind: 'unnecessary', note: unnecessary },
+      })
+    }
+    if (always_pack) {
+      candidates.push({
+        personId, category: 'packing', memoryType: person ? 'family_member_preference' : 'confirmed_preference',
+        summary: `${personPrefix}Sollte künftig immer mit: ${always_pack}`,
+        structuredValue: { tripTitle, kind: 'always_pack', note: always_pack },
+      })
+    }
   }
 
   return candidates

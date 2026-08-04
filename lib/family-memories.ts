@@ -67,12 +67,12 @@ export async function listFamilyMemories(familyId: string, status?: MemoryStatus
  * Bandbreite bisheriger Erfahrungen gefragt).
  */
 export const MEMORY_CATEGORIES_BY_INTENT: Record<string, string[] | 'all'> = {
-  reise_check: [],
+  reise_check: ['packing'],
   familienfit: ['pace', 'activity', 'family_member_preference'],
   vergleich_hotel: ['hotel'],
   vergleich_flight: ['flight'],
   vergleich_general: ['hotel', 'flight'],
-  journey_support: ['pace', 'activity', 'interest'],
+  journey_support: ['pace', 'activity', 'interest', 'packing'],
   inspiration: 'all',
 }
 
