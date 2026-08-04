@@ -115,6 +115,12 @@ export async function uploadMemoryPhotos(formData: FormData) {
   const stageId = String(formData.get('stage_id') ?? '').trim() || null
   const markAsCover = formData.get('mark_as_cover') === 'on'
   const returnTo = String(formData.get('return_to') ?? '').trim() || null
+  // §Bugfix "Fotos manuell erfassten Reisen (past_trips) nicht zuordenbar"
+  // (Nutzer-Feedback): explizites Ziel, wenn direkt von der past_trip-
+  // Detailseite hochgeladen wird -- past_trips haben kein exaktes Datum
+  // (nur `year`), deshalb hier bewusst KEINE Auto-Zuordnung wie bei `trips`,
+  // sondern immer die Reise, von der aus tatsächlich hochgeladen wurde.
+  const pastTripId = String(formData.get('past_trip_id') ?? '').trim() || null
 
   const backPath = returnTo ?? '/memories'
 
@@ -134,7 +140,7 @@ export async function uploadMemoryPhotos(formData: FormData) {
     redirect(`${backPath}?error=${encodeURIComponent(`Maximal ${MAX_PHOTOS_PER_UPLOAD} Fotos pro Upload.`)}`)
 
   const supabase = await createClient()
-  const tripId = String(formData.get('trip_id') ?? '').trim() || await suggestTripId(supabase, familyId, takenAt)
+  const tripId = pastTripId ? null : (String(formData.get('trip_id') ?? '').trim() || await suggestTripId(supabase, familyId, takenAt))
 
   // §"Kein Datum mehr abfragen -- automatisch Reisebeginn verwenden": der
   // Galerie-Upload fragt kein Aufnahmedatum mehr ab (taken_at kommt hier also
@@ -142,7 +148,9 @@ export async function uploadMemoryPhotos(formData: FormData) {
   // Einordnung in Travel Memory wird ersatzweise der zentral abgeleitete
   // Reisezeitraum-Start verwendet (lib/trip-dates.ts, dieselbe Ableitung wie
   // Reiseübersicht/Status) -- bleibt der Zeitraum offen, bleibt auch
-  // taken_at null, statt ein Datum zu erfinden.
+  // taken_at null, statt ein Datum zu erfinden. past_trips haben keinen
+  // exakten Zeitraum (nur `year`), deshalb hier bewusst ausgenommen -- kein
+  // erfundenes "1. Januar".
   if (!takenAt && tripId) {
     const { data: tripForDate } = await supabase
       .from('trips')
@@ -184,6 +192,7 @@ export async function uploadMemoryPhotos(formData: FormData) {
       const { data: inserted, error: insertError } = await supabase.from('memory_photos').insert({
         family_id: familyId,
         trip_id: tripId,
+        past_trip_id: pastTripId,
         stage_id: stageId,
         uploaded_by_person_id: uploadedByPersonId,
         storage_path: storagePath,
@@ -519,7 +528,37 @@ export async function assignMemoryPhotoToTrip(formData: FormData) {
   if (!photoId || !tripId) redirect(`${returnTo}?error=${encodeURIComponent('Zuordnung fehlgeschlagen')}`)
 
   const supabase = await createClient()
-  const { error } = await supabase.from('memory_photos').update({ trip_id: tripId }).eq('id', photoId)
+  const { error } = await supabase.from('memory_photos').update({ trip_id: tripId, past_trip_id: null }).eq('id', photoId)
+  if (error) redirect(`${returnTo}?error=${encodeURIComponent('Zuordnung fehlgeschlagen: ' + error.message)}`)
+
+  redirect(returnTo)
+}
+
+/**
+ * §Bugfix "Fotos manuell erfassten Reisen (past_trips) nicht zuordenbar"
+ * (Nutzer-Feedback): manuell erfasste Reisen (past_trips) haben kein exaktes
+ * Datum, nur `year` -- eine automatische, zuverlässige Zuordnung wie
+ * `suggestTrip` für `trips` ist dafür nicht sinnvoll möglich. Diese eine
+ * Aktion deckt sowohl den (seltenen, eindeutigen) Jahres-Vorschlag als auch
+ * die manuelle Auswahl auf der Reparaturliste ab -- `target` kodiert
+ * `trip:<id>` oder `past_trip:<id>`, damit ein einziges Auswahlfeld beide
+ * Reiseformen anbieten kann (siehe app/(app)/memories/unzugeordnet/page.tsx).
+ */
+export async function assignMemoryPhotoToAnyTrip(formData: FormData) {
+  const photoId = String(formData.get('photo_id') ?? '')
+  const target = String(formData.get('target') ?? '')
+  const returnTo = String(formData.get('return_to') ?? '').trim() || '/memories/unzugeordnet'
+
+  const separatorIdx = target.indexOf(':')
+  const type = separatorIdx > -1 ? target.slice(0, separatorIdx) : ''
+  const targetId = separatorIdx > -1 ? target.slice(separatorIdx + 1) : ''
+
+  if (!photoId || !targetId || (type !== 'trip' && type !== 'past_trip'))
+    redirect(`${returnTo}?error=${encodeURIComponent('Zuordnung fehlgeschlagen')}`)
+
+  const supabase = await createClient()
+  const update = type === 'trip' ? { trip_id: targetId, past_trip_id: null } : { trip_id: null, past_trip_id: targetId }
+  const { error } = await supabase.from('memory_photos').update(update).eq('id', photoId)
   if (error) redirect(`${returnTo}?error=${encodeURIComponent('Zuordnung fehlgeschlagen: ' + error.message)}`)
 
   redirect(returnTo)
