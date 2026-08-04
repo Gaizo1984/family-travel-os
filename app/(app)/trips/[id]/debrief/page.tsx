@@ -300,6 +300,62 @@ export default async function TripDebriefPage({ params }: { params: Promise<{ id
             </>
           )}
 
+          {step === "packing_feedback" && (
+            <>
+              <form id={STEP_FORM_ID} action={saveDebriefStep}>
+                <input type="hidden" name="debrief_id" value={debrief.id} />
+                <input type="hidden" name="slug" value={trip.slug} />
+                <input type="hidden" name="step" value={step} />
+              </form>
+              <h2 className="font-light mb-2" style={{ color: "var(--foreground)", fontSize: "1.1rem" }}>Wie war's mit der Packliste?</h2>
+              <p className="mb-5" style={{ color: "var(--muted)", fontSize: "0.76rem" }}>Optional -- hilft LUMI, künftige Packlisten für euch zu verbessern.</p>
+
+              <div className="mb-5">
+                <label htmlFor="db-pk-missing" style={LABEL_STYLE}>Was hat gefehlt?</label>
+                <input
+                  id="db-pk-missing" name="missing" type="text" form={STEP_FORM_ID}
+                  defaultValue={debrief.answers.packing_feedback?.missing ?? ""}
+                  placeholder="z. B. wärmere Jacke für die Abende"
+                  style={FIELD_STYLE}
+                />
+              </div>
+
+              <div className="mb-5">
+                <label htmlFor="db-pk-unnecessary" style={LABEL_STYLE}>Was war unnötig eingepackt?</label>
+                <input
+                  id="db-pk-unnecessary" name="unnecessary" type="text" form={STEP_FORM_ID}
+                  defaultValue={debrief.answers.packing_feedback?.unnecessary ?? ""}
+                  placeholder="z. B. der Regenschirm"
+                  style={FIELD_STYLE}
+                />
+              </div>
+
+              <div className="mb-5">
+                <label htmlFor="db-pk-always" style={LABEL_STYLE}>Was sollte künftig immer mit?</label>
+                <input
+                  id="db-pk-always" name="always_pack" type="text" form={STEP_FORM_ID}
+                  defaultValue={debrief.answers.packing_feedback?.always_pack ?? ""}
+                  placeholder="z. B. Steckdosenadapter"
+                  style={FIELD_STYLE}
+                />
+              </div>
+
+              {participants.length > 0 && (
+                <div className="mb-6">
+                  <label style={LABEL_STYLE}>Betrifft besonders (optional)</label>
+                  <div className="flex flex-wrap gap-2">
+                    <RadioChip name="person_id" value="" checked={!debrief.answers.packing_feedback?.person_id} label="Alle" />
+                    {participants.map((p) => (
+                      <RadioChip key={p.id} name="person_id" value={p.id} checked={debrief.answers.packing_feedback?.person_id === p.id} label={p.name} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <StepNav debriefId={debrief.id} slug={trip.slug} step={step} />
+            </>
+          )}
+
           {step === "summary" && (
             <>
               <form id={STEP_FORM_ID} action={confirmDebrief}>

@@ -8,13 +8,15 @@ import {
   type OfflineTripSnapshot, type CachedDocumentMeta,
 } from '@/lib/offline-document-cache'
 import { OfflineDocumentViewer } from '@/components/OfflineDocumentViewer'
+import { packingCategoryLabel } from '@/lib/packing-list'
 
-type Tab = 'uebersicht' | 'journey' | 'fluege-hotels' | 'dokumente'
+type Tab = 'uebersicht' | 'journey' | 'fluege-hotels' | 'packliste' | 'dokumente'
 
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'uebersicht', label: 'Übersicht' },
   { key: 'journey', label: 'Journey' },
   { key: 'fluege-hotels', label: 'Flüge & Hotels' },
+  { key: 'packliste', label: 'Packliste' },
   { key: 'dokumente', label: 'Dokumente' },
 ]
 
@@ -267,6 +269,45 @@ export function OfflineTripDetail({ tripId }: { tripId: string }) {
           </div>
         ) : (
           <p style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>Keine Flug-/Hotelbuchungen gespeichert.</p>
+        )
+      )}
+
+      {tab === 'packliste' && (
+        snapshot.packingItems.length > 0 ? (
+          <div className="space-y-2.5">
+            {snapshot.packingItems.map((item) => (
+              <div key={item.id} className="rounded-xl p-4 flex items-start gap-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+                <div
+                  className="flex items-center justify-center rounded-lg shrink-0"
+                  style={{
+                    width: '26px', height: '26px', marginTop: '1px',
+                    background: item.status === 'eingepackt' ? 'var(--accent)' : 'var(--background)',
+                    border: `1px solid ${item.status === 'eingepackt' ? 'var(--accent)' : 'var(--border)'}`,
+                    color: item.status === 'eingepackt' ? 'var(--surface)' : 'transparent', fontSize: '0.8rem',
+                  }}
+                >
+                  ✓
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span style={{ color: 'var(--foreground)', fontSize: '0.82rem', textDecoration: item.status === 'nicht_benoetigt' ? 'line-through' : 'none' }}>
+                      {item.label}{item.quantity > 1 ? ` × ${item.quantity}` : ''}
+                    </span>
+                    {item.isEssential && (
+                      <span style={{ color: '#B5624A', fontSize: '0.58rem', letterSpacing: '0.08em', textTransform: 'uppercase', border: '1px solid rgba(181,98,74,0.35)', borderRadius: '10px', padding: '1px 7px' }}>
+                        Essentiell
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1" style={{ color: 'var(--muted)', fontSize: '0.68rem' }}>
+                    {packingCategoryLabel(item.category)} · {item.personLabel}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>Keine Packliste gespeichert.</p>
         )
       )}
 

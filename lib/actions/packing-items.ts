@@ -1,0 +1,87 @@
+'use server'
+
+import { revalidatePath } from 'next/cache'
+import { createClient } from '@/lib/supabase/server'
+import type { PackingStatus, LuggageAssignment } from '@/lib/packing-list'
+import { PACKING_STATUS_ORDER, LUGGAGE_ASSIGNMENT_ORDER } from '@/lib/packing-list'
+
+function packingPath(slug: string): string {
+  return `/trips/${slug}/packing`
+}
+
+/** §"Eigenen Gegenstand hinzufügen" (Nutzervorgabe): source bleibt 'manuell'/source_key bleibt NULL -- eine Regenerierung fasst diese Zeile nie an (siehe lib/packing-list-generation.ts). */
+export async function addPackingItem(formData: FormData) {
+  const tripId = String(formData.get('trip_id') ?? '')
+  const slug = String(formData.get('slug') ?? '')
+  const label = String(formData.get('label') ?? '').trim()
+  const category = String(formData.get('category') ?? '').trim() || null
+  const personId = String(formData.get('person_id') ?? '').trim() || null
+  const quantityRaw = Number(formData.get('quantity') ?? 1)
+  const quantity = Number.isFinite(quantityRaw) && quantityRaw > 0 ? Math.round(quantityRaw) : 1
+  const isEssential = formData.get('is_essential') === 'on'
+
+  if (label.length < 1 || !tripId) {
+    revalidatePath(packingPath(slug))
+    return
+  }
+
+  const supabase = await createClient()
+  await supabase.from('packing_items').insert({
+    trip_id: tripId, person_id: personId, label, category, quantity, is_essential: isEssential,
+    status: 'offen', luggage_assignment: 'unassigned', source: 'manuell', source_key: null,
+  })
+
+  revalidatePath(packingPath(slug))
+}
+
+function isPackingStatus(value: string): value is PackingStatus {
+  return (PACKING_STATUS_ORDER as string[]).includes(value)
+}
+
+export async function updatePackingItemStatus(formData: FormData) {
+  const itemId = String(formData.get('item_id') ?? '')
+  const slug = String(formData.get('slug') ?? '')
+  const status = String(formData.get('status') ?? '')
+  if (!isPackingStatus(status)) return
+
+  const supabase = await createClient()
+  await supabase.from('packing_items').update({ status }).eq('id', itemId)
+
+  revalidatePath(packingPath(slug))
+}
+
+function isLuggageAssignment(value: string): value is LuggageAssignment {
+  return (LUGGAGE_ASSIGNMENT_ORDER as string[]).includes(value)
+}
+
+/** §"Anzahl bearbeiten / Person ändern / Gepäckstück zuordnen / Notiz ergänzen" (Nutzervorgabe): bewusst EINE Bearbeiten-Aktion für die selteneren Feldänderungen, statt vier einzelner -- der schnelle Eingepackt-Toggle bleibt als eigene Aktion getrennt (siehe oben), dieses Formular deckt zusätzlich die selteneren Status-Werte (noch_besorgen/nicht_benoetigt) mit ab. */
+export async function updatePackingItemDetails(formData: FormData) {
+  const itemId = String(formData.get('item_id') ?? '')
+  const slug = String(formData.get('slug') ?? '')
+  const quantityRaw = Number(formData.get('quantity') ?? 1)
+  const quantity = Number.isFinite(quantityRaw) && quantityRaw > 0 ? Math.round(quantityRaw) : 1
+  const personId = String(formData.get('person_id') ?? '').trim() || null
+  const luggageAssignmentRaw = String(formData.get('luggage_assignment') ?? '')
+  const luggageAssignment = isLuggageAssignment(luggageAssignmentRaw) ? luggageAssignmentRaw : 'unassigned'
+  const note = String(formData.get('note') ?? '').trim() || null
+  const isEssential = formData.get('is_essential') === 'on'
+  const statusRaw = String(formData.get('status') ?? '')
+
+  const supabase = await createClient()
+  await supabase.from('packing_items').update({
+    quantity, person_id: personId, luggage_assignment: luggageAssignment, note, is_essential: isEssential,
+    ...(isPackingStatus(statusRaw) ? { status: statusRaw } : {}),
+  }).eq('id', itemId)
+
+  revalidatePath(packingPath(slug))
+}
+
+export async function deletePackingItem(formData: FormData) {
+  const itemId = String(formData.get('item_id') ?? '')
+  const slug = String(formData.get('slug') ?? '')
+
+  const supabase = await createClient()
+  await supabase.from('packing_items').delete().eq('id', itemId)
+
+  revalidatePath(packingPath(slug))
+}

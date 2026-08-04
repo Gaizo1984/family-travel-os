@@ -324,15 +324,24 @@ export interface Database {
       packing_items: {
         Row: {
           id: string; trip_id: string; person_id: string | null; label: string
-          category: string | null; is_packed: boolean; is_essential: boolean; created_at: string
+          category: string | null; is_essential: boolean; created_at: string
+          quantity: number; status: string; luggage_assignment: string
+          reasoning: string | null; source: string; source_key: string | null
+          note: string | null; sort_order: number; updated_at: string
         }
         Insert: {
           id?: string; trip_id: string; person_id?: string | null; label: string
-          category?: string | null; is_packed?: boolean; is_essential?: boolean; created_at?: string
+          category?: string | null; is_essential?: boolean; created_at?: string
+          quantity?: number; status?: string; luggage_assignment?: string
+          reasoning?: string | null; source?: string; source_key?: string | null
+          note?: string | null; sort_order?: number; updated_at?: string
         }
         Update: {
           id?: string; trip_id?: string; person_id?: string | null; label?: string
-          category?: string | null; is_packed?: boolean; is_essential?: boolean; created_at?: string
+          category?: string | null; is_essential?: boolean; created_at?: string
+          quantity?: number; status?: string; luggage_assignment?: string
+          reasoning?: string | null; source?: string; source_key?: string | null
+          note?: string | null; sort_order?: number; updated_at?: string
         }
         Relationships: [
           { foreignKeyName: "packing_items_trip_id_fkey";   columns: ["trip_id"];   isOneToOne: false; referencedRelation: "trips";   referencedColumns: ["id"] },
@@ -1166,6 +1175,15 @@ export interface Database {
         Relationships: [
           { foreignKeyName: "trip_debriefs_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] },
           { foreignKeyName: "trip_debriefs_trip_id_fkey"; columns: ["trip_id"]; isOneToOne: false; referencedRelation: "trips"; referencedColumns: ["id"] }
+        ]
+      }
+      packing_list_drafts: {
+        Row: { id: string; trip_id: string; family_id: string; items: Json; created_at: string }
+        Insert: { id?: string; trip_id: string; family_id: string; items: Json; created_at?: string }
+        Update: { id?: string; trip_id?: string; family_id?: string; items?: Json; created_at?: string }
+        Relationships: [
+          { foreignKeyName: "packing_list_drafts_trip_id_fkey"; columns: ["trip_id"]; isOneToOne: true; referencedRelation: "trips"; referencedColumns: ["id"] },
+          { foreignKeyName: "packing_list_drafts_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }
         ]
       }
     }

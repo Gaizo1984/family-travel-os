@@ -52,6 +52,19 @@ export async function saveDebriefStep(formData: FormData) {
   } else if (step === 'would_revisit') {
     const value = String(formData.get('value') ?? '')
     if (value === 'yes' || value === 'no' || value === 'maybe') answers.would_revisit = { value }
+  } else if (step === 'packing_feedback') {
+    const missing = String(formData.get('missing') ?? '').trim()
+    const unnecessary = String(formData.get('unnecessary') ?? '').trim()
+    const alwaysPack = String(formData.get('always_pack') ?? '').trim()
+    const personId = String(formData.get('person_id') ?? '').trim()
+    if (missing || unnecessary || alwaysPack) {
+      answers.packing_feedback = {
+        ...(missing ? { missing } : {}),
+        ...(unnecessary ? { unnecessary } : {}),
+        ...(alwaysPack ? { always_pack: alwaysPack } : {}),
+        ...(personId ? { person_id: personId } : {}),
+      }
+    }
   }
 
   const next = nextDebriefStep(step)

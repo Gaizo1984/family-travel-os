@@ -105,6 +105,16 @@ export type OfflineTripSnapshot = {
     endLabel: string | null
     reference: string | null
   }>
+  /** §"Offline lesen" (Architekturplan, Sprint 7): reine Erweiterung des bestehenden Snapshots, keine zweite Offline-Architektur -- volle Überschreibung bei jedem "Für Offline speichern" wie der Rest des Snapshots, kein Offline-Schreiben (siehe Fast-Follow im Plan). */
+  packingItems: Array<{
+    id: string
+    label: string
+    quantity: number
+    status: string
+    category: string | null
+    personLabel: string
+    isEssential: boolean
+  }>
   cachedAt: string
 }
 
