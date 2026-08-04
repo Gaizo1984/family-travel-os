@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Banner } from "@/components/Banner";
 import { generatePackingList } from "@/lib/actions/packing-list-generation";
 import { PACK_STYLE_ORDER, PACK_STYLE_LABELS } from "@/lib/packing-list-generation";
+import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -103,16 +104,7 @@ export default async function GeneratePackingListPage({
               <Link href={`/trips/${trip.slug}/packing`} style={{ color: "var(--muted)", fontSize: "0.7rem", letterSpacing: "0.1em", textDecoration: "none" }}>
                 Abbrechen
               </Link>
-              <button
-                type="submit"
-                style={{
-                  background: "var(--foreground)", color: "var(--surface)", border: "none",
-                  borderRadius: "6px", padding: "11px 20px", fontSize: "0.65rem",
-                  letterSpacing: "0.16em", textTransform: "uppercase", cursor: "pointer",
-                }}
-              >
-                Intelligente Packliste erstellen
-              </button>
+              <SubmitButtonWithProgress label="Intelligente Packliste erstellen" pendingLabel="LUMI erstellt die Packliste …" />
             </div>
           </div>
         </form>

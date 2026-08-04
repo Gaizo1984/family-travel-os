@@ -1,4 +1,4 @@
-import type { PackingCategory, PackingItem, PackingSource } from '@/lib/packing-list'
+import type { PackingCategory, PackingItem, PackingSource, PackingStatus } from '@/lib/packing-list'
 import { PACKING_CATEGORY_ORDER } from '@/lib/packing-list'
 
 export type PackStyle = 'leicht' | 'ausgewogen' | 'komfortabel'
@@ -153,6 +153,8 @@ Wichtige Einschränkungen:
 - Hotel-Ausstattung (Handtücher, Föhn, Babybett, Waschmöglichkeit) ist NICHT bekannt, außer explizit oben genannt. Erfinde nichts -- setze needs_check_flag="hotel_amenity".
 - Triff niemals verbindliche Aussagen zu verbotenen Gegenständen oder aktuellen Airline-Sicherheitsregeln -- setze bei relevanten Gegenständen needs_check_flag="airline_rule".
 - Kategorie "gesundheit": ausschließlich neutrale, generische Einträge wie "Persönliche Medikamente", "Erste-Hilfe-Set", niemals Diagnosen oder konkrete Medikamentennamen ableiten.
+- Größere Kinderausstattung (Reisebett/Kinderbett, Kinderwagen, Kindersitz, Babytrage) NUR vorschlagen, wenn die Familie das ausdrücklich in "Antworten der Familie" oben angegeben hat. Ohne ausdrückliche Angabe NICHT vorschlagen -- diese Dinge sind oft vor Ort vorhanden, werden anders gelöst (z. B. Kind schläft im Elternbett) oder unnötiger Ballast, das kannst du nicht wissen.
+- Gegenstände, die typischerweise für die ganze Familie gemeinsam gelten (z. B. Ladegeräte, Sonnencreme, Insektenschutz, Erste-Hilfe-Set, Reiseapotheke), bekommen person_key="gemeinsam", NICHT eine Einzelperson -- außer es handelt sich eindeutig um ein persönliches Gerät oder ein personenspezifisches Medikament.
 - Jeder Gegenstand braucht einen stabilen source_key, der bei einer künftigen erneuten Generierung für dasselbe gedachte Item identisch bleibt.`
 }
 
@@ -201,6 +203,44 @@ export function reasoningWithCheckNotice(item: { reasoning: string; needsCheckFl
   if (item.needsCheckFlag === 'none') return item.reasoning
   const notice = NEEDS_CHECK_MESSAGES[item.needsCheckFlag]
   return item.reasoning ? `${item.reasoning} ${notice}` : notice
+}
+
+/**
+ * §"Reisepässe etc. können bereits abgehakt sein, wenn diese in der App
+ * hinterlegt und aktuell sind" (Nutzer-Feedback): rein deterministische
+ * Nachbearbeitung NACH dem Parsen -- die KI kennt den Dokumentenstatus
+ * nicht und soll ihn nicht raten, das entscheidet dieselbe Travel-
+ * Requirements-Engine wie Ready to Travel (lib/travel-requirements.ts).
+ */
+export function buildReadyPassportPersonKeys(
+  requirements: Array<{ type: string; status: string; personId: string | null }>,
+  participants: Array<{ id: string; name: string }>,
+): Set<string> {
+  const nameById = new Map(participants.map((p) => [p.id, p.name.toLowerCase()]))
+  const keys = new Set<string>()
+  for (const r of requirements) {
+    if (r.type !== 'passport' || r.status !== 'satisfied' || !r.personId) continue
+    const name = nameById.get(r.personId)
+    if (name) keys.add(name)
+  }
+  return keys
+}
+
+const PASSPORT_LABEL_PATTERN = 'reisepass'
+
+export function initialStatusForItem(
+  item: { category: string; label: string; personKey: string },
+  readyPassportPersonKeys: Set<string>,
+): PackingStatus {
+  const isPassportDoc = item.category === 'dokumente' && item.label.toLowerCase().includes(PASSPORT_LABEL_PATTERN)
+  if (isPassportDoc && readyPassportPersonKeys.has(item.personKey.toLowerCase())) return 'eingepackt'
+  return 'offen'
+}
+
+export function reasoningWithReadinessNotice(reasoning: string, isPreChecked: boolean): string {
+  if (!isPreChecked) return reasoning
+  const notice = 'Bereits in LUMI hinterlegt und gültig -- als eingepackt vorbelegt.'
+  return reasoning ? `${reasoning} ${notice}` : notice
 }
 
 // ─────────────────────────────── Diff ───────────────────────────────
