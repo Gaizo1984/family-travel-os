@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Plane, BedDouble, Compass, FileText, MoreHorizontal, ChevronLeft, ChevronRight, Wallet, Route, Pencil, Images } from "lucide-react";
+import { Plane, BedDouble, Compass, FileText, MoreHorizontal, ChevronLeft, ChevronRight, Wallet, Route, Pencil, Images, Luggage } from "lucide-react";
 import { formatDateDE } from "@/lib/demo-data";
 import { deriveTripDateRange, tripDurationDays, formatTripDateRangeLabel } from "@/lib/trip-dates";
 import { createClient } from "@/lib/supabase/server";
@@ -677,6 +677,7 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
               <QuickNavItem Icon={Plane} label="Flüge" href={`/trips/${trip.slug}/bookings/category/flight`} />
               <QuickNavItem Icon={BedDouble} label="Hotels" href={`/trips/${trip.slug}/bookings/category/accommodation`} />
               <QuickNavItem Icon={Compass} label="Aktivitäten" href={`/trips/${trip.slug}/bookings/category/activity`} />
+              <QuickNavItem Icon={Luggage} label="Packliste" href={`/trips/${trip.slug}/packing`} />
               <QuickNavItem Icon={Images} label="Galerie" href={`/trips/${trip.slug}/gallery`} />
               <QuickNavItem Icon={FileText} label="Dokumente" href={`/trips/${trip.slug}/documents`} />
               <QuickNavItem Icon={Wallet} label="Budget" href={`/trips/${trip.slug}/budget`} />
