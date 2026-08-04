@@ -781,6 +781,8 @@ export interface Database {
           analyzed_at: string | null; created_at: string
           categories: string[]; reasoning: string | null; recommendation: string | null
           temporary: boolean; expires_at: string | null; retained_as_memory: boolean; memory_photo_id: string | null
+          vacation_post_marked_at: string | null; vacation_post_score: number | null
+          vacation_post_reasoning: string | null; vacation_post_rank: number | null; vacation_post_pinned: boolean
         }
         Insert: {
           id?: string; project_id: string; storage_path: string; phash?: string | null
@@ -788,6 +790,8 @@ export interface Database {
           analyzed_at?: string | null; created_at?: string
           categories?: string[]; reasoning?: string | null; recommendation?: string | null
           temporary?: boolean; expires_at?: string | null; retained_as_memory?: boolean; memory_photo_id?: string | null
+          vacation_post_marked_at?: string | null; vacation_post_score?: number | null
+          vacation_post_reasoning?: string | null; vacation_post_rank?: number | null; vacation_post_pinned?: boolean
         }
         Update: {
           id?: string; project_id?: string; storage_path?: string; phash?: string | null
@@ -795,6 +799,8 @@ export interface Database {
           analyzed_at?: string | null; created_at?: string
           categories?: string[]; reasoning?: string | null; recommendation?: string | null
           temporary?: boolean; expires_at?: string | null; retained_as_memory?: boolean; memory_photo_id?: string | null
+          vacation_post_marked_at?: string | null; vacation_post_score?: number | null
+          vacation_post_reasoning?: string | null; vacation_post_rank?: number | null; vacation_post_pinned?: boolean
         }
         Relationships: [
           { foreignKeyName: "content_project_photos_project_id_fkey";      columns: ["project_id"];      isOneToOne: false; referencedRelation: "content_projects";       referencedColumns: ["id"] },

@@ -4,10 +4,11 @@ import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import {
   createImageCheckUploadSlots, uploadImageCheckPhotos, runImageCheckAnalysis,
-  adoptImageCheckPhotoToSession, adoptImageCheckPhotoToReel,
+  adoptImageCheckPhotoToSession, adoptImageCheckPhotoToReel, markImageCheckPhotoForVacationPost,
 } from "@/lib/actions/image-check";
 import { deleteContentSessionPhotosNow, deleteContentSessionProject } from "@/lib/actions/content-sessions";
 import { MAX_IMAGE_CHECK_PHOTOS } from "@/lib/content-session-limits";
+import { MAX_VACATION_POST_PHOTOS } from "@/lib/vacation-post-curation";
 import { getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
 import { DirectPhotoUploadForm } from "@/components/DirectPhotoUploadForm";
 import { MultiPhotoFilePreview } from "@/components/MultiPhotoFilePreview";
@@ -64,6 +65,22 @@ export default async function ImageCheckProjectPage({
 
   const tripTitle = (project.trips as unknown as { title: string } | null)?.title ?? project.title;
   const hasPhotos = photos.length > 0;
+
+  // §"Alle vorgemerkten Bilder werden reisebezogen gesammelt" (Nutzervorgabe):
+  // Status/Sperre gilt über ALLE image_check-Projekte dieser Reise, nicht nur
+  // dieses eine -- mehrere Bild-Check-Durchgänge sammeln in denselben Pool.
+  let markedCount = 0;
+  let alreadyMarkedPhotoIds = new Set<string>();
+  if (project.trip_id) {
+    const { data: sisterProjectRows } = await supabase
+      .from("content_projects").select("id").eq("trip_id", project.trip_id).eq("project_type", "image_check");
+    const projectIds = (sisterProjectRows ?? []).map((p) => p.id);
+    const { data: markedRows } = projectIds.length > 0
+      ? await supabase.from("content_project_photos").select("id, project_id").in("project_id", projectIds).not("vacation_post_marked_at", "is", null)
+      : { data: [] };
+    markedCount = markedRows?.length ?? 0;
+    alreadyMarkedPhotoIds = new Set((markedRows ?? []).filter((r) => r.project_id === projectId).map((r) => r.id));
+  }
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -152,6 +169,17 @@ export default async function ImageCheckProjectPage({
           )}
         </div>
 
+        {project.trip_id && markedCount > 0 && (
+          <div className="flex items-center justify-between mb-6 flex-wrap gap-2 rounded-xl p-4" style={{ background: "rgba(184,154,94,0.08)", border: "1px solid rgba(184,154,94,0.25)" }}>
+            <span style={{ color: "var(--foreground)", fontSize: "0.76rem" }}>
+              {markedCount} von maximal {MAX_VACATION_POST_PHOTOS} Bildern für {tripTitle} vorgemerkt
+            </span>
+            <Link href={`/content-studio/urlaubsbeitrag/${project.trip_id}`} style={{ color: "var(--accent)", fontSize: "0.72rem", textDecoration: "none" }}>
+              Auswahl ansehen →
+            </Link>
+          </div>
+        )}
+
         {hasPhotos && (
           <ImageCheckPanel
             projectId={projectId}
@@ -159,6 +187,9 @@ export default async function ImageCheckProjectPage({
             runAnalysis={runImageCheckAnalysis}
             adoptToSession={adoptImageCheckPhotoToSession}
             adoptToReel={adoptImageCheckPhotoToReel}
+            markForVacationPost={markImageCheckPhotoForVacationPost}
+            hasTrip={Boolean(project.trip_id)}
+            alreadyMarkedPhotoIds={alreadyMarkedPhotoIds}
           />
         )}
       </div>
