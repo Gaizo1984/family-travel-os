@@ -353,6 +353,17 @@ export default async function PackingListPage({
           </form>
         </div>
 
+        {items.length > 0 && (
+          <div className="flex justify-center mt-6">
+            <Link
+              href={`/trips/${trip.slug}/packing/delete`}
+              style={{ color: "var(--muted)", fontSize: "0.68rem", letterSpacing: "0.04em", textDecoration: "none" }}
+            >
+              Packliste löschen
+            </Link>
+          </div>
+        )}
+
       </div>
     </div>
   );

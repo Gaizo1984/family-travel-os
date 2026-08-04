@@ -1,9 +1,10 @@
 import type { PackingCategory, PackingItem, PackingSource, PackingStatus } from '@/lib/packing-list'
 import { PACKING_CATEGORY_ORDER } from '@/lib/packing-list'
 
-export type PackStyle = 'leicht' | 'ausgewogen' | 'komfortabel'
-export const PACK_STYLE_ORDER: PackStyle[] = ['leicht', 'ausgewogen', 'komfortabel']
-export const PACK_STYLE_LABELS: Record<PackStyle, string> = { leicht: 'Leicht', ausgewogen: 'Ausgewogen', komfortabel: 'Komfortabel' }
+/** §"Leicht und ausgewogen reicht, wir reisen i.d.R. mit wenig Gepäck" (Nutzer-Feedback): "komfortabel" bewusst entfernt statt nur versteckt. */
+export type PackStyle = 'leicht' | 'ausgewogen'
+export const PACK_STYLE_ORDER: PackStyle[] = ['leicht', 'ausgewogen']
+export const PACK_STYLE_LABELS: Record<PackStyle, string> = { leicht: 'Leicht', ausgewogen: 'Ausgewogen' }
 
 export type PackingFollowUpAnswers = {
   packStyle: PackStyle

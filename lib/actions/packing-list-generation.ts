@@ -29,7 +29,7 @@ function generatePath(slug: string): string {
 }
 
 function isPackStyle(value: string): value is PackStyle {
-  return value === 'leicht' || value === 'ausgewogen' || value === 'komfortabel'
+  return value === 'leicht' || value === 'ausgewogen'
 }
 
 function readFollowUp(formData: FormData): PackingFollowUpAnswers {
