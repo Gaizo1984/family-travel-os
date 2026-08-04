@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { formatDateDE } from '@/lib/demo-data'
 
@@ -6,9 +7,15 @@ import { formatDateDE } from '@/lib/demo-data'
  * kurzen Fließtext zusammen — dient KI-Flows als einzige Faktengrundlage
  * (z. B. Content-Ideen), damit nie über die Reise hinaus erfundene Fakten
  * in einen Prompt gelangen.
+ *
+ * `supabaseOverride` erlaubt den Aufruf aus einem sitzungslosen Kontext (z. B.
+ * dem Urlaubsbeitrag-Kurations-Cron) mit einem Service-Role-Client -- ohne
+ * diesen Parameter würde der cookie-basierte Default-Client dort mangels
+ * Nutzer-Session jede Abfrage still auf 0 Zeilen filtern (gleiches Muster wie
+ * lib/travel-requirements.ts::computeTripRequirements).
  */
-export async function buildTripDigest(tripId: string): Promise<string> {
-  const supabase = await createClient()
+export async function buildTripDigest(tripId: string, supabaseOverride?: SupabaseClient): Promise<string> {
+  const supabase = supabaseOverride ?? await createClient()
 
   const [{ data: trip }, { data: stages }, { data: bookings }, { data: events }] = await Promise.all([
     supabase.from('trips').select('title, subtitle, start_date, end_date').eq('id', tripId).maybeSingle(),
