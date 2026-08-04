@@ -11,6 +11,7 @@ import type { JourneyEventCategory, JourneyEventStatus } from '@/lib/journey-eve
 import type { OfflineTripSnapshot } from '@/lib/offline-document-cache'
 import { sortForBoardingPassViewer } from '@/lib/boarding-passes'
 import { getCachedSignedUrl } from '@/lib/signed-storage-url'
+import { loadPackingItems } from '@/lib/packing-list'
 
 type StageRow = {
   id: string; title: string; location: string | null; nights: number | null
@@ -51,6 +52,24 @@ export async function fetchOfflineTripSnapshotData(tripId: string): Promise<Offl
     .maybeSingle()
 
   if (!trip) return null
+
+  const [packingItemsRaw, { data: memberRows }] = await Promise.all([
+    loadPackingItems(supabase, tripId),
+    supabase.from('trip_members').select('persons ( id, name )').eq('trip_id', tripId),
+  ])
+  const personNameById = new Map(
+    (memberRows ?? [])
+      .map((m) => m.persons as unknown as { id: string; name: string } | null)
+      .filter((p): p is { id: string; name: string } => Boolean(p))
+      .map((p) => [p.id, p.name]),
+  )
+  const packingItems = packingItemsRaw
+    .filter((i) => i.status !== 'nicht_benoetigt')
+    .map((i) => ({
+      id: i.id, label: i.label, quantity: i.quantity, status: i.status,
+      category: i.category, isEssential: i.isEssential,
+      personLabel: i.personId ? (personNameById.get(i.personId) ?? 'Gemeinsam') : 'Gemeinsam',
+    }))
 
   const stages = sortStagesChronologically((trip.stages ?? []) as StageRow[]) as StageInput[]
   const bookings = sortBookingsChronologically((trip.bookings ?? []) as BookingRow[]) as TimelineBooking[]
@@ -97,6 +116,7 @@ export async function fetchOfflineTripSnapshotData(tripId: string): Promise<Offl
     statusLabel,
     journeyDays,
     flightsAndHotels,
+    packingItems,
     cachedAt: new Date().toISOString(),
   }
 }
