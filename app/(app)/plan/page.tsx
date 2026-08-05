@@ -9,6 +9,8 @@ import { Banner } from "@/components/Banner";
 import { DateSelectFields } from "@/components/DateSelectFields";
 import { getDateFieldRange } from "@/lib/documents";
 import { TripBriefingWizard } from "@/components/TripBriefingWizard";
+import { loadJob } from "@/lib/ai-generation-jobs";
+import { PendingGenerationView } from "@/components/PendingGenerationView";
 
 // ── Verified Unsplash photos ──────────────────────────────────────────────────
 
@@ -129,11 +131,28 @@ function InspirationCard({ title, tags, photo }: (typeof INSPIRATIONS)[0]) {
 export default async function PlanPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; from_idea?: string }>;
+  searchParams: Promise<{ error?: string; from_idea?: string; job?: string }>;
 }) {
-  const { error, from_idea } = await searchParams;
+  const { error, from_idea, job: jobId } = await searchParams;
 
   const supabase = await createClient();
+
+  // §"KI-Aufrufe hintergrundfest machen": solange die Reiseideen-Generierung
+  // im Hintergrund läuft, zeigt diese Seite ausschließlich den Wartezustand.
+  const job = jobId ? await loadJob(jobId) : null;
+  if (job && job.status === "pending") {
+    return (
+      <div className="flex-1" style={{ background: "var(--background)" }}>
+        <div className="max-w-3xl mx-auto px-5 md:px-8 pb-24 pt-14">
+          <PendingGenerationView
+            jobId={job.id}
+            pendingLabel="LUMI entwickelt eure Reiseideen im Hintergrund … Ihr könnt die App währenddessen schließen."
+            fallbackPath="/plan"
+          />
+        </div>
+      </div>
+    );
+  }
   const { data: persons } = await supabase
     .from("persons")
     .select("id, name, initials, color, birth_date, is_minor")
@@ -192,6 +211,11 @@ export default async function PlanPage({
           {error && (
             <Banner variant="error" className="mb-4 px-4 py-3 rounded-lg">
               {error}
+            </Banner>
+          )}
+          {job?.status === "failed" && (
+            <Banner variant="error" className="mb-4 px-4 py-3 rounded-lg">
+              {job.errorMessage ?? "Die Reiseideen-Generierung ist fehlgeschlagen. Bitte erneut versuchen."}
             </Banner>
           )}
           <TripBriefingWizard persons={persons ?? []} action={generateTripIdeas}>

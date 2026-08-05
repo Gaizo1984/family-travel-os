@@ -22,6 +22,8 @@ import { isoToday, isBeforeIso } from "@/lib/date-utils";
 import { countFlexibleDateCombinations } from "@/lib/flight-date-combinations";
 import type { FlightSearchOption } from "@/lib/flight-types";
 import type { FlightDateContext } from "@/components/FlightCard";
+import { loadJob } from "@/lib/ai-generation-jobs";
+import { PendingGenerationView } from "@/components/PendingGenerationView";
 
 // §"Duffel-Suchen können mehrere Sekunden bis über eine Minute dauern"
 // (insbesondere die flexible Suche: mehrere Datumskombinationen à bis zu 60s
@@ -93,11 +95,29 @@ export default async function DiscoverFlightsPage({
     traveler_ids?: string; idea_id?: string; search_key?: string; search_keys?: string
     mode?: string; window_start_date?: string; window_end_date?: string
     nights_min?: string; nights_max?: string; batch?: string; error?: string
-    expired_option?: string
+    expired_option?: string; job?: string
   }>;
 }) {
   const sp = await searchParams;
   const mode: SearchMode = sp.mode === "flexible" ? "flexible" : "fixed";
+
+  // §"KI-Aufrufe hintergrundfest machen": die Flugsuche (inkl. flexibler
+  // Mehrfachsuche, bisher timeoutgefährdet, siehe maxDuration-Kommentar oben)
+  // läuft jetzt im Hintergrund -- Wartezustand, solange der Job pending ist.
+  const job = sp.job ? await loadJob(sp.job) : null;
+  if (job && job.status === "pending") {
+    return (
+      <div className="flex-1" style={{ background: "var(--background)" }}>
+        <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-9">
+          <PendingGenerationView
+            jobId={job.id}
+            pendingLabel="LUMI sucht Flüge im Hintergrund … Ihr könnt die App währenddessen schließen."
+            fallbackPath="/discover/flights"
+          />
+        </div>
+      </div>
+    );
+  }
 
   const supabase = await createClient();
   const { id: familyId } = await getFamily();

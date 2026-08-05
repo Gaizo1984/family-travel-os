@@ -18,6 +18,8 @@ import { DirectVideoUploadForm } from "@/components/DirectVideoUploadForm";
 import { GenerateReelStoryboardButton } from "@/components/GenerateReelStoryboardButton";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
 import { Banner } from "@/components/Banner";
+import { loadJob } from "@/lib/ai-generation-jobs";
+import { PendingGenerationView } from "@/components/PendingGenerationView";
 
 type ReelStoryboardScene = {
   source_type: "photo" | "video"; source_id: string; duration_seconds: number
@@ -54,10 +56,10 @@ export default async function ReelMediaPage({
   searchParams,
 }: {
   params: Promise<{ projectId: string }>;
-  searchParams: Promise<{ error?: string; uploaded?: string; storyboard?: string }>;
+  searchParams: Promise<{ error?: string; uploaded?: string; storyboard?: string; job?: string }>;
 }) {
   const { projectId } = await params;
-  const { error, uploaded, storyboard } = await searchParams;
+  const { error, uploaded, storyboard, job: jobId } = await searchParams;
 
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
@@ -70,6 +72,23 @@ export default async function ReelMediaPage({
     .eq("project_type", "reel")
     .maybeSingle();
   if (!project || !project.trip_id) notFound();
+
+  // §"KI-Aufrufe hintergrundfest machen": Wartezustand, solange das
+  // Storyboard im Hintergrund erzeugt wird.
+  const job = jobId ? await loadJob(jobId) : null;
+  if (job && job.status === "pending") {
+    return (
+      <div className="flex-1" style={{ background: "var(--background)" }}>
+        <div className="max-w-5xl w-full mx-auto px-5 md:px-8 pb-24 pt-9">
+          <PendingGenerationView
+            jobId={job.id}
+            pendingLabel="LUMI erstellt das Storyboard im Hintergrund … Ihr könnt die App währenddessen schließen."
+            fallbackPath={returnTo}
+          />
+        </div>
+      </div>
+    );
+  }
 
   const [{ data: photosRaw }, { data: videosRaw }, { data: itemsRaw }, { data: draftRaw }] = await Promise.all([
     supabase
@@ -180,6 +199,9 @@ export default async function ReelMediaPage({
 
         {uploaded && <Banner variant="success">{uploaded} Video(s) gespeichert.</Banner>}
         {error && <Banner variant="error">{error}</Banner>}
+        {job?.status === "failed" && (
+          <Banner variant="error">{job.errorMessage ?? "Das Storyboard konnte nicht erstellt werden. Bitte erneut versuchen."}</Banner>
+        )}
 
         {selectedCount > 0 && (
           <section className="mb-10">

@@ -1,7 +1,9 @@
 'use server'
 
 import { redirect } from 'next/navigation'
+import { after } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createJob, completeJob, failJob } from '@/lib/ai-generation-jobs'
 import { computeRoute, type ComputeRouteResult } from '@/lib/providers/routes-provider'
 import { ProviderConfigError } from '@/lib/providers/provider-errors'
 import { generateFiveRecommendations } from '@/lib/concierge-ai'
@@ -409,21 +411,34 @@ export async function generateDayPlan(formData: FormData) {
 
   if (!familyId || !tripId || !date) redirect('/today')
 
-  const result = await generateDayPlanPreview(familyId, tripId, date, preferStopover)
-  const redirectParams = new URLSearchParams({ date })
-  if (preferStopover) redirectParams.set('stopover', '1')
+  const jobId = await createJob(familyId, 'day_plan_generate')
 
-  if (!result.ok) {
-    redirectParams.set('error', result.reason)
-    redirect(`${returnTo}?${redirectParams.toString()}`)
-  }
+  after(async () => {
+    try {
+      const result = await generateDayPlanPreview(familyId, tripId, date, preferStopover)
+      const redirectParams = new URLSearchParams({ date })
+      if (preferStopover) redirectParams.set('stopover', '1')
 
-  const supabase = await createClient()
-  const { error } = await supabase.from('day_plan_cache').upsert(
-    { family_id: familyId, trip_id: tripId, date, mode: 'tagesplan', plan: result.plan, updated_at: new Date().toISOString() },
-    { onConflict: 'family_id,trip_id,date' },
-  )
-  if (error) console.error('[day-planner] cache upsert failed', { date, error: error.message })
+      if (!result.ok) {
+        await failJob(jobId, result.reason)
+        return
+      }
 
-  redirect(`${returnTo}?${redirectParams.toString()}`)
+      const supabase = await createClient()
+      const { error } = await supabase.from('day_plan_cache').upsert(
+        { family_id: familyId, trip_id: tripId, date, mode: 'tagesplan', plan: result.plan, updated_at: new Date().toISOString() },
+        { onConflict: 'family_id,trip_id,date' },
+      )
+      if (error) console.error('[day-planner] cache upsert failed', { date, error: error.message })
+
+      await completeJob(jobId, `${returnTo}?${redirectParams.toString()}`, supabase)
+    } catch (e) {
+      console.error('[day-planner] generateDayPlan fehlgeschlagen:', e instanceof Error ? e.message : e)
+      await failJob(jobId, 'Der Tagesplan ist gerade nicht verfügbar. Bitte später erneut versuchen.')
+    }
+  })
+
+  const pendingParams = new URLSearchParams({ date, job: jobId })
+  if (preferStopover) pendingParams.set('stopover', '1')
+  redirect(`${returnTo}?${pendingParams.toString()}`)
 }

@@ -12,6 +12,9 @@ import { getCachedContentStrategy, generateAndCacheContentStrategy } from "@/lib
 import { regenerateContentStrategy } from "@/lib/actions/content-strategy-actions";
 import { cleanupExpiredContentSessionPhotos } from "@/lib/content-session-cleanup";
 import { cleanupExpiredReelVideos } from "@/lib/reel-video-cleanup";
+import { loadJob } from "@/lib/ai-generation-jobs";
+import { PendingGenerationView } from "@/components/PendingGenerationView";
+import { Banner } from "@/components/Banner";
 
 const STEPS = [
   { Icon: MapPin, label: "Format & Reise wählen" },
@@ -47,9 +50,29 @@ function resolveStrategyEntryHref(contentType: string): string {
   return "/content-studio/session/new?format=carousel";
 }
 
-export default async function ContentStudioPage() {
+export default async function ContentStudioPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ job?: string }>;
+}) {
+  const { job: jobId } = await searchParams;
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
+
+  // §"KI-Aufrufe hintergrundfest machen": "Andere Strategie"-Regenerierung
+  // läuft jetzt im Hintergrund -- kompakter Warte-/Fehlerhinweis zusätzlich
+  // zum bestehenden Seiteninhalt (keine Vollseiten-Ersetzung, da dieser Hub
+  // viel eigenständig nutzbaren Inhalt hat).
+  const job = jobId ? await loadJob(jobId) : null;
+  const jobStatusBanner = job?.status === "pending" ? (
+    <PendingGenerationView
+      jobId={job.id}
+      pendingLabel="LUMI erstellt eine neue Strategie im Hintergrund … Ihr könnt die App währenddessen schließen."
+      fallbackPath="/content-studio"
+    />
+  ) : job?.status === "failed" ? (
+    <Banner variant="error">{job.errorMessage ?? "Etwas ist schiefgelaufen. Bitte erneut versuchen."}</Banner>
+  ) : null;
 
   // §"Kontrollierter Cleanup beim Öffnen des Content Studios" -- zusätzliche
   // Absicherung neben dem Vercel-Cron (app/api/cron/cleanup-content-sessions),
@@ -156,6 +179,8 @@ export default async function ContentStudioPage() {
             Content-Fahrplan
           </Link>
         </div>
+
+        {jobStatusBanner && <div className="mb-6">{jobStatusBanner}</div>}
 
         {strategyContext && strategy && (
           <div className="rounded-xl p-6 mb-6" style={{ background: "var(--surface)", border: "1px solid var(--accent)" }}>

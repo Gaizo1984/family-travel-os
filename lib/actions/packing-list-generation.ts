@@ -2,6 +2,7 @@
 
 import OpenAI from 'openai'
 import { redirect } from 'next/navigation'
+import { after } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getFamily } from '@/lib/family'
 import { ageAtDate } from '@/lib/family-dna'
@@ -10,6 +11,7 @@ import { getWeatherForLocation, formatDailyWeatherSummary } from '@/lib/weather'
 import { loadRelevantMemories } from '@/lib/family-memories'
 import { loadPackingItems } from '@/lib/packing-list'
 import { computeTripRequirements } from '@/lib/travel-requirements'
+import { createJob, completeJob, failJob } from '@/lib/ai-generation-jobs'
 import {
   buildPackingPrompt, parseGeneratedItems, computeRegenerationDiff, needsCheckFlagToPersisted,
   buildReadyPassportPersonKeys, initialStatusForItem, reasoningWithReadinessNotice,
@@ -71,111 +73,133 @@ export async function generatePackingList(formData: FormData) {
     .maybeSingle()
   if (!trip) redirect(packingPath(slug))
 
-  const [{ data: memberRows }, { data: stagesRaw }, { data: bookingsRaw }, confirmedMemories] = await Promise.all([
-    supabase.from('trip_members').select('persons ( id, name, birth_date, is_minor )').eq('trip_id', tripId),
-    supabase.from('stages').select('title, location, start_date, end_date, nights, accommodation, is_transit').eq('trip_id', tripId).order('sort_order'),
-    supabase.from('bookings').select('type, title').eq('trip_id', tripId).in('type', ['activity', 'restaurant']).neq('status', 'cancelled'),
-    loadRelevantMemories(familyId, ['packing']),
-  ])
+  // §"KI-Aufrufe hintergrundfest machen" (Nutzervorgabe): Job sofort
+  // anlegen und redirecten -- die eigentliche Arbeit (Kontext sammeln,
+  // KI-Aufruf, Schreiben) läuft danach über after() weiter, exakt das
+  // in lib/actions/memories.ts etablierte Prinzip, verallgemeinert auf
+  // ai_generation_jobs.
+  const jobId = await createJob(familyId, 'packing_list_generate', supabase)
 
-  const participants = (memberRows ?? [])
-    .map((m) => m.persons as unknown as { id: string; name: string; birth_date: string | null; is_minor: boolean } | null)
-    .filter((p): p is { id: string; name: string; birth_date: string | null; is_minor: boolean } => Boolean(p))
-    .map((p) => ({ id: p.id, name: p.name, ageAtTrip: trip.start_date ? ageAtDate(p.birth_date, trip.start_date) : ageAtDate(p.birth_date, todayIsoInFamilyTimezone()), isMinor: p.is_minor }))
+  after(async () => {
+    try {
+      const [{ data: memberRows }, { data: stagesRaw }, { data: bookingsRaw }, confirmedMemories] = await Promise.all([
+        supabase.from('trip_members').select('persons ( id, name, birth_date, is_minor )').eq('trip_id', tripId),
+        supabase.from('stages').select('title, location, start_date, end_date, nights, accommodation, is_transit').eq('trip_id', tripId).order('sort_order'),
+        supabase.from('bookings').select('type, title').eq('trip_id', tripId).in('type', ['activity', 'restaurant']).neq('status', 'cancelled'),
+        loadRelevantMemories(familyId, ['packing']),
+      ])
 
-  const stages = stagesRaw ?? []
-  const nonTransitAccommodationStages = stages.filter((s) => !s.is_transit && s.accommodation)
-  const stageSummaries = stages.map((s) => `- ${s.title}${s.location ? ` (${s.location})` : ''}${s.nights ? `, ${s.nights} Nächte` : ''}${s.accommodation ? `, Unterkunft: ${s.accommodation}` : ''}`)
+      const participants = (memberRows ?? [])
+        .map((m) => m.persons as unknown as { id: string; name: string; birth_date: string | null; is_minor: boolean } | null)
+        .filter((p): p is { id: string; name: string; birth_date: string | null; is_minor: boolean } => Boolean(p))
+        .map((p) => ({ id: p.id, name: p.name, ageAtTrip: trip.start_date ? ageAtDate(p.birth_date, trip.start_date) : ageAtDate(p.birth_date, todayIsoInFamilyTimezone()), isMinor: p.is_minor }))
 
-  let weatherSummary: string | null = null
-  const todayIso = todayIsoInFamilyTimezone()
-  if (trip.start_date) {
-    const daysUntilStart = Math.round((new Date(trip.start_date + 'T00:00:00Z').getTime() - new Date(todayIso + 'T00:00:00Z').getTime()) / 86400000)
-    // §"Wetter-Vorhersagefenster passt nicht zur üblichen Packlisten-
-    // Erstellungszeit" (Architekturplan-Risiko): nur bei einer echten
-    // Vorhersage für die Reisetage source:'wetter' ansetzen -- sonst bleibt
-    // weatherSummary null und der Prompt fällt auf eine klar gekennzeichnete
-    // Schätzung zurück (siehe buildPackingPrompt).
-    if (daysUntilStart >= 0 && daysUntilStart <= 4) {
-      const candidates = [
-        ...nonTransitAccommodationStages.map((s) => ({ query: s.accommodation as string })),
-        ...stages.filter((s) => !s.is_transit).map((s) => ({ query: s.location ?? s.title })),
-        { query: trip.title },
-      ]
-      try {
-        const weather = await getWeatherForLocation(candidates)
-        if (weather) weatherSummary = weather.daily.slice(0, Math.max(1, 5 - daysUntilStart)).map((d) => formatDailyWeatherSummary(d)).join(' ')
-      } catch {
-        // Wetter bleibt optionale Anreicherung, siehe lib/weather.ts -- kein Abbruch der Generierung.
+      const stages = stagesRaw ?? []
+      const nonTransitAccommodationStages = stages.filter((s) => !s.is_transit && s.accommodation)
+      const stageSummaries = stages.map((s) => `- ${s.title}${s.location ? ` (${s.location})` : ''}${s.nights ? `, ${s.nights} Nächte` : ''}${s.accommodation ? `, Unterkunft: ${s.accommodation}` : ''}`)
+
+      let weatherSummary: string | null = null
+      const todayIso = todayIsoInFamilyTimezone()
+      if (trip.start_date) {
+        const daysUntilStart = Math.round((new Date(trip.start_date + 'T00:00:00Z').getTime() - new Date(todayIso + 'T00:00:00Z').getTime()) / 86400000)
+        // §"Wetter-Vorhersagefenster passt nicht zur üblichen Packlisten-
+        // Erstellungszeit" (Architekturplan-Risiko): nur bei einer echten
+        // Vorhersage für die Reisetage source:'wetter' ansetzen -- sonst bleibt
+        // weatherSummary null und der Prompt fällt auf eine klar gekennzeichnete
+        // Schätzung zurück (siehe buildPackingPrompt).
+        if (daysUntilStart >= 0 && daysUntilStart <= 4) {
+          const candidates = [
+            ...nonTransitAccommodationStages.map((s) => ({ query: s.accommodation as string })),
+            ...stages.filter((s) => !s.is_transit).map((s) => ({ query: s.location ?? s.title })),
+            { query: trip.title },
+          ]
+          try {
+            const weather = await getWeatherForLocation(candidates)
+            if (weather) weatherSummary = weather.daily.slice(0, Math.max(1, 5 - daysUntilStart)).map((d) => formatDailyWeatherSummary(d)).join(' ')
+          } catch {
+            // Wetter bleibt optionale Anreicherung, siehe lib/weather.ts -- kein Abbruch der Generierung.
+          }
+        }
       }
+
+      const activityTitles = (bookingsRaw ?? []).map((b) => b.title).filter((t): t is string => Boolean(t))
+
+      const context: PackingGenerationContext = {
+        tripTitle: trip.title,
+        participants,
+        stageSummaries,
+        hotelChangeCount: nonTransitAccommodationStages.length,
+        weatherSummary,
+        activityTitles,
+        confirmedMemories: confirmedMemories.map((m) => m.summary),
+        followUp,
+      }
+
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+      const response = await openai.responses.create({
+        model: OPENAI_MODEL_PACKING_LIST,
+        reasoning: { effort: OPENAI_REASONING_PACKING_LIST },
+        input: [{ role: 'user', content: [{ type: 'input_text', text: buildPackingPrompt(context) }] }],
+        text: { format: { type: 'json_schema', name: 'packing_list', schema: PACKING_ITEM_SCHEMA, strict: true } },
+      })
+      const parsedItems = parseGeneratedItems(JSON.parse(response.output_text))
+
+      if (parsedItems.length === 0) {
+        await failJob(jobId, 'Es konnten keine Vorschläge erzeugt werden. Bitte erneut versuchen.', supabase)
+        return
+      }
+
+      const existingItems = await loadPackingItems(supabase, tripId)
+      const hasExistingGenerated = existingItems.some((i) => i.sourceKey !== null)
+
+      if (!hasExistingGenerated) {
+        // §"Erststart: reines Einfügen, noch kein Abgleich nötig" (Architekturplan) -- keine bestehenden KI-Zeilen, mit denen kollidiert werden könnte.
+        const personIdByName = new Map(participants.map((p) => [p.name.toLowerCase(), p.id]))
+        // §"Reisepässe können bereits abgehakt sein, wenn diese in der App
+        // hinterlegt und aktuell sind" (Nutzer-Feedback): dieselbe Travel-
+        // Requirements-Engine wie Ready to Travel, keine zweite Prüfung.
+        const requirements = await computeTripRequirements(tripId)
+        const readyPassportPersonKeys = buildReadyPassportPersonKeys(requirements, participants)
+        const rows = parsedItems.map((item, index) => {
+          const status = initialStatusForItem(item, readyPassportPersonKeys)
+          return {
+            trip_id: tripId,
+            person_id: item.personKey.toLowerCase() === 'gemeinsam' ? null : (personIdByName.get(item.personKey.toLowerCase()) ?? null),
+            label: item.label, category: item.category, quantity: item.quantity,
+            priority: item.priority, is_last_minute: item.isLastMinute, needs_check: needsCheckFlagToPersisted(item.needsCheckFlag),
+            reasoning: reasoningWithReadinessNotice(item.reasoning, status === 'eingepackt'),
+            source: item.source, source_key: item.sourceKey,
+            status, luggage_assignment: 'unassigned', sort_order: index,
+          }
+        })
+        const { error: insertError } = await supabase.from('packing_items').insert(rows)
+        if (insertError) {
+          console.error('[packing-list-generation] Insert fehlgeschlagen:', insertError.message)
+          await failJob(jobId, 'Die Packliste konnte nicht gespeichert werden. Bitte erneut versuchen.', supabase)
+          return
+        }
+        await completeJob(jobId, packingPath(slug), supabase)
+        return
+      }
+
+      // §Aktualisierung: Entwurf zwischenspeichern, Diff-Ansicht entscheidet über die Übernahme (siehe app/(app)/trips/[id]/packing/diff/page.tsx).
+      const { error: draftError } = await supabase.from('packing_list_drafts').upsert(
+        { trip_id: tripId, family_id: familyId, items: parsedItems, created_at: new Date().toISOString() },
+        { onConflict: 'trip_id' },
+      )
+      if (draftError) {
+        console.error('[packing-list-generation] Entwurf-Upsert fehlgeschlagen:', draftError.message)
+        await failJob(jobId, 'Die aktualisierte Packliste konnte nicht gespeichert werden. Bitte erneut versuchen.', supabase)
+        return
+      }
+      await completeJob(jobId, `${packingPath(slug)}/diff`, supabase)
+    } catch (e) {
+      console.error('[packing-list-generation] KI-Aufruf fehlgeschlagen:', e instanceof Error ? e.message : e)
+      await failJob(jobId, 'Die Packlisten-Erstellung ist gerade nicht verfügbar. Bitte später erneut versuchen.', supabase)
     }
-  }
+  })
 
-  const activityTitles = (bookingsRaw ?? []).map((b) => b.title).filter((t): t is string => Boolean(t))
-
-  const context: PackingGenerationContext = {
-    tripTitle: trip.title,
-    participants,
-    stageSummaries,
-    hotelChangeCount: nonTransitAccommodationStages.length,
-    weatherSummary,
-    activityTitles,
-    confirmedMemories: confirmedMemories.map((m) => m.summary),
-    followUp,
-  }
-
-  let parsedItems
-  try {
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-    const response = await openai.responses.create({
-      model: OPENAI_MODEL_PACKING_LIST,
-      reasoning: { effort: OPENAI_REASONING_PACKING_LIST },
-      input: [{ role: 'user', content: [{ type: 'input_text', text: buildPackingPrompt(context) }] }],
-      text: { format: { type: 'json_schema', name: 'packing_list', schema: PACKING_ITEM_SCHEMA, strict: true } },
-    })
-    parsedItems = parseGeneratedItems(JSON.parse(response.output_text))
-  } catch (e) {
-    console.error('[packing-list-generation] KI-Aufruf fehlgeschlagen:', e instanceof Error ? e.message : e)
-    redirect(`${generatePath(slug)}?error=${encodeURIComponent('Die Packlisten-Erstellung ist gerade nicht verfügbar. Bitte später erneut versuchen.')}`)
-  }
-
-  if (parsedItems.length === 0) {
-    redirect(`${generatePath(slug)}?error=${encodeURIComponent('Es konnten keine Vorschläge erzeugt werden.')}`)
-  }
-
-  const existingItems = await loadPackingItems(supabase, tripId)
-  const hasExistingGenerated = existingItems.some((i) => i.sourceKey !== null)
-
-  if (!hasExistingGenerated) {
-    // §"Erststart: reines Einfügen, noch kein Abgleich nötig" (Architekturplan) -- keine bestehenden KI-Zeilen, mit denen kollidiert werden könnte.
-    const personIdByName = new Map(participants.map((p) => [p.name.toLowerCase(), p.id]))
-    // §"Reisepässe können bereits abgehakt sein, wenn diese in der App
-    // hinterlegt und aktuell sind" (Nutzer-Feedback): dieselbe Travel-
-    // Requirements-Engine wie Ready to Travel, keine zweite Prüfung.
-    const requirements = await computeTripRequirements(tripId)
-    const readyPassportPersonKeys = buildReadyPassportPersonKeys(requirements, participants)
-    const rows = parsedItems.map((item, index) => {
-      const status = initialStatusForItem(item, readyPassportPersonKeys)
-      return {
-        trip_id: tripId,
-        person_id: item.personKey.toLowerCase() === 'gemeinsam' ? null : (personIdByName.get(item.personKey.toLowerCase()) ?? null),
-        label: item.label, category: item.category, quantity: item.quantity,
-        priority: item.priority, is_last_minute: item.isLastMinute, needs_check: needsCheckFlagToPersisted(item.needsCheckFlag),
-        reasoning: reasoningWithReadinessNotice(item.reasoning, status === 'eingepackt'),
-        source: item.source, source_key: item.sourceKey,
-        status, luggage_assignment: 'unassigned', sort_order: index,
-      }
-    })
-    await supabase.from('packing_items').insert(rows)
-    redirect(packingPath(slug))
-  }
-
-  // §Aktualisierung: Entwurf zwischenspeichern, Diff-Ansicht entscheidet über die Übernahme (siehe app/(app)/trips/[id]/packing/diff/page.tsx).
-  await supabase.from('packing_list_drafts').upsert(
-    { trip_id: tripId, family_id: familyId, items: parsedItems, created_at: new Date().toISOString() },
-    { onConflict: 'trip_id' },
-  )
-  redirect(`${packingPath(slug)}/diff`)
+  redirect(`${packingPath(slug)}?job=${jobId}`)
 }
 
 /** §"Nichts wird geschrieben, bevor der zweite Klick erfolgt" (Architekturplan): wendet nur die vom Nutzer bestätigte Teilmenge des Diffs an. */

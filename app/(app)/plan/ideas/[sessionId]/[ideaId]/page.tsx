@@ -12,6 +12,14 @@ import { Banner } from "@/components/Banner";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
 import { TIER_COLORS, BELOW_STANDARD_COLOR } from "@/components/HotelCard";
 import { HotelResultGroups } from "@/components/HotelResultGroups";
+import { loadJob } from "@/lib/ai-generation-jobs";
+import { PendingGenerationView } from "@/components/PendingGenerationView";
+
+const JOB_PENDING_LABELS: Record<string, string> = {
+  trip_idea_hotel_shortlist: "LUMI sucht und bewertet passende Hotels im Hintergrund … Ihr könnt die App währenddessen schließen.",
+  trip_idea_budget_estimate: "LUMI schätzt das Budget im Hintergrund … Ihr könnt die App währenddessen schließen.",
+  trip_idea_variants_generate: "LUMI entwickelt Reisevarianten im Hintergrund … Ihr könnt die App währenddessen schließen.",
+};
 
 type BudgetBreakdown = {
   currency: string; totalMin: number | null; totalMax: number | null
@@ -158,10 +166,10 @@ export default async function TripIdeaDetailPage({
   searchParams,
 }: {
   params: Promise<{ sessionId: string; ideaId: string }>;
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; job?: string }>;
 }) {
   const { sessionId, ideaId } = await params;
-  const { error } = await searchParams;
+  const { error, job: jobId } = await searchParams;
 
   const supabase = await createClient();
   const { data: idea } = await supabase
@@ -171,6 +179,25 @@ export default async function TripIdeaDetailPage({
     .maybeSingle();
 
   if (!idea) notFound();
+
+  // §"KI-Aufrufe hintergrundfest machen": Hotel-Shortlist/Budget-Schätzung/
+  // Varianten laufen jetzt alle im Hintergrund -- Wartezustand, solange der
+  // jeweilige Job pending ist.
+  const job = jobId ? await loadJob(jobId) : null;
+  if (job && job.status === "pending") {
+    const returnTo = `/plan/ideas/${sessionId}/${ideaId}`;
+    return (
+      <div className="flex-1" style={{ background: "var(--background)" }}>
+        <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-9">
+          <PendingGenerationView
+            jobId={job.id}
+            pendingLabel={JOB_PENDING_LABELS[job.kind] ?? "LUMI arbeitet im Hintergrund … Ihr könnt die App währenddessen schließen."}
+            fallbackPath={returnTo}
+          />
+        </div>
+      </div>
+    );
+  }
 
   const hotelShortlist = (idea.hotel_shortlist as HotelShortlist | null) ?? null;
   const budgetBreakdown = (idea.budget_breakdown as BudgetBreakdown | null) ?? null;
@@ -227,6 +254,11 @@ export default async function TripIdeaDetailPage({
         {error && (
           <Banner variant="error" className="mb-6 px-4 py-3 rounded-lg">
             {error}
+          </Banner>
+        )}
+        {job?.status === "failed" && (
+          <Banner variant="error" className="mb-6 px-4 py-3 rounded-lg">
+            {job.errorMessage ?? "Etwas ist schiefgelaufen. Bitte erneut versuchen."}
           </Banner>
         )}
 

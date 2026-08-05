@@ -11,6 +11,8 @@ import { computeVacationPostExpiresAt, MAX_VACATION_POST_PHOTOS } from "@/lib/va
 import { formatIsoFullDE } from "@/lib/date-utils";
 import { getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
 import { Banner } from "@/components/Banner";
+import { loadJob } from "@/lib/ai-generation-jobs";
+import { PendingGenerationView } from "@/components/PendingGenerationView";
 
 const BUTTON_STYLE: React.CSSProperties = {
   background: "transparent", color: "var(--accent)", border: "1px solid rgba(184,154,94,0.4)",
@@ -40,14 +42,31 @@ export default async function VacationPostPage({
   searchParams,
 }: {
   params: Promise<{ tripId: string }>;
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; job?: string }>;
 }) {
   const { tripId } = await params;
-  const { error } = await searchParams;
+  const { error, job: jobId } = await searchParams;
 
   const supabase = await createClient();
   const { data: trip } = await supabase.from("trips").select("id, title, end_date").eq("id", tripId).maybeSingle();
   if (!trip) notFound();
+
+  // §"KI-Aufrufe hintergrundfest machen": beide Formulare dieser Seite
+  // (Neu kuratieren, Instagram-Beitrag erstellen) laufen jetzt im
+  // Hintergrund weiter -- Wartezustand, solange der jeweilige Job pending ist.
+  const job = jobId ? await loadJob(jobId) : null;
+  if (job && job.status === "pending") {
+    const pendingLabel = job.kind === "vacation_post_content_session"
+      ? "LUMI erstellt den Beitrag im Hintergrund … Ihr könnt die App währenddessen schließen."
+      : "LUMI kuratiert die Auswahl im Hintergrund … Ihr könnt die App währenddessen schließen.";
+    return (
+      <div className="flex-1" style={{ background: "var(--background)" }}>
+        <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-9">
+          <PendingGenerationView jobId={job.id} pendingLabel={pendingLabel} fallbackPath={`/content-studio/urlaubsbeitrag/${tripId}`} />
+        </div>
+      </div>
+    );
+  }
 
   const { data: projectRows } = await supabase
     .from("content_projects").select("id").eq("trip_id", tripId).eq("project_type", "image_check");
@@ -128,6 +147,9 @@ export default async function VacationPostPage({
         </p>
 
         {error && <Banner variant="error">{error}</Banner>}
+        {job?.status === "failed" && (
+          <Banner variant="error">{job.errorMessage ?? "Etwas ist schiefgelaufen. Bitte erneut versuchen."}</Banner>
+        )}
 
         {rows.length === 0 ? (
           <p style={{ color: "var(--muted)", fontSize: "0.82rem" }}>

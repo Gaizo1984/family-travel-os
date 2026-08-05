@@ -1,7 +1,9 @@
 'use server'
 
 import { redirect } from 'next/navigation'
+import { after } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createJob, completeJob, failJob } from '@/lib/ai-generation-jobs'
 import { searchPlaces, distanceKm, isPlainBeach, isLodging, type PlaceResult } from '@/lib/providers/places-provider'
 import { computeRouteMatrix, type RouteMatrixElement } from '@/lib/providers/routes-provider'
 import { ProviderConfigError } from '@/lib/providers/provider-errors'
@@ -142,33 +144,50 @@ export async function loadCategoryPlaces(formData: FormData) {
   const config = getTodayCategoryConfig(category)
   if (!config?.placesCategory || !familyId || !tripId) redirect(returnTo)
 
-  const contextResult = await buildLumiContext(familyId, tripId, new Date().toISOString().slice(0, 10))
-  if (!contextResult.ok) redirect(`${returnTo}?error=${encodeURIComponent(lumiContextErrorMessage(contextResult.reason))}`)
-  const context = contextResult.context
+  const jobId = await createJob(familyId, 'category_places_generate')
 
-  const origin = context.origin
-  const originKey = originKeyFor(origin)
+  after(async () => {
+    try {
+      const contextResult = await buildLumiContext(familyId, tripId, new Date().toISOString().slice(0, 10))
+      if (!contextResult.ok) {
+        await failJob(jobId, lumiContextErrorMessage(contextResult.reason))
+        return
+      }
+      const context = contextResult.context
 
-  const candidates = await searchCategoryCandidates(origin, config)
-  if (!candidates.ok) redirect(`${returnTo}?error=${encodeURIComponent(candidates.message)}`)
+      const origin = context.origin
+      const originKey = originKeyFor(origin)
 
-  const picks = await generateFiveRecommendations({
-    locationLabel: origin.formattedAddress,
-    candidates: candidates.facts.map((r) => ({
-      name: r.place.name, category: config.key,
-      rating: r.place.rating, userRatingCount: r.place.userRatingCount, openNow: r.place.openNow,
-      durationMinutes: r.durationMinutes, distanceKm: r.distanceKm,
-    })),
-    familyDnaText: context.dnaText,
-    // §Bugfix "Alter fälschlich hart auf null gesetzt" (Nutzervorgabe, Familienprofil):
-    // Kategorien-Empfehlungen gelten für HEUTE -- Alter zum heutigen Datum berechnen,
-    // nicht erfinden/weglassen, wo birth_date längst geladen ist.
-    members: context.dna.persons.map((p) => ({ name: p.name, age: ageAtDate(p.birth_date, context.todayIso), isMinor: p.is_minor })),
-    weatherSummary: context.weather ? `${context.weather.currentTemp}°C, ${context.weather.daily[0]?.tempMin}-${context.weather.daily[0]?.tempMax}°C` : null,
+      const candidates = await searchCategoryCandidates(origin, config)
+      if (!candidates.ok) {
+        await failJob(jobId, candidates.message)
+        return
+      }
+
+      const picks = await generateFiveRecommendations({
+        locationLabel: origin.formattedAddress,
+        candidates: candidates.facts.map((r) => ({
+          name: r.place.name, category: config.key,
+          rating: r.place.rating, userRatingCount: r.place.userRatingCount, openNow: r.place.openNow,
+          durationMinutes: r.durationMinutes, distanceKm: r.distanceKm,
+        })),
+        familyDnaText: context.dnaText,
+        // §Bugfix "Alter fälschlich hart auf null gesetzt" (Nutzervorgabe, Familienprofil):
+        // Kategorien-Empfehlungen gelten für HEUTE -- Alter zum heutigen Datum berechnen,
+        // nicht erfinden/weglassen, wo birth_date längst geladen ist.
+        members: context.dna.persons.map((p) => ({ name: p.name, age: ageAtDate(p.birth_date, context.todayIso), isMinor: p.is_minor })),
+        weatherSummary: context.weather ? `${context.weather.currentTemp}°C, ${context.weather.daily[0]?.tempMin}-${context.weather.daily[0]?.tempMax}°C` : null,
+      })
+
+      const items = buildCategoryPlaceItems(candidates.facts, picks)
+      await writeCategoryPlacesCache(familyId, tripId, category, originKey, origin.formattedAddress, origin.source, items)
+
+      await completeJob(jobId, returnTo)
+    } catch (e) {
+      console.error('[category-places] loadCategoryPlaces fehlgeschlagen:', e instanceof Error ? e.message : e)
+      await failJob(jobId, 'Die Suche ist gerade nicht verfügbar. Bitte später erneut versuchen.')
+    }
   })
 
-  const items = buildCategoryPlaceItems(candidates.facts, picks)
-  await writeCategoryPlacesCache(familyId, tripId, category, originKey, origin.formattedAddress, origin.source, items)
-
-  redirect(returnTo)
+  redirect(`${returnTo}?job=${jobId}`)
 }

@@ -19,6 +19,8 @@ import { MemoryCandidateCard } from "@/components/MemoryCandidateCard";
 import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { deleteConciergeMessage, deleteAllConciergeMessages } from "@/lib/actions/concierge-actions";
 import { Trash2 } from "lucide-react";
+import { loadJob, type AiGenerationJob } from "@/lib/ai-generation-jobs";
+import { PendingGenerationView } from "@/components/PendingGenerationView";
 
 /** §"Basierend auf..." (Nutzervorgabe) -- rein deterministisch, keine KI-Vorschau; identischer Wortlaut wie lib/lumi-brain-ai.ts::buildBasisLabel, hier nur als UI-Text ohne KI-Aufruf dupliziert. */
 function basisLabelFor(selectedTrip: TripPickerEntry | null): string {
@@ -239,10 +241,16 @@ function ContextFields({
   );
 }
 
-function StatusNotices({ sp }: { sp: { error?: string; notice?: string } }) {
+function StatusNotices({ sp, job }: { sp: { error?: string; notice?: string }; job: AiGenerationJob | null }) {
   return (
     <>
       {sp.error && <Banner variant="error">{sp.error}</Banner>}
+      {job?.status === "pending" && (
+        <div className="mb-6">
+          <PendingGenerationView jobId={job.id} pendingLabel="LUMI denkt nach … Ihr könnt die App währenddessen schließen." fallbackPath="/concierge" />
+        </div>
+      )}
+      {job?.status === "failed" && <Banner variant="error">{job.errorMessage ?? "Etwas ist schiefgelaufen. Bitte erneut versuchen."}</Banner>}
       {sp.notice && (
         <div className="mb-6 px-4 py-3 rounded-lg" style={{ background: "rgba(184,154,94,0.08)", border: "1px solid rgba(184,154,94,0.25)", color: "var(--muted)", fontSize: "0.75rem", lineHeight: 1.6 }}>
           {sp.notice}
@@ -255,11 +263,12 @@ function StatusNotices({ sp }: { sp: { error?: string; notice?: string } }) {
 export default async function ConciergePage({
   searchParams,
 }: {
-  searchParams: Promise<{ scope?: string; trip?: string; error?: string; notice?: string }>;
+  searchParams: Promise<{ scope?: string; trip?: string; error?: string; notice?: string; job?: string }>;
 }) {
   const sp = await searchParams;
   const { id: familyId } = await getFamily();
   const todayIso = todayIsoInFamilyTimezone();
+  const job = sp.job ? await loadJob(sp.job) : null;
 
   const trips = await listTripsForPicker(familyId);
   const rememberedTripId = await getRememberedTripId(familyId);
@@ -324,7 +333,7 @@ export default async function ConciergePage({
         <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-8">
           {modeSwitch}
           {basisLine}
-          <StatusNotices sp={sp} />
+          <StatusNotices sp={sp} job={job} />
           {memoryCandidatesSection}
 
           <section className="mb-8">
@@ -395,7 +404,7 @@ export default async function ConciergePage({
         <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-8">
           {modeSwitch}
           {basisLine}
-          <StatusNotices sp={sp} />
+          <StatusNotices sp={sp} job={job} />
           {memoryCandidatesSection}
 
           <section className="mb-4">
@@ -480,7 +489,7 @@ export default async function ConciergePage({
       <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-8">
         {modeSwitch}
         {basisLine}
-        <StatusNotices sp={sp} />
+        <StatusNotices sp={sp} job={job} />
         {memoryCandidatesSection}
 
         <section className="mb-8">
