@@ -50,6 +50,8 @@ import { QUICK_ACTIONS, buildConciergeCards } from "@/lib/concierge";
 import type { QuickActionKey, DisplayCard } from "@/lib/concierge";
 import { listTodayConciergeMessages, buildContextFingerprint } from "@/lib/concierge-messages";
 import type { CachedConciergeMessage } from "@/lib/concierge-messages";
+import { loadJob } from "@/lib/ai-generation-jobs";
+import { PendingGenerationView } from "@/components/PendingGenerationView";
 
 type FlightWithPasses = { id: string; title: string; slug: string };
 
@@ -442,13 +444,30 @@ function WeatherStrip({ weather }: { weather: WeatherResult }) {
 export default async function TodayPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; stopover?: string }>;
+  searchParams: Promise<{ error?: string; stopover?: string; job?: string }>;
 }) {
-  const { error, stopover } = await searchParams;
+  const { error, stopover, job: jobId } = await searchParams;
   const preferStopover = stopover === "1";
   const supabase = await createClient();
   const family = await getFamily();
   const familyId = family.id;
+
+  // §"KI-Aufrufe hintergrundfest machen": Tagesplanung UND Frag-LUMI laufen
+  // jetzt im Hintergrund -- ein kompakter Warte-/Fehlerhinweis erscheint
+  // zusätzlich zum bestehenden Seiteninhalt (keine Vollseiten-Ersetzung,
+  // da dieses Dashboard viel eigenständig nutzbaren Inhalt hat).
+  const job = jobId ? await loadJob(jobId) : null;
+  const jobStatusBanner = job?.status === "pending" ? (
+    <PendingGenerationView
+      jobId={job.id}
+      pendingLabel={job.kind === "today_plan_generate"
+        ? "LUMI erstellt die Tagesplanung im Hintergrund … Ihr könnt die App währenddessen schließen."
+        : "LUMI arbeitet an der Antwort im Hintergrund … Ihr könnt die App währenddessen schließen."}
+      fallbackPath="/today"
+    />
+  ) : job?.status === "failed" ? (
+    <Banner variant="error">{job.errorMessage ?? "Etwas ist schiefgelaufen. Bitte erneut versuchen."}</Banner>
+  ) : null;
 
   // §"LUMI/heutiger Tag soll die Zeit vor Ort verwenden, nicht die deutsche
   // Zeit" (Nutzervorgabe, wörtlich): diese vier Werte starten als Bootstrap
@@ -589,6 +608,7 @@ export default async function TodayPage({
 
         <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-8 w-full">
           {error && <Banner variant="error">{error}</Banner>}
+          {jobStatusBanner && <div className="mb-4">{jobStatusBanner}</div>}
           <div style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "12px" }}>
             {dateLabel}
           </div>
@@ -659,6 +679,7 @@ export default async function TodayPage({
         {debriefBanner}
         <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-9 w-full">
           {error && <Banner variant="error">{error}</Banner>}
+          {jobStatusBanner && <div className="mb-4">{jobStatusBanner}</div>}
           <div style={{ color: "var(--accent)", fontSize: "0.55rem", letterSpacing: "0.24em", textTransform: "uppercase", marginBottom: "12px" }}>
             {dateLabel}
           </div>

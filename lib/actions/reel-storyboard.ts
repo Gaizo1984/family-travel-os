@@ -2,8 +2,10 @@
 
 import OpenAI from 'openai'
 import { redirect } from 'next/navigation'
+import { after } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getFamily } from '@/lib/family'
+import { createJob, completeJob, failJob } from '@/lib/ai-generation-jobs'
 import { buildTripDigest } from '@/lib/trip-digest'
 import { assessPhotoBatch } from '@/lib/photo-quality-analysis'
 import { reelMediaLimitFor } from '@/lib/reel-media-limits'
@@ -109,169 +111,192 @@ export async function generateReelStoryboard(formData: FormData) {
   const project = await loadOwnedReelProjectWithDetails(projectId, familyId)
   if (!project || !project.trip_id) redirect(returnTo || '/content-studio')
 
-  const durationSeconds = (project.reel_duration_seconds ?? 30) as 15 | 30 | 60
-  const limit = reelMediaLimitFor(durationSeconds)
-  const reelStyleLabel = REEL_STYLE_LABELS[project.reel_style ?? ''] ?? project.reel_style ?? 'Family Memory'
-
   const supabase = await createClient()
+  const jobId = await createJob(familyId, 'reel_storyboard_generate', supabase)
 
-  const { data: itemsRaw } = await supabase
-    .from('content_reel_media_items')
-    .select('source_type, source_id')
-    .eq('project_id', projectId)
-    .order('sort_order', { ascending: true })
-  const items = itemsRaw ?? []
-  if (items.length < limit.min)
-    redirect(`${returnTo}?error=${encodeURIComponent(`Bitte zuerst mindestens ${limit.min} Medien auswählen.`)}`)
-
-  const photoIds = items.filter((i) => i.source_type === 'photo').map((i) => i.source_id)
-  const videoIds = items.filter((i) => i.source_type === 'video').map((i) => i.source_id)
-
-  const [{ data: photoRowsRaw }, { data: videoRowsRaw }] = await Promise.all([
-    photoIds.length > 0
-      ? supabase.from('memory_photos').select('id, storage_path').in('id', photoIds)
-      : Promise.resolve({ data: [] as { id: string; storage_path: string }[] }),
-    videoIds.length > 0
-      ? supabase.from('memory_videos').select('id, storage_path, thumbnail_storage_path, duration_seconds').in('id', videoIds)
-      : Promise.resolve({ data: [] as { id: string; storage_path: string; thumbnail_storage_path: string | null; duration_seconds: number | null }[] }),
-  ])
-  const photoRows = photoRowsRaw ?? []
-  const videoRows = videoRowsRaw ?? []
-
-  const missingPosterframe = videoRows.some((v) => !v.thumbnail_storage_path)
-  if (missingPosterframe)
-    redirect(`${returnTo}?error=${encodeURIComponent('Für mindestens ein Video fehlt noch das Standbild. Bitte erneut versuchen.')}`)
-
-  const photoById = new Map(photoRows.map((p) => [p.id, p]))
-  const videoById = new Map(videoRows.map((v) => [v.id, v]))
-
-  // §Reihenfolge der ausgewählten Medien (sort_order) bleibt die Ladereihenfolge -- fehlerhafte Einzelmedien brechen den Rest nicht ab.
-  const loaded = await Promise.all(items.map(async (item): Promise<Candidate | null> => {
+  after(async () => {
     try {
-      if (item.source_type === 'photo') {
-        const row = photoById.get(item.source_id)
-        if (!row) return null
-        const { data: signed } = await supabase.storage.from(STORAGE_BUCKET).createSignedUrl(row.storage_path, 60)
-        if (!signed?.signedUrl) return null
-        const res = await fetch(signed.signedUrl)
-        const buffer = Buffer.from(await res.arrayBuffer())
-        return { sourceType: 'photo', sourceId: item.source_id, buffer, mimeType: 'image/webp', durationSeconds: null }
+      const durationSeconds = (project.reel_duration_seconds ?? 30) as 15 | 30 | 60
+      const limit = reelMediaLimitFor(durationSeconds)
+      const reelStyleLabel = REEL_STYLE_LABELS[project.reel_style ?? ''] ?? project.reel_style ?? 'Family Memory'
+
+      const { data: itemsRaw } = await supabase
+        .from('content_reel_media_items')
+        .select('source_type, source_id')
+        .eq('project_id', projectId)
+        .order('sort_order', { ascending: true })
+      const items = itemsRaw ?? []
+      if (items.length < limit.min) {
+        await failJob(jobId, `Bitte zuerst mindestens ${limit.min} Medien auswählen.`, supabase)
+        return
       }
-      const row = videoById.get(item.source_id)
-      if (!row?.thumbnail_storage_path) return null
-      const { data: signed } = await supabase.storage.from(STORAGE_BUCKET).createSignedUrl(row.thumbnail_storage_path, 60)
-      if (!signed?.signedUrl) return null
-      const res = await fetch(signed.signedUrl)
-      const buffer = Buffer.from(await res.arrayBuffer())
-      return { sourceType: 'video', sourceId: item.source_id, buffer, mimeType: 'image/jpeg', durationSeconds: row.duration_seconds }
-    } catch {
-      return null
+
+      const photoIds = items.filter((i) => i.source_type === 'photo').map((i) => i.source_id)
+      const videoIds = items.filter((i) => i.source_type === 'video').map((i) => i.source_id)
+
+      const [{ data: photoRowsRaw }, { data: videoRowsRaw }] = await Promise.all([
+        photoIds.length > 0
+          ? supabase.from('memory_photos').select('id, storage_path').in('id', photoIds)
+          : Promise.resolve({ data: [] as { id: string; storage_path: string }[] }),
+        videoIds.length > 0
+          ? supabase.from('memory_videos').select('id, storage_path, thumbnail_storage_path, duration_seconds').in('id', videoIds)
+          : Promise.resolve({ data: [] as { id: string; storage_path: string; thumbnail_storage_path: string | null; duration_seconds: number | null }[] }),
+      ])
+      const photoRows = photoRowsRaw ?? []
+      const videoRows = videoRowsRaw ?? []
+
+      const missingPosterframe = videoRows.some((v) => !v.thumbnail_storage_path)
+      if (missingPosterframe) {
+        await failJob(jobId, 'Für mindestens ein Video fehlt noch das Standbild. Bitte erneut versuchen.', supabase)
+        return
+      }
+
+      const photoById = new Map(photoRows.map((p) => [p.id, p]))
+      const videoById = new Map(videoRows.map((v) => [v.id, v]))
+
+      // §Reihenfolge der ausgewählten Medien (sort_order) bleibt die Ladereihenfolge -- fehlerhafte Einzelmedien brechen den Rest nicht ab.
+      const loaded = await Promise.all(items.map(async (item): Promise<Candidate | null> => {
+        try {
+          if (item.source_type === 'photo') {
+            const row = photoById.get(item.source_id)
+            if (!row) return null
+            const { data: signed } = await supabase.storage.from(STORAGE_BUCKET).createSignedUrl(row.storage_path, 60)
+            if (!signed?.signedUrl) return null
+            const res = await fetch(signed.signedUrl)
+            const buffer = Buffer.from(await res.arrayBuffer())
+            return { sourceType: 'photo', sourceId: item.source_id, buffer, mimeType: 'image/webp', durationSeconds: null }
+          }
+          const row = videoById.get(item.source_id)
+          if (!row?.thumbnail_storage_path) return null
+          const { data: signed } = await supabase.storage.from(STORAGE_BUCKET).createSignedUrl(row.thumbnail_storage_path, 60)
+          if (!signed?.signedUrl) return null
+          const res = await fetch(signed.signedUrl)
+          const buffer = Buffer.from(await res.arrayBuffer())
+          return { sourceType: 'video', sourceId: item.source_id, buffer, mimeType: 'image/jpeg', durationSeconds: row.duration_seconds }
+        } catch {
+          return null
+        }
+      }))
+      const candidates = loaded.filter((c): c is Candidate => c !== null)
+      if (candidates.length < 2) {
+        await failJob(jobId, 'Die Medien konnten nicht geladen werden. Bitte gleich noch einmal versuchen.', supabase)
+        return
+      }
+
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+      const tripDigest = await buildTripDigest(project.trip_id as string)
+
+      await supabase.from('content_projects').update({ status: 'analyzing' }).eq('id', projectId)
+
+      // ── Stufe 1: Kuratierung über die einzige, gemeinsame Bildbewertungs-Implementierung ──
+      const assessments = await assessPhotoBatch(
+        candidates.map((c) => ({ buffer: c.buffer, mimeType: c.mimeType })),
+        `Bewerte diese Fotos/Video-Standbilder einer Familienreise für ein ${durationSeconds}-Sekunden-Reise-Reel im Stil "${reelStyleLabel}".`,
+      )
+      if (!assessments) {
+        await failJob(jobId, 'Die Bildanalyse ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.', supabase)
+        return
+      }
+
+      const manifestText = candidates
+        .map((c, idx) => {
+          const a = assessments.find((x) => x.photoIndex === idx)
+          const qualityPart = a ? `Qualität ${a.qualityScore}/10${a.isBestMotif ? ', bestes Motiv' : ''}` : 'nicht bewertet'
+          const durationPart = c.sourceType === 'video' && c.durationSeconds != null ? `, Clip-Länge ${Math.round(c.durationSeconds)}s` : ''
+          return `[${idx}] source_type=${c.sourceType} source_id=${c.sourceId} -- ${qualityPart}${durationPart}`
+        })
+        .join('\n')
+
+      const sceneCountGuidance = durationSeconds === 15
+        ? 'Nutze für dieses 15-Sekunden-Reel eine kompakte Szenenzahl (eher wenige, aber starke Szenen).'
+        : durationSeconds === 30
+          ? 'Nutze für dieses 30-Sekunden-Reel eine größere Szenenzahl als bei einem 15-Sekunden-Reel.'
+          : 'Nutze für dieses 60-Sekunden-Reel eine deutlich größere Szenenzahl als bei 15/30 Sekunden -- genug Abwechslung für die volle Länge, ohne einzelne Szenen unnötig zu strecken.'
+
+      const minScenes = Math.min(3, candidates.length)
+      const maxScenes = candidates.length
+
+      const promptText = [
+        `Du bist Video-Regisseur und erstellst ein Storyboard für ein ${durationSeconds}-Sekunden-Reise-Reel (Format 9:16, Stil "${reelStyleLabel}") einer Familie, ausschließlich aus den unten aufgeführten, bereits vorhandenen Fotos/Video-Standbildern.`,
+        FACT_RULE_INSTRUCTION,
+        NO_CLICHE_INSTRUCTION,
+        NO_FACE_ID_INSTRUCTION,
+        sceneCountGuidance,
+        `Die Summe aller "duration_seconds" der Szenen soll ungefähr ${durationSeconds} Sekunden ergeben (kleine Abweichung ist ok).`,
+        'Wähle bewusst eine Teilmenge aus, wenn Medien sich stark ähneln oder redundant wirken -- vermeide Wiederholungen/nahezu identische Motive in direkter Folge.',
+        'Referenziere ausschließlich "source_id"-Werte exakt aus der Liste unten (mit passendem source_type), erfinde keine IDs.',
+        'Bei source_type="video": "video_start_seconds" muss innerhalb der angegebenen Clip-Länge liegen. Bei source_type="photo": "video_start_seconds" ist immer null.',
+        'Begründe Auswahl und Reihenfolge kurz und nachvollziehbar in "reasoning".',
+        'Führe außerdem einen ehrlichen, kurzen Qualitäts-Check durch (quality_check).',
+        `Reisekontext: ${tripDigest}`,
+        `Medienliste (Index, Typ, ID, Bewertung):\n${manifestText}`,
+      ].filter(Boolean).join('\n\n')
+
+      const content: Array<{ type: 'input_text'; text: string } | { type: 'input_image'; image_url: string; detail: 'high' }> = [
+        { type: 'input_text', text: promptText },
+      ]
+      for (const c of candidates) content.push({ type: 'input_image', image_url: `data:${c.mimeType};base64,${c.buffer.toString('base64')}`, detail: 'high' })
+
+      let result: {
+        caption: string; hashtags: string[]; quality_check: unknown; hook: string; outro: string
+        music_direction: string; reasoning: string
+        scenes: Array<{
+          source_type: 'photo' | 'video'; source_id: string; duration_seconds: number
+          transition: string; camera_motion: string; text_overlay: string; video_start_seconds: number | null
+        }>
+      }
+      try {
+        const response = await openai.responses.create({
+          model: OPENAI_MODEL,
+          input: [{ role: 'user', content }],
+          text: { format: { type: 'json_schema', name: 'reel_storyboard', schema: buildStoryboardSchema(minScenes, maxScenes), strict: true } },
+        })
+        result = JSON.parse(response.output_text)
+      } catch {
+        await failJob(jobId, 'Das Storyboard konnte gerade nicht erstellt werden. Bitte gleich noch einmal versuchen.', supabase)
+        return
+      }
+
+      // §Verteidigung gegen halluzinierte IDs: nur Szenen behalten, die auf eine tatsächlich übergebene Kandidaten-ID verweisen.
+      const candidateKeys = new Set(candidates.map((c) => `${c.sourceType}:${c.sourceId}`))
+      const validScenes = result.scenes.filter((s) => candidateKeys.has(`${s.source_type}:${s.source_id}`))
+      if (validScenes.length < 2) {
+        await failJob(jobId, 'Das Storyboard konnte gerade nicht erstellt werden. Bitte gleich noch einmal versuchen.', supabase)
+        return
+      }
+
+      const structure = {
+        reel_style: project.reel_style,
+        reel_duration_seconds: project.reel_duration_seconds,
+        hook: result.hook,
+        scenes: validScenes.map((s) => ({
+          source_type: s.source_type, source_id: s.source_id, duration_seconds: s.duration_seconds,
+          transition: s.transition, camera_motion: s.camera_motion, text_overlay: s.text_overlay,
+          video_start_seconds: s.source_type === 'video' ? s.video_start_seconds : null,
+        })),
+        outro: result.outro,
+        music_direction: result.music_direction,
+        caption: result.caption,
+        hashtags: result.hashtags,
+        quality_check: result.quality_check,
+        reasoning: result.reasoning,
+      }
+
+      const { error: draftError } = await supabase.from('content_drafts').insert({
+        project_id: projectId, draft_type: 'video_reel', structure: structure as Json,
+      })
+      if (draftError) {
+        await failJob(jobId, 'Speicherfehler: ' + draftError.message, supabase)
+        return
+      }
+
+      await supabase.from('content_projects').update({ status: 'draft_created' }).eq('id', projectId)
+      await completeJob(jobId, `${returnTo}?storyboard=1`, supabase)
+    } catch (e) {
+      console.error('[reel-storyboard] generateReelStoryboard fehlgeschlagen:', e instanceof Error ? e.message : e)
+      await failJob(jobId, 'Das Storyboard konnte gerade nicht erstellt werden. Bitte später erneut versuchen.', supabase)
     }
-  }))
-  const candidates = loaded.filter((c): c is Candidate => c !== null)
-  if (candidates.length < 2)
-    redirect(`${returnTo}?error=${encodeURIComponent('Die Medien konnten nicht geladen werden. Bitte gleich noch einmal versuchen.')}`)
-
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-  const tripDigest = await buildTripDigest(project.trip_id)
-
-  await supabase.from('content_projects').update({ status: 'analyzing' }).eq('id', projectId)
-
-  // ── Stufe 1: Kuratierung über die einzige, gemeinsame Bildbewertungs-Implementierung ──
-  const assessments = await assessPhotoBatch(
-    candidates.map((c) => ({ buffer: c.buffer, mimeType: c.mimeType })),
-    `Bewerte diese Fotos/Video-Standbilder einer Familienreise für ein ${durationSeconds}-Sekunden-Reise-Reel im Stil "${reelStyleLabel}".`,
-  )
-  if (!assessments) {
-    redirect(`${returnTo}?error=${encodeURIComponent('Die Bildanalyse ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.')}`)
-  }
-
-  const manifestText = candidates
-    .map((c, idx) => {
-      const a = assessments!.find((x) => x.photoIndex === idx)
-      const qualityPart = a ? `Qualität ${a.qualityScore}/10${a.isBestMotif ? ', bestes Motiv' : ''}` : 'nicht bewertet'
-      const durationPart = c.sourceType === 'video' && c.durationSeconds != null ? `, Clip-Länge ${Math.round(c.durationSeconds)}s` : ''
-      return `[${idx}] source_type=${c.sourceType} source_id=${c.sourceId} -- ${qualityPart}${durationPart}`
-    })
-    .join('\n')
-
-  const sceneCountGuidance = durationSeconds === 15
-    ? 'Nutze für dieses 15-Sekunden-Reel eine kompakte Szenenzahl (eher wenige, aber starke Szenen).'
-    : durationSeconds === 30
-      ? 'Nutze für dieses 30-Sekunden-Reel eine größere Szenenzahl als bei einem 15-Sekunden-Reel.'
-      : 'Nutze für dieses 60-Sekunden-Reel eine deutlich größere Szenenzahl als bei 15/30 Sekunden -- genug Abwechslung für die volle Länge, ohne einzelne Szenen unnötig zu strecken.'
-
-  const minScenes = Math.min(3, candidates.length)
-  const maxScenes = candidates.length
-
-  const promptText = [
-    `Du bist Video-Regisseur und erstellst ein Storyboard für ein ${durationSeconds}-Sekunden-Reise-Reel (Format 9:16, Stil "${reelStyleLabel}") einer Familie, ausschließlich aus den unten aufgeführten, bereits vorhandenen Fotos/Video-Standbildern.`,
-    FACT_RULE_INSTRUCTION,
-    NO_CLICHE_INSTRUCTION,
-    NO_FACE_ID_INSTRUCTION,
-    sceneCountGuidance,
-    `Die Summe aller "duration_seconds" der Szenen soll ungefähr ${durationSeconds} Sekunden ergeben (kleine Abweichung ist ok).`,
-    'Wähle bewusst eine Teilmenge aus, wenn Medien sich stark ähneln oder redundant wirken -- vermeide Wiederholungen/nahezu identische Motive in direkter Folge.',
-    'Referenziere ausschließlich "source_id"-Werte exakt aus der Liste unten (mit passendem source_type), erfinde keine IDs.',
-    'Bei source_type="video": "video_start_seconds" muss innerhalb der angegebenen Clip-Länge liegen. Bei source_type="photo": "video_start_seconds" ist immer null.',
-    'Begründe Auswahl und Reihenfolge kurz und nachvollziehbar in "reasoning".',
-    'Führe außerdem einen ehrlichen, kurzen Qualitäts-Check durch (quality_check).',
-    `Reisekontext: ${tripDigest}`,
-    `Medienliste (Index, Typ, ID, Bewertung):\n${manifestText}`,
-  ].filter(Boolean).join('\n\n')
-
-  const content: Array<{ type: 'input_text'; text: string } | { type: 'input_image'; image_url: string; detail: 'high' }> = [
-    { type: 'input_text', text: promptText },
-  ]
-  for (const c of candidates) content.push({ type: 'input_image', image_url: `data:${c.mimeType};base64,${c.buffer.toString('base64')}`, detail: 'high' })
-
-  let result: {
-    caption: string; hashtags: string[]; quality_check: unknown; hook: string; outro: string
-    music_direction: string; reasoning: string
-    scenes: Array<{
-      source_type: 'photo' | 'video'; source_id: string; duration_seconds: number
-      transition: string; camera_motion: string; text_overlay: string; video_start_seconds: number | null
-    }>
-  }
-  try {
-    const response = await openai.responses.create({
-      model: OPENAI_MODEL,
-      input: [{ role: 'user', content }],
-      text: { format: { type: 'json_schema', name: 'reel_storyboard', schema: buildStoryboardSchema(minScenes, maxScenes), strict: true } },
-    })
-    result = JSON.parse(response.output_text)
-  } catch {
-    redirect(`${returnTo}?error=${encodeURIComponent('Das Storyboard konnte gerade nicht erstellt werden. Bitte gleich noch einmal versuchen.')}`)
-  }
-
-  // §Verteidigung gegen halluzinierte IDs: nur Szenen behalten, die auf eine tatsächlich übergebene Kandidaten-ID verweisen.
-  const candidateKeys = new Set(candidates.map((c) => `${c.sourceType}:${c.sourceId}`))
-  const validScenes = result.scenes.filter((s) => candidateKeys.has(`${s.source_type}:${s.source_id}`))
-  if (validScenes.length < 2)
-    redirect(`${returnTo}?error=${encodeURIComponent('Das Storyboard konnte gerade nicht erstellt werden. Bitte gleich noch einmal versuchen.')}`)
-
-  const structure = {
-    reel_style: project.reel_style,
-    reel_duration_seconds: project.reel_duration_seconds,
-    hook: result.hook,
-    scenes: validScenes.map((s) => ({
-      source_type: s.source_type, source_id: s.source_id, duration_seconds: s.duration_seconds,
-      transition: s.transition, camera_motion: s.camera_motion, text_overlay: s.text_overlay,
-      video_start_seconds: s.source_type === 'video' ? s.video_start_seconds : null,
-    })),
-    outro: result.outro,
-    music_direction: result.music_direction,
-    caption: result.caption,
-    hashtags: result.hashtags,
-    quality_check: result.quality_check,
-    reasoning: result.reasoning,
-  }
-
-  const { error: draftError } = await supabase.from('content_drafts').insert({
-    project_id: projectId, draft_type: 'video_reel', structure: structure as Json,
   })
-  if (draftError) redirect(`${returnTo}?error=${encodeURIComponent('Speicherfehler: ' + draftError.message)}`)
 
-  await supabase.from('content_projects').update({ status: 'draft_created' }).eq('id', projectId)
-  redirect(`${returnTo}?storyboard=1`)
+  redirect(`${returnTo}?job=${jobId}`)
 }

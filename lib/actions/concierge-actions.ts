@@ -2,6 +2,8 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
+import { after } from 'next/server'
+import { createJob, completeJob, failJob } from '@/lib/ai-generation-jobs'
 import {
   QUICK_ACTIONS, buildWhatsMissingAnswer, buildExplainConflictAnswer, buildPlanTomorrowAnswer,
 } from '@/lib/concierge'
@@ -83,192 +85,226 @@ export async function askConcierge(formData: FormData) {
   const tripBoundKeys = ['today_important', 'plan_tomorrow', 'whats_missing', 'explain_conflict']
   if (tripBoundKeys.includes(questionKey) && !ctx.tripId) redirect(ctx.returnTo)
 
-  if (questionKey === 'today_important') {
-    let rec = await getCachedTodayRecommendation(ctx.familyId, ctx.tripId, ctx.forDate)
-    if (!rec) {
-      const dna = await buildFamilyDnaSummary(ctx.familyId)
-      rec = await generateAndCacheTodayRecommendation(
-        ctx.familyId, ctx.tripId, ctx.forDate,
-        {
-          dateLabel: ctx.dateLabel, locationLabel: ctx.locationLabel, weatherSummary: ctx.weatherSummary,
-          familyDnaText: formatFamilyDnaForPrompt(dna, ctx.forDate), knownPlanText: ctx.knownPlanText,
-        },
-        ctx.highlightTitle, null,
-      )
-    }
-    redirect(ctx.returnTo)
-    return
-  }
+  // §"KI-Aufrufe hintergrundfest machen" (Nutzervorgabe): EIN Job pro Aufruf
+  // reicht -- die Verzweigung zwischen deterministischen und KI-basierten
+  // Antworten (today-ai/lumi-brain-ai/concierge-ai) passiert weiterhin
+  // innerhalb dieses einen after()-Blocks, wie im Architekturplan festgelegt.
+  const jobId = await createJob(ctx.familyId, 'concierge_ask')
 
-  if (questionKey === 'plan_tomorrow') {
-    const supabase = await createClient()
-    const { data: trip } = await supabase
-      .from('trips')
-      .select(`
-        start_date, end_date,
-        stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code ),
-        bookings ( id, type, title, provider, status, start_datetime, end_datetime, stage_id, details, created_at ),
-        journey_events ( id, stage_id, date, time, category, title, location, status )
-      `)
-      .eq('id', ctx.tripId)
-      .maybeSingle()
-
-    if (trip) {
-      const stages = sortStagesChronologically((trip.stages ?? []) as StageRow[]) as StageInput[]
-      const bookings = sortBookingsChronologically((trip.bookings ?? []) as BookingRow[]) as TimelineBooking[]
-      const events = (trip.journey_events ?? []) as unknown as TimelineEvent[]
-      const tomorrowIso = addDaysIso(ctx.forDate, 1)
-      const timeline = buildJourneyTimeline({ start_date: trip.start_date, end_date: trip.end_date }, stages, bookings, events)
-      const allDays: TimelineDay[] = timeline.flatMap((seg) => (seg.kind === 'stay' ? seg.days : [seg.day]))
-      const tomorrowDay = allDays.find((d) => d.date === tomorrowIso) ?? null
-
-      const answer = buildPlanTomorrowAnswer(tomorrowDay, stages, tomorrowIso, ctx.tripSlug)
-      await supabase.from('concierge_messages').upsert(
-        {
-          family_id: ctx.familyId, trip_id: ctx.tripId, for_date: ctx.forDate, question_key: questionKey,
-          question_text: questionTextRaw, answer_title: answer.title, answer_body: answer.body,
-          actions: [{ event_title: answer.title, links: answer.links }], context_fingerprint: null,
-          created_at: new Date().toISOString(),
-        },
-        { onConflict: 'family_id,trip_id,for_date,question_key' },
-      )
-    }
-    redirect(ctx.returnTo)
-    return
-  }
-
-  if (questionKey === 'whats_missing' || questionKey === 'explain_conflict') {
-    const supabase = await createClient()
-    const { data: trip } = await supabase.from('trips').select('slug').eq('id', ctx.tripId).maybeSingle()
-    const answer = questionKey === 'whats_missing'
-      ? await buildWhatsMissingAnswer(ctx.tripId, trip?.slug ?? ctx.tripSlug)
-      : await buildExplainConflictAnswer(ctx.tripId)
-
-    await supabase.from('concierge_messages').upsert(
-      {
-        family_id: ctx.familyId, trip_id: ctx.tripId, for_date: ctx.forDate, question_key: questionKey,
-        question_text: questionTextRaw, answer_title: answer.title, answer_body: answer.body,
-        actions: [{ event_title: answer.title, links: answer.links }], context_fingerprint: null,
-        created_at: new Date().toISOString(),
-      },
-      { onConflict: 'family_id,trip_id,for_date,question_key' },
-    )
-    redirect(ctx.returnTo)
-    return
-  }
-
-  // KI-basiert: adjust_weather, find_alternative, Freitext
-  const isFreetext = !QUICK_ACTIONS.some((a) => a.key === questionKey)
-  const effectiveKey = isFreetext ? normalizeQuestionKey(questionTextRaw) : questionKey
-  if (!questionTextRaw) redirect(ctx.returnTo)
-
-  // §"Strukturierte Empfehlungskarten statt Fließtext" (LUMI Intelligence v1,
-  // §7): erkennt eine Freitext-Frage als Kategorie-/Tagesplan-Anfrage und
-  // leitet auf die bereits mit echten Places-/Routes-Daten arbeitende Seite
-  // um -- kein zweiter, paralleler KI-Textpfad für dasselbe Ergebnis.
-  if (isFreetext) {
-    const intent = detectLumiIntent(questionTextRaw)
-    if (intent?.type === 'category') redirect(`/today/category/${intent.category}`)
-    if (intent?.type === 'day_plan') redirect('/today/plan')
-
-    // §"LUMI Brain / Frag LUMI" (Nutzervorgabe): Erklärung/Priorisierung/
-    // Vergleich/Empfehlung auf Basis bereits bestehender Readiness-/Journey-/
-    // Hotel-/Flug-Ergebnisse -- kein zweiter, paralleler Kontext- oder
-    // Readiness-Aufbau (siehe lib/lumi-brain-context.ts::buildLumiBrainContext,
-    // die ausschließlich buildLumiContext/buildTravelWorld wiederverwendet).
-    const brainIntent = detectLumiBrainIntent(questionTextRaw)
-    if (brainIntent) {
-      const limitReached = await isLumiBrainLimitReached(ctx.familyId)
-      if (limitReached) {
-        redirect(`${ctx.returnTo}?error=${encodeURIComponent('Monatliches LUMI-Anfragelimit erreicht -- bitte später erneut versuchen.')}`)
+  after(async () => {
+    try {
+      if (questionKey === 'today_important') {
+        let rec = await getCachedTodayRecommendation(ctx.familyId, ctx.tripId, ctx.forDate)
+        if (!rec) {
+          const dna = await buildFamilyDnaSummary(ctx.familyId)
+          rec = await generateAndCacheTodayRecommendation(
+            ctx.familyId, ctx.tripId, ctx.forDate,
+            {
+              dateLabel: ctx.dateLabel, locationLabel: ctx.locationLabel, weatherSummary: ctx.weatherSummary,
+              familyDnaText: formatFamilyDnaForPrompt(dna, ctx.forDate), knownPlanText: ctx.knownPlanText,
+            },
+            ctx.highlightTitle, null,
+          )
+        }
+        await completeJob(jobId, ctx.returnTo)
+        return
       }
 
-      // §"Automatische Erkennung aus Fragen" (Nutzervorgabe, wörtlich:
-      // "lib/lumi-trip-picker.ts als einzige zentrale Quelle für Reiseauswahl
-      // und Text-Matching verwenden -- keine parallele Matching-Logik in UI
-      // und askConcierge"): dieselbe Liste/Matching-Funktion wie der Picker
-      // in app/(app)/concierge/page.tsx, kein zweiter KI-Aufruf fürs Matching.
-      const basePath = ctx.returnTo.split('?')[0] || '/concierge'
-      const pickerTrips = await listTripsForPicker(ctx.familyId)
-      const textMatches = matchTripsFromText(questionTextRaw, pickerTrips)
+      if (questionKey === 'plan_tomorrow') {
+        const supabase = await createClient()
+        const { data: trip } = await supabase
+          .from('trips')
+          .select(`
+            start_date, end_date,
+            stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code ),
+            bookings ( id, type, title, provider, status, start_datetime, end_datetime, stage_id, details, created_at ),
+            journey_events ( id, stage_id, date, time, category, title, location, status )
+          `)
+          .eq('id', ctx.tripId)
+          .maybeSingle()
 
-      let scope: LumiBrainScope = ctx.tripId ? { mode: 'trip', tripId: ctx.tripId } : { mode: 'general' }
-      let matchedTrip: { id: string; slug: string } | null = null
+        if (trip) {
+          const stages = sortStagesChronologically((trip.stages ?? []) as StageRow[]) as StageInput[]
+          const bookings = sortBookingsChronologically((trip.bookings ?? []) as BookingRow[]) as TimelineBooking[]
+          const events = (trip.journey_events ?? []) as unknown as TimelineEvent[]
+          const tomorrowIso = addDaysIso(ctx.forDate, 1)
+          const timeline = buildJourneyTimeline({ start_date: trip.start_date, end_date: trip.end_date }, stages, bookings, events)
+          const allDays: TimelineDay[] = timeline.flatMap((seg) => (seg.kind === 'stay' ? seg.days : [seg.day]))
+          const tomorrowDay = allDays.find((d) => d.date === tomorrowIso) ?? null
 
-      if (textMatches.length === 1 && textMatches[0].id !== ctx.tripId) {
-        scope = { mode: 'trip', tripId: textMatches[0].id }
-        matchedTrip = textMatches[0]
-      } else if (textMatches.length > 1 && !textMatches.some((t) => t.id === ctx.tripId)) {
-        // §"Bei Mehrdeutigkeit eine Auswahl anbieten, nicht raten" (Nutzervorgabe):
-        // kein Rateversuch -- Hinweis, über den Picker die passende Reise zu wählen.
-        const names = textMatches.map((t) => t.title).join(', ')
-        redirect(`${basePath}?notice=${encodeURIComponent(`Mehrere Reisen passen zur Frage (${names}) -- bitte über "Reise auswählen" die passende Reise wählen.`)}`)
-      }
-
-      const brainContext = await buildLumiBrainContext(ctx.familyId, scope, brainIntent)
-      // §"OpenAI-Ausfall erzeugt verständliche Fehlermeldung" (Nutzervorgabe):
-      // vorher fiel ein Kontext-/Antwortfehler kommentarlos auf den
-      // generischen Freitext-Pfad zurück -- der Nutzer bekam eine andere
-      // Antwortqualität ohne erkennbaren Grund. Jetzt wird das ehrlich
-      // benannt (bestehender ?notice=-Banner-Mechanismus), der Fallback
-      // selbst bleibt unverändert bestehen.
-      let fallbackNotice: string | null = null
-      if (brainContext.ok) {
-        const answer = await generateLumiBrainAnswer({ intent: brainIntent, context: brainContext, questionText: questionTextRaw })
-        if (answer) {
-          await incrementLumiBrainUsage(ctx.familyId)
-          const supabase = await createClient()
-          const effectiveTripId = matchedTrip?.id ?? ctx.tripId
-          const combinedBody = [
-            answer.basisLabel, answer.body,
-            answer.recommendation ? `Empfehlung: ${answer.recommendation}` : null,
-            answer.missingInfo ? `Fehlende Angabe: ${answer.missingInfo}` : null,
-          ].filter(Boolean).join('\n\n')
+          const answer = buildPlanTomorrowAnswer(tomorrowDay, stages, tomorrowIso, ctx.tripSlug)
           await supabase.from('concierge_messages').upsert(
             {
-              family_id: ctx.familyId, trip_id: effectiveTripId || null, for_date: ctx.forDate, question_key: effectiveKey,
-              question_text: questionTextRaw, answer_title: answer.title, answer_body: combinedBody,
+              family_id: ctx.familyId, trip_id: ctx.tripId, for_date: ctx.forDate, question_key: questionKey,
+              question_text: questionTextRaw, answer_title: answer.title, answer_body: answer.body,
               actions: [{ event_title: answer.title, links: answer.links }], context_fingerprint: null,
               created_at: new Date().toISOString(),
             },
             { onConflict: 'family_id,trip_id,for_date,question_key' },
           )
-
-          // §"Frag LUMI darf eine mögliche Erinnerung erkennen, aber nicht
-          // ungefragt speichern" (Nutzervorgabe): legt NUR einen 'pending'-
-          // Kandidaten an, niemals 'confirmed' -- die Seite zeigt ihn als
-          // eigene Bestätigungskarte. "Ablehnung wird respektiert": vor dem
-          // erneuten Vorschlagen wird auf einen bereits abgelehnten,
-          // gleichartigen Kandidaten geprüft.
-          if (answer.memoryCandidate) {
-            const { memoryType, category, summary } = answer.memoryCandidate
-            const alreadyDeclined = await hasDeclinedSimilarMemory(ctx.familyId, category, summary)
-            if (!alreadyDeclined) {
-              await createPendingMemoryCandidate({
-                familyId: ctx.familyId, tripId: effectiveTripId || null,
-                memoryType, category, summary, source: 'concierge_chat',
-              })
-            }
-          }
-
-          if (matchedTrip) {
-            // §"Bei eindeutigem Treffer die UI-Auswahl sichtbar auf die
-            // erkannte Reise umstellen" + "nur für diese Familie speichern"
-            // (Nutzervorgabe): dieselbe familiengebundene Persistenz wie die
-            // manuelle Auswahl im Picker (lib/actions/lumi-trip-selection.ts).
-            await supabase.from('families').update({ last_lumi_trip_id: matchedTrip.id }).eq('id', ctx.familyId)
-            redirect(`${basePath}?trip=${encodeURIComponent(matchedTrip.slug)}`)
-          }
-          redirect(ctx.returnTo)
         }
-        fallbackNotice = 'Die spezialisierte LUMI-Antwort war gerade nicht verfügbar -- hier eine allgemeine Einschätzung.'
-      } else {
-        fallbackNotice = brainContext.message
+        await completeJob(jobId, ctx.returnTo, supabase)
+        return
       }
-      // §"Bei Fehlern immer ehrlich zurückfallen, nie abstürzen": Kontext-/
-      // Antwortfehler fallen bewusst durch auf den bestehenden freien
-      // Fließtext-Pfad unten, statt die Seite scheitern zu lassen -- aber
-      // mit sichtbarem Hinweis statt stillschweigend anderer Antwortqualität.
+
+      if (questionKey === 'whats_missing' || questionKey === 'explain_conflict') {
+        const supabase = await createClient()
+        const { data: trip } = await supabase.from('trips').select('slug').eq('id', ctx.tripId).maybeSingle()
+        const answer = questionKey === 'whats_missing'
+          ? await buildWhatsMissingAnswer(ctx.tripId, trip?.slug ?? ctx.tripSlug)
+          : await buildExplainConflictAnswer(ctx.tripId)
+
+        await supabase.from('concierge_messages').upsert(
+          {
+            family_id: ctx.familyId, trip_id: ctx.tripId, for_date: ctx.forDate, question_key: questionKey,
+            question_text: questionTextRaw, answer_title: answer.title, answer_body: answer.body,
+            actions: [{ event_title: answer.title, links: answer.links }], context_fingerprint: null,
+            created_at: new Date().toISOString(),
+          },
+          { onConflict: 'family_id,trip_id,for_date,question_key' },
+        )
+        await completeJob(jobId, ctx.returnTo, supabase)
+        return
+      }
+
+      // KI-basiert: adjust_weather, find_alternative, Freitext
+      const isFreetext = !QUICK_ACTIONS.some((a) => a.key === questionKey)
+      const effectiveKey = isFreetext ? normalizeQuestionKey(questionTextRaw) : questionKey
+      if (!questionTextRaw) {
+        await completeJob(jobId, ctx.returnTo)
+        return
+      }
+
+      // §"Strukturierte Empfehlungskarten statt Fließtext" (LUMI Intelligence v1,
+      // §7): erkennt eine Freitext-Frage als Kategorie-/Tagesplan-Anfrage und
+      // leitet auf die bereits mit echten Places-/Routes-Daten arbeitende Seite
+      // um -- kein zweiter, paralleler KI-Textpfad für dasselbe Ergebnis.
+      if (isFreetext) {
+        const intent = detectLumiIntent(questionTextRaw)
+        if (intent?.type === 'category') {
+          await completeJob(jobId, `/today/category/${intent.category}`)
+          return
+        }
+        if (intent?.type === 'day_plan') {
+          await completeJob(jobId, '/today/plan')
+          return
+        }
+
+        // §"LUMI Brain / Frag LUMI" (Nutzervorgabe): Erklärung/Priorisierung/
+        // Vergleich/Empfehlung auf Basis bereits bestehender Readiness-/Journey-/
+        // Hotel-/Flug-Ergebnisse -- kein zweiter, paralleler Kontext- oder
+        // Readiness-Aufbau (siehe lib/lumi-brain-context.ts::buildLumiBrainContext,
+        // die ausschließlich buildLumiContext/buildTravelWorld wiederverwendet).
+        const brainIntent = detectLumiBrainIntent(questionTextRaw)
+        if (brainIntent) {
+          const limitReached = await isLumiBrainLimitReached(ctx.familyId)
+          if (limitReached) {
+            await completeJob(jobId, `${ctx.returnTo}?error=${encodeURIComponent('Monatliches LUMI-Anfragelimit erreicht -- bitte später erneut versuchen.')}`)
+            return
+          }
+
+          // §"Automatische Erkennung aus Fragen" (Nutzervorgabe, wörtlich:
+          // "lib/lumi-trip-picker.ts als einzige zentrale Quelle für Reiseauswahl
+          // und Text-Matching verwenden -- keine parallele Matching-Logik in UI
+          // und askConcierge"): dieselbe Liste/Matching-Funktion wie der Picker
+          // in app/(app)/concierge/page.tsx, kein zweiter KI-Aufruf fürs Matching.
+          const basePath = ctx.returnTo.split('?')[0] || '/concierge'
+          const pickerTrips = await listTripsForPicker(ctx.familyId)
+          const textMatches = matchTripsFromText(questionTextRaw, pickerTrips)
+
+          let scope: LumiBrainScope = ctx.tripId ? { mode: 'trip', tripId: ctx.tripId } : { mode: 'general' }
+          let matchedTrip: { id: string; slug: string } | null = null
+
+          if (textMatches.length === 1 && textMatches[0].id !== ctx.tripId) {
+            scope = { mode: 'trip', tripId: textMatches[0].id }
+            matchedTrip = textMatches[0]
+          } else if (textMatches.length > 1 && !textMatches.some((t) => t.id === ctx.tripId)) {
+            // §"Bei Mehrdeutigkeit eine Auswahl anbieten, nicht raten" (Nutzervorgabe):
+            // kein Rateversuch -- Hinweis, über den Picker die passende Reise zu wählen.
+            const names = textMatches.map((t) => t.title).join(', ')
+            await completeJob(jobId, `${basePath}?notice=${encodeURIComponent(`Mehrere Reisen passen zur Frage (${names}) -- bitte über "Reise auswählen" die passende Reise wählen.`)}`)
+            return
+          }
+
+          const brainContext = await buildLumiBrainContext(ctx.familyId, scope, brainIntent)
+          // §"OpenAI-Ausfall erzeugt verständliche Fehlermeldung" (Nutzervorgabe):
+          // vorher fiel ein Kontext-/Antwortfehler kommentarlos auf den
+          // generischen Freitext-Pfad zurück -- der Nutzer bekam eine andere
+          // Antwortqualität ohne erkennbaren Grund. Jetzt wird das ehrlich
+          // benannt (bestehender ?notice=-Banner-Mechanismus), der Fallback
+          // selbst bleibt unverändert bestehen.
+          let fallbackNotice: string | null = null
+          if (brainContext.ok) {
+            const answer = await generateLumiBrainAnswer({ intent: brainIntent, context: brainContext, questionText: questionTextRaw })
+            if (answer) {
+              await incrementLumiBrainUsage(ctx.familyId)
+              const supabase = await createClient()
+              const effectiveTripId = matchedTrip?.id ?? ctx.tripId
+              const combinedBody = [
+                answer.basisLabel, answer.body,
+                answer.recommendation ? `Empfehlung: ${answer.recommendation}` : null,
+                answer.missingInfo ? `Fehlende Angabe: ${answer.missingInfo}` : null,
+              ].filter(Boolean).join('\n\n')
+              await supabase.from('concierge_messages').upsert(
+                {
+                  family_id: ctx.familyId, trip_id: effectiveTripId || null, for_date: ctx.forDate, question_key: effectiveKey,
+                  question_text: questionTextRaw, answer_title: answer.title, answer_body: combinedBody,
+                  actions: [{ event_title: answer.title, links: answer.links }], context_fingerprint: null,
+                  created_at: new Date().toISOString(),
+                },
+                { onConflict: 'family_id,trip_id,for_date,question_key' },
+              )
+
+              // §"Frag LUMI darf eine mögliche Erinnerung erkennen, aber nicht
+              // ungefragt speichern" (Nutzervorgabe): legt NUR einen 'pending'-
+              // Kandidaten an, niemals 'confirmed' -- die Seite zeigt ihn als
+              // eigene Bestätigungskarte. "Ablehnung wird respektiert": vor dem
+              // erneuten Vorschlagen wird auf einen bereits abgelehnten,
+              // gleichartigen Kandidaten geprüft.
+              if (answer.memoryCandidate) {
+                const { memoryType, category, summary } = answer.memoryCandidate
+                const alreadyDeclined = await hasDeclinedSimilarMemory(ctx.familyId, category, summary)
+                if (!alreadyDeclined) {
+                  await createPendingMemoryCandidate({
+                    familyId: ctx.familyId, tripId: effectiveTripId || null,
+                    memoryType, category, summary, source: 'concierge_chat',
+                  })
+                }
+              }
+
+              if (matchedTrip) {
+                // §"Bei eindeutigem Treffer die UI-Auswahl sichtbar auf die
+                // erkannte Reise umstellen" + "nur für diese Familie speichern"
+                // (Nutzervorgabe): dieselbe familiengebundene Persistenz wie die
+                // manuelle Auswahl im Picker (lib/actions/lumi-trip-selection.ts).
+                await supabase.from('families').update({ last_lumi_trip_id: matchedTrip.id }).eq('id', ctx.familyId)
+                await completeJob(jobId, `${basePath}?trip=${encodeURIComponent(matchedTrip.slug)}`, supabase)
+                return
+              }
+              await completeJob(jobId, ctx.returnTo, supabase)
+              return
+            }
+            fallbackNotice = 'Die spezialisierte LUMI-Antwort war gerade nicht verfügbar -- hier eine allgemeine Einschätzung.'
+          } else {
+            fallbackNotice = brainContext.message
+          }
+          // §"Bei Fehlern immer ehrlich zurückfallen, nie abstürzen": Kontext-/
+          // Antwortfehler fallen bewusst durch auf den bestehenden freien
+          // Fließtext-Pfad unten, statt die Seite scheitern zu lassen -- aber
+          // mit sichtbarem Hinweis statt stillschweigend anderer Antwortqualität.
+          await generateAndCacheConciergeMessage(
+            ctx.familyId, ctx.tripId || null, ctx.forDate, effectiveKey, questionTextRaw,
+            {
+              dateLabel: ctx.dateLabel, locationLabel: ctx.locationLabel, weatherSummary: ctx.weatherSummary,
+              knownPlanText: ctx.knownPlanText, highlightTitle: ctx.highlightTitle, memberNames: ctx.memberNames,
+            },
+            false,
+          )
+          await completeJob(jobId, appendQueryParam(ctx.returnTo, 'notice', fallbackNotice))
+          return
+        }
+      }
+
       await generateAndCacheConciergeMessage(
         ctx.familyId, ctx.tripId || null, ctx.forDate, effectiveKey, questionTextRaw,
         {
@@ -277,19 +313,14 @@ export async function askConcierge(formData: FormData) {
         },
         false,
       )
-      redirect(appendQueryParam(ctx.returnTo, 'notice', fallbackNotice))
+      await completeJob(jobId, ctx.returnTo)
+    } catch (e) {
+      console.error('[concierge-actions] askConcierge fehlgeschlagen:', e instanceof Error ? e.message : e)
+      await failJob(jobId, 'LUMI ist gerade nicht verfügbar. Bitte später erneut versuchen.')
     }
-  }
+  })
 
-  await generateAndCacheConciergeMessage(
-    ctx.familyId, ctx.tripId || null, ctx.forDate, effectiveKey, questionTextRaw,
-    {
-      dateLabel: ctx.dateLabel, locationLabel: ctx.locationLabel, weatherSummary: ctx.weatherSummary,
-      knownPlanText: ctx.knownPlanText, highlightTitle: ctx.highlightTitle, memberNames: ctx.memberNames,
-    },
-    false,
-  )
-  redirect(ctx.returnTo)
+  redirect(`${appendQueryParam(ctx.returnTo, 'job', jobId)}`)
 }
 
 /** §"Hinweis 'Empfehlung aktualisieren' anzeigen statt automatisch neu zu rechnen": bewusster, manueller Regenerier-Schritt. */

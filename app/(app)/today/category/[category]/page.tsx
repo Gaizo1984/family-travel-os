@@ -15,6 +15,13 @@ import { commitPlaceToJourney } from "@/lib/actions/lumi-journey";
 import { Banner } from "@/components/Banner";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
 import type { StageInput, TimelineBooking } from "@/lib/journey";
+import { loadJob } from "@/lib/ai-generation-jobs";
+import { PendingGenerationView } from "@/components/PendingGenerationView";
+
+const CATEGORY_JOB_PENDING_LABELS: Record<string, string> = {
+  category_suggestion_generate: "LUMI erstellt einen Vorschlag im Hintergrund … Ihr könnt die App währenddessen schließen.",
+  category_places_generate: "LUMI sucht passende Orte im Hintergrund … Ihr könnt die App währenddessen schließen.",
+};
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
@@ -45,10 +52,10 @@ export default async function TodayCategoryPage({
   searchParams,
 }: {
   params: Promise<{ category: string }>;
-  searchParams: Promise<{ error?: string; saved?: string }>;
+  searchParams: Promise<{ error?: string; saved?: string; job?: string }>;
 }) {
   const { category } = await params;
-  const { error, saved } = await searchParams;
+  const { error, saved, job: jobId } = await searchParams;
 
   // §"Vollständig generisch, keine eigene Seite pro Kategorie": diese Seite
   // rendert ausschließlich aus der aufgelösten Config (lib/today-categories.ts).
@@ -57,6 +64,23 @@ export default async function TodayCategoryPage({
   if (!config) notFound();
 
   const returnTo = `/today/category/${category}`;
+
+  // §"KI-Aufrufe hintergrundfest machen": Vorschlag/Orte-Suche laufen jetzt
+  // im Hintergrund -- Wartezustand, solange der jeweilige Job pending ist.
+  const job = jobId ? await loadJob(jobId) : null;
+  if (job && job.status === "pending") {
+    return (
+      <div className="flex-1" style={{ background: "var(--background)" }}>
+        <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-9">
+          <PendingGenerationView
+            jobId={job.id}
+            pendingLabel={CATEGORY_JOB_PENDING_LABELS[job.kind] ?? "LUMI arbeitet im Hintergrund … Ihr könnt die App währenddessen schließen."}
+            fallbackPath={returnTo}
+          />
+        </div>
+      </div>
+    );
+  }
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
   const todayIso = todayIsoInFamilyTimezone();
@@ -138,6 +162,9 @@ export default async function TodayCategoryPage({
         <p className="mb-8" style={{ color: "var(--muted)", fontSize: "0.78rem" }}>📍 {context.locationLabel}</p>
 
         {error && <Banner variant="error">{error}</Banner>}
+        {job?.status === "failed" && (
+          <Banner variant="error">{job.errorMessage ?? "Etwas ist schiefgelaufen. Bitte erneut versuchen."}</Banner>
+        )}
         {saved && <Banner variant="success">Gemerkt -- in der Journey unter „Idee" zu finden.</Banner>}
 
         {config.placesCategory ? (

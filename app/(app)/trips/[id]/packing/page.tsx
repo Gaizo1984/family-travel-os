@@ -3,6 +3,9 @@ import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
+import { loadJob } from "@/lib/ai-generation-jobs";
+import { PendingGenerationView } from "@/components/PendingGenerationView";
+import { Banner } from "@/components/Banner";
 import { loadTripParticipantOptions } from "@/lib/trip-participants";
 import {
   loadPackingItems, loadPackingLuggage, computePackingProgress, isPreDepartureItem, isLastMinuteOpenItem, PRE_DEPARTURE_WINDOW_DAYS,
@@ -203,10 +206,10 @@ export default async function PackingListPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ person?: string; category?: string; quick?: string }>;
+  searchParams: Promise<{ person?: string; category?: string; quick?: string; job?: string }>;
 }) {
   const { id } = await params;
-  const { person: personFilter, category: categoryFilter, quick: quickFilter } = await searchParams;
+  const { person: personFilter, category: categoryFilter, quick: quickFilter, job: jobId } = await searchParams;
 
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
@@ -217,6 +220,25 @@ export default async function PackingListPage({
     .eq("slug", id)
     .maybeSingle();
   if (!trip) notFound();
+
+  // §"KI-Aufrufe hintergrundfest machen": solange der Hintergrundauftrag
+  // noch läuft, zeigt diese Seite ausschließlich den Wartezustand -- die
+  // Client-Komponente pollt selbst weiter und navigiert per router.replace,
+  // sobald der Job fertig ist, auch wenn die App zwischenzeitlich geschlossen war.
+  const job = jobId ? await loadJob(jobId) : null;
+  if (job && job.status === "pending") {
+    return (
+      <div className="flex-1" style={{ background: "var(--background)" }}>
+        <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-9">
+          <PendingGenerationView
+            jobId={job.id}
+            pendingLabel="LUMI erstellt die Packliste im Hintergrund … Ihr könnt die App währenddessen schließen."
+            fallbackPath={`/trips/${trip.slug}/packing`}
+          />
+        </div>
+      </div>
+    );
+  }
 
   const [participants, items, luggage] = await Promise.all([
     loadTripParticipantOptions(supabase, trip.id, familyId),
@@ -321,6 +343,10 @@ export default async function PackingListPage({
               ))}
             </div>
           </div>
+        )}
+
+        {job?.status === "failed" && (
+          <Banner variant="error">{job.errorMessage ?? "Die Packlisten-Erstellung ist fehlgeschlagen. Bitte erneut versuchen."}</Banner>
         )}
 
         {/* ── KI-Generierung ── */}

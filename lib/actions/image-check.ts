@@ -1,8 +1,10 @@
 'use server'
 
 import { redirect } from 'next/navigation'
+import { after } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getFamily } from '@/lib/family'
+import { createJob, completeJob, failJob } from '@/lib/ai-generation-jobs'
 import { createUploadSlots, downloadAndClearStagedUpload, type UploadSlot } from '@/lib/actions/photo-staging'
 import { parseStagedPaths } from '@/lib/staged-paths'
 import { compressImageForStorage } from '@/lib/image-compression'
@@ -454,36 +456,55 @@ export async function recurateVacationPostSelectionNow(formData: FormData) {
   if (!process.env.OPENAI_API_KEY) redirect(`${returnPath}?error=${encodeURIComponent('Die Kuration ist aktuell nicht konfiguriert.')}`)
 
   const supabase = await createClient()
-  const { data: trip } = await supabase.from('trips').select('end_date').eq('id', tripId).maybeSingle()
-  const projectIds = await loadImageCheckProjectIdsForTrip(supabase, tripId)
+  const { id: familyId } = await getFamily()
 
-  const { data: candidateRows } = projectIds.length > 0
-    ? await supabase
-      .from('content_project_photos')
-      .select('id, vacation_post_score, vacation_post_reasoning, vacation_post_rank, vacation_post_pinned')
-      .in('project_id', projectIds).not('vacation_post_marked_at', 'is', null)
-    : { data: [] }
-  const candidates = candidateRows ?? []
-  if (candidates.length === 0) redirect(`${returnPath}?error=${encodeURIComponent('Keine vorgemerkten Bilder vorhanden.')}`)
+  const jobId = await createJob(familyId, 'vacation_post_recurate', supabase)
 
-  const tripDigest = await buildTripDigest(tripId)
-  const vacationPostCandidates: VacationPostCandidate[] = candidates.map((c) => ({
-    photoId: c.id, score: c.vacation_post_score, reasoning: c.vacation_post_reasoning,
-    pinned: c.vacation_post_pinned, existingRank: c.vacation_post_rank,
-  }))
-  const selection = await curateVacationPostSelection(vacationPostCandidates, tripDigest)
-  if (!selection) redirect(`${returnPath}?error=${encodeURIComponent('Die Kuration ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.')}`)
+  after(async () => {
+    try {
+      const { data: trip } = await supabase.from('trips').select('end_date').eq('id', tripId).maybeSingle()
+      const projectIds = await loadImageCheckProjectIdsForTrip(supabase, tripId)
 
-  const rankByPhotoId = new Map(selection.map((s) => [s.photoId, s.rank]))
-  const expiresAt = computeVacationPostExpiresAt(trip?.end_date ?? null)
-  await Promise.all(candidates.map((c) =>
-    supabase.from('content_project_photos').update({
-      vacation_post_rank: rankByPhotoId.get(c.id) ?? null,
-      expires_at: expiresAt,
-    }).eq('id', c.id),
-  ))
+      const { data: candidateRows } = projectIds.length > 0
+        ? await supabase
+          .from('content_project_photos')
+          .select('id, vacation_post_score, vacation_post_reasoning, vacation_post_rank, vacation_post_pinned')
+          .in('project_id', projectIds).not('vacation_post_marked_at', 'is', null)
+        : { data: [] }
+      const candidates = candidateRows ?? []
+      if (candidates.length === 0) {
+        await failJob(jobId, 'Keine vorgemerkten Bilder vorhanden.', supabase)
+        return
+      }
 
-  redirect(returnPath)
+      const tripDigest = await buildTripDigest(tripId)
+      const vacationPostCandidates: VacationPostCandidate[] = candidates.map((c) => ({
+        photoId: c.id, score: c.vacation_post_score, reasoning: c.vacation_post_reasoning,
+        pinned: c.vacation_post_pinned, existingRank: c.vacation_post_rank,
+      }))
+      const selection = await curateVacationPostSelection(vacationPostCandidates, tripDigest)
+      if (!selection) {
+        await failJob(jobId, 'Die Kuration ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.', supabase)
+        return
+      }
+
+      const rankByPhotoId = new Map(selection.map((s) => [s.photoId, s.rank]))
+      const expiresAt = computeVacationPostExpiresAt(trip?.end_date ?? null)
+      await Promise.all(candidates.map((c) =>
+        supabase.from('content_project_photos').update({
+          vacation_post_rank: rankByPhotoId.get(c.id) ?? null,
+          expires_at: expiresAt,
+        }).eq('id', c.id),
+      ))
+
+      await completeJob(jobId, returnPath, supabase)
+    } catch (e) {
+      console.error('[image-check] recurateVacationPostSelectionNow fehlgeschlagen:', e instanceof Error ? e.message : e)
+      await failJob(jobId, 'Die Kuration ist gerade nicht verfügbar. Bitte später erneut versuchen.', supabase)
+    }
+  })
+
+  redirect(`${returnPath}?job=${jobId}`)
 }
 
 /** §"Gesamte temporäre Auswahl löschen": entfernt die Vormerkung ALLER Bilder dieser Reise (nicht nur die finale Auswahl) -- die Fotos selbst und ihre Bild-Check-Projekte bleiben unangetastet, nur die Urlaubsbeitrag-Zuordnung verschwindet. */

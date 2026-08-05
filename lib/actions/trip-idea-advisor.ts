@@ -1,7 +1,9 @@
 'use server'
 
 import { redirect } from 'next/navigation'
+import { after } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createJob, completeJob, failJob } from '@/lib/ai-generation-jobs'
 import { geocodeLocation, searchLodging, computeLodgingRadiusMeters, type LodgingResult } from '@/lib/providers/places-provider'
 import { computeRouteMatrix } from '@/lib/providers/routes-provider'
 import { ProviderConfigError } from '@/lib/providers/provider-errors'
@@ -79,158 +81,183 @@ export async function generateHotelShortlist(formData: FormData) {
   if (!ctx) redirect(returnTo)
   const { supabase, idea, dnaSummary, selectedPersons, effectiveDate } = ctx
 
-  let destGeo: Awaited<ReturnType<typeof geocodeLocation>>
-  try {
-    destGeo = await geocodeLocation(idea.destination)
-  } catch (e) {
-    const message = e instanceof ProviderConfigError
-      ? 'Die Hotelsuche ist aktuell nicht konfiguriert -- bitte Support informieren.'
-      : 'Die Hotelsuche ist gerade fehlgeschlagen -- bitte in Kürze erneut versuchen.'
-    redirect(`${returnTo}?error=${encodeURIComponent(message)}`)
-  }
-  if (!destGeo) redirect(`${returnTo}?error=${encodeURIComponent('Zielort konnte nicht gefunden werden.')}`)
+  const jobId = await createJob(idea.family_id, 'trip_idea_hotel_shortlist', supabase)
 
-  let candidates: LodgingResult[] | null
-  try {
-    candidates = await searchLodging({ locationName: idea.destination, lat: destGeo.lat, lng: destGeo.lng, radiusMeters: computeLodgingRadiusMeters(destGeo), viewport: destGeo.viewport })
-  } catch {
-    redirect(`${returnTo}?error=${encodeURIComponent('Die Hotelsuche ist gerade fehlgeschlagen -- bitte in Kürze erneut versuchen.')}`)
-  }
-  if (!candidates || candidates.length === 0)
-    redirect(`${returnTo}?error=${encodeURIComponent('Keine Hotels für dieses Ziel gefunden -- bitte später erneut versuchen.')}`)
-
-  // §"Nach Place ID deduplizieren": zwei Hotels können ähnliche/identische
-  // Namen tragen, aber nie dieselbe Place ID -- Dedupe bewusst auf `id`, nicht auf `name`.
-  const seenIds = new Set<string>()
-  const dedupedRaw = candidates.filter((c) => {
-    if (seenIds.has(c.id)) return false
-    seenIds.add(c.id)
-    return true
-  })
-
-  // §"Qualitativ neu kalibrieren": Mindeststandard gehobenes 5-Sterne-Niveau
-  // (Westin/Le Méridien-Klasse) -- Kandidaten unterhalb davon fliegen HIER
-  // raus, bevor Route Matrix/KI überhaupt dafür aufgerufen werden (spart auch
-  // Kosten für Hotels, die ohnehin nicht in Frage kommen).
-  const qualificationByPlaceId = new Map(dedupedRaw.map((c) => [c.id, classifyAndQualify(c)]))
-
-  // §"Gibt es die eine Lösung? Nein" -- `selectHotelDisplayList` bündelt die
-  // Entscheidung zentral: ausgewogene Komposition, Bewertungs-Fallback bei
-  // Null-Qualifizierten, oder (neu) bei kleinen Zielen mit wenigen
-  // Gesamttreffern (Insel/abgelegene Region) bewusst gelockert -- jedes
-  // echte Hotel wird gezeigt und trotzdem individuell klassifiziert.
-  const { items: deduped, belowStandard: belowStandardMode, limitedInventory } = selectHotelDisplayList(dedupedRaw, qualificationByPlaceId)
-
-  // §"Referenzpunkt für Transferzeit": erst der Flughafen des Ziels
-  // versuchen, sonst der Zielort selbst als Näherung.
-  let referencePoint = destGeo
-  try {
-    const airportGeo = await geocodeLocation(`Flughafen ${idea.destination}`)
-    if (airportGeo) referencePoint = airportGeo
-  } catch {
-    // Kein Flughafen auflösbar -- Zielort-Geocode bleibt als Referenzpunkt.
-  }
-
-  // §"Route-Matrix-Fehler dürfen die Hotel-Shortlist nicht verwerfen": schlägt
-  // der Matrix-Call fehl, läuft die Erzeugung mit durationMinutes=null je
-  // Kandidat weiter -- die UI zeigt diese Hotels dann ohne Transferzeit.
-  let matrix: Awaited<ReturnType<typeof computeRouteMatrix>> = null
-  try {
-    matrix = await computeRouteMatrix({
-      origins: [{ lat: referencePoint.lat, lng: referencePoint.lng }],
-      destinations: deduped.map((c) => ({ lat: c.lat, lng: c.lng })),
-    })
-  } catch {
-    // Bereits über logProviderError() geloggt -- Hotels bleiben ohne Transferzeit-Anreicherung erhalten.
-  }
-
-  const withFacts = deduped.map((c, i) => {
-    const m = matrix?.find((el) => el.destinationIndex === i)
-    const durationMinutes = m?.reachable && m.durationSeconds != null ? Math.round(m.durationSeconds / 60) : null
-    return { candidate: c, durationMinutes }
-  })
-
-  const candidateFacts: HotelCandidateFact[] = withFacts.map((r) => ({
-    name: r.candidate.name,
-    rating: r.candidate.rating,
-    userRatingCount: r.candidate.userRatingCount,
-    priceLevel: r.candidate.priceLevel,
-    transferMinutes: r.durationMinutes,
-    address: r.candidate.formattedAddress,
-    types: r.candidate.types,
-    // §"Jedes Hotel bekommt seine eigene, echte Klassifizierung" statt eines
-    // global geleerten Tiers -- betrifft vor allem den neuen `limitedInventory`-
-    // Fall (kleines Ziel, gemischt qualifizierte/nicht qualifizierte Kandidaten).
-    tier: qualificationByPlaceId.get(r.candidate.id)!.qualifies ? qualificationByPlaceId.get(r.candidate.id)!.tier : null,
-  }))
-
-  const dnaText = formatFamilyDnaForPrompt({ ...dnaSummary, persons: selectedPersons }, effectiveDate)
-  const picks = await selectHotelShortlist({ destination: idea.destination, familyDnaText: dnaText, candidates: candidateFacts, belowStandardMode })
-
-  if (!picks || picks.length === 0)
-    redirect(`${returnTo}?error=${encodeURIComponent('Die Hotelauswahl ist gerade nicht verfügbar -- bitte in Kürze erneut versuchen.')}`)
-
-  // §"KI-Namensabgleich verliert Treffer lautlos" (Nutzervorgabe,
-  // Malediven-Livetest): matchHotelPicksToFacts (lib/trip-idea-advisor-ai.ts)
-  // ersetzt den bisherigen reinen Namens-Abgleich, der einen Kandidaten bei
-  // nur leicht abweichender KI-Schreibweise lautlos verwarf -- gleiche
-  // Funktion wie in lib/actions/hotel-search.ts, keine zweite Kopie.
-  const shortlist = matchHotelPicksToFacts(withFacts, picks)
-    .map(({ candidate, durationMinutes, pick }) => {
-      const qualification = qualificationByPlaceId.get(candidate.id)!
-      const unverifiedFields: string[] = []
-      if (candidate.rating === null) unverifiedFields.push('rating')
-      if (!candidate.priceLevel) unverifiedFields.push('priceLevel')
-      if (!candidate.websiteUri) unverifiedFields.push('website')
-      if (durationMinutes === null) unverifiedFields.push('transferMinutes')
-      return {
-        placeId: candidate.id,
-        name: candidate.name,
-        address: candidate.formattedAddress,
-        rating: candidate.rating,
-        reviewCount: candidate.userRatingCount,
-        priceLevel: candidate.priceLevel,
-        photoName: candidate.photoName,
-        websiteUri: candidate.websiteUri,
-        transferMinutes: durationMinutes,
-        familyFitReasoning: pick.familyFitReasoning,
-        styleImpression: pick.styleImpression,
-        bestFor: pick.bestFor,
-        caveats: pick.caveats,
-        // §"Falls Google Places keine sichere Sterneklassifizierung liefert,
-        // nicht raten": tier ist deterministisch aus Marke ODER Bewertung+
-        // Preisniveau bestimmt (siehe classifyAndQualify oben), NIE von der
-        // KI. `null` = dieser konkrete Kandidat qualifiziert nicht (siehe
-        // belowStandardMode/limitedInventory). tierBasis === 'heuristic'
-        // kennzeichnet zusätzlich die Unsicherheit in der UI (kein
-        // verifizierter Markenname, nur Fakten-Kombination).
-        tier: qualification.qualifies ? qualification.tier : null,
-        tierBasis: qualification.tierBasis,
-        isIconic: qualification.isIconic,
-        iconicReason: qualification.iconicReason,
-        unverifiedFields,
-        // §Vorbereitung für einen späteren HotelAvailabilityProvider
-        // (Booking.com/Expedia): reserviertes Feld, damit ein Live-Preis-/
-        // Verfügbarkeits-Anbieter später ergänzt werden kann, ohne diese
-        // Places-basierte Hoteldiscovery neu zu bauen.
-        livePricing: null,
+  after(async () => {
+    try {
+      let destGeo: Awaited<ReturnType<typeof geocodeLocation>>
+      try {
+        destGeo = await geocodeLocation(idea.destination)
+      } catch (e) {
+        const message = e instanceof ProviderConfigError
+          ? 'Die Hotelsuche ist aktuell nicht konfiguriert -- bitte Support informieren.'
+          : 'Die Hotelsuche ist gerade fehlgeschlagen -- bitte in Kürze erneut versuchen.'
+        await failJob(jobId, message, supabase)
+        return
       }
-    })
+      if (!destGeo) {
+        await failJob(jobId, 'Zielort konnte nicht gefunden werden.', supabase)
+        return
+      }
 
-  if (shortlist.length === 0)
-    redirect(`${returnTo}?error=${encodeURIComponent('Die Hotelauswahl konnte nicht mit echten Treffern abgeglichen werden -- bitte erneut versuchen.')}`)
+      let candidates: LodgingResult[] | null
+      try {
+        candidates = await searchLodging({ locationName: idea.destination, lat: destGeo.lat, lng: destGeo.lng, radiusMeters: computeLodgingRadiusMeters(destGeo), viewport: destGeo.viewport })
+      } catch {
+        await failJob(jobId, 'Die Hotelsuche ist gerade fehlgeschlagen -- bitte in Kürze erneut versuchen.', supabase)
+        return
+      }
+      if (!candidates || candidates.length === 0) {
+        await failJob(jobId, 'Keine Hotels für dieses Ziel gefunden -- bitte später erneut versuchen.', supabase)
+        return
+      }
 
-  const { error: updateError } = await supabase
-    .from('trip_ideas')
-    .update({
-      hotel_shortlist: { items: shortlist, belowStandard: belowStandardMode, limitedInventory },
-      hotel_shortlist_updated_at: new Date().toISOString(),
-    })
-    .eq('id', ideaId)
+      // §"Nach Place ID deduplizieren": zwei Hotels können ähnliche/identische
+      // Namen tragen, aber nie dieselbe Place ID -- Dedupe bewusst auf `id`, nicht auf `name`.
+      const seenIds = new Set<string>()
+      const dedupedRaw = candidates.filter((c) => {
+        if (seenIds.has(c.id)) return false
+        seenIds.add(c.id)
+        return true
+      })
 
-  if (updateError) redirect(`${returnTo}?error=${encodeURIComponent('Speicherfehler: ' + updateError.message)}`)
+      // §"Qualitativ neu kalibrieren": Mindeststandard gehobenes 5-Sterne-Niveau
+      // (Westin/Le Méridien-Klasse) -- Kandidaten unterhalb davon fliegen HIER
+      // raus, bevor Route Matrix/KI überhaupt dafür aufgerufen werden (spart auch
+      // Kosten für Hotels, die ohnehin nicht in Frage kommen).
+      const qualificationByPlaceId = new Map(dedupedRaw.map((c) => [c.id, classifyAndQualify(c)]))
 
-  redirect(returnTo)
+      // §"Gibt es die eine Lösung? Nein" -- `selectHotelDisplayList` bündelt die
+      // Entscheidung zentral: ausgewogene Komposition, Bewertungs-Fallback bei
+      // Null-Qualifizierten, oder (neu) bei kleinen Zielen mit wenigen
+      // Gesamttreffern (Insel/abgelegene Region) bewusst gelockert -- jedes
+      // echte Hotel wird gezeigt und trotzdem individuell klassifiziert.
+      const { items: deduped, belowStandard: belowStandardMode, limitedInventory } = selectHotelDisplayList(dedupedRaw, qualificationByPlaceId)
+
+      // §"Referenzpunkt für Transferzeit": erst der Flughafen des Ziels
+      // versuchen, sonst der Zielort selbst als Näherung.
+      let referencePoint = destGeo
+      try {
+        const airportGeo = await geocodeLocation(`Flughafen ${idea.destination}`)
+        if (airportGeo) referencePoint = airportGeo
+      } catch {
+        // Kein Flughafen auflösbar -- Zielort-Geocode bleibt als Referenzpunkt.
+      }
+
+      // §"Route-Matrix-Fehler dürfen die Hotel-Shortlist nicht verwerfen": schlägt
+      // der Matrix-Call fehl, läuft die Erzeugung mit durationMinutes=null je
+      // Kandidat weiter -- die UI zeigt diese Hotels dann ohne Transferzeit.
+      let matrix: Awaited<ReturnType<typeof computeRouteMatrix>> = null
+      try {
+        matrix = await computeRouteMatrix({
+          origins: [{ lat: referencePoint.lat, lng: referencePoint.lng }],
+          destinations: deduped.map((c) => ({ lat: c.lat, lng: c.lng })),
+        })
+      } catch {
+        // Bereits über logProviderError() geloggt -- Hotels bleiben ohne Transferzeit-Anreicherung erhalten.
+      }
+
+      const withFacts = deduped.map((c, i) => {
+        const m = matrix?.find((el) => el.destinationIndex === i)
+        const durationMinutes = m?.reachable && m.durationSeconds != null ? Math.round(m.durationSeconds / 60) : null
+        return { candidate: c, durationMinutes }
+      })
+
+      const candidateFacts: HotelCandidateFact[] = withFacts.map((r) => ({
+        name: r.candidate.name,
+        rating: r.candidate.rating,
+        userRatingCount: r.candidate.userRatingCount,
+        priceLevel: r.candidate.priceLevel,
+        transferMinutes: r.durationMinutes,
+        address: r.candidate.formattedAddress,
+        types: r.candidate.types,
+        // §"Jedes Hotel bekommt seine eigene, echte Klassifizierung" statt eines
+        // global geleerten Tiers -- betrifft vor allem den neuen `limitedInventory`-
+        // Fall (kleines Ziel, gemischt qualifizierte/nicht qualifizierte Kandidaten).
+        tier: qualificationByPlaceId.get(r.candidate.id)!.qualifies ? qualificationByPlaceId.get(r.candidate.id)!.tier : null,
+      }))
+
+      const dnaText = formatFamilyDnaForPrompt({ ...dnaSummary, persons: selectedPersons }, effectiveDate)
+      const picks = await selectHotelShortlist({ destination: idea.destination, familyDnaText: dnaText, candidates: candidateFacts, belowStandardMode })
+
+      if (!picks || picks.length === 0) {
+        await failJob(jobId, 'Die Hotelauswahl ist gerade nicht verfügbar -- bitte in Kürze erneut versuchen.', supabase)
+        return
+      }
+
+      // §"KI-Namensabgleich verliert Treffer lautlos" (Nutzervorgabe,
+      // Malediven-Livetest): matchHotelPicksToFacts (lib/trip-idea-advisor-ai.ts)
+      // ersetzt den bisherigen reinen Namens-Abgleich, der einen Kandidaten bei
+      // nur leicht abweichender KI-Schreibweise lautlos verwarf -- gleiche
+      // Funktion wie in lib/actions/hotel-search.ts, keine zweite Kopie.
+      const shortlist = matchHotelPicksToFacts(withFacts, picks)
+        .map(({ candidate, durationMinutes, pick }) => {
+          const qualification = qualificationByPlaceId.get(candidate.id)!
+          const unverifiedFields: string[] = []
+          if (candidate.rating === null) unverifiedFields.push('rating')
+          if (!candidate.priceLevel) unverifiedFields.push('priceLevel')
+          if (!candidate.websiteUri) unverifiedFields.push('website')
+          if (durationMinutes === null) unverifiedFields.push('transferMinutes')
+          return {
+            placeId: candidate.id,
+            name: candidate.name,
+            address: candidate.formattedAddress,
+            rating: candidate.rating,
+            reviewCount: candidate.userRatingCount,
+            priceLevel: candidate.priceLevel,
+            photoName: candidate.photoName,
+            websiteUri: candidate.websiteUri,
+            transferMinutes: durationMinutes,
+            familyFitReasoning: pick.familyFitReasoning,
+            styleImpression: pick.styleImpression,
+            bestFor: pick.bestFor,
+            caveats: pick.caveats,
+            // §"Falls Google Places keine sichere Sterneklassifizierung liefert,
+            // nicht raten": tier ist deterministisch aus Marke ODER Bewertung+
+            // Preisniveau bestimmt (siehe classifyAndQualify oben), NIE von der
+            // KI. `null` = dieser konkrete Kandidat qualifiziert nicht (siehe
+            // belowStandardMode/limitedInventory). tierBasis === 'heuristic'
+            // kennzeichnet zusätzlich die Unsicherheit in der UI (kein
+            // verifizierter Markenname, nur Fakten-Kombination).
+            tier: qualification.qualifies ? qualification.tier : null,
+            tierBasis: qualification.tierBasis,
+            isIconic: qualification.isIconic,
+            iconicReason: qualification.iconicReason,
+            unverifiedFields,
+            // §Vorbereitung für einen späteren HotelAvailabilityProvider
+            // (Booking.com/Expedia): reserviertes Feld, damit ein Live-Preis-/
+            // Verfügbarkeits-Anbieter später ergänzt werden kann, ohne diese
+            // Places-basierte Hoteldiscovery neu zu bauen.
+            livePricing: null,
+          }
+        })
+
+      if (shortlist.length === 0) {
+        await failJob(jobId, 'Die Hotelauswahl konnte nicht mit echten Treffern abgeglichen werden -- bitte erneut versuchen.', supabase)
+        return
+      }
+
+      const { error: updateError } = await supabase
+        .from('trip_ideas')
+        .update({
+          hotel_shortlist: { items: shortlist, belowStandard: belowStandardMode, limitedInventory },
+          hotel_shortlist_updated_at: new Date().toISOString(),
+        })
+        .eq('id', ideaId)
+
+      if (updateError) {
+        await failJob(jobId, 'Speicherfehler: ' + updateError.message, supabase)
+        return
+      }
+
+      await completeJob(jobId, returnTo, supabase)
+    } catch (e) {
+      console.error('[trip-idea-advisor] generateHotelShortlist fehlgeschlagen:', e instanceof Error ? e.message : e)
+      await failJob(jobId, 'Die Hotelsuche ist gerade fehlgeschlagen -- bitte in Kürze erneut versuchen.', supabase)
+    }
+  })
+
+  redirect(`${returnTo}?job=${jobId}`)
 }
 
 /**
@@ -247,31 +274,48 @@ export async function estimateTripIdeaBudget(formData: FormData) {
   if (!ctx) redirect(returnTo)
   const { supabase, idea, dnaSummary, selectedPersons, effectiveDate } = ctx
 
-  const dnaText = formatFamilyDnaForPrompt({ ...dnaSummary, persons: selectedPersons }, effectiveDate)
-  const membersText = selectedPersons.length > 0 ? selectedPersons.map((p) => p.name).join(', ') : 'keine Reisenden hinterlegt'
+  const jobId = await createJob(idea.family_id, 'trip_idea_budget_estimate', supabase)
 
-  const estimate = await generateBudgetBreakdown({
-    destination: idea.destination,
-    durationDaysMin: idea.duration_days_min,
-    durationDaysMax: idea.duration_days_max,
-    existingBudgetMin: idea.budget_range_min,
-    existingBudgetMax: idea.budget_range_max,
-    existingBudgetCurrency: idea.budget_currency,
-    includesFlights: idea.includes_flights,
-    familyDnaText: dnaText,
-    membersText,
+  after(async () => {
+    try {
+      const dnaText = formatFamilyDnaForPrompt({ ...dnaSummary, persons: selectedPersons }, effectiveDate)
+      const membersText = selectedPersons.length > 0 ? selectedPersons.map((p) => p.name).join(', ') : 'keine Reisenden hinterlegt'
+
+      const estimate = await generateBudgetBreakdown({
+        destination: idea.destination,
+        durationDaysMin: idea.duration_days_min,
+        durationDaysMax: idea.duration_days_max,
+        existingBudgetMin: idea.budget_range_min,
+        existingBudgetMax: idea.budget_range_max,
+        existingBudgetCurrency: idea.budget_currency,
+        includesFlights: idea.includes_flights,
+        familyDnaText: dnaText,
+        membersText,
+      })
+
+      if (!estimate) {
+        await failJob(jobId, 'Die Budget-Schätzung ist gerade nicht verfügbar -- bitte in Kürze erneut versuchen.', supabase)
+        return
+      }
+
+      const { error: updateError } = await supabase
+        .from('trip_ideas')
+        .update({ budget_breakdown: estimate, budget_breakdown_updated_at: new Date().toISOString() })
+        .eq('id', ideaId)
+
+      if (updateError) {
+        await failJob(jobId, 'Speicherfehler: ' + updateError.message, supabase)
+        return
+      }
+
+      await completeJob(jobId, returnTo, supabase)
+    } catch (e) {
+      console.error('[trip-idea-advisor] estimateTripIdeaBudget fehlgeschlagen:', e instanceof Error ? e.message : e)
+      await failJob(jobId, 'Die Budget-Schätzung ist gerade nicht verfügbar -- bitte in Kürze erneut versuchen.', supabase)
+    }
   })
 
-  if (!estimate) redirect(`${returnTo}?error=${encodeURIComponent('Die Budget-Schätzung ist gerade nicht verfügbar -- bitte in Kürze erneut versuchen.')}`)
-
-  const { error: updateError } = await supabase
-    .from('trip_ideas')
-    .update({ budget_breakdown: estimate, budget_breakdown_updated_at: new Date().toISOString() })
-    .eq('id', ideaId)
-
-  if (updateError) redirect(`${returnTo}?error=${encodeURIComponent('Speicherfehler: ' + updateError.message)}`)
-
-  redirect(returnTo)
+  redirect(`${returnTo}?job=${jobId}`)
 }
 
 /**
@@ -290,70 +334,86 @@ export async function generateTripVariants(formData: FormData) {
   if (!ctx) redirect(returnTo)
   const { supabase, idea, dnaSummary, selectedPersons, effectiveDate, climatePreference, tripTypePreference, stopoverPreference, maxStopovers } = ctx
 
-  const dnaText = formatFamilyDnaForPrompt({ ...dnaSummary, persons: selectedPersons }, effectiveDate)
+  const jobId = await createJob(idea.family_id, 'trip_idea_variants_generate', supabase)
 
-  const shortlistItems = idea.hotel_shortlist?.items ?? []
-  // §"Wenn die Shortlist keine sinnvolle Differenzierung ermöglicht": ab 2
-  // echten, qualifizierten Hotelnamen bekommt die KI sie als Auswahl-Pool,
-  // sonst bleibt recommended_hotel_name bei jeder Variante null (siehe Prompt
-  // in generateTripVariants/lib/trip-idea-advisor-ai.ts).
-  const hotelCandidates = shortlistItems.map((h) => ({
-    name: h.name, tier: h.tier, priceLevel: h.priceLevel, transferMinutes: h.transferMinutes,
-  }))
+  after(async () => {
+    try {
+      const dnaText = formatFamilyDnaForPrompt({ ...dnaSummary, persons: selectedPersons }, effectiveDate)
 
-  const variants = await generateTripVariantsAi({
-    destination: idea.destination,
-    routeSummary: idea.route_summary,
-    durationDaysMin: idea.duration_days_min,
-    durationDaysMax: idea.duration_days_max,
-    budgetRangeMin: idea.budget_range_min,
-    budgetRangeMax: idea.budget_range_max,
-    budgetCurrency: idea.budget_currency,
-    familyDnaText: dnaText,
-    hotelCandidates,
-    // §"Reisebriefing": aus dem Wizard bekannte Präferenzen steuern die
-    // Varianten-Generierung, statt der KI die Anreise-/Themenfokus-Wahl
-    // vollständig zu überlassen (z. B. "Entspannte Anreise" bei explizit
-    // ausgeschlossenem Stopover).
-    climatePreference,
-    tripTypePreference,
-    stopoverPreference,
-    maxStopovers,
+      const shortlistItems = idea.hotel_shortlist?.items ?? []
+      // §"Wenn die Shortlist keine sinnvolle Differenzierung ermöglicht": ab 2
+      // echten, qualifizierten Hotelnamen bekommt die KI sie als Auswahl-Pool,
+      // sonst bleibt recommended_hotel_name bei jeder Variante null (siehe Prompt
+      // in generateTripVariants/lib/trip-idea-advisor-ai.ts).
+      const hotelCandidates = shortlistItems.map((h) => ({
+        name: h.name, tier: h.tier, priceLevel: h.priceLevel, transferMinutes: h.transferMinutes,
+      }))
+
+      const variants = await generateTripVariantsAi({
+        destination: idea.destination,
+        routeSummary: idea.route_summary,
+        durationDaysMin: idea.duration_days_min,
+        durationDaysMax: idea.duration_days_max,
+        budgetRangeMin: idea.budget_range_min,
+        budgetRangeMax: idea.budget_range_max,
+        budgetCurrency: idea.budget_currency,
+        familyDnaText: dnaText,
+        hotelCandidates,
+        // §"Reisebriefing": aus dem Wizard bekannte Präferenzen steuern die
+        // Varianten-Generierung, statt der KI die Anreise-/Themenfokus-Wahl
+        // vollständig zu überlassen (z. B. "Entspannte Anreise" bei explizit
+        // ausgeschlossenem Stopover).
+        climatePreference,
+        tripTypePreference,
+        stopoverPreference,
+        maxStopovers,
+      })
+
+      if (!variants || variants.length === 0) {
+        await failJob(jobId, 'Die Varianten-Entwicklung ist gerade nicht verfügbar -- bitte in Kürze erneut versuchen.', supabase)
+        return
+      }
+
+      const shortlistByName = new Map(shortlistItems.map((h) => [h.name, h]))
+
+      // §Defensive zweite Absicherung neben dem Schema: jeder von der KI
+      // genannte Hotelname ohne echten Treffer in der Shortlist wird verworfen
+      // (recommendedHotel bleibt null) -- kein erfundenes Hotel kann durchrutschen.
+      const storedVariants = variants.map((v) => ({
+        variantType: v.variantType,
+        title: v.title,
+        routeSummary: v.routeSummary,
+        stageCount: v.stageCount,
+        hasStopover: v.hasStopover,
+        durationDaysMin: v.durationDaysMin,
+        durationDaysMax: v.durationDaysMax,
+        transferBurden: v.transferBurden,
+        themeFocus: v.themeFocus,
+        budgetRangeMin: v.budgetRangeMin,
+        budgetRangeMax: v.budgetRangeMax,
+        budgetCurrency: v.budgetCurrency,
+        pros: v.pros,
+        cons: v.cons,
+        whyThisVariant: v.whyThisVariant,
+        recommendedHotel: v.recommendedHotelName ? shortlistByName.get(v.recommendedHotelName) ?? null : null,
+      }))
+
+      const { error: updateError } = await supabase
+        .from('trip_ideas')
+        .update({ variants: storedVariants, variants_generated_at: new Date().toISOString() })
+        .eq('id', ideaId)
+
+      if (updateError) {
+        await failJob(jobId, 'Speicherfehler: ' + updateError.message, supabase)
+        return
+      }
+
+      await completeJob(jobId, returnTo, supabase)
+    } catch (e) {
+      console.error('[trip-idea-advisor] generateTripVariants fehlgeschlagen:', e instanceof Error ? e.message : e)
+      await failJob(jobId, 'Die Varianten-Entwicklung ist gerade nicht verfügbar -- bitte in Kürze erneut versuchen.', supabase)
+    }
   })
 
-  if (!variants || variants.length === 0)
-    redirect(`${returnTo}?error=${encodeURIComponent('Die Varianten-Entwicklung ist gerade nicht verfügbar -- bitte in Kürze erneut versuchen.')}`)
-
-  const shortlistByName = new Map(shortlistItems.map((h) => [h.name, h]))
-
-  // §Defensive zweite Absicherung neben dem Schema: jeder von der KI
-  // genannte Hotelname ohne echten Treffer in der Shortlist wird verworfen
-  // (recommendedHotel bleibt null) -- kein erfundenes Hotel kann durchrutschen.
-  const storedVariants = variants.map((v) => ({
-    variantType: v.variantType,
-    title: v.title,
-    routeSummary: v.routeSummary,
-    stageCount: v.stageCount,
-    hasStopover: v.hasStopover,
-    durationDaysMin: v.durationDaysMin,
-    durationDaysMax: v.durationDaysMax,
-    transferBurden: v.transferBurden,
-    themeFocus: v.themeFocus,
-    budgetRangeMin: v.budgetRangeMin,
-    budgetRangeMax: v.budgetRangeMax,
-    budgetCurrency: v.budgetCurrency,
-    pros: v.pros,
-    cons: v.cons,
-    whyThisVariant: v.whyThisVariant,
-    recommendedHotel: v.recommendedHotelName ? shortlistByName.get(v.recommendedHotelName) ?? null : null,
-  }))
-
-  const { error: updateError } = await supabase
-    .from('trip_ideas')
-    .update({ variants: storedVariants, variants_generated_at: new Date().toISOString() })
-    .eq('id', ideaId)
-
-  if (updateError) redirect(`${returnTo}?error=${encodeURIComponent('Speicherfehler: ' + updateError.message)}`)
-
-  redirect(returnTo)
+  redirect(`${returnTo}?job=${jobId}`)
 }

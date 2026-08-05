@@ -12,6 +12,8 @@ import { generateDayPlan, getLatestDayPlan, type DayPlan, type DayPlanVariant } 
 import { commitDayPlanVariantToJourney } from "@/lib/actions/lumi-journey";
 import { Banner } from "@/components/Banner";
 import { StopoverPlanningNotice } from "@/components/StopoverPlanningNotice";
+import { loadJob } from "@/lib/ai-generation-jobs";
+import { PendingGenerationView } from "@/components/PendingGenerationView";
 
 type TripRow = {
   id: string; slug: string; title: string; subtitle: string | null; status: string; start_date: string | null; end_date: string | null
@@ -39,13 +41,34 @@ function Card({ children }: { children: React.ReactNode }) {
 export default async function DayPlanPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; date?: string; stopover?: string }>;
+  searchParams: Promise<{ error?: string; date?: string; stopover?: string; job?: string }>;
 }) {
-  const { error, date: dateParam, stopover } = await searchParams;
+  const { error, date: dateParam, stopover, job: jobId } = await searchParams;
   const preferStopover = stopover === "1";
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
   const todayIso = todayIsoInFamilyTimezone();
+
+  // §"KI-Aufrufe hintergrundfest machen": der Tagesplan wird jetzt im
+  // Hintergrund erzeugt -- Wartezustand, solange der Job pending ist.
+  const job = jobId ? await loadJob(jobId) : null;
+  if (job && job.status === "pending") {
+    const fallbackParams = new URLSearchParams();
+    if (dateParam) fallbackParams.set("date", dateParam);
+    if (preferStopover) fallbackParams.set("stopover", "1");
+    const fallbackPath = `/today/plan${fallbackParams.toString() ? `?${fallbackParams.toString()}` : ""}`;
+    return (
+      <div className="flex-1" style={{ background: "var(--background)" }}>
+        <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-9">
+          <PendingGenerationView
+            jobId={job.id}
+            pendingLabel="LUMI erstellt den Tagesplan im Hintergrund … Ihr könnt die App währenddessen schließen."
+            fallbackPath={fallbackPath}
+          />
+        </div>
+      </div>
+    );
+  }
 
   const { data: trips } = await supabase
     .from("trips")
@@ -124,6 +147,9 @@ export default async function DayPlanPage({
         </div>
 
         {error && <Banner variant="error">{error}</Banner>}
+        {job?.status === "failed" && (
+          <Banner variant="error">{job.errorMessage ?? "Der Tagesplan konnte nicht erstellt werden. Bitte erneut versuchen."}</Banner>
+        )}
 
         {stopoverOverrideAvailable && (
           <StopoverPlanningNotice

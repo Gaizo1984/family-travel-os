@@ -3,7 +3,9 @@
 import OpenAI from 'openai'
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
+import { after } from 'next/server'
 import { getFamily } from '@/lib/family'
+import { createJob, completeJob, failJob } from '@/lib/ai-generation-jobs'
 import { createUploadSlots, downloadAndClearStagedUpload, type UploadSlot } from '@/lib/actions/photo-staging'
 import { parseStagedPaths } from '@/lib/staged-paths'
 import { compressImageForStorage } from '@/lib/image-compression'
@@ -404,190 +406,213 @@ export async function analyzeContentSession(formData: FormData) {
   if (!outputFormat || (!isPackage && !CONTENT_FORMAT_SCHEMAS[outputFormat]))
     redirect(`${returnPath}?error=${encodeURIComponent('Bitte zuerst eine Content-Art auswählen.')}`)
 
-  await supabase.from('content_projects').update({
-    status: 'analyzing', language, tonality,
-    content_focus: contentFocus, custom_focus: customFocus, mood: mood.length ? mood : null, hint_text: hintText,
-  }).eq('id', projectId)
+  // §"KI-Aufrufe hintergrundfest machen" (Nutzervorgabe): Job sofort anlegen
+  // und redirecten, die mehrstufige Analyse/Generierung läuft danach über
+  // after() weiter. Ersetzt zugleich den früheren Root-Cause-Fix-Workaround
+  // (isolierter try/catch um checkContentFit, damit dessen catch{} nicht
+  // versehentlich den redirect()-Throw verschluckt) -- hier wird gar nicht
+  // mehr redirect() aufgerufen, sondern explizit completeJob/failJob, das
+  // Problem kann strukturell nicht mehr auftreten.
+  const jobId = await createJob(project.family_id, 'content_session_analyze', supabase)
 
-  const focusLabel = contentFocus === 'custom' ? customFocus : (contentFocus ? CONTENT_FOCUS_LABELS[contentFocus] ?? contentFocus : null)
-  const moodLabels = mood.map((m) => CONTENT_MOOD_LABELS[m] ?? m)
-  const formatLabel = isPackage ? 'Content-Paket' : (CONTENT_FORMAT_LABELS[outputFormat] ?? outputFormat)
-  const maxPhotos = MAX_PHOTOS_BY_FORMAT[outputFormat] ?? DEFAULT_MAX_PHOTOS
-
-  const { data: photoRowsRaw } = await supabase
-    .from('content_project_photos')
-    .select('id, storage_path')
-    .eq('project_id', projectId)
-    .is('is_duplicate_of', null)
-    .order('created_at', { ascending: true })
-  // §Verteidigung: falls das Format nach dem Upload gewechselt wurde und mehr
-  // Fotos als für das NEUE Format erlaubt in der DB liegen, wird die Analyse
-  // trotzdem hart auf das aktuelle Limit gekappt.
-  const rows = (photoRowsRaw ?? []).slice(0, maxPhotos)
-  if (rows.length === 0)
-    redirect(`${returnPath}?error=${encodeURIComponent('Keine Fotos für diese Session gefunden.')}`)
-
-  // Bilder für die Analyse laden -- nur einmal, Stufe 2 nutzt ausschließlich
-  // Text. Unabhängig pro Foto, deshalb parallel statt sequenziell (vgl.
-  // analyzeTripMemoryPhotos in lib/actions/memories.ts).
-  const loaded = await Promise.all(rows.map(async (row): Promise<SessionPhoto | null> => {
+  after(async () => {
     try {
-      const { data: signed } = await supabase.storage.from('documents').createSignedUrl(row.storage_path, 60)
-      if (!signed?.signedUrl) return null
-      const res = await fetch(signed.signedUrl)
-      const buffer = Buffer.from(await res.arrayBuffer())
-      return { id: row.id, storagePath: row.storage_path, buffer, mimeType: 'image/webp' }
-    } catch {
-      return null
-    }
-  }))
-  const photos: SessionPhoto[] = loaded.filter((p): p is SessionPhoto => p !== null)
-  if (photos.length === 0)
-    redirect(`${returnPath}?error=${encodeURIComponent('Fotos konnten nicht geladen werden.')}`)
+      await supabase.from('content_projects').update({
+        status: 'analyzing', language, tonality,
+        content_focus: contentFocus, custom_focus: customFocus, mood: mood.length ? mood : null, hint_text: hintText,
+      }).eq('id', projectId)
 
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-  const tripDigest = await buildTripDigest(project.trip_id)
+      const focusLabel = contentFocus === 'custom' ? customFocus : (contentFocus ? CONTENT_FOCUS_LABELS[contentFocus] ?? contentFocus : null)
+      const moodLabels = mood.map((m) => CONTENT_MOOD_LABELS[m] ?? m)
+      const formatLabel = isPackage ? 'Content-Paket' : (CONTENT_FORMAT_LABELS[outputFormat] ?? outputFormat)
+      const maxPhotos = MAX_PHOTOS_BY_FORMAT[outputFormat] ?? DEFAULT_MAX_PHOTOS
 
-  const assessments: Assessment[] = []
-
-  for (let i = 0; i < photos.length; i += ASSESSMENT_BATCH_SIZE) {
-    const batch = photos.slice(i, i + ASSESSMENT_BATCH_SIZE)
-    try {
-      const content: Array<{ type: 'input_text'; text: string } | { type: 'input_image'; image_url: string; detail: 'high' }> = [
-        {
-          type: 'input_text',
-          text:
-            'Bewerte jedes Foto einer Familienreise einzeln in "assessments" (gleiche Reihenfolge wie übergeben): ' +
-            'Bildqualität, Eignung als bestes Motiv, und eine kurze visuelle Beschreibung (Motiv/Szene/Stimmung). ' +
-            `Reisekontext: ${tripDigest}`,
-        },
-      ]
-      for (const p of batch) content.push({ type: 'input_image', image_url: `data:${p.mimeType};base64,${p.buffer.toString('base64')}`, detail: 'high' })
-
-      const response = await openai.responses.create({
-        model: OPENAI_MODEL,
-        input: [{ role: 'user', content }],
-        text: { format: { type: 'json_schema', name: 'session_photo_assessment', schema: SESSION_ASSESSMENT_SCHEMA, strict: true } },
-      })
-      const parsed = JSON.parse(response.output_text) as {
-        assessments: Array<{ photo_index: number; quality_score: number; is_best_motif: boolean; visual_description: string }>
+      const { data: photoRowsRaw } = await supabase
+        .from('content_project_photos')
+        .select('id, storage_path')
+        .eq('project_id', projectId)
+        .is('is_duplicate_of', null)
+        .order('created_at', { ascending: true })
+      // §Verteidigung: falls das Format nach dem Upload gewechselt wurde und mehr
+      // Fotos als für das NEUE Format erlaubt in der DB liegen, wird die Analyse
+      // trotzdem hart auf das aktuelle Limit gekappt.
+      const rows = (photoRowsRaw ?? []).slice(0, maxPhotos)
+      if (rows.length === 0) {
+        await failJob(jobId, 'Keine Fotos für diese Session gefunden.', supabase)
+        return
       }
-      for (const a of parsed.assessments) {
-        const photo = batch[a.photo_index]
-        if (!photo) continue
-        assessments.push({ id: photo.id, qualityScore: a.quality_score, isBestMotif: a.is_best_motif, description: a.visual_description })
-        await supabase.from('content_project_photos').update({
-          quality_score: a.quality_score, reasoning: a.visual_description, analyzed_at: new Date().toISOString(),
-        }).eq('id', photo.id)
+
+      // Bilder für die Analyse laden -- nur einmal, Stufe 2 nutzt ausschließlich
+      // Text. Unabhängig pro Foto, deshalb parallel statt sequenziell (vgl.
+      // analyzeTripMemoryPhotos in lib/actions/memories.ts).
+      const loaded = await Promise.all(rows.map(async (row): Promise<SessionPhoto | null> => {
+        try {
+          const { data: signed } = await supabase.storage.from('documents').createSignedUrl(row.storage_path, 60)
+          if (!signed?.signedUrl) return null
+          const res = await fetch(signed.signedUrl)
+          const buffer = Buffer.from(await res.arrayBuffer())
+          return { id: row.id, storagePath: row.storage_path, buffer, mimeType: 'image/webp' }
+        } catch {
+          return null
+        }
+      }))
+      const photos: SessionPhoto[] = loaded.filter((p): p is SessionPhoto => p !== null)
+      if (photos.length === 0) {
+        await failJob(jobId, 'Fotos konnten nicht geladen werden.', supabase)
+        return
       }
-    } catch {
-      // Ein fehlgeschlagener Batch darf die übrigen Batches nicht abbrechen.
-      continue
-    }
-  }
 
-  if (assessments.length === 0)
-    redirect(`${returnPath}?error=${encodeURIComponent('Die Bildanalyse ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.')}`)
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+      const tripDigest = await buildTripDigest(project.trip_id as string)
 
-  // §"Beitrag: LUMI wählt maximal 7 aus": Einschränkung passiert HIER im
-  // Code (nicht nur per Prompt-Anweisung) -- das Manifest, das an die
-  // Text-Generierung geht, enthält für carousel von vornherein nur die
-  // stärksten MAX_SELECTED_FOR_CAROUSEL Fotos, die KI kann also gar keine
-  // anderen Foto-IDs referenzieren.
-  const manifestSource = outputFormat === 'carousel' && !isPackage
-    ? [...assessments].sort((a, b) => Number(b.isBestMotif) - Number(a.isBestMotif) || b.qualityScore - a.qualityScore).slice(0, MAX_SELECTED_FOR_CAROUSEL)
-    : assessments
+      const assessments: Assessment[] = []
 
-  const manifestText = manifestSource
-    .map((a) => `Foto-ID ${a.id}: Qualität ${a.qualityScore}/10${a.isBestMotif ? ', bestes Motiv' : ''}. ${a.description}`)
-    .join('\n')
+      for (let i = 0; i < photos.length; i += ASSESSMENT_BATCH_SIZE) {
+        const batch = photos.slice(i, i + ASSESSMENT_BATCH_SIZE)
+        try {
+          const content: Array<{ type: 'input_text'; text: string } | { type: 'input_image'; image_url: string; detail: 'high' }> = [
+            {
+              type: 'input_text',
+              text:
+                'Bewerte jedes Foto einer Familienreise einzeln in "assessments" (gleiche Reihenfolge wie übergeben): ' +
+                'Bildqualität, Eignung als bestes Motiv, und eine kurze visuelle Beschreibung (Motiv/Szene/Stimmung). ' +
+                `Reisekontext: ${tripDigest}`,
+            },
+          ]
+          for (const p of batch) content.push({ type: 'input_image', image_url: `data:${p.mimeType};base64,${p.buffer.toString('base64')}`, detail: 'high' })
 
-  // §Root-Cause-Fix "Content erstellen liefert keine Ergebnisse": `redirect()`
-  // (Next.js) funktioniert über einen internen Throw (NEXT_REDIRECT), den die
-  // Routing-Schicht darüber abfängt. Der Redirect stand bisher INNERHALB des
-  // try-Blocks, dessen catch{} eigentlich nur Fehler von `checkContentFit`
-  // auffangen sollte -- er hat aber jeden Throw abgefangen, auch den des
-  // Redirects selbst. Bei "schwacher" Passung (bei echten Urlaubsfotos keine
-  // Seltenheit) wurde der Redirect dadurch lautlos verschluckt: die Analyse
-  // lief im Hintergrund einfach weiter (erneutes Foto-Update = "Doppelt-
-  // erfassung"), ohne dass beim Nutzer je ein sichtbares Ergebnis ankam. Fix:
-  // `checkContentFit` läuft in einem ISOLIERTEN try/catch, der Redirect selbst
-  // steht danach außerhalb -- sein Throw kann jetzt ungehindert durchreichen.
-  if (focusLabel && !forceCreate) {
-    let fit: Awaited<ReturnType<typeof checkContentFit>> | null = null
-    try {
-      fit = await checkContentFit(openai, tripDigest, manifestText, formatLabel, focusLabel, moodLabels, hintText ?? '')
-    } catch {
-      // Passungsprüfung selbst nicht verfügbar -- Generierung läuft trotzdem weiter (fail-open).
-    }
-    if (fit?.fit === 'weak') {
-      redirect(`${returnPath}?fit=weak&reason=${encodeURIComponent(fit.reason)}&missing=${encodeURIComponent(fit.missingMotifs.join('; '))}&altfocus=${encodeURIComponent(fit.suggestedFocus)}`)
-    }
-  }
+          const response = await openai.responses.create({
+            model: OPENAI_MODEL,
+            input: [{ role: 'user', content }],
+            text: { format: { type: 'json_schema', name: 'session_photo_assessment', schema: SESSION_ASSESSMENT_SCHEMA, strict: true } },
+          })
+          const parsed = JSON.parse(response.output_text) as {
+            assessments: Array<{ photo_index: number; quality_score: number; is_best_motif: boolean; visual_description: string }>
+          }
+          for (const a of parsed.assessments) {
+            const photo = batch[a.photo_index]
+            if (!photo) continue
+            assessments.push({ id: photo.id, qualityScore: a.quality_score, isBestMotif: a.is_best_motif, description: a.visual_description })
+            await supabase.from('content_project_photos').update({
+              quality_score: a.quality_score, reasoning: a.visual_description, analyzed_at: new Date().toISOString(),
+            }).eq('id', photo.id)
+          }
+        } catch {
+          // Ein fehlgeschlagener Batch darf die übrigen Batches nicht abbrechen.
+          continue
+        }
+      }
 
-  const guidedContext = { focusLabel, moodLabels, hint: hintText, forceCreate }
+      if (assessments.length === 0) {
+        await failJob(jobId, 'Die Bildanalyse ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.', supabase)
+        return
+      }
 
-  // §"Content-Paket": erzeugt mehrere Bestandteile (Beitrag/Story/Reel/
-  // Tagesrückblick) in einem Lauf, jeder als eigener content_drafts-
-  // Eintrag -- einzeln bearbeitbar/verwerfbar, kein Gruppen-Datensatz nötig
-  // (bereits über project_id verknüpft, wie alle anderen Drafts der Session).
-  if (isPackage) {
-    let createdCount = 0
-    for (const componentFormat of PACKAGE_COMPONENT_FORMATS) {
+      // §"Beitrag: LUMI wählt maximal 7 aus": Einschränkung passiert HIER im
+      // Code (nicht nur per Prompt-Anweisung) -- das Manifest, das an die
+      // Text-Generierung geht, enthält für carousel von vornherein nur die
+      // stärksten MAX_SELECTED_FOR_CAROUSEL Fotos, die KI kann also gar keine
+      // anderen Foto-IDs referenzieren.
+      const manifestSource = outputFormat === 'carousel' && !isPackage
+        ? [...assessments].sort((a, b) => Number(b.isBestMotif) - Number(a.isBestMotif) || b.qualityScore - a.qualityScore).slice(0, MAX_SELECTED_FOR_CAROUSEL)
+        : assessments
+
+      const manifestText = manifestSource
+        .map((a) => `Foto-ID ${a.id}: Qualität ${a.qualityScore}/10${a.isBestMotif ? ', bestes Motiv' : ''}. ${a.description}`)
+        .join('\n')
+
+      if (focusLabel && !forceCreate) {
+        let fit: Awaited<ReturnType<typeof checkContentFit>> | null = null
+        try {
+          fit = await checkContentFit(openai, tripDigest, manifestText, formatLabel, focusLabel, moodLabels, hintText ?? '')
+        } catch {
+          // Passungsprüfung selbst nicht verfügbar -- Generierung läuft trotzdem weiter (fail-open).
+        }
+        if (fit?.fit === 'weak') {
+          await completeJob(
+            jobId,
+            `${returnPath}?fit=weak&reason=${encodeURIComponent(fit.reason)}&missing=${encodeURIComponent(fit.missingMotifs.join('; '))}&altfocus=${encodeURIComponent(fit.suggestedFocus)}`,
+            supabase,
+          )
+          return
+        }
+      }
+
+      const guidedContext = { focusLabel, moodLabels, hint: hintText, forceCreate }
+
+      // §"Content-Paket": erzeugt mehrere Bestandteile (Beitrag/Story/Reel/
+      // Tagesrückblick) in einem Lauf, jeder als eigener content_drafts-
+      // Eintrag -- einzeln bearbeitbar/verwerfbar, kein Gruppen-Datensatz nötig
+      // (bereits über project_id verknüpft, wie alle anderen Drafts der Session).
+      if (isPackage) {
+        let createdCount = 0
+        for (const componentFormat of PACKAGE_COMPONENT_FORMATS) {
+          try {
+            const componentManifest = componentFormat === 'carousel'
+              ? [...assessments].sort((a, b) => Number(b.isBestMotif) - Number(a.isBestMotif) || b.qualityScore - a.qualityScore).slice(0, MAX_SELECTED_FOR_CAROUSEL)
+                .map((a) => `Foto-ID ${a.id}: Qualität ${a.qualityScore}/10${a.isBestMotif ? ', bestes Motiv' : ''}. ${a.description}`).join('\n')
+              : manifestText
+            const extra = componentFormat === 'story' ? 'Erzeuge 2 bis 4 Story-Slides (oder genau 1, wenn nur ein Bild wirklich trägt).' : undefined
+            const result = await generateFormatContent(openai, componentFormat, tripDigest, componentManifest, tonality, language, guidedContext, extra)
+            const structure = buildDraftStructure(componentFormat, result)
+            const { data: draft } = await supabase.from('content_drafts').insert({
+              project_id: projectId, draft_type: FORMAT_TO_DRAFT_TYPE[componentFormat], structure: structure as Json,
+            }).select('id').single()
+            if (draft) createdCount++
+          } catch {
+            // Ein fehlgeschlagener Bestandteil darf das restliche Paket nicht abbrechen.
+            continue
+          }
+        }
+
+        if (createdCount === 0) {
+          await failJob(jobId, 'Das Content-Paket konnte nicht erstellt werden. Bitte gleich noch einmal versuchen.', supabase)
+          return
+        }
+
+        await supabase.from('content_projects').update({ status: 'draft_created' }).eq('id', projectId)
+        await completeJob(jobId, `${returnPath}?package=${createdCount}`, supabase)
+        return
+      }
+
+      // §"KI soll Bilder sinnvoll auswählen, nicht jedes abnicken": bei Story
+      // dieselbe Selektions-Anweisung wie im Content-Paket-Pfad -- ohne sie sah
+      // die KI nur die generische Prompt-Basis und schrieb reflexhaft zu jedem
+      // hochgeladenen Foto etwas, statt schwächere Fotos wegzulassen.
+      const extraInstruction = outputFormat === 'story'
+        ? 'Erzeuge 2 bis 4 Story-Slides (oder genau 1, wenn nur ein Bild wirklich trägt). Lass Fotos bewusst weg, die nicht zur Story passen.'
+        : undefined
+
+      let contentResult: Record<string, unknown>
       try {
-        const componentManifest = componentFormat === 'carousel'
-          ? [...assessments].sort((a, b) => Number(b.isBestMotif) - Number(a.isBestMotif) || b.qualityScore - a.qualityScore).slice(0, MAX_SELECTED_FOR_CAROUSEL)
-            .map((a) => `Foto-ID ${a.id}: Qualität ${a.qualityScore}/10${a.isBestMotif ? ', bestes Motiv' : ''}. ${a.description}`).join('\n')
-          : manifestText
-        const extra = componentFormat === 'story' ? 'Erzeuge 2 bis 4 Story-Slides (oder genau 1, wenn nur ein Bild wirklich trägt).' : undefined
-        const result = await generateFormatContent(openai, componentFormat, tripDigest, componentManifest, tonality, language, guidedContext, extra)
-        const structure = buildDraftStructure(componentFormat, result)
-        const { data: draft } = await supabase.from('content_drafts').insert({
-          project_id: projectId, draft_type: FORMAT_TO_DRAFT_TYPE[componentFormat], structure: structure as Json,
-        }).select('id').single()
-        if (draft) createdCount++
+        contentResult = await generateFormatContent(openai, outputFormat, tripDigest, manifestText, tonality, language, guidedContext, extraInstruction)
       } catch {
-        // Ein fehlgeschlagener Bestandteil darf das restliche Paket nicht abbrechen.
-        continue
+        await failJob(jobId, 'Die Inhalte-Generierung ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.', supabase)
+        return
       }
+
+      const structure = buildDraftStructure(outputFormat, contentResult)
+
+      const { data: draft, error: draftError } = await supabase.from('content_drafts').insert({
+        project_id: projectId,
+        draft_type: FORMAT_TO_DRAFT_TYPE[outputFormat],
+        structure: structure as Json,
+      }).select('id').single()
+
+      if (draftError || !draft) {
+        await failJob(jobId, 'Speicherfehler: ' + (draftError?.message ?? 'unbekannt'), supabase)
+        return
+      }
+
+      await supabase.from('content_projects').update({ status: 'draft_created' }).eq('id', projectId)
+      await completeJob(jobId, `/content-studio/drafts/${draft.id}`, supabase)
+    } catch (e) {
+      console.error('[content-sessions] analyzeContentSession fehlgeschlagen:', e instanceof Error ? e.message : e)
+      await failJob(jobId, 'Die Content-Erstellung ist gerade nicht verfügbar. Bitte später erneut versuchen.', supabase)
     }
+  })
 
-    if (createdCount === 0)
-      redirect(`${returnPath}?error=${encodeURIComponent('Das Content-Paket konnte nicht erstellt werden. Bitte gleich noch einmal versuchen.')}`)
-
-    await supabase.from('content_projects').update({ status: 'draft_created' }).eq('id', projectId)
-    redirect(`${returnPath}?package=${createdCount}`)
-  }
-
-  // §"KI soll Bilder sinnvoll auswählen, nicht jedes abnicken": bei Story
-  // dieselbe Selektions-Anweisung wie im Content-Paket-Pfad -- ohne sie sah
-  // die KI nur die generische Prompt-Basis und schrieb reflexhaft zu jedem
-  // hochgeladenen Foto etwas, statt schwächere Fotos wegzulassen.
-  const extraInstruction = outputFormat === 'story'
-    ? 'Erzeuge 2 bis 4 Story-Slides (oder genau 1, wenn nur ein Bild wirklich trägt). Lass Fotos bewusst weg, die nicht zur Story passen.'
-    : undefined
-
-  let contentResult: Record<string, unknown>
-  try {
-    contentResult = await generateFormatContent(openai, outputFormat, tripDigest, manifestText, tonality, language, guidedContext, extraInstruction)
-  } catch {
-    redirect(`${returnPath}?error=${encodeURIComponent('Die Inhalte-Generierung ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.')}`)
-  }
-
-  const structure = buildDraftStructure(outputFormat, contentResult)
-
-  const { data: draft, error: draftError } = await supabase.from('content_drafts').insert({
-    project_id: projectId,
-    draft_type: FORMAT_TO_DRAFT_TYPE[outputFormat],
-    structure: structure as Json,
-  }).select('id').single()
-
-  if (draftError || !draft)
-    redirect(`${returnPath}?error=${encodeURIComponent('Speicherfehler: ' + (draftError?.message ?? 'unbekannt'))}`)
-
-  await supabase.from('content_projects').update({ status: 'draft_created' }).eq('id', projectId)
-
-  redirect(`/content-studio/drafts/${draft.id}`)
+  redirect(`${returnPath}?job=${jobId}`)
 }
 
 /** Ein Text-Call für EIN Content-Format -- von Einzelformat- und Content-Paket-Erzeugung gemeinsam genutzt. */
@@ -691,64 +716,81 @@ export async function createContentSessionFromVacationPostSelection(formData: Fo
   const { data: trip } = await supabase.from('trips').select('title').eq('id', tripId).maybeSingle()
   if (!trip) redirect('/content-studio')
 
-  const { data: projectRows } = await supabase
-    .from('content_projects').select('id').eq('trip_id', tripId).eq('project_type', 'image_check')
-  const projectIds = (projectRows ?? []).map((p) => p.id)
+  const jobId = await createJob(familyId, 'vacation_post_content_session', supabase)
 
-  const { data: selectedRaw } = projectIds.length > 0
-    ? await supabase
-      .from('content_project_photos')
-      .select('id, vacation_post_rank, vacation_post_score, vacation_post_reasoning')
-      .in('project_id', projectIds)
-      .not('vacation_post_rank', 'is', null)
-      .order('vacation_post_rank', { ascending: true })
-    : { data: [] }
+  after(async () => {
+    try {
+      const { data: projectRows } = await supabase
+        .from('content_projects').select('id').eq('trip_id', tripId).eq('project_type', 'image_check')
+      const projectIds = (projectRows ?? []).map((p) => p.id)
 
-  const selected = selectedRaw ?? []
-  if (selected.length === 0)
-    redirect(`${returnPath}?error=${encodeURIComponent('Es ist noch keine kuratierte Auswahl vorhanden.')}`)
+      const { data: selectedRaw } = projectIds.length > 0
+        ? await supabase
+          .from('content_project_photos')
+          .select('id, vacation_post_rank, vacation_post_score, vacation_post_reasoning')
+          .in('project_id', projectIds)
+          .not('vacation_post_rank', 'is', null)
+          .order('vacation_post_rank', { ascending: true })
+        : { data: [] }
 
-  const { data: newSession, error: sessionError } = await supabase.from('content_projects').insert({
-    family_id: familyId, trip_id: tripId, title: `Urlaubsbeitrag · ${trip.title}`,
-    status: 'ready_for_analysis', project_type: 'session', output_format: 'carousel',
-  }).select('id').single()
-  if (sessionError || !newSession)
-    redirect(`${returnPath}?error=${encodeURIComponent('Speicherfehler: ' + (sessionError?.message ?? 'unbekannt'))}`)
+      const selected = selectedRaw ?? []
+      if (selected.length === 0) {
+        await failJob(jobId, 'Es ist noch keine kuratierte Auswahl vorhanden.', supabase)
+        return
+      }
 
-  const expiresAt = new Date(Date.now() + TEMP_IMAGE_TTL_HOURS * 60 * 60 * 1000).toISOString()
-  await supabase.from('content_project_photos')
-    .update({ project_id: newSession.id, temporary: true, expires_at: expiresAt })
-    .in('id', selected.map((s) => s.id))
+      const { data: newSession, error: sessionError } = await supabase.from('content_projects').insert({
+        family_id: familyId, trip_id: tripId, title: `Urlaubsbeitrag · ${trip.title}`,
+        status: 'ready_for_analysis', project_type: 'session', output_format: 'carousel',
+      }).select('id').single()
+      if (sessionError || !newSession) {
+        await failJob(jobId, 'Speicherfehler: ' + (sessionError?.message ?? 'unbekannt'), supabase)
+        return
+      }
 
-  const manifestText = selected
-    .map((s) => `Foto-ID ${s.id}: ${s.vacation_post_score !== null ? `Instagram-Score ${s.vacation_post_score}/10. ` : ''}${s.vacation_post_reasoning ?? ''}`)
-    .join('\n')
-  const orderText = selected.map((s, i) => `${i + 1}. Foto-ID ${s.id}`).join(', ')
+      const expiresAt = new Date(Date.now() + TEMP_IMAGE_TTL_HOURS * 60 * 60 * 1000).toISOString()
+      await supabase.from('content_project_photos')
+        .update({ project_id: newSession.id, temporary: true, expires_at: expiresAt })
+        .in('id', selected.map((s) => s.id))
 
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-  const tripDigest = await buildTripDigest(tripId)
-  const guidedContext = { focusLabel: 'Urlaubsabschluss-Beitrag', moodLabels: [], hint: null, forceCreate: true }
-  const extraInstruction =
-    `Die Fotoauswahl wurde bereits durch eine separate Kuration in dieser empfohlenen Reihenfolge vorbereitet: ${orderText}. ` +
-    'Übernimm diese Auswahl und Reihenfolge als cover_photo_id/slides, außer es gibt einen zwingenden inhaltlichen Grund für eine andere Anordnung.'
+      const manifestText = selected
+        .map((s) => `Foto-ID ${s.id}: ${s.vacation_post_score !== null ? `Instagram-Score ${s.vacation_post_score}/10. ` : ''}${s.vacation_post_reasoning ?? ''}`)
+        .join('\n')
+      const orderText = selected.map((s, i) => `${i + 1}. Foto-ID ${s.id}`).join(', ')
 
-  let contentResult: Record<string, unknown>
-  try {
-    contentResult = await generateFormatContent(openai, 'carousel', tripDigest, manifestText, null, 'de', guidedContext, extraInstruction)
-  } catch {
-    redirect(`${returnPath}?error=${encodeURIComponent('Die Beitragserstellung ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.')}`)
-  }
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+      const tripDigest = await buildTripDigest(tripId)
+      const guidedContext = { focusLabel: 'Urlaubsabschluss-Beitrag', moodLabels: [], hint: null, forceCreate: true }
+      const extraInstruction =
+        `Die Fotoauswahl wurde bereits durch eine separate Kuration in dieser empfohlenen Reihenfolge vorbereitet: ${orderText}. ` +
+        'Übernimm diese Auswahl und Reihenfolge als cover_photo_id/slides, außer es gibt einen zwingenden inhaltlichen Grund für eine andere Anordnung.'
 
-  const structure = buildDraftStructure('carousel', contentResult)
-  const { data: draft, error: draftError } = await supabase.from('content_drafts').insert({
-    project_id: newSession.id, draft_type: 'carousel_plan', structure: structure as Json,
-  }).select('id').single()
-  if (draftError || !draft)
-    redirect(`${returnPath}?error=${encodeURIComponent('Speicherfehler: ' + (draftError?.message ?? 'unbekannt'))}`)
+      let contentResult: Record<string, unknown>
+      try {
+        contentResult = await generateFormatContent(openai, 'carousel', tripDigest, manifestText, null, 'de', guidedContext, extraInstruction)
+      } catch {
+        await failJob(jobId, 'Die Beitragserstellung ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.', supabase)
+        return
+      }
 
-  await supabase.from('content_projects').update({ status: 'draft_created' }).eq('id', newSession.id)
+      const structure = buildDraftStructure('carousel', contentResult)
+      const { data: draft, error: draftError } = await supabase.from('content_drafts').insert({
+        project_id: newSession.id, draft_type: 'carousel_plan', structure: structure as Json,
+      }).select('id').single()
+      if (draftError || !draft) {
+        await failJob(jobId, 'Speicherfehler: ' + (draftError?.message ?? 'unbekannt'), supabase)
+        return
+      }
 
-  redirect(`/content-studio/drafts/${draft.id}`)
+      await supabase.from('content_projects').update({ status: 'draft_created' }).eq('id', newSession.id)
+      await completeJob(jobId, `/content-studio/drafts/${draft.id}`, supabase)
+    } catch (e) {
+      console.error('[content-sessions] createContentSessionFromVacationPostSelection fehlgeschlagen:', e instanceof Error ? e.message : e)
+      await failJob(jobId, 'Die Beitragserstellung ist gerade nicht verfügbar. Bitte später erneut versuchen.', supabase)
+    }
+  })
+
+  redirect(`${returnPath}?job=${jobId}`)
 }
 
 /** Baut das Foto-Manifest für eine Regenerierung aus bereits gespeicherten Bewertungen (kein erneuter Bild-Upload/keine erneute Bildanalyse nötig). */

@@ -2,7 +2,9 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
+import { after } from 'next/server'
 import { generateConciergeAnswer } from '@/lib/concierge-ai'
+import { createJob, completeJob, failJob } from '@/lib/ai-generation-jobs'
 
 export type CachedCategorySuggestion = {
   category: string
@@ -74,25 +76,41 @@ export async function generateCategorySuggestion(formData: FormData) {
 
   if (!familyId || !tripId || !category || !questionText) redirect(returnTo)
 
-  const result = await generateConciergeAnswer({
-    questionText: questionText + PLAUSIBILITY_HINT,
-    dateLabel, locationLabel, weatherSummary, knownPlanText, highlightTitle, memberNames, isRegenerate,
+  const jobId = await createJob(familyId, 'category_suggestion_generate')
+
+  after(async () => {
+    try {
+      const result = await generateConciergeAnswer({
+        questionText: questionText + PLAUSIBILITY_HINT,
+        dateLabel, locationLabel, weatherSummary, knownPlanText, highlightTitle, memberNames, isRegenerate,
+      })
+
+      if (!result) {
+        await failJob(jobId, 'Die KI ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.')
+        return
+      }
+
+      const supabase = await createClient()
+      const { error } = await supabase.from('concierge_category_suggestions').upsert(
+        {
+          family_id: familyId, trip_id: tripId, category, question_text: questionText,
+          title: result.title, body: result.body, event_title: result.eventTitle,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'family_id,trip_id,category' },
+      )
+
+      if (error) {
+        await failJob(jobId, 'Speicherfehler: ' + error.message, supabase)
+        return
+      }
+
+      await completeJob(jobId, returnTo, supabase)
+    } catch (e) {
+      console.error('[category-suggestions] generateCategorySuggestion fehlgeschlagen:', e instanceof Error ? e.message : e)
+      await failJob(jobId, 'Die KI ist gerade nicht verfügbar. Bitte später erneut versuchen.')
+    }
   })
 
-  if (!result)
-    redirect(`${returnTo}?error=${encodeURIComponent('Die KI ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.')}`)
-
-  const supabase = await createClient()
-  const { error } = await supabase.from('concierge_category_suggestions').upsert(
-    {
-      family_id: familyId, trip_id: tripId, category, question_text: questionText,
-      title: result.title, body: result.body, event_title: result.eventTitle,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: 'family_id,trip_id,category' },
-  )
-
-  if (error) redirect(`${returnTo}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
-
-  redirect(returnTo)
+  redirect(`${returnTo}?job=${jobId}`)
 }

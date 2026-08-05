@@ -4,6 +4,9 @@ import { getFamily } from "@/lib/family";
 import { buildContentPostingPlanContext } from "@/lib/content-strategy-context";
 import { getOrGeneratePostingPlan } from "@/lib/content-strategy";
 import { regenerateContentStrategy } from "@/lib/actions/content-strategy-actions";
+import { loadJob } from "@/lib/ai-generation-jobs";
+import { PendingGenerationView } from "@/components/PendingGenerationView";
+import { Banner } from "@/components/Banner";
 
 function Card({ children }: { children: React.ReactNode }) {
   return (
@@ -22,11 +25,20 @@ function Card({ children }: { children: React.ReactNode }) {
  * geloopt (lib/content-strategy.ts::getOrGeneratePostingPlan). Keine neue
  * Migration, keine zweite Content-Strategie-Logik.
  */
-export default async function ContentPostingPlanPage() {
+export default async function ContentPostingPlanPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ job?: string }>;
+}) {
+  const { job: jobId } = await searchParams;
   const { id: familyId } = await getFamily();
   const context = await buildContentPostingPlanContext(familyId);
   const days = context ? await getOrGeneratePostingPlan(familyId, context) : [];
   const returnTo = "/content-studio/posting-plan";
+
+  // §"KI-Aufrufe hintergrundfest machen": "Andere Idee für diesen Tag"
+  // läuft jetzt im Hintergrund.
+  const job = jobId ? await loadJob(jobId) : null;
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -51,6 +63,21 @@ export default async function ContentPostingPlanPage() {
           LUMI schlägt für jeden kommenden Tag vor, ob und wie sich ein Post lohnt -- basierend auf Wetter,
           bekanntem Tagesplan und Etappen. Keine Pflicht, nur eine Orientierung.
         </p>
+
+        {job?.status === "pending" && (
+          <div className="mb-6">
+            <PendingGenerationView
+              jobId={job.id}
+              pendingLabel="LUMI erstellt eine neue Idee im Hintergrund … Ihr könnt die App währenddessen schließen."
+              fallbackPath={returnTo}
+            />
+          </div>
+        )}
+        {job?.status === "failed" && (
+          <div className="mb-6">
+            <Banner variant="error">{job.errorMessage ?? "Etwas ist schiefgelaufen. Bitte erneut versuchen."}</Banner>
+          </div>
+        )}
 
         {!context && (
           <Card>

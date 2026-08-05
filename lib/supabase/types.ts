@@ -373,6 +373,23 @@ export interface Database {
           { foreignKeyName: "packing_luggage_person_id_fkey"; columns: ["person_id"]; isOneToOne: false; referencedRelation: "persons"; referencedColumns: ["id"] }
         ]
       }
+      ai_generation_jobs: {
+        Row: {
+          id: string; family_id: string; kind: string; status: string
+          error_message: string | null; redirect_path: string | null; created_at: string; updated_at: string
+        }
+        Insert: {
+          id?: string; family_id: string; kind: string; status?: string
+          error_message?: string | null; redirect_path?: string | null; created_at?: string; updated_at?: string
+        }
+        Update: {
+          id?: string; family_id?: string; kind?: string; status?: string
+          error_message?: string | null; redirect_path?: string | null; created_at?: string; updated_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "ai_generation_jobs_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }
+        ]
+      }
       tasks: {
         Row: {
           id: string; trip_id: string; stage_id: string | null; title: string

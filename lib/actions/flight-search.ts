@@ -1,8 +1,10 @@
 'use server'
 
 import { redirect } from 'next/navigation'
+import { after } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getFamily } from '@/lib/family'
+import { createJob, completeJob } from '@/lib/ai-generation-jobs'
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt, ageAtDate } from '@/lib/family-dna'
 import { resolveAirportCode, searchFlights, isFlightProviderSandbox } from '@/lib/providers/flights-provider'
 import { ProviderConfigError, ProviderRequestError, describeProviderError } from '@/lib/providers/provider-errors'
@@ -269,6 +271,16 @@ function buildFlightsPageUrl(params: {
  * `idea_id`-Feld) -- einziger Auslöser für den echten Providerruf ist der
  * Button-Klick auf `/discover/flights`, nie ein Seitenaufruf.
  */
+/**
+ * §"KI-Aufrufe hintergrundfest machen" (Nutzervorgabe) -- Sonderfall laut
+ * Architekturplan: bündelt echte Anbieter-Flugsuche UND KI-Begründung in
+ * einem Aufruf. Entscheidung nach Prüfung: die GESAMTE Suche (inkl. der
+ * bereits bekannten Timeout-Gefahr bei vielen parallelen Datumskombinationen
+ * im flexiblen Modus, siehe Kommentar bei `searchFlightsFlexible`) läuft
+ * über denselben Job-Mechanismus wie jede andere KI-Aktion -- das behebt das
+ * Timeout-Risiko als Nebeneffekt, statt nur die KI-Begründung separat zu
+ * behandeln.
+ */
 export async function searchFlightsStandalone(formData: FormData) {
   const destination = String(formData.get('destination') ?? '').trim()
   const departureCity = String(formData.get('departure_city') ?? '').trim()
@@ -276,100 +288,127 @@ export async function searchFlightsStandalone(formData: FormData) {
   const ideaId = String(formData.get('idea_id') ?? '').trim() || null
   const searchMode: 'fixed' | 'flexible' = String(formData.get('search_mode') ?? 'fixed') === 'flexible' ? 'flexible' : 'fixed'
 
-  const redirectBack = (error: string, extra?: Partial<Parameters<typeof buildFlightsPageUrl>[0]>): never => {
-    redirect(buildFlightsPageUrl({ destination, departureCity, travelerIds, ideaId, mode: searchMode, error, ...extra }))
-  }
-
-  if (!destination) redirectBack('Bitte ein Reiseziel angeben.')
-  if (!departureCity) redirectBack('Bitte einen Abflugort angeben.')
+  if (!destination) redirect(buildFlightsPageUrl({ destination, departureCity, travelerIds, ideaId, mode: searchMode, error: 'Bitte ein Reiseziel angeben.' }))
+  if (!departureCity) redirect(buildFlightsPageUrl({ destination, departureCity, travelerIds, ideaId, mode: searchMode, error: 'Bitte einen Abflugort angeben.' }))
 
   const { id: familyId } = await getFamily()
-  const dnaSummary = await buildFamilyDnaSummary(familyId)
-  const selectedPersons = travelerIds.length > 0
-    ? dnaSummary.persons.filter((p) => travelerIds.includes(p.id))
-    : dnaSummary.persons
+  const jobId = await createJob(familyId, 'flight_search')
 
-  let originResolved: { code: string; name: string } | null = null
-  let destResolved: { code: string; name: string } | null = null
-  try {
-    originResolved = await resolveAirportCode(departureCity)
-    destResolved = await resolveAirportCode(destination)
-  } catch (e) {
-    redirectBack(describeFlightSearchFailure(e))
-  }
-  if (!originResolved) redirectBack(`Kein Flughafen für "${departureCity}" gefunden -- bitte präzisieren.`)
-  if (!destResolved) redirectBack(`Kein Zielflughafen für "${destination}" gefunden -- bitte Ziel präzisieren.`)
+  after(async () => {
+    // §Die Flüge-Seite hat bereits einen eigenen `?error=`-Banner-Mechanismus
+    // (wie vor der Umstellung) -- ein Fehler bei der Flugsuche ist deshalb
+    // ein ABGESCHLOSSENER Job, dessen redirect_path den Fehler + die
+    // bisherigen Formularwerte trägt, kein `failJob` (das wäre der
+    // generische "etwas ist schiefgelaufen"-Zustand ohne die hier bereits
+    // vorhandene, genauere Fehlermeldung).
+    const failBack = (error: string, extra?: Partial<Parameters<typeof buildFlightsPageUrl>[0]>) =>
+      completeJob(jobId, buildFlightsPageUrl({ destination, departureCity, travelerIds, ideaId, mode: searchMode, error, ...extra }))
 
-  if (searchMode === 'flexible') {
-    await searchFlightsFlexible(formData, {
-      familyId, dnaSummary, selectedPersons, destination, departureCity, travelerIds, ideaId, redirectBack,
-      originCode: originResolved!.code, destinationCode: destResolved!.code,
-    })
-    return
-  }
+    try {
+      const dnaSummary = await buildFamilyDnaSummary(familyId)
+      const selectedPersons = travelerIds.length > 0
+        ? dnaSummary.persons.filter((p) => travelerIds.includes(p.id))
+        : dnaSummary.persons
 
-  let departureDate: string | null = null
-  let returnDate: string | null = null
-  try {
-    departureDate = readDateGroupFromFormData(formData, 'departure_date', 'Hinflugdatum')
-    returnDate = readDateGroupFromFormData(formData, 'return_date', 'Rückflugdatum')
-  } catch (e) {
-    redirectBack(e instanceof Error ? e.message : 'Ungültiges Datum')
-  }
-  if (!departureDate) redirectBack('Bitte ein Hinflugdatum angeben.')
+      let originResolved: { code: string; name: string } | null = null
+      let destResolved: { code: string; name: string } | null = null
+      try {
+        originResolved = await resolveAirportCode(departureCity)
+        destResolved = await resolveAirportCode(destination)
+      } catch (e) {
+        await failBack(describeFlightSearchFailure(e))
+        return
+      }
+      if (!originResolved) { await failBack(`Kein Flughafen für "${departureCity}" gefunden -- bitte präzisieren.`); return }
+      if (!destResolved) { await failBack(`Kein Zielflughafen für "${destination}" gefunden -- bitte Ziel präzisieren.`); return }
 
-  const today = isoToday()
-  if (isBeforeIso(departureDate!, today)) redirectBack('Das Hinflugdatum darf nicht in der Vergangenheit liegen.')
-  if (returnDate && isBeforeIso(returnDate, departureDate!))
-    redirectBack('Der Rückflug darf nicht vor dem Hinflug liegen.', { departureDate })
+      if (searchMode === 'flexible') {
+        await searchFlightsFlexible(formData, jobId, {
+          familyId, dnaSummary, selectedPersons, destination, departureCity, travelerIds, ideaId, failBack,
+          originCode: originResolved.code, destinationCode: destResolved.code,
+        })
+        return
+      }
 
-  const passengerAges: Array<number | null> = selectedPersons.length > 0
-    ? selectedPersons.map((p) => ageAtDate(p.birth_date, departureDate!))
-    : [null]
+      let departureDate: string | null = null
+      let returnDate: string | null = null
+      try {
+        departureDate = readDateGroupFromFormData(formData, 'departure_date', 'Hinflugdatum')
+        returnDate = readDateGroupFromFormData(formData, 'return_date', 'Rückflugdatum')
+      } catch (e) {
+        await failBack(e instanceof Error ? e.message : 'Ungültiges Datum')
+        return
+      }
+      if (!departureDate) { await failBack('Bitte ein Hinflugdatum angeben.'); return }
 
-  const safeDepartureDate = departureDate!
+      const today = isoToday()
+      if (isBeforeIso(departureDate, today)) { await failBack('Das Hinflugdatum darf nicht in der Vergangenheit liegen.'); return }
+      if (returnDate && isBeforeIso(returnDate, departureDate)) {
+        await failBack('Der Rückflug darf nicht vor dem Hinflug liegen.', { departureDate })
+        return
+      }
 
-  const dnaText = formatFamilyDnaForPrompt({ ...dnaSummary, persons: selectedPersons }, safeDepartureDate)
+      const passengerAges: Array<number | null> = selectedPersons.length > 0
+        ? selectedPersons.map((p) => ageAtDate(p.birth_date, departureDate as string))
+        : [null]
 
-  let outcome!: FlightSearchOutcome
-  try {
-    outcome = await getOrSearchFlightOptions({
-      familyId,
-      originCodes: [originResolved!.code],
-      destinationCode: destResolved!.code,
-      departureDate: safeDepartureDate,
-      returnDate,
-      passengerAges,
-      maxStops: null,
-      familyDnaText: dnaText,
-      stopoverPreference: null,
-      forceRefresh: formData.get('force_refresh') === 'on',
-    })
-  } catch (e) {
-    redirectBack(describeFlightSearchFailure(e), { departureDate, returnDate })
-  }
+      const safeDepartureDate = departureDate
 
-  if (outcome.status === 'limit_reached')
-    redirectBack('Monatliches Such-Limit erreicht -- weitere Suchen sind erst im nächsten Monat möglich.', { departureDate, returnDate })
-  if (outcome.status === 'already_in_progress')
-    redirectBack('Für diese Suche läuft bereits eine Anfrage -- bitte kurz warten und erneut versuchen.', { departureDate, returnDate })
-  if (outcome.status === 'no_results')
-    redirectBack('Keine Flüge für diese Route/Daten gefunden.', { departureDate, returnDate })
+      const dnaText = formatFamilyDnaForPrompt({ ...dnaSummary, persons: selectedPersons }, safeDepartureDate)
 
-  const okOutcome = outcome as Extract<FlightSearchOutcome, { status: 'ok' }>
+      let outcome: FlightSearchOutcome
+      try {
+        outcome = await getOrSearchFlightOptions({
+          familyId,
+          originCodes: [originResolved.code],
+          destinationCode: destResolved.code,
+          departureDate: safeDepartureDate,
+          returnDate,
+          passengerAges,
+          maxStops: null,
+          familyDnaText: dnaText,
+          stopoverPreference: null,
+          forceRefresh: formData.get('force_refresh') === 'on',
+        })
+      } catch (e) {
+        await failBack(describeFlightSearchFailure(e), { departureDate, returnDate })
+        return
+      }
 
-  // §"Zuletzt gesucht"-Erinnerung auf der Ideen-Seite: best-effort, blockiert die eigentliche Anzeige nicht.
-  if (ideaId) {
-    const supabase = await createClient()
-    await supabase
-      .from('trip_ideas')
-      .update({ flight_search_key: okOutcome.searchKey, flight_options_updated_at: okOutcome.result.searchedAt })
-      .eq('id', ideaId)
-  }
+      if (outcome.status === 'limit_reached') {
+        await failBack('Monatliches Such-Limit erreicht -- weitere Suchen sind erst im nächsten Monat möglich.', { departureDate, returnDate })
+        return
+      }
+      if (outcome.status === 'already_in_progress') {
+        await failBack('Für diese Suche läuft bereits eine Anfrage -- bitte kurz warten und erneut versuchen.', { departureDate, returnDate })
+        return
+      }
+      if (outcome.status === 'no_results') {
+        await failBack('Keine Flüge für diese Route/Daten gefunden.', { departureDate, returnDate })
+        return
+      }
 
-  redirect(buildFlightsPageUrl({
-    destination, departureCity, departureDate, returnDate, travelerIds, ideaId, searchKey: okOutcome.searchKey, mode: 'fixed',
-  }))
+      const okOutcome = outcome
+
+      // §"Zuletzt gesucht"-Erinnerung auf der Ideen-Seite: best-effort, blockiert die eigentliche Anzeige nicht.
+      if (ideaId) {
+        const supabase = await createClient()
+        await supabase
+          .from('trip_ideas')
+          .update({ flight_search_key: okOutcome.searchKey, flight_options_updated_at: okOutcome.result.searchedAt })
+          .eq('id', ideaId)
+      }
+
+      await completeJob(jobId, buildFlightsPageUrl({
+        destination, departureCity, departureDate, returnDate, travelerIds, ideaId, searchKey: okOutcome.searchKey, mode: 'fixed',
+      }))
+    } catch (e) {
+      console.error('[flight-search] searchFlightsStandalone fehlgeschlagen:', e instanceof Error ? e.message : e)
+      await failBack(describeFlightSearchFailure(e))
+    }
+  })
+
+  redirect(`${buildFlightsPageUrl({ destination, departureCity, travelerIds, ideaId, mode: searchMode })}&job=${jobId}`)
 }
 
 /**
@@ -382,16 +421,17 @@ export async function searchFlightsStandalone(formData: FormData) {
  */
 async function searchFlightsFlexible(
   formData: FormData,
+  jobId: string,
   ctx: {
     familyId: string
     dnaSummary: Awaited<ReturnType<typeof buildFamilyDnaSummary>>
     selectedPersons: Awaited<ReturnType<typeof buildFamilyDnaSummary>>['persons']
     destination: string; departureCity: string; travelerIds: string[]; ideaId: string | null
     originCode: string; destinationCode: string
-    redirectBack: (error: string, extra?: Partial<Parameters<typeof buildFlightsPageUrl>[0]>) => never
+    failBack: (error: string, extra?: Partial<Parameters<typeof buildFlightsPageUrl>[0]>) => Promise<void>
   },
 ): Promise<void> {
-  const { familyId, dnaSummary, selectedPersons, destination, departureCity, travelerIds, ideaId, originCode, destinationCode, redirectBack } = ctx
+  const { familyId, dnaSummary, selectedPersons, destination, departureCity, travelerIds, ideaId, originCode, destinationCode, failBack } = ctx
 
   let windowStart: string | null = null
   let windowEnd: string | null = null
@@ -399,28 +439,33 @@ async function searchFlightsFlexible(
     windowStart = readDateGroupFromFormData(formData, 'window_start_date', 'Frühester Abflug')
     windowEnd = readDateGroupFromFormData(formData, 'window_end_date', 'Späteste Rückkehr')
   } catch (e) {
-    redirectBack(e instanceof Error ? e.message : 'Ungültiges Datum')
+    await failBack(e instanceof Error ? e.message : 'Ungültiges Datum')
+    return
   }
-  if (!windowStart) redirectBack('Bitte ein frühestes Abflugdatum angeben.')
-  if (!windowEnd) redirectBack('Bitte ein spätestes Rückkehrdatum angeben.')
+  if (!windowStart) { await failBack('Bitte ein frühestes Abflugdatum angeben.'); return }
+  if (!windowEnd) { await failBack('Bitte ein spätestes Rückkehrdatum angeben.'); return }
 
   const today = isoToday()
-  if (isBeforeIso(windowStart!, today)) redirectBack('Das Reisefenster darf nicht in der Vergangenheit beginnen.')
-  if (isBeforeIso(windowEnd!, windowStart!))
-    redirectBack('Die späteste Rückkehr darf nicht vor dem frühesten Abflug liegen.', { windowStartDate: windowStart, mode: 'flexible' })
+  if (isBeforeIso(windowStart, today)) { await failBack('Das Reisefenster darf nicht in der Vergangenheit beginnen.'); return }
+  if (isBeforeIso(windowEnd, windowStart)) {
+    await failBack('Die späteste Rückkehr darf nicht vor dem frühesten Abflug liegen.', { windowStartDate: windowStart, mode: 'flexible' })
+    return
+  }
 
   const nightsMin = Number(formData.get('nights_min') ?? '')
   const nightsMax = Number(formData.get('nights_max') ?? '')
-  const flexibleExtra = { windowStartDate: windowStart!, windowEndDate: windowEnd!, nightsMin: String(nightsMin || ''), nightsMax: String(nightsMax || ''), mode: 'flexible' as const }
-  if (!Number.isFinite(nightsMin) || nightsMin < 1) redirectBack('Bitte eine gültige Nächtezahl (ab) angeben.', flexibleExtra)
-  if (!Number.isFinite(nightsMax) || nightsMax < nightsMin) redirectBack('Die maximale Nächtezahl muss mindestens der minimalen entsprechen.', flexibleExtra)
+  const flexibleExtra = { windowStartDate: windowStart, windowEndDate: windowEnd, nightsMin: String(nightsMin || ''), nightsMax: String(nightsMax || ''), mode: 'flexible' as const }
+  if (!Number.isFinite(nightsMin) || nightsMin < 1) { await failBack('Bitte eine gültige Nächtezahl (ab) angeben.', flexibleExtra); return }
+  if (!Number.isFinite(nightsMax) || nightsMax < nightsMin) { await failBack('Die maximale Nächtezahl muss mindestens der minimalen entsprechen.', flexibleExtra); return }
 
   const batch = Math.max(0, Number(formData.get('batch') ?? '0') || 0)
   const existingSearchKeys = String(formData.get('existing_search_keys') ?? '').split(',').map((k) => k.trim()).filter(Boolean)
 
-  const combinations = generateFlexibleDateCombinations(windowStart!, windowEnd!, nightsMin, nightsMax, batch)
-  if (combinations.length === 0)
-    redirectBack('Für dieses Reisefenster und diese Nächtezahl gibt es keine weiteren Datumskombinationen.', flexibleExtra)
+  const combinations = generateFlexibleDateCombinations(windowStart, windowEnd, nightsMin, nightsMax, batch)
+  if (combinations.length === 0) {
+    await failBack('Für dieses Reisefenster und diese Nächtezahl gibt es keine weiteren Datumskombinationen.', flexibleExtra)
+    return
+  }
 
   // §"Analysiert viel zu lange": bis zu MAX_FLEXIBLE_DATE_COMBINATIONS
   // sequentielle Duffel-Aufrufe (je mehrere Sekunden) summierten sich zu
@@ -459,13 +504,15 @@ async function searchFlightsFlexible(
   }
 
   const allSearchKeys = Array.from(new Set([...existingSearchKeys, ...newSearchKeys]))
-  if (allSearchKeys.length === 0)
-    redirectBack(
+  if (allSearchKeys.length === 0) {
+    await failBack(
       lastError ? `Keine Flüge für die geprüften Datumsvarianten gefunden (${lastError}).` : 'Keine Flüge für die geprüften Datumsvarianten gefunden.',
       flexibleExtra,
     )
+    return
+  }
 
-  redirect(buildFlightsPageUrl({
+  await completeJob(jobId, buildFlightsPageUrl({
     destination, departureCity, travelerIds, ideaId, mode: 'flexible',
     windowStartDate: windowStart, windowEndDate: windowEnd, nightsMin: String(nightsMin), nightsMax: String(nightsMax),
     batch, searchKeys: allSearchKeys,

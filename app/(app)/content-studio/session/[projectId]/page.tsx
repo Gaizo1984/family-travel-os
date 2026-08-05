@@ -16,6 +16,8 @@ import { ChipToggleGroup } from "@/components/ChipToggleGroup";
 import { SignedPhoto } from "@/components/SignedPhoto";
 import { Banner } from "@/components/Banner";
 import { getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
+import { loadJob } from "@/lib/ai-generation-jobs";
+import { PendingGenerationView } from "@/components/PendingGenerationView";
 
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
@@ -74,10 +76,10 @@ export default async function ContentSessionPage({
   searchParams,
 }: {
   params: Promise<{ projectId: string }>;
-  searchParams: Promise<{ error?: string; uploaded?: string; package?: string; fit?: string; reason?: string; missing?: string; altfocus?: string }>;
+  searchParams: Promise<{ error?: string; uploaded?: string; package?: string; fit?: string; reason?: string; missing?: string; altfocus?: string; job?: string }>;
 }) {
   const { projectId } = await params;
-  const { error, uploaded, package: packageCount, fit, reason, missing, altfocus } = await searchParams;
+  const { error, uploaded, package: packageCount, fit, reason, missing, altfocus, job: jobId } = await searchParams;
 
   const supabase = await createClient();
   const { data: project } = await supabase
@@ -88,6 +90,24 @@ export default async function ContentSessionPage({
     .maybeSingle();
 
   if (!project) notFound();
+
+  // §"KI-Aufrufe hintergrundfest machen": Wartezustand, solange die
+  // Analyse/Generierung im Hintergrund läuft -- die Client-Komponente
+  // navigiert selbst weiter, sobald der Job abgeschlossen ist.
+  const job = jobId ? await loadJob(jobId) : null;
+  if (job && job.status === "pending") {
+    return (
+      <div className="flex-1" style={{ background: "var(--background)" }}>
+        <div className="max-w-2xl mx-auto px-5 md:px-8 pb-24 pt-9">
+          <PendingGenerationView
+            jobId={job.id}
+            pendingLabel="LUMI analysiert Bilder, wählt die stärksten aus und formuliert den Text … Ihr könnt die App währenddessen schließen."
+            fallbackPath={`/content-studio/session/${projectId}`}
+          />
+        </div>
+      </div>
+    );
+  }
 
   const [{ data: photosRaw }, { data: drafts }, { count: retainedCount }] = await Promise.all([
     supabase
@@ -162,6 +182,9 @@ export default async function ContentSessionPage({
         </h1>
 
         {error && fit !== "weak" && <Banner variant="error">{error}</Banner>}
+        {job?.status === "failed" && (
+          <Banner variant="error">{job.errorMessage ?? "Die Content-Erstellung ist fehlgeschlagen. Bitte erneut versuchen."}</Banner>
+        )}
         {uploaded && (
           <p className="mb-6" style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
             {uploaded} Foto{uploaded === "1" ? "" : "s"} hochgeladen.

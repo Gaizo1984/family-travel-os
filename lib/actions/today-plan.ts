@@ -1,7 +1,9 @@
 'use server'
 
 import { redirect } from 'next/navigation'
+import { after } from 'next/server'
 import { generateAndCacheTodayRecommendation } from '@/lib/today-recommendation'
+import { createJob, completeJob, failJob } from '@/lib/ai-generation-jobs'
 
 /**
  * §"Wichtig: KI nur auf ausdrückliche Nutzeraktion": vormals generierte die
@@ -24,11 +26,21 @@ export async function generateTodayPlan(formData: FormData) {
 
   if (!familyId || !tripId || !forDate) redirect('/today')
 
-  await generateAndCacheTodayRecommendation(
-    familyId, tripId, forDate,
-    { dateLabel, locationLabel, weatherSummary, familyDnaText, knownPlanText },
-    highlightTitle, null,
-  )
+  const jobId = await createJob(familyId, 'today_plan_generate')
 
-  redirect('/today')
+  after(async () => {
+    try {
+      await generateAndCacheTodayRecommendation(
+        familyId, tripId, forDate,
+        { dateLabel, locationLabel, weatherSummary, familyDnaText, knownPlanText },
+        highlightTitle, null,
+      )
+      await completeJob(jobId, '/today')
+    } catch (e) {
+      console.error('[today-plan] generateTodayPlan fehlgeschlagen:', e instanceof Error ? e.message : e)
+      await failJob(jobId, 'Die Tagesplanung ist gerade nicht verfügbar. Bitte später erneut versuchen.')
+    }
+  })
+
+  redirect(`/today?job=${jobId}`)
 }

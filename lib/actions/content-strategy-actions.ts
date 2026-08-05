@@ -1,7 +1,9 @@
 'use server'
 
 import { redirect } from 'next/navigation'
+import { after } from 'next/server'
 import { generateAndCacheContentStrategy } from '@/lib/content-strategy'
+import { createJob, completeJob, failJob } from '@/lib/ai-generation-jobs'
 
 /**
  * Wird sowohl für die erste Strategie des Tages als auch für den
@@ -23,11 +25,21 @@ export async function regenerateContentStrategy(formData: FormData) {
 
   if (!familyId || !tripId || !forDate) redirect('/content-studio')
 
-  await generateAndCacheContentStrategy(
-    familyId, tripId, forDate,
-    { dateLabel, locationLabel, weatherSummary, knownPlanText, highlightTitle },
-    true,
-  )
+  const jobId = await createJob(familyId, 'content_strategy_regenerate')
 
-  redirect(returnTo)
+  after(async () => {
+    try {
+      await generateAndCacheContentStrategy(
+        familyId, tripId, forDate,
+        { dateLabel, locationLabel, weatherSummary, knownPlanText, highlightTitle },
+        true,
+      )
+      await completeJob(jobId, returnTo)
+    } catch (e) {
+      console.error('[content-strategy-actions] regenerateContentStrategy fehlgeschlagen:', e instanceof Error ? e.message : e)
+      await failJob(jobId, 'Die Content-Strategie ist gerade nicht verfügbar. Bitte später erneut versuchen.')
+    }
+  })
+
+  redirect(`${returnTo}?job=${jobId}`)
 }
