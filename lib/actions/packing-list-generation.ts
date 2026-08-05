@@ -166,7 +166,15 @@ export async function generatePackingList(formData: FormData) {
         status, luggage_assignment: 'unassigned', sort_order: index,
       }
     })
-    await supabase.from('packing_items').insert(rows)
+    // §Root-Cause-Fix "Button liefert keine Ergebnisse" (Nutzer-Feedback): der
+    // Insert-Fehler wurde bisher nie geprüft -- schlug er fehl (z.B. fehlende
+    // Spalte nach einer noch nicht angewendeten Migration), redirectete der
+    // Code trotzdem stillschweigend zur (dann leeren) Packliste. Jetzt sichtbar.
+    const { error: insertError } = await supabase.from('packing_items').insert(rows)
+    if (insertError) {
+      console.error('[packing-list-generation] Speichern fehlgeschlagen:', insertError.message)
+      redirect(`${generatePath(slug)}?error=${encodeURIComponent('Speicherfehler: ' + insertError.message)}`)
+    }
     redirect(packingPath(slug))
   }
 
@@ -201,10 +209,16 @@ export async function applyPackingListDiff(formData: FormData) {
   const toUpdate = diff.filter((d) => d.bucket === 'geaendert' && approvedKeys.has(d.key) && d.existingItemId)
   const toRemove = diff.filter((d) => d.bucket === 'nicht_mehr_erforderlich' && approvedKeys.has(d.key) && d.existingItemId)
 
+  // §Root-Cause-Fix "Button liefert keine Ergebnisse" (Nutzer-Feedback): wie
+  // beim Erststart wurde hier bisher kein Schreibfehler geprüft -- ein
+  // Speicherfehler blieb komplett unsichtbar, der Entwurf wurde trotzdem
+  // gelöscht, als wäre alles übernommen worden.
+  let writeError: string | null = null
+
   if (toInsert.length > 0) {
     const requirements = await computeTripRequirements(tripId)
     const readyPassportPersonKeys = buildReadyPassportPersonKeys(requirements, participants)
-    await supabase.from('packing_items').insert(toInsert.map((d) => {
+    const { error } = await supabase.from('packing_items').insert(toInsert.map((d) => {
       const status = initialStatusForItem({ category: d.category, label: d.label, personKey: d.personLabel }, readyPassportPersonKeys)
       return {
         trip_id: tripId, person_id: d.personId, label: d.label, category: d.category, quantity: d.quantity,
@@ -214,15 +228,23 @@ export async function applyPackingListDiff(formData: FormData) {
         status, luggage_assignment: 'unassigned',
       }
     }))
+    if (error) writeError = error.message
   }
   for (const d of toUpdate) {
-    await supabase.from('packing_items').update({
+    const { error } = await supabase.from('packing_items').update({
       label: d.label, category: d.category, quantity: d.quantity, reasoning: d.reasoning,
       priority: d.priority, is_last_minute: d.isLastMinute, needs_check: d.needsCheck,
     }).eq('id', d.existingItemId as string)
+    if (error) writeError = error.message
   }
   if (toRemove.length > 0) {
-    await supabase.from('packing_items').update({ status: 'nicht_benoetigt' }).in('id', toRemove.map((d) => d.existingItemId as string))
+    const { error } = await supabase.from('packing_items').update({ status: 'nicht_benoetigt' }).in('id', toRemove.map((d) => d.existingItemId as string))
+    if (error) writeError = error.message
+  }
+
+  if (writeError) {
+    console.error('[packing-list-generation] Übernahme fehlgeschlagen:', writeError)
+    redirect(`${packingPath(slug)}/diff?error=${encodeURIComponent('Speicherfehler: ' + writeError)}`)
   }
 
   await supabase.from('packing_list_drafts').delete().eq('trip_id', tripId)

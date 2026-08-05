@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { loadPackingItems, packingCategoryLabel } from "@/lib/packing-list";
 import { computeRegenerationDiff, type GeneratedPackingItem, type PackingDiffEntry } from "@/lib/packing-list-generation";
 import { applyPackingListDiff, discardPackingListDraft } from "@/lib/actions/packing-list-generation";
+import { Banner } from "@/components/Banner";
 
 const BUCKET_LABELS = {
   neu_vorgeschlagen: "Neu vorgeschlagen",
@@ -43,8 +44,15 @@ function DiffGroup({ title, entries, defaultChecked }: { title: string; entries:
   );
 }
 
-export default async function PackingListDiffPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function PackingListDiffPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ error?: string }>;
+}) {
   const { id } = await params;
+  const { error } = await searchParams;
 
   const supabase = await createClient();
   const { data: trip } = await supabase.from("trips").select("id, slug, title").eq("slug", id).maybeSingle();
@@ -102,6 +110,8 @@ export default async function PackingListDiffPage({ params }: { params: Promise<
         <p className="mb-8" style={{ color: "var(--muted)", fontSize: "0.8rem", lineHeight: 1.6 }}>
           Bereits eingepackte oder manuell hinzugefügte Gegenstände bleiben in jedem Fall unverändert. Wählt aus, was übernommen werden soll.
         </p>
+
+        {error && <Banner variant="error">{error}</Banner>}
 
         {diff.length === 0 ? (
           <div className="rounded-xl p-6 text-center mb-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>

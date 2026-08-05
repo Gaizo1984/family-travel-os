@@ -100,11 +100,15 @@ export default async function GeneratePackingListPage({
               </label>
             </div>
 
-            <div className="flex items-center justify-between mt-8" style={{ borderTop: "1px solid var(--border)", paddingTop: "24px" }}>
+            <div className="flex items-center justify-between flex-wrap gap-3 mt-8" style={{ borderTop: "1px solid var(--border)", paddingTop: "24px" }}>
               <Link href={`/trips/${trip.slug}/packing`} style={{ color: "var(--muted)", fontSize: "0.7rem", letterSpacing: "0.1em", textDecoration: "none" }}>
                 Abbrechen
               </Link>
-              <SubmitButtonWithProgress label="Intelligente Packliste erstellen" pendingLabel="LUMI erstellt die Packliste …" />
+              <SubmitButtonWithProgress
+                label="Intelligente Packliste erstellen" pendingLabel="LUMI erstellt die Packliste …"
+                className="w-full sm:w-auto justify-center"
+                style={{ whiteSpace: "normal" }}
+              />
             </div>
           </div>
         </form>
