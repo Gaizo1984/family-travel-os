@@ -324,28 +324,53 @@ export interface Database {
       packing_items: {
         Row: {
           id: string; trip_id: string; person_id: string | null; label: string
-          category: string | null; is_essential: boolean; created_at: string
+          category: string | null; created_at: string
           quantity: number; status: string; luggage_assignment: string
           reasoning: string | null; source: string; source_key: string | null
           note: string | null; sort_order: number; updated_at: string
+          priority: string; needs_check: string | null; is_last_minute: boolean
+          luggage_id: string | null; weight_grams: number | null
         }
         Insert: {
           id?: string; trip_id: string; person_id?: string | null; label: string
-          category?: string | null; is_essential?: boolean; created_at?: string
+          category?: string | null; created_at?: string
           quantity?: number; status?: string; luggage_assignment?: string
           reasoning?: string | null; source?: string; source_key?: string | null
           note?: string | null; sort_order?: number; updated_at?: string
+          priority?: string; needs_check?: string | null; is_last_minute?: boolean
+          luggage_id?: string | null; weight_grams?: number | null
         }
         Update: {
           id?: string; trip_id?: string; person_id?: string | null; label?: string
-          category?: string | null; is_essential?: boolean; created_at?: string
+          category?: string | null; created_at?: string
           quantity?: number; status?: string; luggage_assignment?: string
           reasoning?: string | null; source?: string; source_key?: string | null
           note?: string | null; sort_order?: number; updated_at?: string
+          priority?: string; needs_check?: string | null; is_last_minute?: boolean
+          luggage_id?: string | null; weight_grams?: number | null
         }
         Relationships: [
-          { foreignKeyName: "packing_items_trip_id_fkey";   columns: ["trip_id"];   isOneToOne: false; referencedRelation: "trips";   referencedColumns: ["id"] },
-          { foreignKeyName: "packing_items_person_id_fkey"; columns: ["person_id"]; isOneToOne: false; referencedRelation: "persons"; referencedColumns: ["id"] }
+          { foreignKeyName: "packing_items_trip_id_fkey";    columns: ["trip_id"];    isOneToOne: false; referencedRelation: "trips";           referencedColumns: ["id"] },
+          { foreignKeyName: "packing_items_person_id_fkey";  columns: ["person_id"];  isOneToOne: false; referencedRelation: "persons";         referencedColumns: ["id"] },
+          { foreignKeyName: "packing_items_luggage_id_fkey"; columns: ["luggage_id"]; isOneToOne: false; referencedRelation: "packing_luggage"; referencedColumns: ["id"] }
+        ]
+      }
+      packing_luggage: {
+        Row: {
+          id: string; trip_id: string; person_id: string | null; label: string
+          allowed_weight_grams: number | null; sort_order: number; created_at: string; updated_at: string
+        }
+        Insert: {
+          id?: string; trip_id: string; person_id?: string | null; label: string
+          allowed_weight_grams?: number | null; sort_order?: number; created_at?: string; updated_at?: string
+        }
+        Update: {
+          id?: string; trip_id?: string; person_id?: string | null; label?: string
+          allowed_weight_grams?: number | null; sort_order?: number; created_at?: string; updated_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: "packing_luggage_trip_id_fkey";   columns: ["trip_id"];   isOneToOne: false; referencedRelation: "trips";   referencedColumns: ["id"] },
+          { foreignKeyName: "packing_luggage_person_id_fkey"; columns: ["person_id"]; isOneToOne: false; referencedRelation: "persons"; referencedColumns: ["id"] }
         ]
       }
       tasks: {
