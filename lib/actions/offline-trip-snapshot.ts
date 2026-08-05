@@ -67,7 +67,7 @@ export async function fetchOfflineTripSnapshotData(tripId: string): Promise<Offl
     .filter((i) => i.status !== 'nicht_benoetigt')
     .map((i) => ({
       id: i.id, label: i.label, quantity: i.quantity, status: i.status,
-      category: i.category, isEssential: i.isEssential,
+      category: i.category, priority: i.priority, isLastMinute: i.isLastMinute,
       personLabel: i.personId ? (personNameById.get(i.personId) ?? 'Gemeinsam') : 'Gemeinsam',
     }))
 

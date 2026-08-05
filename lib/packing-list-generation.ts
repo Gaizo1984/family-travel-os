@@ -1,5 +1,5 @@
-import type { PackingCategory, PackingItem, PackingSource, PackingStatus } from '@/lib/packing-list'
-import { PACKING_CATEGORY_ORDER } from '@/lib/packing-list'
+import type { PackingCategory, PackingItem, PackingSource, PackingStatus, PackingPriority, NeedsCheck } from '@/lib/packing-list'
+import { PACKING_CATEGORY_ORDER, PACKING_PRIORITY_ORDER, SAFETY_CRITICAL_CATEGORIES } from '@/lib/packing-list'
 
 /** §"Leicht und ausgewogen reicht, wir reisen i.d.R. mit wenig Gepäck" (Nutzer-Feedback): "komfortabel" bewusst entfernt statt nur versteckt. */
 export type PackStyle = 'leicht' | 'ausgewogen'
@@ -15,21 +15,15 @@ export type PackingFollowUpAnswers = {
   needsCarrier: boolean
 }
 
-export type NeedsCheckFlag = 'none' | 'baggage_allowance' | 'hotel_amenity' | 'airline_rule'
-
-/** §"Unbekannte Hotel- oder Gepäckinformationen niemals erfinden. Transparent 'Bitte prüfen' anzeigen" (Nutzervorgabe, wörtlich): wird an die reasoning-Anzeige angehängt, nie stillschweigend verworfen. */
-export const NEEDS_CHECK_MESSAGES: Record<Exclude<NeedsCheckFlag, 'none'>, string> = {
-  baggage_allowance: 'Bitte Gepäckfreigrenze der Airline prüfen.',
-  hotel_amenity: 'Bitte vorab beim Hotel nachfragen, ob vorhanden.',
-  airline_rule: 'Bitte aktuelle Airline-/Sicherheitsregeln prüfen.',
-}
+/** §"'Noch prüfen' ist kein Prioritätswert" (Nutzervorgabe, Packliste 2.0): AI-seitiger Rückgabewert inkl. "none" -- wird nach dem Parsen auf `NeedsCheck | null` (lib/packing-list.ts, ohne "none") abgebildet, das echte, filterbare Feld auf packing_items. */
+export type NeedsCheckFlag = 'none' | NeedsCheck
 
 /**
  * §"Bei Gesundheit keine Diagnosen oder konkrete Medikamente ableiten. Nur
  * neutrale Einträge ... verwenden" (Nutzervorgabe, wörtlich): strukturelle
  * Absicherung NACH dem Parsen, nicht nur Prompt-Wortlaut -- ein Label der
- * Kategorie 'gesundheit', das keinem dieser generischen Begriffe entspricht,
- * wird auf den neutralen Standardeintrag zurückgesetzt.
+ * Kategorie 'medikamente_und_gesundheit', das keinem dieser generischen
+ * Begriffe entspricht, wird auf den neutralen Standardeintrag zurückgesetzt.
  */
 const ALLOWED_HEALTH_LABEL_PATTERNS = [
   'persönliche medikamente', 'medikamente', 'erste hilfe', 'erste-hilfe', 'pflaster', 'verband',
@@ -39,7 +33,7 @@ const ALLOWED_HEALTH_LABEL_PATTERNS = [
 const HEALTH_LABEL_FALLBACK = 'Persönliche Medikamente'
 
 export function sanitizeHealthLabel(category: string, label: string): string {
-  if (category !== 'gesundheit') return label
+  if (category !== 'medikamente_und_gesundheit') return label
   const lower = label.toLowerCase()
   const isAllowed = ALLOWED_HEALTH_LABEL_PATTERNS.some((p) => lower.includes(p))
   return isAllowed ? label : HEALTH_LABEL_FALLBACK
@@ -55,7 +49,8 @@ export type GeneratedPackingItem = {
   category: string
   label: string
   quantity: number
-  isEssential: boolean
+  priority: PackingPriority
+  isLastMinute: boolean
   reasoning: string
   source: Exclude<PackingSource, 'manuell'>
   sourceKey: string
@@ -74,7 +69,14 @@ export const PACKING_ITEM_SCHEMA = {
           category: { type: 'string', enum: PACKING_CATEGORY_ORDER },
           label: { type: 'string' },
           quantity: { type: 'integer' },
-          is_essential: { type: 'boolean' },
+          priority: {
+            type: 'string', enum: PACKING_PRIORITY_ORDER,
+            description: '"unverzichtbar" nur für wirklich unverzichtbare Dinge (Dokumente, notwendige Medikamente, zwingend benötigte Ausrüstung), "empfohlen" für sinnvolle Standardgegenstände, "optional" für Nice-to-have. Nicht alles ist unverzichtbar.',
+          },
+          is_last_minute: {
+            type: 'boolean',
+            description: 'true für Dinge, die typischerweise erst am Abreisetag eingepackt werden (z.B. Zahnbürste, täglich verwendete Medikamente, Mobiltelefon, Ladekabel, Lieblingsspielzeug, Hausschlüssel) -- unabhängig von der Kategorie.',
+          },
           reasoning: { type: 'string', description: 'Ein kurzer Satz auf Deutsch, warum dieser Gegenstand vorgeschlagen wird.' },
           source: { type: 'string', enum: ['basisliste', 'wetter', 'aktivitaet', 'buchung', 'hotel', 'bestaetigte_vorliebe', 'fruehere_reiseerfahrung'] },
           source_key: { type: 'string', description: 'Stabiler, sprachunabhängiger Schlüssel für dieses konkrete Konzept (z. B. "kleidung_regenjacke_mama"). MUSS bei einer künftigen erneuten Generierung derselben Reise für dasselbe gedachte Item identisch bleiben.' },
@@ -83,7 +85,7 @@ export const PACKING_ITEM_SCHEMA = {
             description: '"none" außer wenn dieser Vorschlag von einer NICHT bekannten Buchungs-/Hotel-/Gepäckangabe abhängt -- dann statt einer Annahme diesen Flag setzen, niemals eine Gepäckfreigrenze oder Hotel-Ausstattung erfinden.',
           },
         },
-        required: ['person_key', 'category', 'label', 'quantity', 'is_essential', 'reasoning', 'source', 'source_key', 'needs_check_flag'],
+        required: ['person_key', 'category', 'label', 'quantity', 'priority', 'is_last_minute', 'reasoning', 'source', 'source_key', 'needs_check_flag'],
         additionalProperties: false,
       },
     },
@@ -153,9 +155,12 @@ Wichtige Einschränkungen:
 - Gepäckfreigrenzen (Fluggewicht/-anzahl) sind NICHT bekannt. Erfinde niemals eine konkrete Grenze -- setze bei betroffenen Vorschlägen needs_check_flag="baggage_allowance".
 - Hotel-Ausstattung (Handtücher, Föhn, Babybett, Waschmöglichkeit) ist NICHT bekannt, außer explizit oben genannt. Erfinde nichts -- setze needs_check_flag="hotel_amenity".
 - Triff niemals verbindliche Aussagen zu verbotenen Gegenständen oder aktuellen Airline-Sicherheitsregeln -- setze bei relevanten Gegenständen needs_check_flag="airline_rule".
-- Kategorie "gesundheit": ausschließlich neutrale, generische Einträge wie "Persönliche Medikamente", "Erste-Hilfe-Set", niemals Diagnosen oder konkrete Medikamentennamen ableiten.
+- Kategorie "medikamente_und_gesundheit": ausschließlich neutrale, generische Einträge wie "Persönliche Medikamente", "Erste-Hilfe-Set", niemals Diagnosen oder konkrete Medikamentennamen ableiten.
 - Größere Kinderausstattung (Reisebett/Kinderbett, Kinderwagen, Kindersitz, Babytrage) NUR vorschlagen, wenn die Familie das ausdrücklich in "Antworten der Familie" oben angegeben hat. Ohne ausdrückliche Angabe NICHT vorschlagen -- diese Dinge sind oft vor Ort vorhanden, werden anders gelöst (z. B. Kind schläft im Elternbett) oder unnötiger Ballast, das kannst du nicht wissen.
 - Gegenstände, die typischerweise für die ganze Familie gemeinsam gelten (z. B. Ladegeräte, Sonnencreme, Insektenschutz, Erste-Hilfe-Set, Reiseapotheke), bekommen person_key="gemeinsam", NICHT eine Einzelperson -- außer es handelt sich eindeutig um ein persönliches Gerät oder ein personenspezifisches Medikament.
+- Priorität differenziert wirklich: "unverzichtbar" nur für Dokumente, notwendige Medikamente, zwingend benötigte Ausrüstung -- nicht jeder Gegenstand ist unverzichtbar, die meisten sind "empfohlen" oder "optional".
+- Mengen NICHT automatisch für jeden Reisetag ein vollständiges Kleidungsset -- weniger bei verlässlichem Waschservice, mehr Wechselkleidung bei kleinen Kindern, Sportkleidung nur bei tatsächlich geplanten Aktivitäten, elegante Kleidung nur bei passendem Anlass, Regenausstattung abhängig vom Wetter/Forecast oben.
+- is_last_minute=true für Dinge, die erst am Abreisetag eingepackt werden können (Zahnbürste, täglich verwendete Medikamente, Handy, Ladekabel, Lieblingsspielzeug, Hausschlüssel) -- unabhängig von der sonstigen Kategorie des Gegenstands.
 - Jeder Gegenstand braucht einen stabilen source_key, der bei einer künftigen erneuten Generierung für dasselbe gedachte Item identisch bleibt.`
 }
 
@@ -166,6 +171,10 @@ function normalizeQuantity(raw: unknown): number {
 
 function isNeedsCheckFlag(value: unknown): value is NeedsCheckFlag {
   return value === 'none' || value === 'baggage_allowance' || value === 'hotel_amenity' || value === 'airline_rule'
+}
+
+function isPackingPriorityFromAi(value: unknown): value is PackingPriority {
+  return value === 'unverzichtbar' || value === 'empfohlen' || value === 'optional'
 }
 
 function isPackingSourceFromAi(value: unknown): value is Exclude<PackingSource, 'manuell'> {
@@ -190,7 +199,8 @@ export function parseGeneratedItems(raw: unknown): GeneratedPackingItem[] {
     result.push({
       personKey: typeof e.person_key === 'string' && e.person_key.trim() ? e.person_key.trim() : 'gemeinsam',
       category, label, quantity: normalizeQuantity(e.quantity),
-      isEssential: e.is_essential === true,
+      priority: isPackingPriorityFromAi(e.priority) ? e.priority : 'empfohlen',
+      isLastMinute: e.is_last_minute === true,
       reasoning: typeof e.reasoning === 'string' ? e.reasoning : '',
       source: isPackingSourceFromAi(e.source) ? e.source : 'basisliste',
       sourceKey: normalizeSourceKey(sourceKeyRaw),
@@ -200,10 +210,9 @@ export function parseGeneratedItems(raw: unknown): GeneratedPackingItem[] {
   return result
 }
 
-export function reasoningWithCheckNotice(item: { reasoning: string; needsCheckFlag: NeedsCheckFlag }): string {
-  if (item.needsCheckFlag === 'none') return item.reasoning
-  const notice = NEEDS_CHECK_MESSAGES[item.needsCheckFlag]
-  return item.reasoning ? `${item.reasoning} ${notice}` : notice
+/** Bildet den AI-seitigen Rückgabewert (inkl. "none") auf das echte, persistierte Feld ab (lib/packing-list.ts::NeedsCheck, ohne "none" -- dort ist "kein Wert" schlicht `null`). */
+export function needsCheckFlagToPersisted(flag: NeedsCheckFlag): NeedsCheck | null {
+  return flag === 'none' ? null : flag
 }
 
 /**
@@ -255,7 +264,9 @@ export type PackingDiffEntry = {
   personLabel: string
   category: string
   quantity: number
-  isEssential: boolean
+  priority: PackingPriority
+  isLastMinute: boolean
+  needsCheck: NeedsCheck | null
   reasoning: string
   source: PackingSource
   sourceKey: string
@@ -264,7 +275,8 @@ export type PackingDiffEntry = {
 
 /**
  * §"Manuell hinzugefügte Gegenstände erhalten, bereits gepackte erhalten,
- * nicht benötigte nicht sofort erneut vorschlagen, keine Duplikate" (Nutzervorgabe):
+ * nicht benötigte nicht sofort erneut vorschlagen, keine Duplikate,
+ * sicherheitskritische Inhalte niemals automatisch entfernen" (Nutzervorgabe):
  * reine Vergleichsfunktion, kein Schreibzugriff -- siehe applyPackingListDiff
  * (lib/actions/packing-list-generation.ts) für die tatsächliche Übernahme.
  */
@@ -295,8 +307,9 @@ export function computeRegenerationDiff(
     if (!existing) {
       entries.push({
         bucket: 'neu_vorgeschlagen', key, label: gen.label, personId, personLabel: gen.personKey,
-        category: gen.category, quantity: gen.quantity, isEssential: gen.isEssential,
-        reasoning: reasoningWithCheckNotice(gen), source: gen.source, sourceKey: gen.sourceKey, existingItemId: null,
+        category: gen.category, quantity: gen.quantity, priority: gen.priority, isLastMinute: gen.isLastMinute,
+        needsCheck: needsCheckFlagToPersisted(gen.needsCheckFlag),
+        reasoning: gen.reasoning, source: gen.source, sourceKey: gen.sourceKey, existingItemId: null,
       })
       continue
     }
@@ -310,8 +323,9 @@ export function computeRegenerationDiff(
     if (changed) {
       entries.push({
         bucket: 'geaendert', key, label: gen.label, personId, personLabel: gen.personKey,
-        category: gen.category, quantity: gen.quantity, isEssential: gen.isEssential,
-        reasoning: reasoningWithCheckNotice(gen), source: gen.source, sourceKey: gen.sourceKey, existingItemId: existing.id,
+        category: gen.category, quantity: gen.quantity, priority: gen.priority, isLastMinute: gen.isLastMinute,
+        needsCheck: needsCheckFlagToPersisted(gen.needsCheckFlag),
+        reasoning: gen.reasoning, source: gen.source, sourceKey: gen.sourceKey, existingItemId: existing.id,
       })
     }
   }
@@ -319,10 +333,14 @@ export function computeRegenerationDiff(
   for (const [key, existing] of existingByKey) {
     if (seenKeys.has(key)) continue
     if (existing.status === 'eingepackt' || existing.status === 'nicht_benoetigt') continue
+    // §"Sicherheitskritische Inhalte niemals automatisch entfernen" (Nutzervorgabe, wörtlich: Reisepässe/erforderliche
+    // Dokumente, notwendige Medikamente) -- unabhängig davon, ob die KI sie erneut vorschlägt.
+    if (SAFETY_CRITICAL_CATEGORIES.includes(existing.category as PackingCategory)) continue
     entries.push({
       bucket: 'nicht_mehr_erforderlich', key, label: existing.label, personId: existing.personId,
       personLabel: existing.personId ? (personNameById.get(existing.personId) ?? 'gemeinsam') : 'gemeinsam',
-      category: existing.category ?? 'gemeinsam', quantity: existing.quantity, isEssential: existing.isEssential,
+      category: existing.category ?? 'gemeinsam', quantity: existing.quantity,
+      priority: existing.priority, isLastMinute: existing.isLastMinute, needsCheck: existing.needsCheck,
       reasoning: existing.reasoning ?? '', source: existing.source, sourceKey: existing.sourceKey ?? '', existingItemId: existing.id,
     })
   }

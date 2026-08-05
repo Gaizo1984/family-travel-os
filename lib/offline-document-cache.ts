@@ -113,7 +113,8 @@ export type OfflineTripSnapshot = {
     status: string
     category: string | null
     personLabel: string
-    isEssential: boolean
+    priority: string
+    isLastMinute: boolean
   }>
   cachedAt: string
 }

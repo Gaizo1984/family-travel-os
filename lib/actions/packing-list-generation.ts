@@ -11,7 +11,7 @@ import { loadRelevantMemories } from '@/lib/family-memories'
 import { loadPackingItems } from '@/lib/packing-list'
 import { computeTripRequirements } from '@/lib/travel-requirements'
 import {
-  buildPackingPrompt, parseGeneratedItems, computeRegenerationDiff, reasoningWithCheckNotice,
+  buildPackingPrompt, parseGeneratedItems, computeRegenerationDiff, needsCheckFlagToPersisted,
   buildReadyPassportPersonKeys, initialStatusForItem, reasoningWithReadinessNotice,
   PACKING_ITEM_SCHEMA, type PackingFollowUpAnswers, type PackStyle, type PackingGenerationContext,
 } from '@/lib/packing-list-generation'
@@ -159,8 +159,9 @@ export async function generatePackingList(formData: FormData) {
       return {
         trip_id: tripId,
         person_id: item.personKey.toLowerCase() === 'gemeinsam' ? null : (personIdByName.get(item.personKey.toLowerCase()) ?? null),
-        label: item.label, category: item.category, quantity: item.quantity, is_essential: item.isEssential,
-        reasoning: reasoningWithReadinessNotice(reasoningWithCheckNotice(item), status === 'eingepackt'),
+        label: item.label, category: item.category, quantity: item.quantity,
+        priority: item.priority, is_last_minute: item.isLastMinute, needs_check: needsCheckFlagToPersisted(item.needsCheckFlag),
+        reasoning: reasoningWithReadinessNotice(item.reasoning, status === 'eingepackt'),
         source: item.source, source_key: item.sourceKey,
         status, luggage_assignment: 'unassigned', sort_order: index,
       }
@@ -207,7 +208,8 @@ export async function applyPackingListDiff(formData: FormData) {
       const status = initialStatusForItem({ category: d.category, label: d.label, personKey: d.personLabel }, readyPassportPersonKeys)
       return {
         trip_id: tripId, person_id: d.personId, label: d.label, category: d.category, quantity: d.quantity,
-        is_essential: d.isEssential, reasoning: reasoningWithReadinessNotice(d.reasoning, status === 'eingepackt'),
+        priority: d.priority, is_last_minute: d.isLastMinute, needs_check: d.needsCheck,
+        reasoning: reasoningWithReadinessNotice(d.reasoning, status === 'eingepackt'),
         source: d.source, source_key: d.sourceKey,
         status, luggage_assignment: 'unassigned',
       }
@@ -216,6 +218,7 @@ export async function applyPackingListDiff(formData: FormData) {
   for (const d of toUpdate) {
     await supabase.from('packing_items').update({
       label: d.label, category: d.category, quantity: d.quantity, reasoning: d.reasoning,
+      priority: d.priority, is_last_minute: d.isLastMinute, needs_check: d.needsCheck,
     }).eq('id', d.existingItemId as string)
   }
   if (toRemove.length > 0) {

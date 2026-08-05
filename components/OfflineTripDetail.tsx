@@ -293,9 +293,14 @@ export function OfflineTripDetail({ tripId }: { tripId: string }) {
                     <span style={{ color: 'var(--foreground)', fontSize: '0.82rem', textDecoration: item.status === 'nicht_benoetigt' ? 'line-through' : 'none' }}>
                       {item.label}{item.quantity > 1 ? ` × ${item.quantity}` : ''}
                     </span>
-                    {item.isEssential && (
+                    {item.priority === 'unverzichtbar' && (
                       <span style={{ color: '#B5624A', fontSize: '0.58rem', letterSpacing: '0.08em', textTransform: 'uppercase', border: '1px solid rgba(181,98,74,0.35)', borderRadius: '10px', padding: '1px 7px' }}>
-                        Essentiell
+                        Unverzichtbar
+                      </span>
+                    )}
+                    {item.isLastMinute && (
+                      <span style={{ color: 'var(--accent)', fontSize: '0.58rem', letterSpacing: '0.08em', textTransform: 'uppercase', border: '1px solid rgba(184,154,94,0.4)', borderRadius: '10px', padding: '1px 7px' }}>
+                        Zuletzt
                       </span>
                     )}
                   </div>
