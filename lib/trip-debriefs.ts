@@ -44,13 +44,33 @@ export function previousDebriefStep(step: DebriefStep): DebriefStep | null {
 
 export type DebriefStatus = 'active' | 'completed' | 'skipped' | 'closed'
 
+/** §"Feedbacktypen" (Nutzervorgabe, Packliste 2.0, wörtliche Werte). */
+export type PackingFeedbackType = 'missing' | 'unused' | 'too_few' | 'too_many' | 'provided_by_accommodation' | 'always_pack'
+export const PACKING_FEEDBACK_TYPES: PackingFeedbackType[] = ['missing', 'unused', 'too_few', 'too_many', 'provided_by_accommodation', 'always_pack']
+export const PACKING_FEEDBACK_TYPE_LABELS: Record<PackingFeedbackType, string> = {
+  missing: 'Hat gefehlt',
+  unused: 'Wurde nicht gebraucht',
+  too_few: 'Zu wenig eingepackt',
+  too_many: 'Zu viel eingepackt',
+  provided_by_accommodation: 'War in der Unterkunft vorhanden',
+  always_pack: 'Sollte künftig immer auf die Liste',
+}
+
+/** §"Bestehende Packgegenstände direkt auswählbar machen. Fehlende Gegenstände können per Freitext ergänzt werden" (Nutzervorgabe, wörtlich): entweder `item_id` (bestehendes packing_items) ODER `free_text`, nie beides gleichzeitig nötig. */
+export type PackingFeedbackEntry = {
+  item_id: string | null
+  free_text: string | null
+  feedback_type: PackingFeedbackType
+  person_id: string | null
+}
+
 export type DebriefAnswers = {
   hotel_rating?: { rating: number; note?: string }
   best_moment?: { text: string }
   worst_moment?: { text: string }
   person_highlights?: Record<string, string>
   would_revisit?: { value: 'yes' | 'no' | 'maybe' }
-  packing_feedback?: { missing?: string; unnecessary?: string; always_pack?: string; person_id?: string }
+  packing_feedback?: PackingFeedbackEntry[]
 }
 
 export type TripDebrief = {
@@ -115,6 +135,7 @@ export type DebriefMemoryCandidate = {
  */
 export function buildDebriefMemoryCandidates(
   tripTitle: string, answers: DebriefAnswers, participants: Array<{ id: string; name: string }>,
+  packingItems: Array<{ id: string; label: string }> = [],
 ): DebriefMemoryCandidate[] {
   const candidates: DebriefMemoryCandidate[] = []
 
@@ -153,38 +174,37 @@ export function buildDebriefMemoryCandidates(
     })
   }
 
-  // §"Nachreise-Dialog speist kontrolliert in die Packliste zurück" (Nutzervorgabe):
-  // wie bei person_highlights bestätigt hier der Mensch selbst im Dialog, was in
-  // die Zusammenfassung kommt -- kein Mehrfach-Reisen-Gate für diese drei Felder
-  // (anders als der zukünftige automatische Mehrfach-Reisen-Mustererkenner,
-  // lib/actions/packing-preference-learning.ts, Fast-Follow, noch nicht gebaut).
-  if (answers.packing_feedback) {
-    const { missing, unnecessary, always_pack, person_id } = answers.packing_feedback
-    const person = person_id ? participants.find((p) => p.id === person_id) : null
+  // §"Nachreise-Dialog speist kontrolliert in die Packliste zurück ... rohes
+  // Feedback getrennt von dauerhaften Erinnerungen speichern" (Nutzervorgabe,
+  // wörtlich): wie bei person_highlights bestätigt hier der Mensch selbst im
+  // Dialog, was in die Zusammenfassung kommt -- kein Mehrfach-Reisen-Gate für
+  // diese direkt ausgewählten Einträge (anders als der automatische
+  // Mehrfach-Reisen-Mustererkenner, lib/actions/packing-preference-learning.ts,
+  // der über mehrere ABGESCHLOSSENE Reisen hinweg arbeitet).
+  for (const entry of answers.packing_feedback ?? []) {
+    const label = entry.item_id
+      ? packingItems.find((i) => i.id === entry.item_id)?.label ?? entry.free_text ?? ''
+      : entry.free_text ?? ''
+    if (!label) continue
+
+    const person = entry.person_id ? participants.find((p) => p.id === entry.person_id) : null
     const personId = person?.id ?? null
     const personPrefix = person ? `${person.name}: ` : ''
 
-    if (missing) {
-      candidates.push({
-        personId, category: 'packing', memoryType: person ? 'family_member_preference' : 'confirmed_preference',
-        summary: `${personPrefix}Bei "${tripTitle}" hat gefehlt: ${missing}`,
-        structuredValue: { tripTitle, kind: 'missing', note: missing },
-      })
+    const summaryByType: Record<PackingFeedbackType, string> = {
+      missing: `${personPrefix}Bei "${tripTitle}" hat gefehlt: ${label}`,
+      unused: `${personPrefix}Bei "${tripTitle}" wurde nicht gebraucht: ${label}`,
+      too_few: `${personPrefix}Bei "${tripTitle}" war zu wenig dabei: ${label}`,
+      too_many: `${personPrefix}Bei "${tripTitle}" war zu viel dabei: ${label}`,
+      provided_by_accommodation: `${personPrefix}War in der Unterkunft bei "${tripTitle}" bereits vorhanden: ${label}`,
+      always_pack: `${personPrefix}Sollte künftig immer mit: ${label}`,
     }
-    if (unnecessary) {
-      candidates.push({
-        personId, category: 'packing', memoryType: person ? 'family_member_preference' : 'confirmed_preference',
-        summary: `${personPrefix}Bei "${tripTitle}" war unnötig eingepackt: ${unnecessary}`,
-        structuredValue: { tripTitle, kind: 'unnecessary', note: unnecessary },
-      })
-    }
-    if (always_pack) {
-      candidates.push({
-        personId, category: 'packing', memoryType: person ? 'family_member_preference' : 'confirmed_preference',
-        summary: `${personPrefix}Sollte künftig immer mit: ${always_pack}`,
-        structuredValue: { tripTitle, kind: 'always_pack', note: always_pack },
-      })
-    }
+
+    candidates.push({
+      personId, category: 'packing', memoryType: person ? 'family_member_preference' : 'confirmed_preference',
+      summary: summaryByType[entry.feedback_type],
+      structuredValue: { tripTitle, kind: entry.feedback_type, note: label, itemId: entry.item_id },
+    })
   }
 
   return candidates
