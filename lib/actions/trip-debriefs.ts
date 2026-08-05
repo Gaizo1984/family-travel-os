@@ -3,7 +3,16 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createPendingMemoryCandidate, hasDeclinedSimilarMemory } from '@/lib/family-memories'
-import { DEBRIEF_STEPS, nextDebriefStep, previousDebriefStep, buildDebriefMemoryCandidates, type DebriefStep, type DebriefAnswers } from '@/lib/trip-debriefs'
+import {
+  DEBRIEF_STEPS, nextDebriefStep, previousDebriefStep, buildDebriefMemoryCandidates, PACKING_FEEDBACK_TYPES,
+  type DebriefStep, type DebriefAnswers, type PackingFeedbackType, type PackingFeedbackEntry,
+} from '@/lib/trip-debriefs'
+import { loadPackingItems } from '@/lib/packing-list'
+import { maybeSuggestPackingPreference } from '@/lib/actions/packing-preference-learning'
+
+function isPackingFeedbackType(value: string): value is PackingFeedbackType {
+  return (PACKING_FEEDBACK_TYPES as string[]).includes(value)
+}
 
 function isDebriefStep(value: string): value is DebriefStep {
   return (DEBRIEF_STEPS as readonly string[]).includes(value)
@@ -28,7 +37,7 @@ export async function saveDebriefStep(formData: FormData) {
   if (!isDebriefStep(step)) redirect(debriefPath(slug))
 
   const supabase = await createClient()
-  const { data: existing } = await supabase.from('trip_debriefs').select('answers').eq('id', debriefId).maybeSingle()
+  const { data: existing } = await supabase.from('trip_debriefs').select('trip_id, answers').eq('id', debriefId).maybeSingle()
   const answers: DebriefAnswers = (existing?.answers as DebriefAnswers) ?? {}
 
   if (step === 'hotel_rating') {
@@ -53,18 +62,29 @@ export async function saveDebriefStep(formData: FormData) {
     const value = String(formData.get('value') ?? '')
     if (value === 'yes' || value === 'no' || value === 'maybe') answers.would_revisit = { value }
   } else if (step === 'packing_feedback') {
-    const missing = String(formData.get('missing') ?? '').trim()
-    const unnecessary = String(formData.get('unnecessary') ?? '').trim()
-    const alwaysPack = String(formData.get('always_pack') ?? '').trim()
-    const personId = String(formData.get('person_id') ?? '').trim()
-    if (missing || unnecessary || alwaysPack) {
-      answers.packing_feedback = {
-        ...(missing ? { missing } : {}),
-        ...(unnecessary ? { unnecessary } : {}),
-        ...(alwaysPack ? { always_pack: alwaysPack } : {}),
-        ...(personId ? { person_id: personId } : {}),
+    // §"Bestehende Packgegenstände direkt auswählbar machen. Fehlende
+    // Gegenstände können per Freitext ergänzt werden" (Nutzervorgabe,
+    // wörtlich): je Feedbacktyp eine Mehrfachauswahl bestehender Items
+    // (packing_feedback_<typ>_items[]) + ein optionales Freitextfeld
+    // (packing_feedback_<typ>_text). Die Person wird bei ausgewählten Items
+    // automatisch aus dem Item selbst übernommen (nicht redundant erneut
+    // abgefragt) -- nur Freitext-Ergänzungen bleiben ohne Personenbezug.
+    const packingItems = existing?.trip_id ? await loadPackingItems(supabase, existing.trip_id) : []
+    const itemById = new Map(packingItems.map((i) => [i.id, i]))
+    const entries: PackingFeedbackEntry[] = []
+
+    for (const type of PACKING_FEEDBACK_TYPES) {
+      const itemIds = formData.getAll(`packing_feedback_${type}_items`).map(String)
+      for (const itemId of itemIds) {
+        const item = itemById.get(itemId)
+        if (!item) continue
+        entries.push({ item_id: itemId, free_text: null, feedback_type: type, person_id: item.personId })
       }
+      const freeText = String(formData.get(`packing_feedback_${type}_text`) ?? '').trim()
+      if (freeText) entries.push({ item_id: null, free_text: freeText, feedback_type: type, person_id: null })
     }
+
+    if (entries.length > 0) answers.packing_feedback = entries
   }
 
   const next = nextDebriefStep(step)
@@ -120,7 +140,9 @@ async function proposeDebriefMemories(
   familyId: string, tripId: string, tripTitle: string, answers: DebriefAnswers,
   participants: Array<{ id: string; name: string }>,
 ): Promise<void> {
-  const candidates = buildDebriefMemoryCandidates(tripTitle, answers, participants)
+  const supabase = await createClient()
+  const packingItems = await loadPackingItems(supabase, tripId)
+  const candidates = buildDebriefMemoryCandidates(tripTitle, answers, participants, packingItems)
 
   for (const candidate of candidates) {
     // §Debrief entsteht laut Trigger-Cron nur einmalig je Reise (siehe
@@ -163,6 +185,19 @@ export async function confirmDebrief(formData: FormData) {
 
   await proposeDebriefMemories(familyId, tripId, tripTitle, answers, participants)
   await supabase.from('trip_debriefs').update({ status: 'completed' }).eq('id', debriefId)
+
+  // §"Kontrolliertes Mehrfach-Reisen-Lernen" (Nutzervorgabe): best-effort,
+  // niemals blockierend -- läuft nur für die Personen (inkl. "Gemeinsam" =
+  // null), die in DIESEM Rückblick tatsächlich Packlisten-Feedback gegeben
+  // haben (lib/actions/packing-preference-learning.ts).
+  const distinctPersonIds = new Set((answers.packing_feedback ?? []).map((e) => e.person_id))
+  for (const personId of distinctPersonIds) {
+    try {
+      await maybeSuggestPackingPreference(familyId, personId)
+    } catch (e) {
+      console.error('[trip-debriefs] maybeSuggestPackingPreference fehlgeschlagen', e)
+    }
+  }
 
   redirect(`/trips/${slug}`)
 }

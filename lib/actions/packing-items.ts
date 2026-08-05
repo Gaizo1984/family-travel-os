@@ -3,11 +3,15 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import type { PackingStatus, LuggageAssignment } from '@/lib/packing-list'
-import { PACKING_STATUS_ORDER, LUGGAGE_ASSIGNMENT_ORDER } from '@/lib/packing-list'
+import type { PackingStatus, LuggageAssignment, PackingPriority } from '@/lib/packing-list'
+import { PACKING_STATUS_ORDER, LUGGAGE_ASSIGNMENT_ORDER, PACKING_PRIORITY_ORDER } from '@/lib/packing-list'
 
 function packingPath(slug: string): string {
   return `/trips/${slug}/packing`
+}
+
+function isPackingPriority(value: string): value is PackingPriority {
+  return (PACKING_PRIORITY_ORDER as string[]).includes(value)
 }
 
 /** §"Eigenen Gegenstand hinzufügen" (Nutzervorgabe): source bleibt 'manuell'/source_key bleibt NULL -- eine Regenerierung fasst diese Zeile nie an (siehe lib/packing-list-generation.ts). */
@@ -19,7 +23,9 @@ export async function addPackingItem(formData: FormData) {
   const personId = String(formData.get('person_id') ?? '').trim() || null
   const quantityRaw = Number(formData.get('quantity') ?? 1)
   const quantity = Number.isFinite(quantityRaw) && quantityRaw > 0 ? Math.round(quantityRaw) : 1
-  const isEssential = formData.get('is_essential') === 'on'
+  const priorityRaw = String(formData.get('priority') ?? '')
+  const priority = isPackingPriority(priorityRaw) ? priorityRaw : 'empfohlen'
+  const isLastMinute = formData.get('is_last_minute') === 'on'
 
   if (label.length < 1 || !tripId) {
     revalidatePath(packingPath(slug))
@@ -28,7 +34,7 @@ export async function addPackingItem(formData: FormData) {
 
   const supabase = await createClient()
   await supabase.from('packing_items').insert({
-    trip_id: tripId, person_id: personId, label, category, quantity, is_essential: isEssential,
+    trip_id: tripId, person_id: personId, label, category, quantity, priority, is_last_minute: isLastMinute,
     status: 'offen', luggage_assignment: 'unassigned', source: 'manuell', source_key: null,
   })
 
@@ -64,13 +70,20 @@ export async function updatePackingItemDetails(formData: FormData) {
   const personId = String(formData.get('person_id') ?? '').trim() || null
   const luggageAssignmentRaw = String(formData.get('luggage_assignment') ?? '')
   const luggageAssignment = isLuggageAssignment(luggageAssignmentRaw) ? luggageAssignmentRaw : 'unassigned'
+  const luggageId = String(formData.get('luggage_id') ?? '').trim() || null
+  const weightGramsRaw = String(formData.get('weight_grams') ?? '').trim()
+  const weightGrams = weightGramsRaw ? Math.max(0, Math.round(Number(weightGramsRaw))) : null
   const note = String(formData.get('note') ?? '').trim() || null
-  const isEssential = formData.get('is_essential') === 'on'
+  const priorityRaw = String(formData.get('priority') ?? '')
+  const priority = isPackingPriority(priorityRaw) ? priorityRaw : 'empfohlen'
+  const isLastMinute = formData.get('is_last_minute') === 'on'
   const statusRaw = String(formData.get('status') ?? '')
 
   const supabase = await createClient()
   await supabase.from('packing_items').update({
-    quantity, person_id: personId, luggage_assignment: luggageAssignment, note, is_essential: isEssential,
+    quantity, person_id: personId, luggage_assignment: luggageAssignment, luggage_id: luggageId,
+    weight_grams: Number.isFinite(weightGrams) ? weightGrams : null,
+    note, priority, is_last_minute: isLastMinute,
     ...(isPackingStatus(statusRaw) ? { status: statusRaw } : {}),
   }).eq('id', itemId)
 

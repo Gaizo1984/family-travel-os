@@ -2,10 +2,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
-import { loadActiveDebrief, buildDebriefMemoryCandidates, DEBRIEF_STEPS, DEBRIEF_STEP_LABELS } from "@/lib/trip-debriefs";
-import type { DebriefStep } from "@/lib/trip-debriefs";
+import {
+  loadActiveDebrief, buildDebriefMemoryCandidates, DEBRIEF_STEPS, DEBRIEF_STEP_LABELS,
+  PACKING_FEEDBACK_TYPES, PACKING_FEEDBACK_TYPE_LABELS,
+} from "@/lib/trip-debriefs";
+import type { DebriefStep, PackingFeedbackEntry } from "@/lib/trip-debriefs";
 import { loadTripParticipantOptions } from "@/lib/trip-participants";
 import { getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
+import { loadPackingItems } from "@/lib/packing-list";
 import {
   saveDebriefStep, goToPreviousDebriefStep, skipDebrief, closeDebrief, confirmDebrief, toggleMemoryPhotoHighlight,
 } from "@/lib/actions/trip-debriefs";
@@ -115,7 +119,15 @@ export default async function TripDebriefPage({ params }: { params: Promise<{ id
     photos = (photosRaw ?? []).map((p) => ({ id: p.id, isHighlight: p.is_highlight, url: urlByPath.get(p.storage_path)?.url ?? null }));
   }
 
-  const previewCandidates = step === "summary" ? buildDebriefMemoryCandidates(trip.title, debrief.answers, participants) : [];
+  const packingItems = step === "packing_feedback" || step === "summary" ? await loadPackingItems(supabase, trip.id) : [];
+  const selectedByType = new Map<string, Set<string>>(
+    PACKING_FEEDBACK_TYPES.map((t) => [
+      t,
+      new Set((debrief.answers.packing_feedback ?? []).filter((e: PackingFeedbackEntry) => e.feedback_type === t && e.item_id).map((e: PackingFeedbackEntry) => e.item_id as string)),
+    ]),
+  );
+
+  const previewCandidates = step === "summary" ? buildDebriefMemoryCandidates(trip.title, debrief.answers, participants, packingItems) : [];
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -308,49 +320,49 @@ export default async function TripDebriefPage({ params }: { params: Promise<{ id
                 <input type="hidden" name="step" value={step} />
               </form>
               <h2 className="font-light mb-2" style={{ color: "var(--foreground)", fontSize: "1.1rem" }}>Wie war's mit der Packliste?</h2>
-              <p className="mb-5" style={{ color: "var(--muted)", fontSize: "0.76rem" }}>Optional -- hilft LUMI, künftige Packlisten für euch zu verbessern.</p>
+              <p className="mb-5" style={{ color: "var(--muted)", fontSize: "0.76rem" }}>Optional -- hilft LUMI, künftige Packlisten für euch zu verbessern. Bestehende Gegenstände direkt anhaken, Fehlendes per Freitext ergänzen.</p>
 
-              <div className="mb-5">
-                <label htmlFor="db-pk-missing" style={LABEL_STYLE}>Was hat gefehlt?</label>
-                <input
-                  id="db-pk-missing" name="missing" type="text" form={STEP_FORM_ID}
-                  defaultValue={debrief.answers.packing_feedback?.missing ?? ""}
-                  placeholder="z. B. wärmere Jacke für die Abende"
-                  style={FIELD_STYLE}
-                />
+              <div className="space-y-4 mb-6">
+                {PACKING_FEEDBACK_TYPES.map((type) => {
+                  const selected = selectedByType.get(type) ?? new Set<string>();
+                  const existingFreeText = (debrief.answers.packing_feedback ?? [])
+                    .find((e) => e.feedback_type === type && e.item_id === null)?.free_text ?? "";
+                  return (
+                    <details key={type} className="rounded-lg" style={{ border: "1px solid var(--border)" }} open={selected.size > 0 || Boolean(existingFreeText)}>
+                      <summary className="p-3" style={{ color: "var(--foreground)", fontSize: "0.8rem", cursor: "pointer" }}>
+                        {PACKING_FEEDBACK_TYPE_LABELS[type]}
+                        {selected.size > 0 && <span style={{ color: "var(--accent)", fontSize: "0.68rem" }}> · {selected.size} ausgewählt</span>}
+                      </summary>
+                      <div className="p-3 pt-0">
+                        {packingItems.length > 0 && (
+                          <div className="flex flex-wrap gap-2 mb-3">
+                            {packingItems.map((item) => (
+                              <label
+                                key={item.id}
+                                className="flex items-center gap-1.5 rounded-full px-3 py-1.5 cursor-pointer"
+                                style={{ background: selected.has(item.id) ? "rgba(184,154,94,0.14)" : "var(--background)", border: `1px solid ${selected.has(item.id) ? "rgba(184,154,94,0.4)" : "var(--border)"}` }}
+                              >
+                                <input
+                                  type="checkbox" name={`packing_feedback_${type}_items`} value={item.id}
+                                  defaultChecked={selected.has(item.id)} form={STEP_FORM_ID}
+                                  style={{ accentColor: "var(--accent)", width: "13px", height: "13px" }}
+                                />
+                                <span style={{ color: "var(--foreground)", fontSize: "0.74rem" }}>{item.label}</span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                        <input
+                          name={`packing_feedback_${type}_text`} type="text" form={STEP_FORM_ID}
+                          defaultValue={existingFreeText}
+                          placeholder="Weiteres ergänzen (optional)"
+                          style={FIELD_STYLE}
+                        />
+                      </div>
+                    </details>
+                  );
+                })}
               </div>
-
-              <div className="mb-5">
-                <label htmlFor="db-pk-unnecessary" style={LABEL_STYLE}>Was war unnötig eingepackt?</label>
-                <input
-                  id="db-pk-unnecessary" name="unnecessary" type="text" form={STEP_FORM_ID}
-                  defaultValue={debrief.answers.packing_feedback?.unnecessary ?? ""}
-                  placeholder="z. B. der Regenschirm"
-                  style={FIELD_STYLE}
-                />
-              </div>
-
-              <div className="mb-5">
-                <label htmlFor="db-pk-always" style={LABEL_STYLE}>Was sollte künftig immer mit?</label>
-                <input
-                  id="db-pk-always" name="always_pack" type="text" form={STEP_FORM_ID}
-                  defaultValue={debrief.answers.packing_feedback?.always_pack ?? ""}
-                  placeholder="z. B. Steckdosenadapter"
-                  style={FIELD_STYLE}
-                />
-              </div>
-
-              {participants.length > 0 && (
-                <div className="mb-6">
-                  <label style={LABEL_STYLE}>Betrifft besonders (optional)</label>
-                  <div className="flex flex-wrap gap-2">
-                    <RadioChip name="person_id" value="" checked={!debrief.answers.packing_feedback?.person_id} label="Alle" />
-                    {participants.map((p) => (
-                      <RadioChip key={p.id} name="person_id" value={p.id} checked={debrief.answers.packing_feedback?.person_id === p.id} label={p.name} />
-                    ))}
-                  </div>
-                </div>
-              )}
 
               <StepNav debriefId={debrief.id} slug={trip.slug} step={step} />
             </>
