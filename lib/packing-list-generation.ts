@@ -13,6 +13,8 @@ export type PackingFollowUpAnswers = {
   needsStroller: boolean
   needsCarSeat: boolean
   needsCarrier: boolean
+  needsDiapers: boolean
+  hasDrone: boolean
 }
 
 /** §"'Noch prüfen' ist kein Prioritätswert" (Nutzervorgabe, Packliste 2.0): AI-seitiger Rückgabewert inkl. "none" -- wird nach dem Parsen auf `NeedsCheck | null` (lib/packing-list.ts, ohne "none") abgebildet, das echte, filterbare Feld auf packing_items. */
@@ -37,6 +39,17 @@ export function sanitizeHealthLabel(category: string, label: string): string {
   const lower = label.toLowerCase()
   const isAllowed = ALLOWED_HEALTH_LABEL_PATTERNS.some((p) => lower.includes(p))
   return isAllowed ? label : HEALTH_LABEL_FALLBACK
+}
+
+/**
+ * §"Medikamente von der Einzelperson weg hin zu Gemeinsam" (Nutzer-Feedback):
+ * strukturelle Absicherung NACH dem Parsen, nicht nur Prompt-Wortlaut --
+ * dieselbe Kategorie ist ohnehin durch sanitizeHealthLabel auf neutrale,
+ * generische Bezeichnungen begrenzt, eine Personenzuordnung wäre also
+ * ohnehin irreführend.
+ */
+export function sanitizeHealthPersonKey(category: string, personKey: string): string {
+  return category === 'medikamente_und_gesundheit' ? 'gemeinsam' : personKey
 }
 
 /** §Abgleichsschlüssel-Drift durch KI-Uneinheitlichkeit begrenzen (Groß-/Kleinschreibung, Leerzeichen) -- siehe computeRegenerationDiff. */
@@ -113,6 +126,8 @@ function followUpSummary(f: PackingFollowUpAnswers): string {
     f.needsStroller ? 'Kinderwagen wird benötigt.' : null,
     f.needsCarSeat ? 'Kindersitz wird benötigt.' : null,
     f.needsCarrier ? 'Babytrage wird benötigt.' : null,
+    f.needsDiapers ? 'Es reist noch ein Kind mit, das Windeln trägt.' : null,
+    f.hasDrone ? 'Es wird eine Drohne mitgenommen.' : null,
   ].filter((l): l is string => Boolean(l))
   return lines.join('\n')
 }
@@ -157,9 +172,13 @@ Wichtige Einschränkungen:
 - Triff niemals verbindliche Aussagen zu verbotenen Gegenständen oder aktuellen Airline-Sicherheitsregeln -- setze bei relevanten Gegenständen needs_check_flag="airline_rule".
 - Kategorie "medikamente_und_gesundheit": ausschließlich neutrale, generische Einträge wie "Persönliche Medikamente", "Erste-Hilfe-Set", niemals Diagnosen oder konkrete Medikamentennamen ableiten.
 - Größere Kinderausstattung (Reisebett/Kinderbett, Kinderwagen, Kindersitz, Babytrage) NUR vorschlagen, wenn die Familie das ausdrücklich in "Antworten der Familie" oben angegeben hat. Ohne ausdrückliche Angabe NICHT vorschlagen -- diese Dinge sind oft vor Ort vorhanden, werden anders gelöst (z. B. Kind schläft im Elternbett) oder unnötiger Ballast, das kannst du nicht wissen.
-- Gegenstände, die typischerweise für die ganze Familie gemeinsam gelten (z. B. Ladegeräte, Sonnencreme, Insektenschutz, Erste-Hilfe-Set, Reiseapotheke), bekommen person_key="gemeinsam", NICHT eine Einzelperson -- außer es handelt sich eindeutig um ein persönliches Gerät oder ein personenspezifisches Medikament.
+- Windeln NUR vorschlagen, wenn "Antworten der Familie" oben ausdrücklich ein Kind nennt, das noch Windeln trägt -- dann als eigener Gegenstand (person_key des Kindes), mit ausreichend Menge für die Reisedauer plus Puffer.
+- Wenn "Antworten der Familie" oben eine Drohne nennt: eigene Gegenstände dafür vorschlagen (z. B. Ladegerät/Powerbank für die Akkus, Ersatzakkus, Ersatzpropeller, Speicherkarte) -- und für die Drohne selbst sowie ihre Akkus needs_check_flag="airline_rule" setzen, da Mitnahme-/Akku-Vorschriften je Airline/Zielland unterschiedlich und nicht bekannt sind.
+- Gegenstände, die typischerweise für die ganze Familie gemeinsam gelten (z. B. Ladegeräte, Sonnencreme, Insektenschutz), bekommen person_key="gemeinsam", NICHT eine Einzelperson -- außer es handelt sich eindeutig um ein persönliches Gerät.
+- Kategorie "medikamente_und_gesundheit": IMMER person_key="gemeinsam", niemals eine Einzelperson -- die Einträge sind ohnehin nur neutrale, generische Bezeichnungen (siehe unten), eine Personenzuordnung wäre irreführend.
 - Priorität differenziert wirklich: "unverzichtbar" nur für Dokumente, notwendige Medikamente, zwingend benötigte Ausrüstung -- nicht jeder Gegenstand ist unverzichtbar, die meisten sind "empfohlen" oder "optional".
 - Mengen NICHT automatisch für jeden Reisetag ein vollständiges Kleidungsset -- weniger bei verlässlichem Waschservice, mehr Wechselkleidung bei kleinen Kindern, Sportkleidung nur bei tatsächlich geplanten Aktivitäten, elegante Kleidung nur bei passendem Anlass, Regenausstattung abhängig vom Wetter/Forecast oben.
+- Kurze Hosen IMMER als "Shorts" bezeichnen, nicht als "leichte Hose"/"leichte Hosen". Lange (Stoff-/Sommer-)Hosen separat als eigenen Gegenstand führen (z. B. "Leichte lange Hose"), nie unter der Bezeichnung "Shorts" vermischen.
 - is_last_minute=true für Dinge, die erst am Abreisetag eingepackt werden können (Zahnbürste, täglich verwendete Medikamente, Handy, Ladekabel, Lieblingsspielzeug, Hausschlüssel) -- unabhängig von der sonstigen Kategorie des Gegenstands.
 - Jeder Gegenstand braucht einen stabilen source_key, der bei einer künftigen erneuten Generierung für dasselbe gedachte Item identisch bleibt.`
 }
@@ -195,9 +214,10 @@ export function parseGeneratedItems(raw: unknown): GeneratedPackingItem[] {
     if (!rawLabel) continue
     const label = sanitizeHealthLabel(category, rawLabel)
     const sourceKeyRaw = typeof e.source_key === 'string' && e.source_key.trim() ? e.source_key : `${category}_${rawLabel}`
+    const rawPersonKey = typeof e.person_key === 'string' && e.person_key.trim() ? e.person_key.trim() : 'gemeinsam'
 
     result.push({
-      personKey: typeof e.person_key === 'string' && e.person_key.trim() ? e.person_key.trim() : 'gemeinsam',
+      personKey: sanitizeHealthPersonKey(category, rawPersonKey),
       category, label, quantity: normalizeQuantity(e.quantity),
       priority: isPackingPriorityFromAi(e.priority) ? e.priority : 'empfohlen',
       isLastMinute: e.is_last_minute === true,
