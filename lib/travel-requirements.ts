@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createClient } from './supabase/server'
 import type { DocumentType } from './documents'
+import { deriveTripDateRange } from './trip-dates'
 
 /**
  * Zentrale, erweiterbare Travel Requirements Engine: die EINE Stelle, die
@@ -130,25 +131,41 @@ export function resolveWaypointCountry(text: string | null | undefined): 'US' | 
  */
 async function buildRequirementContext(tripId: string, returnTo?: string, supabaseOverride?: SupabaseClient): Promise<RequirementContext | null> {
   const supabase = supabaseOverride ?? await createClient()
-  const { data: trip } = await supabase.from('trips').select('slug, end_date').eq('id', tripId).maybeSingle()
-  if (!trip?.end_date) return null
+  const { data: trip } = await supabase.from('trips').select('slug, start_date, end_date').eq('id', tripId).maybeSingle()
+  if (!trip) return null
 
-  const [{ data: memberRows }, { data: stagesRaw }, { data: flightsRaw }] = await Promise.all([
+  const [{ data: memberRows }, { data: stagesRaw }, { data: bookingsRaw }] = await Promise.all([
     supabase.from('trip_members').select('persons ( id, name )').eq('trip_id', tripId),
-    supabase.from('stages').select('country_code').eq('trip_id', tripId),
-    supabase.from('bookings').select('details').eq('trip_id', tripId).eq('type', 'flight').neq('status', 'cancelled'),
+    supabase.from('stages').select('country_code, start_date, end_date').eq('trip_id', tripId),
+    supabase.from('bookings').select('type, status, start_datetime, end_datetime, details').eq('trip_id', tripId).neq('status', 'cancelled'),
   ])
+  const stages = (stagesRaw ?? []) as Array<{ country_code: string | null; start_date: string | null; end_date: string | null }>
+  const bookings = (bookingsRaw ?? []) as Array<{ type: string; status: string; start_datetime: string | null; end_datetime: string | null; details: Record<string, string> | null }>
+
+  // §"Reiseanlage vereinfachen -- Start-/Enddatum optional" (frühere Session-
+  // Entscheidung): trips.end_date ist bei den meisten aktuellen Reisen NICHT
+  // manuell gesetzt, das reale Ende steckt in Etappen/Buchungen. Root-Cause-
+  // Fix "Reisepässe werden trotz gültiger Dokumente nie als erledigt
+  // erkannt": diese Engine prüfte bisher NUR die rohe trips.end_date-Spalte
+  // und brach bei fehlendem Wert komplett ab (auch Ready to Travel selbst
+  // betroffen) -- jetzt dieselbe, einzige Ableitungslogik wie überall sonst
+  // in der App (lib/trip-dates.ts), damit Reisepass/ESTA/eTA für JEDE Reise
+  // mit einem ableitbaren Zeitraum ausgewertet werden, nicht nur für manuell
+  // terminierte.
+  const dateRange = deriveTripDateRange({ start_date: trip.start_date, end_date: trip.end_date }, bookings, stages)
+  if (!dateRange.endDate) return null
 
   const members = (memberRows ?? [])
     .flatMap((m) => (m.persons ? [m.persons as unknown as { id: string; name: string }] : []))
 
   const countryCodes = new Set<string>()
-  for (const s of (stagesRaw ?? []) as Array<{ country_code: string | null }>) {
+  for (const s of stages) {
     if (s.country_code) countryCodes.add(s.country_code)
   }
-  for (const f of (flightsRaw ?? []) as Array<{ details: Record<string, string> | null }>) {
+  for (const b of bookings) {
+    if (b.type !== 'flight') continue
     for (const field of ['from', 'to', 'layover_airport'] as const) {
-      const code = resolveWaypointCountry(f.details?.[field])
+      const code = resolveWaypointCountry(b.details?.[field])
       if (code) countryCodes.add(code)
     }
   }
@@ -167,7 +184,7 @@ async function buildRequirementContext(tripId: string, returnTo?: string, supaba
   }
 
   return {
-    tripId, tripSlug: trip.slug, tripEnd: trip.end_date,
+    tripId, tripSlug: trip.slug, tripEnd: dateRange.endDate,
     returnTo: returnTo ?? `/trips/${trip.slug}/documents`,
     members, countryCodes, documentsByPerson, supabase,
   }

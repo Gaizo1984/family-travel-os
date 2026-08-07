@@ -43,6 +43,8 @@ function readFollowUp(formData: FormData): PackingFollowUpAnswers {
     needsStroller: formData.get('needs_stroller') === 'on',
     needsCarSeat: formData.get('needs_car_seat') === 'on',
     needsCarrier: formData.get('needs_carrier') === 'on',
+    needsDiapers: formData.get('needs_diapers') === 'on',
+    hasDrone: formData.get('has_drone') === 'on',
   }
 }
 

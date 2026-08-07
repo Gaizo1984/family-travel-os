@@ -85,7 +85,7 @@ export default async function GeneratePackingListPage({
             </div>
 
             <label style={LABEL_STYLE}>Für Kinder</label>
-            <div className="flex flex-wrap gap-4 mb-2">
+            <div className="flex flex-wrap gap-4 mb-6">
               <label className="flex items-center gap-2" style={{ cursor: "pointer" }}>
                 <input type="checkbox" name="needs_stroller" style={{ accentColor: "var(--accent)", width: "14px", height: "14px" }} />
                 <span style={{ color: "var(--foreground)", fontSize: "0.8rem" }}>Kinderwagen</span>
@@ -97,6 +97,18 @@ export default async function GeneratePackingListPage({
               <label className="flex items-center gap-2" style={{ cursor: "pointer" }}>
                 <input type="checkbox" name="needs_carrier" style={{ accentColor: "var(--accent)", width: "14px", height: "14px" }} />
                 <span style={{ color: "var(--foreground)", fontSize: "0.8rem" }}>Babytrage</span>
+              </label>
+              <label className="flex items-center gap-2" style={{ cursor: "pointer" }}>
+                <input type="checkbox" name="needs_diapers" style={{ accentColor: "var(--accent)", width: "14px", height: "14px" }} />
+                <span style={{ color: "var(--foreground)", fontSize: "0.8rem" }}>Windeln (Kind trägt noch Windeln)</span>
+              </label>
+            </div>
+
+            <label style={LABEL_STYLE}>Ausrüstung</label>
+            <div className="flex flex-wrap gap-4 mb-2">
+              <label className="flex items-center gap-2" style={{ cursor: "pointer" }}>
+                <input type="checkbox" name="has_drone" style={{ accentColor: "var(--accent)", width: "14px", height: "14px" }} />
+                <span style={{ color: "var(--foreground)", fontSize: "0.8rem" }}>Drohne wird mitgenommen</span>
               </label>
             </div>
 
