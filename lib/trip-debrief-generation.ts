@@ -2,18 +2,29 @@ import { createServiceRoleClient } from '@/lib/supabase/service-role'
 import { todayIsoInFamilyTimezone } from '@/lib/time'
 import { addDaysIso } from '@/lib/date-utils'
 import { buildTripDigest } from '@/lib/trip-digest'
+import { deriveTripDateRange } from '@/lib/trip-dates'
 import {
   curateVacationPostSelection, computeVacationPostExpiresAt, type VacationPostCandidate,
 } from '@/lib/vacation-post-curation'
 
 /**
  * §"1-3 Tage nach Reiseende soll LUMI EINMALIG einen kompakten Rückblick
- * anbieten" (Nutzervorgabe, wörtlich): gleiches `trips.end_date`-Muster wie
- * lib/booking-document-cleanup.ts (bewusst das rohe Feld, nicht
- * deriveTripDateRange -- siehe dortiger Kommentar). "Einmalig" heißt: pro
- * Reise wird höchstens EIN trip_debriefs-Datensatz jemals angelegt,
- * unabhängig von seinem späteren Status (aktiv/abgeschlossen/übersprungen/
- * geschlossen) -- ein bereits übersprungener Dialog wird nie erneut erzeugt.
+ * anbieten" (Nutzervorgabe, wörtlich). "Einmalig" heißt: pro Reise wird
+ * höchstens EIN trip_debriefs-Datensatz jemals angelegt, unabhängig von
+ * seinem späteren Status (aktiv/abgeschlossen/übersprungen/geschlossen) --
+ * ein bereits übersprungener Dialog wird nie erneut erzeugt.
+ *
+ * §Root-Cause-Fix "Nachreisefeedback wird nie ausgelöst" (Nutzer-Feedback,
+ * konkreter Fall: eine gerade beendete Reise ohne manuell gesetztes
+ * trips.end_date): nutzte bisher wie lib/booking-document-cleanup.ts
+ * bewusst nur das rohe `trips.end_date`-Feld -- dort ist das richtig
+ * (destruktives Löschen, kein Wiederholungsschutz), hier aber nicht: die
+ * "Einmalig"-Prüfung unten via bestehendem trip_debriefs-Datensatz macht
+ * ein später schwankendes abgeleitetes Datum ungefährlich, ein Rückblick
+ * kann so nie doppelt angelegt werden. Nutzt jetzt dieselbe zentrale
+ * Ableitungslogik wie der Rest der App (lib/trip-dates.ts), damit auch
+ * Reisen ohne manuelles Enddatum (deren reales Ende aus Etappen/Buchungen
+ * hervorgeht) erkannt werden.
  */
 const TRIGGER_WINDOW_START_DAYS_AFTER_END = 1
 const TRIGGER_WINDOW_END_DAYS_AFTER_END = 3
@@ -26,15 +37,26 @@ export async function triggerDueTripDebriefs(): Promise<TripDebriefTriggerResult
   const windowStart = addDaysIso(today, -TRIGGER_WINDOW_END_DAYS_AFTER_END)
   const windowEnd = addDaysIso(today, -TRIGGER_WINDOW_START_DAYS_AFTER_END)
 
-  const { data: dueTripsRaw } = await supabase
+  const { data: candidateTripsRaw } = await supabase
     .from('trips')
-    .select('id, family_id')
-    .not('end_date', 'is', null)
-    .gte('end_date', windowStart)
-    .lte('end_date', windowEnd)
+    .select(`
+      id, family_id, start_date, end_date,
+      stages ( start_date, end_date ),
+      bookings ( type, status, start_datetime, end_datetime )
+    `)
     .neq('status', 'archived')
 
-  const dueTrips = dueTripsRaw ?? []
+  const candidateTrips = (candidateTripsRaw ?? []) as Array<{
+    id: string; family_id: string; start_date: string | null; end_date: string | null
+    stages: Array<{ start_date: string | null; end_date: string | null }>
+    bookings: Array<{ type: string; status: string; start_datetime: string | null; end_datetime: string | null }>
+  }>
+
+  const dueTrips = candidateTrips.filter((trip) => {
+    const range = deriveTripDateRange({ start_date: trip.start_date, end_date: trip.end_date }, trip.bookings, trip.stages)
+    return range.endDate !== null && range.endDate >= windowStart && range.endDate <= windowEnd
+  })
+
   let created = 0
 
   for (const trip of dueTrips) {
