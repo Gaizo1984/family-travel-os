@@ -120,7 +120,36 @@ export type PackingGenerationContext = {
   tripNights: number | null
 }
 
-function followUpSummary(f: PackingFollowUpAnswers): string {
+/**
+ * §"Windeln-Einstellung darf natürlich nur für [das jüngste Kind] übernommen
+ * werden" (Nutzer-Feedback): die Checkbox selbst nennt keinen Namen -- ohne
+ * explizite Zuordnung müsste die KI aus dem Kontext raten, WELCHES der
+ * womöglich mehreren minderjährigen Teilnehmer gemeint ist (Rate-Risiko wie
+ * beim früheren KI-Namensabgleich-Bug bei Hotels). Deshalb wird das jüngste
+ * Kind mit bekanntem Alter HIER, deterministisch im Code, ermittelt und im
+ * Prompt namentlich genannt -- die KI muss nicht mehr selbst zuordnen.
+ */
+export function youngestParticipant(participants: PackingGenerationContext['participants']): PackingGenerationContext['participants'][number] | null {
+  const withKnownAge = participants.filter((p) => p.ageAtTrip !== null)
+  if (withKnownAge.length === 0) return null
+  return withKnownAge.reduce((youngest, p) => (p.ageAtTrip! < youngest.ageAtTrip! ? p : youngest))
+}
+
+const DIAPER_LABEL_PATTERN = 'windel'
+
+/**
+ * §"Windeln-Einstellung darf natürlich nur für [das jüngste Kind] übernommen
+ * werden" (Nutzer-Feedback): strukturelle Absicherung NACH dem Parsen,
+ * analog zu sanitizeHealthPersonKey -- verlässt sich nicht allein auf
+ * Prompt-Befolgung, jeder Windel-Gegenstand bekommt zwangsläufig den Namen
+ * des tatsächlich gemeinten Kindes, egal was die KI als person_key liefert.
+ */
+export function sanitizeDiaperPersonKey(label: string, personKey: string, diaperChildName: string | null): string {
+  if (!diaperChildName) return personKey
+  return label.toLowerCase().includes(DIAPER_LABEL_PATTERN) ? diaperChildName : personKey
+}
+
+function followUpSummary(f: PackingFollowUpAnswers, diaperChild: PackingGenerationContext['participants'][number] | null): string {
   const lines = [
     `Packstil: ${PACK_STYLE_LABELS[f.packStyle]}`,
     `Waschmöglichkeit vor Ort: ${f.laundryAvailable ? 'ja' : 'nein/unbekannt'}`,
@@ -128,7 +157,9 @@ function followUpSummary(f: PackingFollowUpAnswers): string {
     f.needsStroller ? 'Kinderwagen wird benötigt.' : null,
     f.needsCarSeat ? 'Kindersitz wird benötigt.' : null,
     f.needsCarrier ? 'Babytrage wird benötigt.' : null,
-    f.needsDiapers ? 'Es reist noch ein Kind mit, das Windeln trägt.' : null,
+    f.needsDiapers && diaperChild
+      ? `Windeln werden ausschließlich für ${diaperChild.name}${diaperChild.ageAtTrip !== null ? ` (${diaperChild.ageAtTrip} Jahre)` : ''} benötigt -- für kein anderes Familienmitglied.`
+      : f.needsDiapers ? 'Es reist noch ein Kind mit, das Windeln trägt (kein Alter bekannt, aus dem Kontext das plausibelste Kind wählen).' : null,
     f.hasDrone ? 'Es wird eine Drohne mitgenommen.' : null,
   ].filter((l): l is string => Boolean(l))
   return lines.join('\n')
@@ -146,6 +177,7 @@ export function buildPackingPrompt(ctx: PackingGenerationContext): string {
   const participantsText = ctx.participants
     .map((p) => `- ${p.name}${p.ageAtTrip !== null ? ` (${p.ageAtTrip} Jahre bei Reisebeginn)` : p.isMinor ? ' (minderjährig, genaues Alter unbekannt)' : ' (Erwachsene/r)'}`)
     .join('\n')
+  const diaperChild = ctx.followUp.needsDiapers ? youngestParticipant(ctx.participants) : null
 
   return `Erstelle eine personenbezogene Packliste für die Reise "${ctx.tripTitle}".
 
@@ -167,7 +199,7 @@ Bestätigte Vorlieben/frühere Packerfahrung dieser Familie:
 ${ctx.confirmedMemories.length > 0 ? ctx.confirmedMemories.map((m) => `- ${m}`).join('\n') : 'Keine bekannt.'}
 
 Antworten der Familie:
-${followUpSummary(ctx.followUp)}
+${followUpSummary(ctx.followUp, diaperChild)}
 
 Wichtige Einschränkungen:
 - Gepäckfreigrenzen (Fluggewicht/-anzahl) sind NICHT bekannt. Erfinde niemals eine konkrete Grenze -- setze bei betroffenen Vorschlägen needs_check_flag="baggage_allowance".
@@ -175,8 +207,9 @@ Wichtige Einschränkungen:
 - Triff niemals verbindliche Aussagen zu verbotenen Gegenständen oder aktuellen Airline-Sicherheitsregeln -- setze bei relevanten Gegenständen needs_check_flag="airline_rule".
 - Kategorie "medikamente_und_gesundheit": ausschließlich neutrale, generische Einträge wie "Persönliche Medikamente", niemals Diagnosen oder konkrete Medikamentennamen ableiten. "Erste-Hilfe-Set" NICHT als eigenen, zusätzlichen Gegenstand vorschlagen -- ist eine Dopplung zu "Persönliche Medikamente"/"Reiseapotheke" und bereits darin enthalten.
 - Größere Kinderausstattung (Reisebett/Kinderbett, Kinderwagen, Kindersitz, Babytrage) NUR vorschlagen, wenn die Familie das ausdrücklich in "Antworten der Familie" oben angegeben hat. Ohne ausdrückliche Angabe NICHT vorschlagen -- diese Dinge sind oft vor Ort vorhanden, werden anders gelöst (z. B. Kind schläft im Elternbett) oder unnötiger Ballast, das kannst du nicht wissen.
-- Windeln NUR vorschlagen, wenn "Antworten der Familie" oben ausdrücklich ein Kind nennt, das noch Windeln trägt -- dann als eigener Gegenstand (person_key des Kindes) mit einer REALISTISCHEN, konkreten Menge (quantity), nicht 1: bei "Gesamtreisedauer" oben als Grundlage ca. 5-6 Windeln pro Tag rechnen, plus etwas Puffer für Reisetage/Verzögerungen -- z. B. bei 10 Nächten realistisch 60-70 Stück, nicht weniger.
-- Wenn "Antworten der Familie" oben eine Drohne nennt: NUR die Drohne selbst als einen Gegenstand vorschlagen (person_key="gemeinsam", needs_check_flag="airline_rule" wegen unbekannter Akku-/Mitnahmeregeln je Airline/Zielland) sowie zusätzlich ein wasserdichtes Schutz-/Travelbag für die Drohne -- KEINE weiteren Einzelteile wie Ladegerät, Ersatzakku, Ersatzpropeller oder Speicherkarte separat auflisten, das zählt bereits zur Drohnenausrüstung selbst.
+- Windeln NUR vorschlagen, wenn "Antworten der Familie" oben ausdrücklich ein Kind nennt, das noch Windeln trägt -- dann als eigener Gegenstand mit EXAKT dem dort genannten Namen als person_key (niemals einem anderen Teilnehmer, auch wenn mehrere Kinder mitreisen) und einer REALISTISCHEN, konkreten Menge (quantity), nicht 1: bei "Gesamtreisedauer" oben als Grundlage ca. 5-6 Windeln pro Tag rechnen, plus etwas Puffer für Reisetage/Verzögerungen -- z. B. bei 10 Nächten realistisch 60-70 Stück, nicht weniger.
+- Wenn "Antworten der Familie" oben eine Drohne nennt: NUR die Drohne selbst als einen Gegenstand vorschlagen (person_key="gemeinsam", needs_check_flag="airline_rule" wegen unbekannter Akku-/Mitnahmeregeln je Airline/Zielland) -- KEINE weiteren Einzelteile wie Ladegerät, Ersatzakku, Ersatzpropeller, Speicherkarte oder Schutztasche separat auflisten, das zählt bereits zur Drohnenausrüstung selbst.
+- Wenn Strand/Pool/Meer relevant ist (siehe Aktivitäten/Etappen oben): eine wasserdichte Tasche/Pouch für Handy, Portemonnaie und Schlüssel als sinnvollen Standardgegenstand vorschlagen (zum Schutz beim Schwimmen/im Wasser) -- das ist UNABHÄNGIG von einer eventuellen Drohne, niemals als Drohnenzubehör bezeichnen.
 - Gegenstände, die typischerweise für die ganze Familie gemeinsam gelten (z. B. Ladegeräte, Sonnencreme, Insektenschutz), bekommen person_key="gemeinsam", NICHT eine Einzelperson -- außer es handelt sich eindeutig um ein persönliches Gerät.
 - Kategorie "medikamente_und_gesundheit": IMMER person_key="gemeinsam", niemals eine Einzelperson -- die Einträge sind ohnehin nur neutrale, generische Bezeichnungen (siehe unten), eine Personenzuordnung wäre irreführend.
 - Priorität differenziert wirklich: "unverzichtbar" nur für Dokumente, notwendige Medikamente, zwingend benötigte Ausrüstung -- nicht jeder Gegenstand ist unverzichtbar, die meisten sind "empfohlen" oder "optional".
