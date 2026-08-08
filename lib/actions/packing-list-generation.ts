@@ -16,6 +16,7 @@ import { createJob, completeJob, failJob } from '@/lib/ai-generation-jobs'
 import {
   buildPackingPrompt, parseGeneratedItems, computeRegenerationDiff, needsCheckFlagToPersisted,
   buildReadyPassportPersonKeys, initialStatusForItem, reasoningWithReadinessNotice,
+  youngestParticipant, sanitizeDiaperPersonKey,
   PACKING_ITEM_SCHEMA, type PackingFollowUpAnswers, type PackStyle, type PackingGenerationContext,
 } from '@/lib/packing-list-generation'
 
@@ -153,7 +154,14 @@ export async function generatePackingList(formData: FormData) {
         input: [{ role: 'user', content: [{ type: 'input_text', text: buildPackingPrompt(context) }] }],
         text: { format: { type: 'json_schema', name: 'packing_list', schema: PACKING_ITEM_SCHEMA, strict: true } },
       })
-      const parsedItems = parseGeneratedItems(JSON.parse(response.output_text))
+      // §"Windeln dürfen natürlich nur für [das jüngste Kind] übernommen
+      // werden" (Nutzer-Feedback): strukturelle Absicherung nach dem Parsen,
+      // verlässt sich nicht allein auf Prompt-Befolgung -- siehe
+      // sanitizeDiaperPersonKey (lib/packing-list-generation.ts).
+      const diaperChildName = followUp.needsDiapers ? youngestParticipant(participants)?.name ?? null : null
+      const parsedItems = parseGeneratedItems(JSON.parse(response.output_text)).map((item) => ({
+        ...item, personKey: sanitizeDiaperPersonKey(item.label, item.personKey, diaperChildName),
+      }))
 
       if (parsedItems.length === 0) {
         await failJob(jobId, 'Es konnten keine Vorschläge erzeugt werden. Bitte erneut versuchen.', supabase)
