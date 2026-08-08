@@ -351,17 +351,18 @@ export default async function PackingListPage({
 
         {/* ── KI-Generierung ── */}
         <div className="rounded-xl p-5 mb-6 flex items-center justify-between flex-wrap gap-3" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-          <p style={{ color: "var(--muted)", fontSize: "0.76rem", lineHeight: 1.5 }}>
+          <p className="flex-1" style={{ color: "var(--muted)", fontSize: "0.76rem", lineHeight: 1.5, minWidth: "180px" }}>
             {hasAnyGenerated
               ? "LUMI kann die Packliste anhand aktueller Reisedaten aktualisieren."
               : "LUMI kann eine Packliste anhand eurer Reisedaten vorschlagen."}
           </p>
           <Link
             href={`/trips/${trip.slug}/packing/generate`}
+            className="w-full sm:w-auto text-center"
             style={{
               background: "var(--foreground)", color: "var(--surface)", textDecoration: "none",
               borderRadius: "6px", padding: "10px 18px", fontSize: "0.62rem", letterSpacing: "0.1em",
-              textTransform: "uppercase", whiteSpace: "nowrap",
+              textTransform: "uppercase",
             }}
           >
             {hasAnyGenerated ? "Packliste aktualisieren" : "Intelligente Packliste erstellen"}
