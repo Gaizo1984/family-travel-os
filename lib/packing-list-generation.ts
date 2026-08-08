@@ -116,6 +116,8 @@ export type PackingGenerationContext = {
   activityTitles: string[]
   confirmedMemories: string[]
   followUp: PackingFollowUpAnswers
+  /** Reisedauer in Nächten, per lib/trip-dates.ts::deriveTripDateRange ermittelt -- null, wenn kein Zeitraum ableitbar ist. Für realistische Mengenangaben (z. B. Windeln), nicht für die Kleidungsmenge (siehe dortige Anweisung). */
+  tripNights: number | null
 }
 
 function followUpSummary(f: PackingFollowUpAnswers): string {
@@ -153,6 +155,7 @@ ${participantsText}
 Etappen:
 ${ctx.stageSummaries.length > 0 ? ctx.stageSummaries.join('\n') : 'Keine Etappen hinterlegt.'}
 ${ctx.hotelChangeCount > 1 ? `Die Reise hat ${ctx.hotelChangeCount} Unterkunftswechsel.` : ''}
+${ctx.tripNights !== null ? `Gesamtreisedauer: ${ctx.tripNights} Nächte.` : ''}
 
 Wetter:
 ${ctx.weatherSummary ?? 'Keine echte Vorhersage verfügbar (Reisebeginn liegt außerhalb des 5-Tage-Fensters) -- gib stattdessen eine kurz als Schätzung gekennzeichnete, allgemeine Klimaeinschätzung für Ziel und Reisezeitraum, markiere jeden darauf basierenden Gegenstand in reasoning als "geschätztes Klima".'}
@@ -170,14 +173,15 @@ Wichtige Einschränkungen:
 - Gepäckfreigrenzen (Fluggewicht/-anzahl) sind NICHT bekannt. Erfinde niemals eine konkrete Grenze -- setze bei betroffenen Vorschlägen needs_check_flag="baggage_allowance".
 - Hotel-Ausstattung (Handtücher, Föhn, Babybett, Waschmöglichkeit) ist NICHT bekannt, außer explizit oben genannt. Erfinde nichts -- setze needs_check_flag="hotel_amenity".
 - Triff niemals verbindliche Aussagen zu verbotenen Gegenständen oder aktuellen Airline-Sicherheitsregeln -- setze bei relevanten Gegenständen needs_check_flag="airline_rule".
-- Kategorie "medikamente_und_gesundheit": ausschließlich neutrale, generische Einträge wie "Persönliche Medikamente", "Erste-Hilfe-Set", niemals Diagnosen oder konkrete Medikamentennamen ableiten.
+- Kategorie "medikamente_und_gesundheit": ausschließlich neutrale, generische Einträge wie "Persönliche Medikamente", niemals Diagnosen oder konkrete Medikamentennamen ableiten. "Erste-Hilfe-Set" NICHT als eigenen, zusätzlichen Gegenstand vorschlagen -- ist eine Dopplung zu "Persönliche Medikamente"/"Reiseapotheke" und bereits darin enthalten.
 - Größere Kinderausstattung (Reisebett/Kinderbett, Kinderwagen, Kindersitz, Babytrage) NUR vorschlagen, wenn die Familie das ausdrücklich in "Antworten der Familie" oben angegeben hat. Ohne ausdrückliche Angabe NICHT vorschlagen -- diese Dinge sind oft vor Ort vorhanden, werden anders gelöst (z. B. Kind schläft im Elternbett) oder unnötiger Ballast, das kannst du nicht wissen.
-- Windeln NUR vorschlagen, wenn "Antworten der Familie" oben ausdrücklich ein Kind nennt, das noch Windeln trägt -- dann als eigener Gegenstand (person_key des Kindes), mit ausreichend Menge für die Reisedauer plus Puffer.
-- Wenn "Antworten der Familie" oben eine Drohne nennt: eigene Gegenstände dafür vorschlagen (z. B. Ladegerät/Powerbank für die Akkus, Ersatzakkus, Ersatzpropeller, Speicherkarte) -- und für die Drohne selbst sowie ihre Akkus needs_check_flag="airline_rule" setzen, da Mitnahme-/Akku-Vorschriften je Airline/Zielland unterschiedlich und nicht bekannt sind.
+- Windeln NUR vorschlagen, wenn "Antworten der Familie" oben ausdrücklich ein Kind nennt, das noch Windeln trägt -- dann als eigener Gegenstand (person_key des Kindes) mit einer REALISTISCHEN, konkreten Menge (quantity), nicht 1: bei "Gesamtreisedauer" oben als Grundlage ca. 5-6 Windeln pro Tag rechnen, plus etwas Puffer für Reisetage/Verzögerungen -- z. B. bei 10 Nächten realistisch 60-70 Stück, nicht weniger.
+- Wenn "Antworten der Familie" oben eine Drohne nennt: NUR die Drohne selbst als einen Gegenstand vorschlagen (person_key="gemeinsam", needs_check_flag="airline_rule" wegen unbekannter Akku-/Mitnahmeregeln je Airline/Zielland) sowie zusätzlich ein wasserdichtes Schutz-/Travelbag für die Drohne -- KEINE weiteren Einzelteile wie Ladegerät, Ersatzakku, Ersatzpropeller oder Speicherkarte separat auflisten, das zählt bereits zur Drohnenausrüstung selbst.
 - Gegenstände, die typischerweise für die ganze Familie gemeinsam gelten (z. B. Ladegeräte, Sonnencreme, Insektenschutz), bekommen person_key="gemeinsam", NICHT eine Einzelperson -- außer es handelt sich eindeutig um ein persönliches Gerät.
 - Kategorie "medikamente_und_gesundheit": IMMER person_key="gemeinsam", niemals eine Einzelperson -- die Einträge sind ohnehin nur neutrale, generische Bezeichnungen (siehe unten), eine Personenzuordnung wäre irreführend.
 - Priorität differenziert wirklich: "unverzichtbar" nur für Dokumente, notwendige Medikamente, zwingend benötigte Ausrüstung -- nicht jeder Gegenstand ist unverzichtbar, die meisten sind "empfohlen" oder "optional".
-- Mengen NICHT automatisch für jeden Reisetag ein vollständiges Kleidungsset -- weniger bei verlässlichem Waschservice, mehr Wechselkleidung bei kleinen Kindern, Sportkleidung nur bei tatsächlich geplanten Aktivitäten, elegante Kleidung nur bei passendem Anlass, Regenausstattung abhängig vom Wetter/Forecast oben.
+- Mengen NICHT automatisch für jeden Reisetag ein vollständiges Kleidungsset -- weniger bei verlässlichem Waschservice, mehr Wechselkleidung bei kleinen Kindern, elegante Kleidung nur bei passendem Anlass, Regenausstattung abhängig vom Wetter/Forecast oben.
+- Sportkleidung (z. B. Sport-/Funktionsshirt, kurze Sporthose, Sportschuhe) für JEDEN Teilnehmer als Basis-Vorschlag einplanen, nicht nur bei einer ausdrücklich gebuchten Sportaktivität -- Bewegung (Spaziergänge, Hotel-Fitnessraum, spontaner Sport) ist auf den meisten Reisen plausibel, auch ohne Buchung. Bei explizit gebuchten Sportaktivitäten (z. B. Tauchen, Wandern, Tennis) zusätzlich aktivitätsspezifische Kleidung/Ausrüstung ergänzen.
 - Kurze Hosen IMMER als "Shorts" bezeichnen, nicht als "leichte Hose"/"leichte Hosen". Lange (Stoff-/Sommer-)Hosen separat als eigenen Gegenstand führen (z. B. "Leichte lange Hose"), nie unter der Bezeichnung "Shorts" vermischen.
 - is_last_minute=true für Dinge, die erst am Abreisetag eingepackt werden können (Zahnbürste, täglich verwendete Medikamente, Handy, Ladekabel, Lieblingsspielzeug, Hausschlüssel) -- unabhängig von der sonstigen Kategorie des Gegenstands.
 - Jeder Gegenstand braucht einen stabilen source_key, der bei einer künftigen erneuten Generierung für dasselbe gedachte Item identisch bleibt.`

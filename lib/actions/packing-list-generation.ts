@@ -11,6 +11,7 @@ import { getWeatherForLocation, formatDailyWeatherSummary } from '@/lib/weather'
 import { loadRelevantMemories } from '@/lib/family-memories'
 import { loadPackingItems } from '@/lib/packing-list'
 import { computeTripRequirements } from '@/lib/travel-requirements'
+import { deriveTripDateRange, tripDurationDays } from '@/lib/trip-dates'
 import { createJob, completeJob, failJob } from '@/lib/ai-generation-jobs'
 import {
   buildPackingPrompt, parseGeneratedItems, computeRegenerationDiff, needsCheckFlagToPersisted,
@@ -126,6 +127,13 @@ export async function generatePackingList(formData: FormData) {
 
       const activityTitles = (bookingsRaw ?? []).map((b) => b.title).filter((t): t is string => Boolean(t))
 
+      // §"Windelanzahl fehlt, bitte realistische Anzahl" (Nutzer-Feedback):
+      // dieselbe zentrale Ableitungslogik wie überall sonst in der App
+      // (lib/trip-dates.ts), nicht die rohe trips.end_date-Spalte -- siehe
+      // Root-Cause-Fix in travel-requirements.ts für denselben Datenpunkt.
+      const dateRange = deriveTripDateRange({ start_date: trip.start_date, end_date: trip.end_date }, [], stages)
+      const tripNights = dateRange.isOpen ? null : tripDurationDays(dateRange)
+
       const context: PackingGenerationContext = {
         tripTitle: trip.title,
         participants,
@@ -135,6 +143,7 @@ export async function generatePackingList(formData: FormData) {
         activityTitles,
         confirmedMemories: confirmedMemories.map((m) => m.summary),
         followUp,
+        tripNights,
       }
 
       const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
