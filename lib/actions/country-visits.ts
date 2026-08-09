@@ -2,9 +2,8 @@
 
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { createClient } from '@/lib/supabase/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
-import { getFamily } from '@/lib/family'
+import { getHouseholdMemberById } from '@/lib/household-members'
 
 function appendError(returnTo: string, error: string): string {
   const separator = returnTo.includes('?') ? '&' : '?'
@@ -41,11 +40,8 @@ export async function addManualCountryVisit(formData: FormData): Promise<void> {
   const returnTo = String(formData.get('return_to') ?? '/family/world/countries')
   if (!personId || !countryCode) redirect(appendError(returnTo, 'Person und Land werden benötigt.'))
 
-  const { id: familyId } = await getFamily()
-  const supabase = await createClient()
-
-  const { data: person } = await supabase.from('persons').select('id').eq('id', personId).eq('family_id', familyId).maybeSingle()
-  if (!person) redirect(appendError(returnTo, 'Person nicht gefunden.'))
+  const member = await getHouseholdMemberById(personId)
+  if (!member) redirect(appendError(returnTo, 'Person nicht gefunden.'))
 
   const lumiCore = await createLumiCoreClient()
   const { error } = await lumiCore.from('travel_person_country_visits').upsert(
@@ -71,11 +67,8 @@ export async function removeManualCountryVisit(formData: FormData): Promise<void
   const returnTo = String(formData.get('return_to') ?? '/family/world/countries')
   if (!personId || !countryCode) redirect(appendError(returnTo, 'Person und Land werden benötigt.'))
 
-  const { id: familyId } = await getFamily()
-  const supabase = await createClient()
-
-  const { data: person } = await supabase.from('persons').select('id').eq('id', personId).eq('family_id', familyId).maybeSingle()
-  if (!person) redirect(appendError(returnTo, 'Person nicht gefunden.'))
+  const member = await getHouseholdMemberById(personId)
+  if (!member) redirect(appendError(returnTo, 'Person nicht gefunden.'))
 
   const lumiCore = await createLumiCoreClient()
   await lumiCore.from('travel_person_country_visits').delete()

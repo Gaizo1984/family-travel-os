@@ -1,6 +1,5 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { redirect } from 'next/navigation'
 import { BOOKING_TYPE_CONFIG, TRIP_BOUNDED_BOOKING_TYPES, BOOKING_CATEGORIES, combineDateTime, AUTO_STAGE_NOTE_LAYOVER } from '@/lib/bookings'
@@ -8,6 +7,7 @@ import { suggestCountryCode } from '@/lib/geo-suggestions'
 import { readDateGroupFromFormData, getNarrowTripDateRange } from '@/lib/documents'
 import { deriveTripDateRange } from '@/lib/trip-dates'
 import { getFamily } from '@/lib/family'
+import { listHouseholdMembers } from '@/lib/household-members'
 import { maybeSuggestActivityPreference } from '@/lib/actions/activity-preference-learning'
 import type { BookingType, BookingStatus, PaymentStatus } from '@/lib/supabase/types'
 
@@ -382,7 +382,6 @@ export async function createBooking(formData: FormData) {
   if (endDatetime && startDatetime && new Date(endDatetime) < new Date(startDatetime))
     redirectWithDraft(newPath, 'Enddatum darf nicht vor dem Startdatum liegen', f)
 
-  const supabase = await createClient()
   const lumiCore = await createLumiCoreClient()
 
   const rangeError = await checkTripBoundedDateRange(lumiCore, tripId, f.type, f.startDate, f.endDate)
@@ -427,8 +426,9 @@ export async function createBooking(formData: FormData) {
   if (f.type === 'activity' && participantIds.length > 0) {
     try {
       const { id: familyId } = await getFamily()
-      const { data: participantPersons } = await supabase.from('persons').select('id, name').in('id', participantIds)
-      for (const p of participantPersons ?? []) {
+      const householdMembers = await listHouseholdMembers()
+      const participantPersons = householdMembers.filter((m) => participantIds.includes(m.id))
+      for (const p of participantPersons) {
         await maybeSuggestActivityPreference(familyId, p.id, p.name)
       }
     } catch (e) {
