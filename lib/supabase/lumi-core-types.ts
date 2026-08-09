@@ -29,12 +29,12 @@ export interface LumiCoreDatabase {
       household_members: TableDef<
         {
           id: string; household_id: string; profile_id: string | null; name: string
-          role: MemberRole; color: string; avatar_emoji: string | null
+          role: MemberRole; color: string; avatar_emoji: string | null; avatar_storage_path: string | null
           birth_date: string | null; is_minor: boolean; created_at: string; deleted_at: string | null
         },
         {
           id?: string; household_id: string; profile_id?: string | null; name: string
-          role?: MemberRole; color: string; avatar_emoji?: string | null
+          role?: MemberRole; color: string; avatar_emoji?: string | null; avatar_storage_path?: string | null
           birth_date?: string | null; is_minor?: boolean; created_at?: string; deleted_at?: string | null
         }
       >
@@ -47,6 +47,12 @@ export interface LumiCoreDatabase {
           id?: string; household_member_id: string; module: AppModule; access_level?: AppAccessLevel
           granted_by?: string | null; created_at?: string; updated_at?: string
         }
+      >
+      // Nur lesend benoetigt: bruecke Travels persons.id (legacy) <->
+      // household_members.id (Lumi Core), siehe lib/household-identity.ts.
+      travel_person_migration_map: TableDef<
+        { id: string; travel_person_id: string; household_member_id: string; travel_person_name: string; created_at: string },
+        { id?: string; travel_person_id: string; household_member_id: string; travel_person_name: string; created_at?: string }
       >
     }
     Views: Record<string, never>
