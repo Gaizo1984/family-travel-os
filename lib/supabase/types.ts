@@ -26,17 +26,17 @@ export interface Database {
         Row: {
           id: string; name: string; created_at: string
           content_style_preference: Json | null; exceptional_hotel_criteria: string[]
-          last_lumi_trip_id: string | null
+          last_lumi_trip_id: string | null; lumi_core_household_id: string | null
         }
         Insert: {
           id?: string; name: string; created_at?: string
           content_style_preference?: Json | null; exceptional_hotel_criteria?: string[]
-          last_lumi_trip_id?: string | null
+          last_lumi_trip_id?: string | null; lumi_core_household_id?: string | null
         }
         Update: {
           id?: string; name?: string; created_at?: string
           content_style_preference?: Json | null; exceptional_hotel_criteria?: string[]
-          last_lumi_trip_id?: string | null
+          last_lumi_trip_id?: string | null; lumi_core_household_id?: string | null
         }
         Relationships: [
           { foreignKeyName: "families_last_lumi_trip_id_fkey"; columns: ["last_lumi_trip_id"]; isOneToOne: false; referencedRelation: "trips"; referencedColumns: ["id"] }
@@ -48,18 +48,21 @@ export interface Database {
           color: string; birth_date: string | null; is_minor: boolean; created_at: string
           photo_storage_path: string | null; description: string | null; role_label: string | null
           interest_tags: string[]; travel_needs: string[]
+          auth_user_id: string | null; lumi_core_profile_id: string | null
         }
         Insert: {
           id?: string; family_id: string; name: string; initials: string
           color: string; birth_date?: string | null; is_minor?: boolean; created_at?: string
           photo_storage_path?: string | null; description?: string | null; role_label?: string | null
           interest_tags?: string[]; travel_needs?: string[]
+          auth_user_id?: string | null; lumi_core_profile_id?: string | null
         }
         Update: {
           id?: string; family_id?: string; name?: string; initials?: string
           color?: string; birth_date?: string | null; is_minor?: boolean; created_at?: string
           photo_storage_path?: string | null; description?: string | null; role_label?: string | null
           interest_tags?: string[]; travel_needs?: string[]
+          auth_user_id?: string | null; lumi_core_profile_id?: string | null
         }
         Relationships: [
           { foreignKeyName: "persons_family_id_fkey"; columns: ["family_id"]; isOneToOne: false; referencedRelation: "families"; referencedColumns: ["id"] }

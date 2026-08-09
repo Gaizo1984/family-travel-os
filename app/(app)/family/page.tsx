@@ -5,6 +5,7 @@ import { getFamily } from "@/lib/family";
 import { COMPASS_CATEGORY_ORDER, COMPASS_CATEGORY_LABELS, ageAtDate } from "@/lib/family-dna";
 import { getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
 import { todayIsoInFamilyTimezone } from "@/lib/time";
+import { LumiCoreConnectionCard } from "@/components/LumiCoreConnectionCard";
 
 type PersonRow = {
   id: string; name: string; initials: string; is_minor: boolean
@@ -52,7 +53,12 @@ function PersonCard({ person, photoUrl }: { person: PersonRow; photoUrl: string 
   );
 }
 
-export default async function FamilyPage() {
+export default async function FamilyPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ lumiCoreError?: string; lumiCoreConnected?: string }>;
+}) {
+  const { lumiCoreError, lumiCoreConnected } = await searchParams;
   const supabase = await createClient();
   const { id: familyId } = await getFamily();
 
@@ -95,6 +101,8 @@ export default async function FamilyPage() {
             Travel Vault
           </Link>
         </header>
+
+        <LumiCoreConnectionCard error={lumiCoreError} connected={lumiCoreConnected === "1"} />
 
         {/* ── 1. Unsere Familie ── */}
         <section className="mb-14">
