@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { PASSKEY_PENDING_LC_COOKIE, LUMI_CORE_GATE_PATH } from './lib/passkey-lumi-core-gate'
 
 /**
  * Security Foundation 1A: aktualisiert die Supabase-Session-Cookies pro
@@ -61,6 +62,52 @@ export async function proxy(request: NextRequest) {
     const redirectResponse = NextResponse.redirect(url)
     response.cookies.getAll().forEach((cookie) => redirectResponse.cookies.set(cookie))
     return redirectResponse
+  }
+
+  // §Passkey/Lumi-Core-Gate (Cutover-Vorbereitung, siehe
+  // PasskeyLoginButton.tsx/app/(auth)/connect-lumi-core/page.tsx):
+  // NUR relevant, wenn der Marker-Cookie gesetzt ist (ausschließlich vom
+  // Passkey-Login gesetzt) -- normales Passwort-Login bleibt davon
+  // vollständig unberührt, läuft bis zum finalen Cutover unverändert nur
+  // über Travel. Kein Service-Role, keine automatische Session-Erzeugung --
+  // nur eine Existenzprüfung der bereits (durch den Nutzer selbst) echt
+  // aufgebauten Lumi-Core-Sitzung, gleiches Cookie-Präfix-Muster wie
+  // lib/supabase/lumi-core-server.ts.
+  if (user && request.cookies.get(PASSKEY_PENDING_LC_COOKIE) && request.nextUrl.pathname !== LUMI_CORE_GATE_PATH) {
+    const LC_COOKIE_PREFIX = 'lc-'
+    const lumiCoreClient = createServerClient(
+      process.env.NEXT_PUBLIC_LUMI_CORE_URL!,
+      process.env.NEXT_PUBLIC_LUMI_CORE_PUBLISHABLE_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return request.cookies
+              .getAll()
+              .filter((cookie) => cookie.name.startsWith(LC_COOKIE_PREFIX))
+              .map((cookie) => ({ name: cookie.name.slice(LC_COOKIE_PREFIX.length), value: cookie.value }))
+          },
+          setAll(cookiesToSet) {
+            cookiesToSet.forEach(({ name, value }) => request.cookies.set(`${LC_COOKIE_PREFIX}${name}`, value))
+            response = NextResponse.next({ request })
+            cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(`${LC_COOKIE_PREFIX}${name}`, value, options))
+          },
+        },
+      },
+    )
+    const { data: { user: lumiCoreUser } } = await lumiCoreClient.auth.getUser()
+
+    if (lumiCoreUser) {
+      // Bereits eine echte, separate Lumi-Core-Sitzung vorhanden (z. B. aus
+      // einem früheren "Verbinden") -- Marker löschen, normal weiter.
+      response.cookies.delete(PASSKEY_PENDING_LC_COOKIE)
+    } else {
+      const url = request.nextUrl.clone()
+      url.pathname = LUMI_CORE_GATE_PATH
+      url.searchParams.set('redirectTo', request.nextUrl.pathname)
+      const redirectResponse = NextResponse.redirect(url)
+      response.cookies.getAll().forEach((cookie) => redirectResponse.cookies.set(cookie))
+      return redirectResponse
+    }
   }
 
   return response

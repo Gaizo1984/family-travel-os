@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Fingerprint, Loader2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { PASSKEY_PENDING_LC_COOKIE, LUMI_CORE_GATE_PATH } from '@/lib/passkey-lumi-core-gate'
 
 /**
  * Security Foundation 1B: Login per Passkey (discoverable credential, kein
@@ -12,6 +13,13 @@ import { createClient } from '@/lib/supabase/client'
  * proxy.ts/Server Components müssen den echten, frisch gesetzten
  * Session-Cookie in einem neuen Request sehen, nicht nur den Client-State.
  * Fehler blockieren nie das bestehende Passwort-Formular darunter.
+ *
+ * §Passkey/Lumi-Core-Gate (Cutover-Vorbereitung): Passkey authentifiziert
+ * NUR gegen Travel, Lumi Core hat kein eigenes Passkey/WebAuthn. Direkt
+ * nach Erfolg wird ein reiner Marker-Cookie gesetzt (keine Zugangsdaten,
+ * kein Secret) und statt auf "/" auf das Lumi-Core-Gate navigiert --
+ * proxy.ts erzwingt diesen Zwischenstopp auch bei direkter Navigation,
+ * bis eine echte, separate Lumi-Core-Sitzung besteht.
  */
 export function PasskeyLoginButton() {
   const [supported, setSupported] = useState(false)
@@ -33,7 +41,10 @@ export function PasskeyLoginButton() {
         setPending(false)
         return
       }
-      window.location.assign('/')
+      // Reiner Marker (kein Secret) -- proxy.ts erzwingt anhand dessen das
+      // Lumi-Core-Gate, bis eine echte, separate Sitzung besteht.
+      document.cookie = `${PASSKEY_PENDING_LC_COOKIE}=1; path=/; max-age=600; samesite=lax`
+      window.location.assign(LUMI_CORE_GATE_PATH)
     } catch {
       setError('Passkey-Anmeldung fehlgeschlagen. Bitte mit Passwort anmelden.')
       setPending(false)

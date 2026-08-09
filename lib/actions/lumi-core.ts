@@ -2,9 +2,11 @@
 
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
+import { cookies } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { getCurrentPerson } from '@/lib/current-person'
+import { PASSKEY_PENDING_LC_COOKIE } from '@/lib/passkey-lumi-core-gate'
 
 /**
  * Phase 3A -- "kontrollierter Re-Login" (Master-Prompt §5): ein von Lumi Core
@@ -73,4 +75,35 @@ export async function disconnectLumiCoreSession() {
   await lumiCore.auth.signOut()
   revalidatePath('/family')
   redirect('/family')
+}
+
+/**
+ * Passkey-Gate (siehe app/(auth)/connect-lumi-core/page.tsx, proxy.ts):
+ * echte, vom Nutzer selbst eingegebene Lumi-Core-Anmeldung -- KEINE
+ * automatische Übernahme von Travel-Zugangsdaten, KEIN Service-Role, KEINE
+ * stille Hintergrund-Session. Bei Erfolg wird ausschließlich der
+ * Passkey-Pending-Marker gelöscht -- keine anderen Cookies/Tabellen
+ * angefasst.
+ */
+export async function establishLumiCoreSession(formData: FormData) {
+  const email = String(formData.get('email') ?? '').trim()
+  const password = String(formData.get('password') ?? '')
+  const redirectTo = String(formData.get('redirectTo') ?? '/')
+  const target = redirectTo.startsWith('/') ? redirectTo : '/'
+  const gatePath = `/connect-lumi-core?redirectTo=${encodeURIComponent(target)}`
+
+  if (!email || !password) {
+    redirect(`${gatePath}&error=${encodeURIComponent('Bitte E-Mail und Passwort eingeben.')}`)
+  }
+
+  const lumiCore = await createLumiCoreClient()
+  const { error } = await lumiCore.auth.signInWithPassword({ email, password })
+  if (error) {
+    redirect(`${gatePath}&error=${encodeURIComponent('Lumi-Core-Anmeldung fehlgeschlagen: E-Mail oder Passwort falsch.')}`)
+  }
+
+  const cookieStore = await cookies()
+  cookieStore.delete(PASSKEY_PENDING_LC_COOKIE)
+
+  redirect(target)
 }
