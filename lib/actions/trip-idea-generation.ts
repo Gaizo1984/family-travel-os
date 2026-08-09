@@ -2,6 +2,8 @@
 
 import OpenAI from 'openai'
 import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
+import { getFamily } from '@/lib/family'
 import { redirect } from 'next/navigation'
 import { after } from 'next/server'
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt } from '@/lib/family-dna'
@@ -127,12 +129,21 @@ export async function generateTripIdeas(formData: FormData) {
 
   const jobId = await createJob(family.id, 'trip_ideas_generate', supabase)
 
+  const lumiCore = await createLumiCoreClient()
+
   after(async () => {
     try {
       const { data: allPersons } = await supabase.from('persons').select('id, name, birth_date').eq('family_id', family.id)
       const selectedTravelers = (allPersons ?? []).filter((p) => travelerIds.includes(p.id))
 
-      const { data: pastTrips } = await supabase.from('past_trips').select('country_or_region, year').eq('family_id', family.id)
+      // FINALER CUTOVER, Korrektur: travel_past_trips.household_id ist die
+      // Lumi-Core household_id, NICHT Travels family.id -- über getFamily()
+      // aufgelöst (persons/trips/bookings direkt darunter bleiben bewusst
+      // auf Travels family.id, da travelerIds hier noch legacy Travel-
+      // person_ids sind, siehe Formular; eine vollständige Umstellung
+      // bräuchte zusätzlich die Umstellung des Reisenden-Auswahlformulars).
+      const { id: householdIdForPastTrips } = await getFamily()
+      const { data: pastTrips } = await lumiCore.from('travel_past_trips').select('country_or_region, year').eq('household_id', householdIdForPastTrips)
       const { data: completedTrips } = await supabase.from('trips').select('id, title').eq('family_id', family.id).in('status', ['completed', 'active'])
       // §"Lieblingshotels" (LUMI Intelligence v1, §8): kein eigenes Favoriten-Flag
       // im Schema -- bisher genutzte Unterkunftsnamen aus abgeschlossenen/
@@ -143,7 +154,7 @@ export async function generateTripIdeas(formData: FormData) {
         ? await supabase.from('bookings').select('title').eq('type', 'accommodation').in('trip_id', completedTripIds)
         : { data: [] as Array<{ title: string }> }
 
-      const dnaSummary = await buildFamilyDnaSummary(family.id)
+      const dnaSummary = await buildFamilyDnaSummary(householdIdForPastTrips)
       // §"atDate-Bug beheben": nur ein echtes, valides Reisedatum (konkreter
       // Modus) wird als Stichtag für die Altersberechnung übergeben -- nie mehr
       // roher Freitext, der bei new Date(...) lautlos zu Invalid Date führte.
@@ -221,8 +232,8 @@ export async function generateTripIdeas(formData: FormData) {
         return
       }
 
-      const { data: session, error: sessionError } = await supabase.from('trip_idea_sessions').insert({
-        family_id: family.id,
+      const { data: session, error: sessionError } = await lumiCore.from('travel_trip_idea_sessions').insert({
+        household_id: family.id,
         input_text: wishText,
         clarifying_answers: {
           departure_city: departureCity || null,
@@ -234,7 +245,7 @@ export async function generateTripIdeas(formData: FormData) {
         // §"Reiseideen 2.0": Teilnehmerauswahl bisher nur transient für den
         // Prompt genutzt, nie gespeichert -- wird für die spätere, alters-
         // bewusste Budget-Schätzung (lib/actions/trip-idea-advisor.ts) gebraucht.
-        traveler_ids: selectedTravelers.map((p) => p.id),
+        traveler_household_member_ids: selectedTravelers.map((p) => p.id),
         // §"Reisebriefing": strukturierte Eckdaten des Wizards, additiv --
         // Downstream (Hotel-Shortlist/Varianten/Budget/Vergleich/Flugsuche) liest
         // diese Spalten direkt statt aus clarifying_answers.
@@ -264,10 +275,10 @@ export async function generateTripIdeas(formData: FormData) {
         return
       }
 
-      const { error: ideasError } = await supabase.from('trip_ideas').insert(
+      const { error: ideasError } = await lumiCore.from('travel_trip_ideas').insert(
         parsed.ideas.map((idea) => ({
           session_id: session.id,
-          family_id: family.id,
+          household_id: family.id,
           origin: 'plan_ai',
           destination: idea.destination,
           route_summary: idea.route_summary,

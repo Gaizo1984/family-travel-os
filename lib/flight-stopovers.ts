@@ -1,4 +1,4 @@
-import { createClient } from './supabase/server'
+import { createLumiCoreClient } from './supabase/lumi-core-server'
 
 export type FlightStopoverSuggestion = {
   location: string
@@ -71,16 +71,16 @@ function isRangeCoveredByStages(stages: StageRow[], startDate: string, endDate: 
  * Raten bei abweichenden Bezeichnungen.
  */
 export async function detectFlightStopoverSuggestions(tripId: string): Promise<FlightStopoverSuggestion[]> {
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
   const [{ data: bookingsRaw }, { data: stagesRaw }] = await Promise.all([
-    supabase
-      .from('bookings')
+    lumiCore
+      .from('travel_bookings')
       .select('id, type, status, start_datetime, end_datetime, details')
       .eq('trip_id', tripId)
       .eq('type', 'flight')
       .neq('status', 'cancelled'),
-    supabase.from('stages').select('start_date, end_date').eq('trip_id', tripId),
+    lumiCore.from('travel_stages').select('start_date, end_date').eq('trip_id', tripId),
   ])
 
   const flights = ((bookingsRaw ?? []) as FlightRow[])
@@ -148,16 +148,16 @@ export async function detectFlightStopoverSuggestions(tripId: string): Promise<F
  * Zwischenstopp-Datum).
  */
 export async function detectSingleFlightLayoverSuggestions(tripId: string): Promise<FlightStopoverSuggestion[]> {
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
   const [{ data: bookingsRaw }, { data: stagesRaw }] = await Promise.all([
-    supabase
-      .from('bookings')
+    lumiCore
+      .from('travel_bookings')
       .select('id, start_datetime, details')
       .eq('trip_id', tripId)
       .eq('type', 'flight')
       .neq('status', 'cancelled'),
-    supabase.from('stages').select('start_date, end_date').eq('trip_id', tripId),
+    lumiCore.from('travel_stages').select('start_date, end_date').eq('trip_id', tripId),
   ])
 
   const flights = (bookingsRaw ?? []) as FlightRow[]

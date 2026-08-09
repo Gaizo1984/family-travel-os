@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt } from '@/lib/family-dna'
 import { generateIdeaComparisonScores } from '@/lib/trip-idea-advisor-ai'
 import { TIER_RANK, type LuxuryHotelTier } from '@/lib/data/luxury-hotel-brands'
@@ -36,7 +37,7 @@ type IdeaForComparison = {
 }
 
 /** §"Reisebriefing": echtes Reisedatum/Zeitfenster der Session statt nur des Freitexts `best_season`, sofern vorhanden. */
-function travelTimingText(session: { travel_date_mode: string; travel_start_date: string | null; travel_end_date: string | null; travel_period_text: string | null } | undefined): string | null {
+function travelTimingText(session: { travel_date_mode: string | null; travel_start_date: string | null; travel_end_date: string | null; travel_period_text: string | null } | undefined): string | null {
   if (!session) return null
   if (session.travel_date_mode === 'exact' && session.travel_start_date && session.travel_end_date)
     return `${session.travel_start_date} bis ${session.travel_end_date}`
@@ -64,22 +65,23 @@ export async function generateIdeaComparison(formData: FormData) {
   const compareUrl = `/discover/ideas/compare?ids=${ideaIds.join(',')}`
 
   const supabase = await createClient()
-  const { data: ideasRaw } = await supabase
-    .from('trip_ideas')
-    .select('id, family_id, session_id, destination, route_summary, best_season, reasoning, duration_days_min, duration_days_max, budget_range_min, budget_range_max, budget_currency, hotel_shortlist, budget_breakdown')
+  const lumiCore = await createLumiCoreClient()
+  const { data: ideasRaw } = await lumiCore
+    .from('travel_trip_ideas')
+    .select('id, household_id, session_id, destination, route_summary, best_season, reasoning, duration_days_min, duration_days_max, budget_range_min, budget_range_max, budget_currency, hotel_shortlist, budget_breakdown')
     .in('id', ideaIds)
 
-  const ideas = (ideasRaw ?? []) as unknown as (IdeaForComparison & { family_id: string })[]
+  const ideas = (ideasRaw ?? []) as unknown as (IdeaForComparison & { household_id: string })[]
   if (ideas.length < 2) redirect(`${fallbackReturn}?error=${encodeURIComponent('Die ausgewählten Ideen konnten nicht geladen werden.')}`)
 
-  const familyId = ideas[0].family_id
+  const familyId = ideas[0].household_id
   const dnaSummary = await buildFamilyDnaSummary(familyId)
   const dnaText = formatFamilyDnaForPrompt(dnaSummary, new Date().toISOString().slice(0, 10))
 
   const sessionIds = [...new Set(ideas.map((i) => i.session_id).filter((id): id is string => Boolean(id)))]
   const { data: sessionsRaw } = sessionIds.length > 0
-    ? await supabase.from('trip_idea_sessions').select('id, travel_date_mode, travel_start_date, travel_end_date, travel_period_text').in('id', sessionIds)
-    : { data: [] as Array<{ id: string; travel_date_mode: string; travel_start_date: string | null; travel_end_date: string | null; travel_period_text: string | null }> }
+    ? await lumiCore.from('travel_trip_idea_sessions').select('id, travel_date_mode, travel_start_date, travel_end_date, travel_period_text').in('id', sessionIds)
+    : { data: [] as Array<{ id: string; travel_date_mode: string | null; travel_start_date: string | null; travel_end_date: string | null; travel_period_text: string | null }> }
   const sessionById = new Map((sessionsRaw ?? []).map((s) => [s.id, s]))
 
   const aiIdeas = ideas.map((idea) => ({

@@ -3,6 +3,8 @@
 import { redirect } from 'next/navigation'
 import { after } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
+import { toTravelDocumentsPath } from '@/lib/lumi-core-storage/paths'
 import { getFamily } from '@/lib/family'
 import { createJob, completeJob, failJob } from '@/lib/ai-generation-jobs'
 import { createUploadSlots, downloadAndClearStagedUpload, type UploadSlot } from '@/lib/actions/photo-staging'
@@ -30,11 +32,12 @@ export async function startImageCheckProject(formData: FormData) {
   if (!tripId) redirect(`${newPath}?error=${encodeURIComponent('Bitte eine Reise auswählen.')}`)
 
   const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const { id: familyId } = await getFamily()
-  const { data: trip } = await supabase.from('trips').select('title').eq('id', tripId).maybeSingle()
+  const { data: trip } = await lumiCore.from('travel_trips').select('title').eq('id', tripId).maybeSingle()
 
-  const { data: project, error } = await supabase.from('content_projects').insert({
-    family_id: familyId,
+  const { data: project, error } = await lumiCore.from('travel_content_projects').insert({
+    household_id: familyId,
     trip_id: tripId,
     title: trip?.title ? `Bild-Check · ${trip.title}` : 'Bild-Check',
     status: 'uploading',
@@ -64,17 +67,17 @@ export async function uploadImageCheckPhotos(formData: FormData) {
   const returnPath = `/content-studio/bild-check/${projectId}`
   if (!projectId) redirect('/content-studio/bild-check/new')
 
-  const supabase = await createClient()
-  const { data: project } = await supabase
-    .from('content_projects').select('id, family_id')
+  const lumiCore = await createLumiCoreClient()
+  const { data: project } = await lumiCore
+    .from('travel_content_projects').select('id, household_id')
     .eq('id', projectId).eq('project_type', 'image_check').maybeSingle()
   if (!project) redirect('/content-studio/bild-check/new')
 
   let stagedPaths = parseStagedPaths(formData.get('uploaded_paths'))
   if (stagedPaths.length === 0) redirect(returnPath)
 
-  const { count: existingCount } = await supabase
-    .from('content_project_photos').select('id', { count: 'exact', head: true }).eq('project_id', projectId)
+  const { count: existingCount } = await lumiCore
+    .from('travel_content_project_photos').select('id', { count: 'exact', head: true }).eq('project_id', projectId)
   const remainingSlots = Math.max(0, MAX_IMAGE_CHECK_PHOTOS - (existingCount ?? 0))
 
   if (remainingSlots === 0)
@@ -96,17 +99,17 @@ export async function uploadImageCheckPhotos(formData: FormData) {
       }
 
       const compressed = await compressImageForStorage(staged.buffer)
-      const storagePath = `content-session/${project.family_id}/${projectId}/${crypto.randomUUID()}.webp`
+      const storagePath = `content-session/${project.household_id}/${projectId}/${crypto.randomUUID()}.webp`
 
-      const { error: uploadError } = await supabase.storage.from('documents')
+      const { error: uploadError } = await lumiCore.storage.from('travel-documents')
         .upload(storagePath, new Blob([new Uint8Array(compressed)], { type: 'image/webp' }), { contentType: 'image/webp', cacheControl: '31536000' })
       if (uploadError) { failedCount++; continue }
 
-      const { error: insertError } = await supabase.from('content_project_photos').insert({
+      const { error: insertError } = await lumiCore.from('travel_content_project_photos').insert({
         project_id: projectId, storage_path: storagePath, temporary: true, expires_at: expiresAt,
       })
       if (insertError) {
-        await supabase.storage.from('documents').remove([storagePath])
+        await lumiCore.storage.from('travel-documents').remove([storagePath])
         failedCount++
         continue
       }
@@ -116,7 +119,7 @@ export async function uploadImageCheckPhotos(formData: FormData) {
     }
   }
 
-  if (savedCount > 0) await supabase.from('content_projects').update({ status: 'ready_for_analysis' }).eq('id', projectId)
+  if (savedCount > 0) await lumiCore.from('travel_content_projects').update({ status: 'ready_for_analysis' }).eq('id', projectId)
 
   const capMessage = cappedCount > 0
     ? ` ${cappedCount} Foto${cappedCount === 1 ? '' : 's'} wurde${cappedCount === 1 ? '' : 'n'} wegen des Limits von ${MAX_IMAGE_CHECK_PHOTOS} Fotos nicht hochgeladen.`
@@ -145,22 +148,22 @@ export type ImageCheckResult = { ok: boolean; results?: ImageCheckResultItem[]; 
  */
 export async function runImageCheckAnalysis(projectId: string): Promise<ImageCheckResult> {
   try {
-    const supabase = await createClient()
+    const lumiCore = await createLumiCoreClient()
     const { id: familyId } = await getFamily()
-    const { data: project } = await supabase
-      .from('content_projects').select('id, trip_id')
-      .eq('id', projectId).eq('family_id', familyId).eq('project_type', 'image_check').maybeSingle()
+    const { data: project } = await lumiCore
+      .from('travel_content_projects').select('id, trip_id')
+      .eq('id', projectId).eq('household_id', familyId).eq('project_type', 'image_check').maybeSingle()
     if (!project) return { ok: false, error: 'Projekt nicht gefunden.' }
 
-    const { data: photoRows } = await supabase
-      .from('content_project_photos').select('id, storage_path')
+    const { data: photoRows } = await lumiCore
+      .from('travel_content_project_photos').select('id, storage_path')
       .eq('project_id', projectId).order('created_at', { ascending: true })
     const rows = photoRows ?? []
     if (rows.length === 0) return { ok: false, error: 'Bitte zuerst Fotos hochladen.' }
 
     const loaded = await Promise.all(rows.map(async (row) => {
       try {
-        const { data: signed } = await supabase.storage.from('documents').createSignedUrl(row.storage_path, 60)
+        const { data: signed } = await lumiCore.storage.from('travel-documents').createSignedUrl(row.storage_path, 60)
         if (!signed?.signedUrl) return null
         const res = await fetch(signed.signedUrl)
         const buffer = Buffer.from(await res.arrayBuffer())
@@ -208,24 +211,25 @@ export async function adoptImageCheckPhotoToSession(formData: FormData) {
   if (!photoId || !projectId || (format !== 'carousel' && format !== 'story')) redirect(returnPath)
 
   const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const { id: familyId } = await getFamily()
 
-  const { data: bildCheckProject } = await supabase
-    .from('content_projects').select('id, trip_id')
-    .eq('id', projectId).eq('family_id', familyId).eq('project_type', 'image_check').maybeSingle()
+  const { data: bildCheckProject } = await lumiCore
+    .from('travel_content_projects').select('id, trip_id')
+    .eq('id', projectId).eq('household_id', familyId).eq('project_type', 'image_check').maybeSingle()
   if (!bildCheckProject) redirect(returnPath)
 
-  const { data: photo } = await supabase
-    .from('content_project_photos').select('id').eq('id', photoId).eq('project_id', projectId).maybeSingle()
+  const { data: photo } = await lumiCore
+    .from('travel_content_project_photos').select('id').eq('id', photoId).eq('project_id', projectId).maybeSingle()
   if (!photo) redirect(`${returnPath}?error=${encodeURIComponent('Foto nicht gefunden.')}`)
 
   const { data: trip } = bildCheckProject.trip_id
-    ? await supabase.from('trips').select('title').eq('id', bildCheckProject.trip_id).maybeSingle()
+    ? await lumiCore.from('travel_trips').select('title').eq('id', bildCheckProject.trip_id).maybeSingle()
     : { data: null }
 
   const formatLabel = format === 'story' ? 'Story' : 'Beitrag'
-  const { data: newSession, error } = await supabase.from('content_projects').insert({
-    family_id: familyId, trip_id: bildCheckProject.trip_id,
+  const { data: newSession, error } = await lumiCore.from('travel_content_projects').insert({
+    household_id: familyId, trip_id: bildCheckProject.trip_id,
     title: trip?.title ? `${formatLabel} · ${trip.title}` : formatLabel,
     status: 'ready_for_analysis', project_type: 'session', output_format: format,
   }).select('id').single()
@@ -234,7 +238,7 @@ export async function adoptImageCheckPhotoToSession(formData: FormData) {
     redirect(`${returnPath}?error=${encodeURIComponent('Speicherfehler: ' + (error?.message ?? 'unbekannt'))}`)
 
   const expiresAt = new Date(Date.now() + TEMP_IMAGE_TTL_HOURS * 60 * 60 * 1000).toISOString()
-  await supabase.from('content_project_photos')
+  await lumiCore.from('travel_content_project_photos')
     .update({ project_id: newSession.id, temporary: true, expires_at: expiresAt })
     .eq('id', photoId)
 
@@ -256,39 +260,41 @@ export async function adoptImageCheckPhotoToReel(formData: FormData) {
   if (!photoId || !projectId) redirect(returnPath)
 
   const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const { id: familyId } = await getFamily()
 
-  const { data: bildCheckProject } = await supabase
-    .from('content_projects').select('id, trip_id')
-    .eq('id', projectId).eq('family_id', familyId).eq('project_type', 'image_check').maybeSingle()
+  const { data: bildCheckProject } = await lumiCore
+    .from('travel_content_projects').select('id, trip_id')
+    .eq('id', projectId).eq('household_id', familyId).eq('project_type', 'image_check').maybeSingle()
   if (!bildCheckProject?.trip_id) redirect(`${returnPath}?error=${encodeURIComponent('Diese Auswahl ist keiner Reise zugeordnet.')}`)
 
-  const { data: photo } = await supabase
-    .from('content_project_photos').select('id, storage_path').eq('id', photoId).eq('project_id', projectId).maybeSingle()
+  const { data: photo } = await lumiCore
+    .from('travel_content_project_photos').select('id, storage_path').eq('id', photoId).eq('project_id', projectId).maybeSingle()
   if (!photo) redirect(`${returnPath}?error=${encodeURIComponent('Foto nicht gefunden.')}`)
 
-  const { count } = await supabase
-    .from('memory_photos').select('id', { count: 'exact', head: true })
+  const { count } = await lumiCore
+    .from('travel_memory_photos').select('id', { count: 'exact', head: true })
     .eq('trip_id', bildCheckProject.trip_id).eq('is_selected', true)
   if ((count ?? 0) >= MAX_RETAINED_MEMORIES_PER_TRIP)
     redirect(`${returnPath}?error=${encodeURIComponent('Für diese Reise sind bereits 25 Erinnerungen gespeichert. Bitte zuerst ein Bild ersetzen oder entfernen.')}`)
 
-  const { data: downloaded, error: downloadError } = await supabase.storage.from('documents').download(photo.storage_path)
+  const { data: downloaded, error: downloadError } = await lumiCore.storage.from('travel-documents').download(photo.storage_path)
   if (downloadError || !downloaded) redirect(`${returnPath}?error=${encodeURIComponent('Foto konnte nicht geladen werden.')}`)
 
   const buffer = Buffer.from(await downloaded.arrayBuffer())
   const compressed = await compressImageForStorage(buffer)
-  const memoryPath = `memories/${familyId}/${crypto.randomUUID()}.webp`
+  const memoryPath = await toTravelDocumentsPath(`memories/${crypto.randomUUID()}.webp`)
+  if (!memoryPath) redirect(`${returnPath}?error=${encodeURIComponent('Household nicht gefunden.')}`)
 
-  const { error: uploadError } = await supabase.storage.from('documents')
+  const { error: uploadError } = await lumiCore.storage.from('travel-documents')
     .upload(memoryPath, new Blob([new Uint8Array(compressed)], { type: 'image/webp' }), { contentType: 'image/webp', cacheControl: '31536000' })
   if (uploadError) redirect(`${returnPath}?error=${encodeURIComponent('Speicherfehler: ' + uploadError.message)}`)
 
-  const { error: insertError } = await supabase.from('memory_photos').insert({
-    family_id: familyId, trip_id: bildCheckProject.trip_id, storage_path: memoryPath, is_selected: true,
+  const { error: insertError } = await lumiCore.from('travel_memory_photos').insert({
+    household_id: familyId, trip_id: bildCheckProject.trip_id, storage_path: memoryPath, is_selected: true,
   })
   if (insertError) {
-    await supabase.storage.from('documents').remove([memoryPath])
+    await lumiCore.storage.from('travel-documents').remove([memoryPath])
     redirect(`${returnPath}?error=${encodeURIComponent('Speicherfehler: ' + insertError.message)}`)
   }
 
@@ -315,23 +321,24 @@ export async function markImageCheckPhotoForVacationPost(formData: FormData) {
   if (!photoId || !projectId) redirect(returnPath)
 
   const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const { id: familyId } = await getFamily()
 
-  const { data: bildCheckProject } = await supabase
-    .from('content_projects').select('id, trip_id')
-    .eq('id', projectId).eq('family_id', familyId).eq('project_type', 'image_check').maybeSingle()
+  const { data: bildCheckProject } = await lumiCore
+    .from('travel_content_projects').select('id, trip_id')
+    .eq('id', projectId).eq('household_id', familyId).eq('project_type', 'image_check').maybeSingle()
   if (!bildCheckProject?.trip_id) redirect(`${returnPath}?error=${encodeURIComponent('Diese Auswahl ist keiner Reise zugeordnet.')}`)
 
-  const { data: photo } = await supabase
-    .from('content_project_photos').select('id').eq('id', photoId).eq('project_id', projectId).maybeSingle()
+  const { data: photo } = await lumiCore
+    .from('travel_content_project_photos').select('id').eq('id', photoId).eq('project_id', projectId).maybeSingle()
   if (!photo) redirect(`${returnPath}?error=${encodeURIComponent('Foto nicht gefunden.')}`)
 
-  const { data: trip } = await supabase.from('trips').select('end_date').eq('id', bildCheckProject.trip_id).maybeSingle()
+  const { data: trip } = await lumiCore.from('travel_trips').select('end_date').eq('id', bildCheckProject.trip_id).maybeSingle()
 
   const reasoningText = [reasoning || null, isSimilarOrWeaker ? 'Ähnlich zu einem anderen Foto der Auswahl.' : null]
     .filter(Boolean).join(' ') || null
 
-  const { error } = await supabase.from('content_project_photos').update({
+  const { error } = await lumiCore.from('travel_content_project_photos').update({
     vacation_post_marked_at: new Date().toISOString(),
     vacation_post_score: Number.isFinite(scoreRaw) ? Math.round(scoreRaw) : null,
     vacation_post_reasoning: reasoningText,
@@ -351,8 +358,8 @@ export async function unmarkImageCheckPhotoForVacationPost(formData: FormData) {
   const returnPath = String(formData.get('return_to') ?? `/content-studio/bild-check/${projectId}`)
   if (!photoId) redirect(returnPath)
 
-  const supabase = await createClient()
-  await supabase.from('content_project_photos').update({
+  const lumiCore = await createLumiCoreClient()
+  await lumiCore.from('travel_content_project_photos').update({
     vacation_post_marked_at: null, vacation_post_score: null, vacation_post_reasoning: null,
     vacation_post_rank: null, vacation_post_pinned: false,
   }).eq('id', photoId)
@@ -366,8 +373,8 @@ export async function unmarkImageCheckPhotoForVacationPost(formData: FormData) {
 // Auswahl löschen" (Nutzervorgabe, wörtlich): siehe
 // app/(app)/content-studio/urlaubsbeitrag/[tripId]/page.tsx.
 
-async function loadImageCheckProjectIdsForTrip(supabase: Awaited<ReturnType<typeof createClient>>, tripId: string): Promise<string[]> {
-  const { data } = await supabase.from('content_projects').select('id').eq('trip_id', tripId).eq('project_type', 'image_check')
+async function loadImageCheckProjectIdsForTrip(lumiCore: Awaited<ReturnType<typeof createLumiCoreClient>>, tripId: string): Promise<string[]> {
+  const { data } = await lumiCore.from('travel_content_projects').select('id').eq('trip_id', tripId).eq('project_type', 'image_check')
   return (data ?? []).map((p) => p.id)
 }
 
@@ -378,24 +385,24 @@ export async function toggleVacationPostSelection(formData: FormData) {
   const returnPath = `/content-studio/urlaubsbeitrag/${tripId}`
   if (!photoId || !tripId) redirect(returnPath)
 
-  const supabase = await createClient()
-  const { data: photo } = await supabase.from('content_project_photos').select('id, vacation_post_rank').eq('id', photoId).maybeSingle()
+  const lumiCore = await createLumiCoreClient()
+  const { data: photo } = await lumiCore.from('travel_content_project_photos').select('id, vacation_post_rank').eq('id', photoId).maybeSingle()
   if (!photo) redirect(returnPath)
 
   if (photo.vacation_post_rank !== null) {
-    await supabase.from('content_project_photos').update({ vacation_post_rank: null }).eq('id', photoId)
+    await lumiCore.from('travel_content_project_photos').update({ vacation_post_rank: null }).eq('id', photoId)
     redirect(returnPath)
   }
 
-  const projectIds = await loadImageCheckProjectIdsForTrip(supabase, tripId)
-  const { data: rankedRows } = await supabase
-    .from('content_project_photos').select('vacation_post_rank').in('project_id', projectIds).not('vacation_post_rank', 'is', null)
+  const projectIds = await loadImageCheckProjectIdsForTrip(lumiCore, tripId)
+  const { data: rankedRows } = await lumiCore
+    .from('travel_content_project_photos').select('vacation_post_rank').in('project_id', projectIds).not('vacation_post_rank', 'is', null)
   const usedRanks = new Set((rankedRows ?? []).map((r) => r.vacation_post_rank as number))
   let nextRank = 1
   while (usedRanks.has(nextRank) && nextRank <= MAX_VACATION_POST_PHOTOS) nextRank++
   if (nextRank > MAX_VACATION_POST_PHOTOS) redirect(`${returnPath}?error=${encodeURIComponent(`Es sind bereits ${MAX_VACATION_POST_PHOTOS} Bilder ausgewählt -- bitte zuerst eins entfernen.`)}`)
 
-  await supabase.from('content_project_photos').update({ vacation_post_rank: nextRank }).eq('id', photoId)
+  await lumiCore.from('travel_content_project_photos').update({ vacation_post_rank: nextRank }).eq('id', photoId)
   redirect(returnPath)
 }
 
@@ -406,11 +413,11 @@ export async function toggleVacationPostPinned(formData: FormData) {
   const returnPath = `/content-studio/urlaubsbeitrag/${tripId}`
   if (!photoId) redirect(returnPath)
 
-  const supabase = await createClient()
-  const { data: photo } = await supabase.from('content_project_photos').select('vacation_post_pinned').eq('id', photoId).maybeSingle()
+  const lumiCore = await createLumiCoreClient()
+  const { data: photo } = await lumiCore.from('travel_content_project_photos').select('vacation_post_pinned').eq('id', photoId).maybeSingle()
   if (!photo) redirect(returnPath)
 
-  await supabase.from('content_project_photos').update({ vacation_post_pinned: !photo.vacation_post_pinned }).eq('id', photoId)
+  await lumiCore.from('travel_content_project_photos').update({ vacation_post_pinned: !photo.vacation_post_pinned }).eq('id', photoId)
   redirect(returnPath)
 }
 
@@ -422,10 +429,10 @@ export async function reorderVacationPostSelection(formData: FormData) {
   const returnPath = `/content-studio/urlaubsbeitrag/${tripId}`
   if (!photoId || !tripId) redirect(returnPath)
 
-  const supabase = await createClient()
-  const projectIds = await loadImageCheckProjectIdsForTrip(supabase, tripId)
-  const { data: rowsRaw } = await supabase
-    .from('content_project_photos').select('id, vacation_post_rank')
+  const lumiCore = await createLumiCoreClient()
+  const projectIds = await loadImageCheckProjectIdsForTrip(lumiCore, tripId)
+  const { data: rowsRaw } = await lumiCore
+    .from('travel_content_project_photos').select('id, vacation_post_rank')
     .in('project_id', projectIds).not('vacation_post_rank', 'is', null)
     .order('vacation_post_rank', { ascending: true })
   const rows = rowsRaw ?? []
@@ -435,8 +442,8 @@ export async function reorderVacationPostSelection(formData: FormData) {
   if (index === -1 || swapWith < 0 || swapWith >= rows.length) redirect(returnPath)
 
   await Promise.all([
-    supabase.from('content_project_photos').update({ vacation_post_rank: rows[swapWith].vacation_post_rank }).eq('id', rows[index].id),
-    supabase.from('content_project_photos').update({ vacation_post_rank: rows[index].vacation_post_rank }).eq('id', rows[swapWith].id),
+    lumiCore.from('travel_content_project_photos').update({ vacation_post_rank: rows[swapWith].vacation_post_rank }).eq('id', rows[index].id),
+    lumiCore.from('travel_content_project_photos').update({ vacation_post_rank: rows[index].vacation_post_rank }).eq('id', rows[swapWith].id),
   ])
   redirect(returnPath)
 }
@@ -456,18 +463,19 @@ export async function recurateVacationPostSelectionNow(formData: FormData) {
   if (!process.env.OPENAI_API_KEY) redirect(`${returnPath}?error=${encodeURIComponent('Die Kuration ist aktuell nicht konfiguriert.')}`)
 
   const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const { id: familyId } = await getFamily()
 
   const jobId = await createJob(familyId, 'vacation_post_recurate', supabase)
 
   after(async () => {
     try {
-      const { data: trip } = await supabase.from('trips').select('end_date').eq('id', tripId).maybeSingle()
-      const projectIds = await loadImageCheckProjectIdsForTrip(supabase, tripId)
+      const { data: trip } = await lumiCore.from('travel_trips').select('end_date').eq('id', tripId).maybeSingle()
+      const projectIds = await loadImageCheckProjectIdsForTrip(lumiCore, tripId)
 
       const { data: candidateRows } = projectIds.length > 0
-        ? await supabase
-          .from('content_project_photos')
+        ? await lumiCore
+          .from('travel_content_project_photos')
           .select('id, vacation_post_score, vacation_post_reasoning, vacation_post_rank, vacation_post_pinned')
           .in('project_id', projectIds).not('vacation_post_marked_at', 'is', null)
         : { data: [] }
@@ -491,7 +499,7 @@ export async function recurateVacationPostSelectionNow(formData: FormData) {
       const rankByPhotoId = new Map(selection.map((s) => [s.photoId, s.rank]))
       const expiresAt = computeVacationPostExpiresAt(trip?.end_date ?? null)
       await Promise.all(candidates.map((c) =>
-        supabase.from('content_project_photos').update({
+        lumiCore.from('travel_content_project_photos').update({
           vacation_post_rank: rankByPhotoId.get(c.id) ?? null,
           expires_at: expiresAt,
         }).eq('id', c.id),
@@ -512,10 +520,10 @@ export async function deleteVacationPostSelection(formData: FormData) {
   const tripId = String(formData.get('trip_id') ?? '')
   if (!tripId) redirect('/content-studio')
 
-  const supabase = await createClient()
-  const projectIds = await loadImageCheckProjectIdsForTrip(supabase, tripId)
+  const lumiCore = await createLumiCoreClient()
+  const projectIds = await loadImageCheckProjectIdsForTrip(lumiCore, tripId)
   if (projectIds.length > 0) {
-    await supabase.from('content_project_photos').update({
+    await lumiCore.from('travel_content_project_photos').update({
       vacation_post_marked_at: null, vacation_post_score: null, vacation_post_reasoning: null,
       vacation_post_rank: null, vacation_post_pinned: false,
     }).in('project_id', projectIds).not('vacation_post_marked_at', 'is', null)

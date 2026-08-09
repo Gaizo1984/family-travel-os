@@ -1,13 +1,14 @@
 'use server'
 
 import OpenAI from 'openai'
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { redirect } from 'next/navigation'
 import {
   ALLOWED_DOCUMENT_MIME_TYPES, MAX_DOCUMENT_FILE_SIZE, buildStoragePath,
   DOCUMENT_TYPE_CONFIG,
 } from '@/lib/documents'
 import type { DocumentType } from '@/lib/documents'
+import { toTravelDocumentsPath } from '@/lib/lumi-core-storage/paths'
 
 /**
  * Aktuell dokumentierter "Standard"-Tier von OpenAI (vision-/PDF-fähig) —
@@ -143,10 +144,13 @@ export async function extractDocumentData(formData: FormData) {
   if (!config.isIdentityType && !config.isEntryDocumentType)
     fail('Für diesen Dokumenttyp ist keine automatische Auslesung vorgesehen.')
 
-  const supabase = await createClient()
-  const storagePath = buildStoragePath(personId, file.name)
+  const supabase = await createLumiCoreClient()
+  const rawPath = buildStoragePath(personId, file.name)
+  const storagePath = await toTravelDocumentsPath(rawPath)
+  if (!storagePath)
+    fail('Upload fehlgeschlagen: Haushalt nicht gefunden')
 
-  const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
+  const { error: uploadError } = await supabase.storage.from('travel-documents').upload(storagePath, file, {
     contentType: file.type,
     cacheControl: '31536000',
   })

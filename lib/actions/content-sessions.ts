@@ -2,6 +2,8 @@
 
 import OpenAI from 'openai'
 import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
+import { toTravelDocumentsPath } from '@/lib/lumi-core-storage/paths'
 import { redirect } from 'next/navigation'
 import { after } from 'next/server'
 import { getFamily } from '@/lib/family'
@@ -53,11 +55,12 @@ export async function startContentSession(formData: FormData) {
   const outputFormat = requestedFormat && requestedFormat in CONTENT_FORMAT_SCHEMAS ? requestedFormat : null
 
   const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const { id: familyId } = await getFamily()
-  const { data: trip } = await supabase.from('trips').select('title').eq('id', tripId).maybeSingle()
+  const { data: trip } = await lumiCore.from('travel_trips').select('title').eq('id', tripId).maybeSingle()
 
-  const { data: project, error } = await supabase.from('content_projects').insert({
-    family_id: familyId,
+  const { data: project, error } = await lumiCore.from('travel_content_projects').insert({
+    household_id: familyId,
     trip_id: tripId,
     title: trip?.title ?? 'Content-Session',
     status: 'uploading',
@@ -87,8 +90,8 @@ export async function chooseContentSessionFormat(formData: FormData) {
   if (!outputFormat || !(outputFormat === 'package' || outputFormat in CONTENT_FORMAT_SCHEMAS))
     redirect(`${returnPath}?error=${encodeURIComponent('Bitte eine Content-Art auswählen.')}`)
 
-  const supabase = await createClient()
-  await supabase.from('content_projects').update({ output_format: outputFormat }).eq('id', projectId)
+  const lumiCore = await createLumiCoreClient()
+  await lumiCore.from('travel_content_projects').update({ output_format: outputFormat }).eq('id', projectId)
   redirect(returnPath)
 }
 
@@ -109,16 +112,16 @@ export async function uploadContentSessionPhotos(formData: FormData) {
   const returnPath = `/content-studio/session/${projectId}`
   if (!projectId) redirect('/content-studio/session/new')
 
-  const supabase = await createClient()
-  const { data: project } = await supabase.from('content_projects').select('id, family_id, output_format').eq('id', projectId).maybeSingle()
+  const lumiCore = await createLumiCoreClient()
+  const { data: project } = await lumiCore.from('travel_content_projects').select('id, household_id, output_format').eq('id', projectId).maybeSingle()
   if (!project) redirect('/content-studio/session/new')
 
   let stagedPaths = parseStagedPaths(formData.get('uploaded_paths'))
   if (stagedPaths.length === 0) redirect(returnPath)
 
   const maxPhotos = project.output_format ? (MAX_PHOTOS_BY_FORMAT[project.output_format] ?? DEFAULT_MAX_PHOTOS) : DEFAULT_MAX_PHOTOS
-  const { count: existingCount } = await supabase
-    .from('content_project_photos').select('id', { count: 'exact', head: true })
+  const { count: existingCount } = await lumiCore
+    .from('travel_content_project_photos').select('id', { count: 'exact', head: true })
     .eq('project_id', projectId).is('is_duplicate_of', null)
   const remainingSlots = Math.max(0, maxPhotos - (existingCount ?? 0))
   const formatLabel = project.output_format ? (CONTENT_FORMAT_LABELS[project.output_format] ?? project.output_format) : 'diese Content-Art'
@@ -129,8 +132,8 @@ export async function uploadContentSessionPhotos(formData: FormData) {
   const cappedCount = Math.max(0, stagedPaths.length - remainingSlots)
   stagedPaths = stagedPaths.slice(0, remainingSlots)
 
-  const { data: existingPhotosRaw } = await supabase
-    .from('content_project_photos').select('id, phash').eq('project_id', projectId).not('phash', 'is', null)
+  const { data: existingPhotosRaw } = await lumiCore
+    .from('travel_content_project_photos').select('id, phash').eq('project_id', projectId).not('phash', 'is', null)
   const hashPool = (existingPhotosRaw ?? []) as { id: string; phash: string }[]
 
   const expiresAt = new Date(Date.now() + TEMP_IMAGE_TTL_HOURS * 60 * 60 * 1000).toISOString()
@@ -146,9 +149,9 @@ export async function uploadContentSessionPhotos(formData: FormData) {
       }
 
       const compressed = await compressImageForStorage(staged.buffer)
-      const storagePath = `content-session/${project.family_id}/${projectId}/${crypto.randomUUID()}.webp`
+      const storagePath = `content-session/${project.household_id}/${projectId}/${crypto.randomUUID()}.webp`
 
-      const { error: uploadError } = await supabase.storage.from('documents')
+      const { error: uploadError } = await lumiCore.storage.from('travel-documents')
         .upload(storagePath, new Blob([new Uint8Array(compressed)], { type: 'image/webp' }), { contentType: 'image/webp', cacheControl: '31536000' })
       if (uploadError) { failedCount++; continue }
 
@@ -157,7 +160,7 @@ export async function uploadContentSessionPhotos(formData: FormData) {
         ? hashPool.find((p) => hammingDistance(p.phash, phash) <= DUPLICATE_HASH_THRESHOLD) ?? null
         : null
 
-      const { data: photoRow, error: insertError } = await supabase.from('content_project_photos').insert({
+      const { data: photoRow, error: insertError } = await lumiCore.from('travel_content_project_photos').insert({
         project_id: projectId,
         storage_path: storagePath,
         phash,
@@ -168,7 +171,7 @@ export async function uploadContentSessionPhotos(formData: FormData) {
       }).select('id').single()
 
       if (insertError || !photoRow) {
-        await supabase.storage.from('documents').remove([storagePath])
+        await lumiCore.storage.from('travel-documents').remove([storagePath])
         failedCount++
         continue
       }
@@ -180,7 +183,7 @@ export async function uploadContentSessionPhotos(formData: FormData) {
   }
 
   if (savedCount > 0)
-    await supabase.from('content_projects').update({ status: 'ready_for_analysis' }).eq('id', projectId)
+    await lumiCore.from('travel_content_projects').update({ status: 'ready_for_analysis' }).eq('id', projectId)
 
   const capMessage = cappedCount > 0 ? ` ${cappedCount} Foto${cappedCount === 1 ? '' : 's'} wurde${cappedCount === 1 ? '' : 'n'} wegen des Limits von ${maxPhotos} Fotos für ${formatLabel} nicht hochgeladen.` : ''
 
@@ -397,8 +400,9 @@ export async function analyzeContentSession(formData: FormData) {
     redirect(`${returnPath}?error=${encodeURIComponent('Die Content-KI ist aktuell nicht konfiguriert.')}`)
 
   const supabase = await createClient()
-  const { data: project } = await supabase
-    .from('content_projects').select('id, trip_id, family_id, output_format').eq('id', projectId).maybeSingle()
+  const lumiCore = await createLumiCoreClient()
+  const { data: project } = await lumiCore
+    .from('travel_content_projects').select('id, trip_id, household_id, output_format').eq('id', projectId).maybeSingle()
   if (!project?.trip_id) redirect(`${returnPath}?error=${encodeURIComponent('Session nicht gefunden.')}`)
 
   const outputFormat = project.output_format ?? ''
@@ -412,12 +416,13 @@ export async function analyzeContentSession(formData: FormData) {
   // (isolierter try/catch um checkContentFit, damit dessen catch{} nicht
   // versehentlich den redirect()-Throw verschluckt) -- hier wird gar nicht
   // mehr redirect() aufgerufen, sondern explizit completeJob/failJob, das
-  // Problem kann strukturell nicht mehr auftreten.
-  const jobId = await createJob(project.family_id, 'content_session_analyze', supabase)
+  // Problem kann strukturell nicht mehr auftreten. ai_generation_jobs bleibt
+  // Travel, daher weiterhin der `supabase`-Override.
+  const jobId = await createJob(project.household_id, 'content_session_analyze', supabase)
 
   after(async () => {
     try {
-      await supabase.from('content_projects').update({
+      await lumiCore.from('travel_content_projects').update({
         status: 'analyzing', language, tonality,
         content_focus: contentFocus, custom_focus: customFocus, mood: mood.length ? mood : null, hint_text: hintText,
       }).eq('id', projectId)
@@ -427,8 +432,8 @@ export async function analyzeContentSession(formData: FormData) {
       const formatLabel = isPackage ? 'Content-Paket' : (CONTENT_FORMAT_LABELS[outputFormat] ?? outputFormat)
       const maxPhotos = MAX_PHOTOS_BY_FORMAT[outputFormat] ?? DEFAULT_MAX_PHOTOS
 
-      const { data: photoRowsRaw } = await supabase
-        .from('content_project_photos')
+      const { data: photoRowsRaw } = await lumiCore
+        .from('travel_content_project_photos')
         .select('id, storage_path')
         .eq('project_id', projectId)
         .is('is_duplicate_of', null)
@@ -447,7 +452,7 @@ export async function analyzeContentSession(formData: FormData) {
       // analyzeTripMemoryPhotos in lib/actions/memories.ts).
       const loaded = await Promise.all(rows.map(async (row): Promise<SessionPhoto | null> => {
         try {
-          const { data: signed } = await supabase.storage.from('documents').createSignedUrl(row.storage_path, 60)
+          const { data: signed } = await lumiCore.storage.from('travel-documents').createSignedUrl(row.storage_path, 60)
           if (!signed?.signedUrl) return null
           const res = await fetch(signed.signedUrl)
           const buffer = Buffer.from(await res.arrayBuffer())
@@ -493,7 +498,7 @@ export async function analyzeContentSession(formData: FormData) {
             const photo = batch[a.photo_index]
             if (!photo) continue
             assessments.push({ id: photo.id, qualityScore: a.quality_score, isBestMotif: a.is_best_motif, description: a.visual_description })
-            await supabase.from('content_project_photos').update({
+            await lumiCore.from('travel_content_project_photos').update({
               quality_score: a.quality_score, reasoning: a.visual_description, analyzed_at: new Date().toISOString(),
             }).eq('id', photo.id)
           }
@@ -555,8 +560,8 @@ export async function analyzeContentSession(formData: FormData) {
             const extra = componentFormat === 'story' ? 'Erzeuge 2 bis 4 Story-Slides (oder genau 1, wenn nur ein Bild wirklich trägt).' : undefined
             const result = await generateFormatContent(openai, componentFormat, tripDigest, componentManifest, tonality, language, guidedContext, extra)
             const structure = buildDraftStructure(componentFormat, result)
-            const { data: draft } = await supabase.from('content_drafts').insert({
-              project_id: projectId, draft_type: FORMAT_TO_DRAFT_TYPE[componentFormat], structure: structure as Json,
+            const { data: draft } = await lumiCore.from('travel_content_drafts').insert({
+              project_id: projectId, draft_type: FORMAT_TO_DRAFT_TYPE[componentFormat], structure,
             }).select('id').single()
             if (draft) createdCount++
           } catch {
@@ -570,7 +575,7 @@ export async function analyzeContentSession(formData: FormData) {
           return
         }
 
-        await supabase.from('content_projects').update({ status: 'draft_created' }).eq('id', projectId)
+        await lumiCore.from('travel_content_projects').update({ status: 'draft_created' }).eq('id', projectId)
         await completeJob(jobId, `${returnPath}?package=${createdCount}`, supabase)
         return
       }
@@ -593,10 +598,10 @@ export async function analyzeContentSession(formData: FormData) {
 
       const structure = buildDraftStructure(outputFormat, contentResult)
 
-      const { data: draft, error: draftError } = await supabase.from('content_drafts').insert({
+      const { data: draft, error: draftError } = await lumiCore.from('travel_content_drafts').insert({
         project_id: projectId,
         draft_type: FORMAT_TO_DRAFT_TYPE[outputFormat],
-        structure: structure as Json,
+        structure,
       }).select('id').single()
 
       if (draftError || !draft) {
@@ -604,7 +609,7 @@ export async function analyzeContentSession(formData: FormData) {
         return
       }
 
-      await supabase.from('content_projects').update({ status: 'draft_created' }).eq('id', projectId)
+      await lumiCore.from('travel_content_projects').update({ status: 'draft_created' }).eq('id', projectId)
       await completeJob(jobId, `/content-studio/drafts/${draft.id}`, supabase)
     } catch (e) {
       console.error('[content-sessions] analyzeContentSession fehlgeschlagen:', e instanceof Error ? e.message : e)
@@ -711,22 +716,23 @@ export async function createContentSessionFromVacationPostSelection(formData: Fo
     redirect(`${returnPath}?error=${encodeURIComponent('Die Content-KI ist aktuell nicht konfiguriert.')}`)
 
   const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const { id: familyId } = await getFamily()
 
-  const { data: trip } = await supabase.from('trips').select('title').eq('id', tripId).maybeSingle()
+  const { data: trip } = await lumiCore.from('travel_trips').select('title').eq('id', tripId).maybeSingle()
   if (!trip) redirect('/content-studio')
 
   const jobId = await createJob(familyId, 'vacation_post_content_session', supabase)
 
   after(async () => {
     try {
-      const { data: projectRows } = await supabase
-        .from('content_projects').select('id').eq('trip_id', tripId).eq('project_type', 'image_check')
+      const { data: projectRows } = await lumiCore
+        .from('travel_content_projects').select('id').eq('trip_id', tripId).eq('project_type', 'image_check')
       const projectIds = (projectRows ?? []).map((p) => p.id)
 
       const { data: selectedRaw } = projectIds.length > 0
-        ? await supabase
-          .from('content_project_photos')
+        ? await lumiCore
+          .from('travel_content_project_photos')
           .select('id, vacation_post_rank, vacation_post_score, vacation_post_reasoning')
           .in('project_id', projectIds)
           .not('vacation_post_rank', 'is', null)
@@ -739,8 +745,8 @@ export async function createContentSessionFromVacationPostSelection(formData: Fo
         return
       }
 
-      const { data: newSession, error: sessionError } = await supabase.from('content_projects').insert({
-        family_id: familyId, trip_id: tripId, title: `Urlaubsbeitrag · ${trip.title}`,
+      const { data: newSession, error: sessionError } = await lumiCore.from('travel_content_projects').insert({
+        household_id: familyId, trip_id: tripId, title: `Urlaubsbeitrag · ${trip.title}`,
         status: 'ready_for_analysis', project_type: 'session', output_format: 'carousel',
       }).select('id').single()
       if (sessionError || !newSession) {
@@ -749,7 +755,7 @@ export async function createContentSessionFromVacationPostSelection(formData: Fo
       }
 
       const expiresAt = new Date(Date.now() + TEMP_IMAGE_TTL_HOURS * 60 * 60 * 1000).toISOString()
-      await supabase.from('content_project_photos')
+      await lumiCore.from('travel_content_project_photos')
         .update({ project_id: newSession.id, temporary: true, expires_at: expiresAt })
         .in('id', selected.map((s) => s.id))
 
@@ -774,15 +780,15 @@ export async function createContentSessionFromVacationPostSelection(formData: Fo
       }
 
       const structure = buildDraftStructure('carousel', contentResult)
-      const { data: draft, error: draftError } = await supabase.from('content_drafts').insert({
-        project_id: newSession.id, draft_type: 'carousel_plan', structure: structure as Json,
+      const { data: draft, error: draftError } = await lumiCore.from('travel_content_drafts').insert({
+        project_id: newSession.id, draft_type: 'carousel_plan', structure,
       }).select('id').single()
       if (draftError || !draft) {
         await failJob(jobId, 'Speicherfehler: ' + (draftError?.message ?? 'unbekannt'), supabase)
         return
       }
 
-      await supabase.from('content_projects').update({ status: 'draft_created' }).eq('id', newSession.id)
+      await lumiCore.from('travel_content_projects').update({ status: 'draft_created' }).eq('id', newSession.id)
       await completeJob(jobId, `/content-studio/drafts/${draft.id}`, supabase)
     } catch (e) {
       console.error('[content-sessions] createContentSessionFromVacationPostSelection fehlgeschlagen:', e instanceof Error ? e.message : e)
@@ -795,9 +801,9 @@ export async function createContentSessionFromVacationPostSelection(formData: Fo
 
 /** Baut das Foto-Manifest für eine Regenerierung aus bereits gespeicherten Bewertungen (kein erneuter Bild-Upload/keine erneute Bildanalyse nötig). */
 async function rebuildManifestForProject(
-  supabase: Awaited<ReturnType<typeof createClient>>, projectId: string, restrictToPhotoIds?: string[],
+  lumiCore: Awaited<ReturnType<typeof createLumiCoreClient>>, projectId: string, restrictToPhotoIds?: string[],
 ): Promise<string> {
-  const { data: rows } = await supabase.from('content_project_photos').select('id, quality_score, reasoning').eq('project_id', projectId).is('is_duplicate_of', null)
+  const { data: rows } = await lumiCore.from('travel_content_project_photos').select('id, quality_score, reasoning').eq('project_id', projectId).is('is_duplicate_of', null)
   const filtered = (rows ?? []).filter((r) => r.quality_score !== null && (!restrictToPhotoIds || restrictToPhotoIds.includes(r.id)))
   return filtered.map((r) => `Foto-ID ${r.id}: Qualität ${r.quality_score}/10. ${r.reasoning ?? ''}`).join('\n')
 }
@@ -817,22 +823,23 @@ export async function regenerateContentSessionDraftPart(formData: FormData) {
   if (!process.env.OPENAI_API_KEY)
     redirect(`${returnPath}?error=${encodeURIComponent('Die Content-KI ist aktuell nicht konfiguriert.')}`)
 
-  const supabase = await createClient()
-  const { data: draft } = await supabase.from('content_drafts').select('project_id, draft_type, structure').eq('id', draftId).maybeSingle()
+  const lumiCore = await createLumiCoreClient()
+  const { data: draft } = await lumiCore.from('travel_content_drafts').select('project_id, draft_type, structure').eq('id', draftId).maybeSingle()
   if (!draft) redirect(returnPath)
 
   const format = Object.entries(FORMAT_TO_DRAFT_TYPE).find(([, v]) => v === draft.draft_type)?.[0]
   if (!format) redirect(returnPath)
+  if (!draft.project_id) redirect(returnPath)
 
-  const { data: project } = await supabase
-    .from('content_projects')
+  const { data: project } = await lumiCore
+    .from('travel_content_projects')
     .select('trip_id, tonality, language, content_focus, custom_focus, mood, hint_text')
     .eq('id', draft.project_id).maybeSingle()
   if (!project?.trip_id) redirect(`${returnPath}?error=${encodeURIComponent('Zugehörige Reise nicht gefunden.')}`)
 
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   const tripDigest = await buildTripDigest(project.trip_id)
-  const manifestText = await rebuildManifestForProject(supabase, draft.project_id)
+  const manifestText = await rebuildManifestForProject(lumiCore, draft.project_id)
   if (!manifestText)
     redirect(`${returnPath}?error=${encodeURIComponent('Für die Regenerierung fehlen die ursprünglichen Bildbewertungen (Fotos evtl. bereits gelöscht).')}`)
 
@@ -860,7 +867,7 @@ export async function regenerateContentSessionDraftPart(formData: FormData) {
     else nextStructure = { ...existingStructure }
   }
 
-  await supabase.from('content_drafts').update({ structure: nextStructure as Json }).eq('id', draftId)
+  await lumiCore.from('travel_content_drafts').update({ structure: nextStructure }).eq('id', draftId)
   redirect(returnPath)
 }
 
@@ -871,8 +878,8 @@ export async function moveContentSessionDraftItem(formData: FormData) {
   const direction = String(formData.get('direction') ?? '')
   const returnPath = `/content-studio/drafts/${draftId}`
 
-  const supabase = await createClient()
-  const { data: draft } = await supabase.from('content_drafts').select('draft_type, structure').eq('id', draftId).maybeSingle()
+  const lumiCore = await createLumiCoreClient()
+  const { data: draft } = await lumiCore.from('travel_content_drafts').select('draft_type, structure').eq('id', draftId).maybeSingle()
   const itemsKey = draft ? ITEMS_KEY_BY_DRAFT_TYPE[draft.draft_type] : undefined
   if (!draft || !itemsKey) redirect(returnPath)
 
@@ -885,7 +892,7 @@ export async function moveContentSessionDraftItem(formData: FormData) {
   items[index] = items[swapWith]
   items[swapWith] = tmp
 
-  await supabase.from('content_drafts').update({ structure: { ...structure, [itemsKey]: items } as Json }).eq('id', draftId)
+  await lumiCore.from('travel_content_drafts').update({ structure: { ...structure, [itemsKey]: items } }).eq('id', draftId)
   redirect(returnPath)
 }
 
@@ -895,8 +902,8 @@ export async function removeContentSessionDraftItem(formData: FormData) {
   const index = Number(formData.get('index') ?? '-1')
   const returnPath = `/content-studio/drafts/${draftId}`
 
-  const supabase = await createClient()
-  const { data: draft } = await supabase.from('content_drafts').select('draft_type, structure').eq('id', draftId).maybeSingle()
+  const lumiCore = await createLumiCoreClient()
+  const { data: draft } = await lumiCore.from('travel_content_drafts').select('draft_type, structure').eq('id', draftId).maybeSingle()
   const itemsKey = draft ? ITEMS_KEY_BY_DRAFT_TYPE[draft.draft_type] : undefined
   if (!draft || !itemsKey) redirect(returnPath)
 
@@ -905,7 +912,7 @@ export async function removeContentSessionDraftItem(formData: FormData) {
   if (index < 0 || index >= items.length) redirect(returnPath)
   items.splice(index, 1)
 
-  await supabase.from('content_drafts').update({ structure: { ...structure, [itemsKey]: items } as Json }).eq('id', draftId)
+  await lumiCore.from('travel_content_drafts').update({ structure: { ...structure, [itemsKey]: items } }).eq('id', draftId)
   redirect(returnPath)
 }
 
@@ -915,8 +922,8 @@ export async function addContentSessionDraftItem(formData: FormData) {
   const photoId = String(formData.get('photo_id') ?? '')
   const returnPath = `/content-studio/drafts/${draftId}`
 
-  const supabase = await createClient()
-  const { data: draft } = await supabase.from('content_drafts').select('draft_type, structure').eq('id', draftId).maybeSingle()
+  const lumiCore = await createLumiCoreClient()
+  const { data: draft } = await lumiCore.from('travel_content_drafts').select('draft_type, structure').eq('id', draftId).maybeSingle()
   const itemsKey = draft ? ITEMS_KEY_BY_DRAFT_TYPE[draft.draft_type] : undefined
   if (!draft || !itemsKey || !photoId) redirect(returnPath)
 
@@ -926,7 +933,7 @@ export async function addContentSessionDraftItem(formData: FormData) {
   if (items.some((i) => i.photo_id === photoId)) redirect(returnPath)
   items.push({ photo_id: photoId, text: '' })
 
-  await supabase.from('content_drafts').update({ structure: { ...structure, [itemsKey]: items } as Json }).eq('id', draftId)
+  await lumiCore.from('travel_content_drafts').update({ structure: { ...structure, [itemsKey]: items } }).eq('id', draftId)
   redirect(returnPath)
 }
 
@@ -936,11 +943,11 @@ export async function setContentSessionDraftCover(formData: FormData) {
   const photoId = String(formData.get('photo_id') ?? '')
   const returnPath = `/content-studio/drafts/${draftId}`
 
-  const supabase = await createClient()
-  const { data: draft } = await supabase.from('content_drafts').select('structure').eq('id', draftId).maybeSingle()
+  const lumiCore = await createLumiCoreClient()
+  const { data: draft } = await lumiCore.from('travel_content_drafts').select('structure').eq('id', draftId).maybeSingle()
   if (!draft) redirect(returnPath)
   const structure = draft.structure as Record<string, unknown>
-  await supabase.from('content_drafts').update({ structure: { ...structure, cover_photo_id: photoId } as Json }).eq('id', draftId)
+  await lumiCore.from('travel_content_drafts').update({ structure: { ...structure, cover_photo_id: photoId } }).eq('id', draftId)
   redirect(returnPath)
 }
 
@@ -955,8 +962,8 @@ export async function saveContentSessionDraftText(formData: FormData) {
   const draftId = String(formData.get('draft_id') ?? '')
   const returnPath = `/content-studio/drafts/${draftId}`
 
-  const supabase = await createClient()
-  const { data: draft } = await supabase.from('content_drafts').select('draft_type, structure').eq('id', draftId).maybeSingle()
+  const lumiCore = await createLumiCoreClient()
+  const { data: draft } = await lumiCore.from('travel_content_drafts').select('draft_type, structure').eq('id', draftId).maybeSingle()
   if (!draft) redirect(returnPath)
 
   const structure = { ...(draft.structure as Record<string, unknown>) }
@@ -988,7 +995,7 @@ export async function saveContentSessionDraftText(formData: FormData) {
     if (formData.has('text')) structure.text = String(formData.get('text') ?? '')
   }
 
-  await supabase.from('content_drafts').update({ structure: structure as Json }).eq('id', draftId)
+  await lumiCore.from('travel_content_drafts').update({ structure }).eq('id', draftId)
   redirect(returnPath)
 }
 
@@ -996,8 +1003,8 @@ export async function saveContentSessionDraftText(formData: FormData) {
 export async function deleteContentSessionDraft(formData: FormData) {
   const draftId = String(formData.get('draft_id') ?? '')
   const projectId = String(formData.get('project_id') ?? '')
-  const supabase = await createClient()
-  await supabase.from('content_drafts').delete().eq('id', draftId)
+  const lumiCore = await createLumiCoreClient()
+  await lumiCore.from('travel_content_drafts').delete().eq('id', draftId)
   redirect(`/content-studio/session/${projectId}`)
 }
 
@@ -1018,14 +1025,14 @@ export async function deleteContentSessionProject(formData: FormData) {
   const returnPath = String(formData.get('return_to') ?? '/content-studio')
   if (!projectId) redirect('/content-studio')
 
-  const supabase = await createClient()
-  const { data: photos } = await supabase.from('content_project_photos').select('storage_path').eq('project_id', projectId)
+  const lumiCore = await createLumiCoreClient()
+  const { data: photos } = await lumiCore.from('travel_content_project_photos').select('storage_path').eq('project_id', projectId)
   if (photos && photos.length > 0) {
-    const { error: storageError } = await supabase.storage.from('documents').remove(photos.map((p) => p.storage_path))
+    const { error: storageError } = await lumiCore.storage.from('travel-documents').remove(photos.map((p) => p.storage_path))
     if (storageError) console.error('[content-sessions] Storage-Bereinigung beim Projekt-Löschen teilweise fehlgeschlagen', storageError.message)
   }
 
-  const { error } = await supabase.from('content_projects').delete().eq('id', projectId)
+  const { error } = await lumiCore.from('travel_content_projects').delete().eq('id', projectId)
   if (error) redirect(`${returnPath}?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)
 
   redirect(returnPath)
@@ -1044,21 +1051,21 @@ export async function deleteContentSessionPhotosNow(formData: FormData) {
   const returnPath = `/content-studio/session/${projectId}`
   if (!projectId) redirect('/content-studio/session/new')
 
-  const supabase = await createClient()
-  const { data: photos } = await supabase
-    .from('content_project_photos')
+  const lumiCore = await createLumiCoreClient()
+  const { data: photos } = await lumiCore
+    .from('travel_content_project_photos')
     .select('id, storage_path')
     .eq('project_id', projectId)
     .eq('temporary', true)
     .eq('retained_as_memory', false)
 
   for (const photo of photos ?? []) {
-    const { error: storageError } = await supabase.storage.from('documents').remove([photo.storage_path])
+    const { error: storageError } = await lumiCore.storage.from('travel-documents').remove([photo.storage_path])
     if (storageError) continue // Storage-Löschung fehlgeschlagen -- DB-Zeile bewusst NICHT gelöscht (kein Storage-Waise/Ghost-Eintrag)
-    await supabase.from('content_project_photos').delete().eq('id', photo.id)
+    await lumiCore.from('travel_content_project_photos').delete().eq('id', photo.id)
   }
 
-  await supabase.from('content_projects').update({ status: 'images_deleted' }).eq('id', projectId)
+  await lumiCore.from('travel_content_projects').update({ status: 'images_deleted' }).eq('id', projectId)
 
   redirect(returnPath)
 }
@@ -1075,43 +1082,44 @@ export async function retainContentSessionPhotoAsMemory(formData: FormData) {
   const projectId = String(formData.get('project_id') ?? '')
   const returnPath = `/content-studio/session/${projectId}`
 
-  const supabase = await createClient()
-  const { data: photo } = await supabase
-    .from('content_project_photos').select('id, storage_path, retained_as_memory').eq('id', photoId).maybeSingle()
+  const lumiCore = await createLumiCoreClient()
+  const { data: photo } = await lumiCore
+    .from('travel_content_project_photos').select('id, storage_path, retained_as_memory').eq('id', photoId).maybeSingle()
   if (!photo) redirect(`${returnPath}?error=${encodeURIComponent('Foto nicht gefunden.')}`)
   if (photo.retained_as_memory) redirect(returnPath)
 
-  const { data: project } = await supabase.from('content_projects').select('family_id, trip_id').eq('id', projectId).maybeSingle()
+  const { data: project } = await lumiCore.from('travel_content_projects').select('household_id, trip_id').eq('id', projectId).maybeSingle()
   if (!project?.trip_id) redirect(`${returnPath}?error=${encodeURIComponent('Diese Session ist keiner Reise zugeordnet.')}`)
 
-  const { count } = await supabase
-    .from('memory_photos').select('id', { count: 'exact', head: true })
+  const { count } = await lumiCore
+    .from('travel_memory_photos').select('id', { count: 'exact', head: true })
     .eq('trip_id', project.trip_id).eq('is_selected', true)
   if ((count ?? 0) >= MAX_RETAINED_MEMORIES_PER_TRIP)
     redirect(`${returnPath}?error=${encodeURIComponent('Für diese Reise sind bereits 25 Erinnerungen gespeichert. Bitte zuerst ein Bild ersetzen oder entfernen.')}`)
 
-  const { data: downloaded, error: downloadError } = await supabase.storage.from('documents').download(photo.storage_path)
+  const { data: downloaded, error: downloadError } = await lumiCore.storage.from('travel-documents').download(photo.storage_path)
   if (downloadError || !downloaded)
     redirect(`${returnPath}?error=${encodeURIComponent('Foto konnte nicht geladen werden.')}`)
 
   const buffer = Buffer.from(await downloaded.arrayBuffer())
   const compressed = await compressImageForStorage(buffer)
-  const memoryPath = `memories/${project.family_id}/${crypto.randomUUID()}.webp`
+  const memoryPath = await toTravelDocumentsPath(`memories/${crypto.randomUUID()}.webp`)
+  if (!memoryPath) redirect(`${returnPath}?error=${encodeURIComponent('Household nicht gefunden.')}`)
 
-  const { error: uploadError } = await supabase.storage.from('documents')
+  const { error: uploadError } = await lumiCore.storage.from('travel-documents')
     .upload(memoryPath, new Blob([new Uint8Array(compressed)], { type: 'image/webp' }), { contentType: 'image/webp', cacheControl: '31536000' })
   if (uploadError) redirect(`${returnPath}?error=${encodeURIComponent('Speicherfehler: ' + uploadError.message)}`)
 
-  const { data: memoryPhoto, error: insertError } = await supabase.from('memory_photos').insert({
-    family_id: project.family_id, trip_id: project.trip_id, storage_path: memoryPath, is_selected: true,
+  const { data: memoryPhoto, error: insertError } = await lumiCore.from('travel_memory_photos').insert({
+    household_id: project.household_id, trip_id: project.trip_id, storage_path: memoryPath, is_selected: true,
   }).select('id').single()
 
   if (insertError || !memoryPhoto) {
-    await supabase.storage.from('documents').remove([memoryPath])
+    await lumiCore.storage.from('travel-documents').remove([memoryPath])
     redirect(`${returnPath}?error=${encodeURIComponent('Speicherfehler: ' + (insertError?.message ?? 'unbekannt'))}`)
   }
 
-  await supabase.from('content_project_photos')
+  await lumiCore.from('travel_content_project_photos')
     .update({ retained_as_memory: true, memory_photo_id: memoryPhoto.id })
     .eq('id', photoId)
 

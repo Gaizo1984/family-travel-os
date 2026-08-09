@@ -1,17 +1,19 @@
 import { cache } from 'react'
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
+import { getCurrentPerson } from '@/lib/current-person'
 
 /**
- * Request-scoped Deduplication via React cache() — nie über Requests/
- * Sessions hinweg gültig, kein Cross-User-/Cross-Family-Leck möglich (die App
- * hat aktuell ohnehin keine Auth/Mehrfamilien-Architektur, aber dieses Muster
- * bleibt auch dann sicher, falls sich das ändert). Erspart die bisher auf
- * >15 Seiten unabhängig wiederholte families-Abfrage innerhalb *eines*
- * Seitenaufrufs (z. B. wenn Layout und Page dieselbe Familie brauchen),
- * ohne irgendeinen Zustand über den einzelnen Request hinaus zu halten.
+ * FINALER CUTOVER: `id` ist jetzt die Lumi-Core household_id (nicht mehr
+ * Travels families.id). Request-scoped via React cache(), wie zuvor.
+ * Ermittelt den Household ausschließlich über die aktuell eingeloggte
+ * Person (getCurrentPerson(), jetzt Lumi-Core-authentifiziert) statt über
+ * ein blindes `.limit(1)` auf Travels einziger families-Zeile.
  */
 export const getFamily = cache(async (): Promise<{ id: string; name: string | null }> => {
-  const supabase = await createClient()
-  const { data } = await supabase.from('families').select('id, name').limit(1).single()
-  return { id: data?.id ?? '', name: data?.name ?? null }
+  const person = await getCurrentPerson()
+  if (!person) return { id: '', name: null }
+
+  const lumiCore = await createLumiCoreClient()
+  const { data } = await lumiCore.from('households').select('id, name').eq('id', person.familyId).maybeSingle()
+  return { id: data?.id ?? person.familyId, name: data?.name ?? null }
 })

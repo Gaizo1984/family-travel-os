@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import type { PackingStatus, LuggageAssignment, PackingPriority } from '@/lib/packing-list'
 import { PACKING_STATUS_ORDER, LUGGAGE_ASSIGNMENT_ORDER, PACKING_PRIORITY_ORDER } from '@/lib/packing-list'
 
@@ -32,9 +32,9 @@ export async function addPackingItem(formData: FormData) {
     return
   }
 
-  const supabase = await createClient()
-  await supabase.from('packing_items').insert({
-    trip_id: tripId, person_id: personId, label, category, quantity, priority, is_last_minute: isLastMinute,
+  const supabase = await createLumiCoreClient()
+  await supabase.from('travel_packing_items').insert({
+    trip_id: tripId, household_member_id: personId, label, category, quantity, priority, is_last_minute: isLastMinute,
     status: 'offen', luggage_assignment: 'unassigned', source: 'manuell', source_key: null,
   })
 
@@ -51,8 +51,8 @@ export async function updatePackingItemStatus(formData: FormData) {
   const status = String(formData.get('status') ?? '')
   if (!isPackingStatus(status)) return
 
-  const supabase = await createClient()
-  await supabase.from('packing_items').update({ status }).eq('id', itemId)
+  const supabase = await createLumiCoreClient()
+  await supabase.from('travel_packing_items').update({ status }).eq('id', itemId)
 
   revalidatePath(packingPath(slug))
 }
@@ -79,9 +79,9 @@ export async function updatePackingItemDetails(formData: FormData) {
   const isLastMinute = formData.get('is_last_minute') === 'on'
   const statusRaw = String(formData.get('status') ?? '')
 
-  const supabase = await createClient()
-  await supabase.from('packing_items').update({
-    quantity, person_id: personId, luggage_assignment: luggageAssignment, luggage_id: luggageId,
+  const supabase = await createLumiCoreClient()
+  await supabase.from('travel_packing_items').update({
+    quantity, household_member_id: personId, luggage_assignment: luggageAssignment, luggage_id: luggageId,
     weight_grams: Number.isFinite(weightGrams) ? weightGrams : null,
     note, priority, is_last_minute: isLastMinute,
     ...(isPackingStatus(statusRaw) ? { status: statusRaw } : {}),
@@ -94,8 +94,8 @@ export async function deletePackingItem(formData: FormData) {
   const itemId = String(formData.get('item_id') ?? '')
   const slug = String(formData.get('slug') ?? '')
 
-  const supabase = await createClient()
-  await supabase.from('packing_items').delete().eq('id', itemId)
+  const supabase = await createLumiCoreClient()
+  await supabase.from('travel_packing_items').delete().eq('id', itemId)
 
   revalidatePath(packingPath(slug))
 }
@@ -105,9 +105,9 @@ export async function deletePackingList(formData: FormData) {
   const tripId = String(formData.get('trip_id') ?? '')
   const slug = String(formData.get('slug') ?? '')
 
-  const supabase = await createClient()
-  await supabase.from('packing_items').delete().eq('trip_id', tripId)
-  await supabase.from('packing_list_drafts').delete().eq('trip_id', tripId)
+  const supabase = await createLumiCoreClient()
+  await supabase.from('travel_packing_items').delete().eq('trip_id', tripId)
+  await supabase.from('travel_packing_list_drafts').delete().eq('trip_id', tripId)
 
   redirect(packingPath(slug))
 }

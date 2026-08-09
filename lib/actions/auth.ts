@@ -3,12 +3,16 @@
 import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 
 /**
- * Security Foundation 1A: Login/Logout/Passwort-Reset über Supabase Auth.
- * Bewusst minimal (nur die vom Auftrag geforderten vier Aktionen) -- keine
- * Rollen-/Berechtigungslogik, keine Profil-/Familien-Zuordnung hier (das
- * bleibt in persons.auth_user_id, nicht in diesen Actions).
+ * FINALER CUTOVER: normales E-Mail/Passwort-Login läuft jetzt primär über
+ * Lumi Core (nicht mehr Travel) -- Marcel und Sarah haben beide bereits
+ * echte, funktionierende Lumi-Core-Konten (siehe Phase 1). Passkey bleibt
+ * unverändert Travel-basiert, siehe PasskeyLoginButton.tsx +
+ * app/(auth)/connect-lumi-core (eigener Zwischenschritt für diesen Fall).
+ * Passwort-Reset bleibt bewusst auf Travel (siehe Kommentar dort) --
+ * betrifft nur den heute nicht mehr primären Pfad, kein Cutover-Blocker.
  */
 
 /** Muss mit der in Supabase Auth konfigurierten Mindestpasswortlänge übereinstimmen. */
@@ -22,8 +26,8 @@ export async function login(formData: FormData) {
     redirect(`/login?error=${encodeURIComponent('Bitte E-Mail und Passwort eingeben.')}`)
   }
 
-  const supabase = await createClient()
-  const { error } = await supabase.auth.signInWithPassword({ email, password })
+  const lumiCore = await createLumiCoreClient()
+  const { error } = await lumiCore.auth.signInWithPassword({ email, password })
 
   if (error) {
     redirect(`/login?error=${encodeURIComponent('Anmeldung fehlgeschlagen: E-Mail oder Passwort falsch.')}`)
@@ -33,8 +37,8 @@ export async function login(formData: FormData) {
 }
 
 export async function logout() {
-  const supabase = await createClient()
-  await supabase.auth.signOut()
+  const lumiCore = await createLumiCoreClient()
+  await lumiCore.auth.signOut()
   redirect('/login')
 }
 

@@ -1,7 +1,7 @@
 'use server'
 
 import OpenAI from 'openai'
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { createPendingMemoryCandidate } from '@/lib/family-memories'
 
 /**
@@ -58,13 +58,13 @@ Wenn die Titel kein klares Muster zeigen, widersprüchlich sind oder nur eine zu
  * Ähnlichkeits-Heuristik).
  */
 async function loadRecentlyDeclinedThemes(familyId: string, personId: string): Promise<string[]> {
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const cutoff = new Date(Date.now() - DECLINED_ACTIVITY_THEME_COOLDOWN_DAYS * 86400000).toISOString()
-  const { data } = await supabase
-    .from('family_memories')
+  const { data } = await lumiCore
+    .from('travel_memories')
     .select('structured_value')
-    .eq('family_id', familyId)
-    .eq('person_id', personId)
+    .eq('household_id', familyId)
+    .eq('household_member_id', personId)
     .eq('category', 'activity')
     .eq('status', 'declined')
     .gte('updated_at', cutoff)
@@ -76,12 +76,12 @@ async function loadRecentlyDeclinedThemes(familyId: string, personId: string): P
 
 /** §"Keine Duplikate": ein bereits vorhandener pending/confirmed Vorschlag zum exakt selben Thema für dieselbe Person wird nicht doppelt angelegt (unabhängig vom Cooldown -- das betrifft nur Ablehnungen). */
 async function hasExistingActiveTheme(familyId: string, personId: string, theme: string): Promise<boolean> {
-  const supabase = await createClient()
-  const { data } = await supabase
-    .from('family_memories')
+  const lumiCore = await createLumiCoreClient()
+  const { data } = await lumiCore
+    .from('travel_memories')
     .select('id')
-    .eq('family_id', familyId)
-    .eq('person_id', personId)
+    .eq('household_id', familyId)
+    .eq('household_member_id', personId)
     .eq('category', 'activity')
     .in('status', ['pending', 'confirmed'])
     .eq('structured_value->>theme', theme)
@@ -92,21 +92,17 @@ async function hasExistingActiveTheme(familyId: string, personId: string, theme:
 export async function maybeSuggestActivityPreference(familyId: string, personId: string, personName: string): Promise<void> {
   if (!process.env.OPENAI_API_KEY) return
 
-  const supabase = await createClient()
-  // §"bookings" hat keine eigene family_id-Spalte und keine tatsächlich
-  // familien-scopende RLS-Policy (siehe supabase/migrations/20260708000003_dev_rls_policies.sql:
-  // "dev_select"/"dev_write" mit USING (true)) -- deshalb hier bewusst über
-  // die Reisen der Familie eingegrenzt, statt mich auf RLS zu verlassen.
-  const { data: familyTrips } = await supabase.from('trips').select('id').eq('family_id', familyId)
+  const lumiCore = await createLumiCoreClient()
+  const { data: familyTrips } = await lumiCore.from('travel_trips').select('id').eq('household_id', familyId)
   const familyTripIds = (familyTrips ?? []).map((t) => t.id)
   if (familyTripIds.length === 0) return
 
-  const { data: rows } = await supabase
-    .from('bookings')
+  const { data: rows } = await lumiCore
+    .from('travel_bookings')
     .select('title')
     .eq('type', 'activity')
     .in('trip_id', familyTripIds)
-    .contains('participant_person_ids', [personId])
+    .contains('participant_household_member_ids', [personId])
 
   const activityTitles = (rows ?? []).map((r) => r.title).filter((t): t is string => Boolean(t))
   if (activityTitles.length < MIN_ACTIVITIES_FOR_PATTERN) return

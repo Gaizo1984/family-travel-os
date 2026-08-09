@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 
 function packingPath(slug: string): string {
   return `/trips/${slug}/packing`
@@ -25,10 +25,10 @@ export async function addPackingLuggage(formData: FormData) {
     return
   }
 
-  const supabase = await createClient()
-  const { count } = await supabase.from('packing_luggage').select('id', { count: 'exact', head: true }).eq('trip_id', tripId)
-  await supabase.from('packing_luggage').insert({
-    trip_id: tripId, person_id: personId, label,
+  const supabase = await createLumiCoreClient()
+  const { count } = await supabase.from('travel_packing_luggage').select('id', { count: 'exact', head: true }).eq('trip_id', tripId)
+  await supabase.from('travel_packing_luggage').insert({
+    trip_id: tripId, household_member_id: personId, label,
     allowed_weight_grams: Number.isFinite(allowedWeightGrams) ? allowedWeightGrams : null,
     sort_order: count ?? 0,
   })
@@ -49,9 +49,9 @@ export async function updatePackingLuggage(formData: FormData) {
     return
   }
 
-  const supabase = await createClient()
-  await supabase.from('packing_luggage').update({
-    label, person_id: personId, allowed_weight_grams: Number.isFinite(allowedWeightGrams) ? allowedWeightGrams : null,
+  const supabase = await createLumiCoreClient()
+  await supabase.from('travel_packing_luggage').update({
+    label, household_member_id: personId, allowed_weight_grams: Number.isFinite(allowedWeightGrams) ? allowedWeightGrams : null,
   }).eq('id', luggageId)
 
   revalidatePath(luggagePath(slug))
@@ -62,8 +62,8 @@ export async function deletePackingLuggage(formData: FormData) {
   const luggageId = String(formData.get('luggage_id') ?? '')
   const slug = String(formData.get('slug') ?? '')
 
-  const supabase = await createClient()
-  await supabase.from('packing_luggage').delete().eq('id', luggageId)
+  const supabase = await createLumiCoreClient()
+  await supabase.from('travel_packing_luggage').delete().eq('id', luggageId)
 
   revalidatePath(luggagePath(slug))
   revalidatePath(packingPath(slug))

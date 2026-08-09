@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation'
 import { after } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { getFamily } from '@/lib/family'
 import { createJob, completeJob } from '@/lib/ai-generation-jobs'
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt, ageAtDate } from '@/lib/family-dna'
@@ -392,9 +393,9 @@ export async function searchFlightsStandalone(formData: FormData) {
 
       // §"Zuletzt gesucht"-Erinnerung auf der Ideen-Seite: best-effort, blockiert die eigentliche Anzeige nicht.
       if (ideaId) {
-        const supabase = await createClient()
-        await supabase
-          .from('trip_ideas')
+        const lumiCore = await createLumiCoreClient()
+        await lumiCore
+          .from('travel_trip_ideas')
           .update({ flight_search_key: okOutcome.searchKey, flight_options_updated_at: okOutcome.result.searchedAt })
           .eq('id', ideaId)
       }

@@ -1,4 +1,4 @@
-import { createClient } from './supabase/server'
+import { createLumiCoreClient } from './supabase/lumi-core-server'
 import type { Json } from './supabase/types'
 import type { LumiBrainIntent } from './lumi-brain-intent'
 
@@ -31,17 +31,17 @@ export type FamilyMemory = {
 }
 
 type MemoryRow = {
-  id: string; family_id: string; person_id: string | null; trip_id: string | null
+  id: string; household_id: string; household_member_id: string | null; trip_id: string | null
   memory_type: string; category: string; structured_value: Json; summary: string
   source: string; status: string; priority: number | null; valid_until: string | null
   created_at: string; updated_at: string
 }
 
-const MEMORY_SELECT = 'id, family_id, person_id, trip_id, memory_type, category, structured_value, summary, source, status, priority, valid_until, created_at, updated_at'
+const MEMORY_SELECT = 'id, household_id, household_member_id, trip_id, memory_type, category, structured_value, summary, source, status, priority, valid_until, created_at, updated_at'
 
 function mapRow(row: MemoryRow): FamilyMemory {
   return {
-    id: row.id, familyId: row.family_id, personId: row.person_id, tripId: row.trip_id,
+    id: row.id, familyId: row.household_id, personId: row.household_member_id, tripId: row.trip_id,
     memoryType: row.memory_type as MemoryType, category: row.category,
     structuredValue: (row.structured_value as Record<string, unknown>) ?? {},
     summary: row.summary, source: row.source, status: row.status as MemoryStatus,
@@ -51,8 +51,8 @@ function mapRow(row: MemoryRow): FamilyMemory {
 
 /** Für die "Unsere Vorlieben"-Seite -- alle Einträge einer Familie, optional nach Status gefiltert. */
 export async function listFamilyMemories(familyId: string, status?: MemoryStatus): Promise<FamilyMemory[]> {
-  const supabase = await createClient()
-  let query = supabase.from('family_memories').select(MEMORY_SELECT).eq('family_id', familyId)
+  const lumiCore = await createLumiCoreClient()
+  let query = lumiCore.from('travel_memories').select(MEMORY_SELECT).eq('household_id', familyId)
   if (status) query = query.eq('status', status)
   const { data } = await query.order('updated_at', { ascending: false })
   return ((data ?? []) as MemoryRow[]).map(mapRow)
@@ -88,8 +88,8 @@ const MAX_RELEVANT_MEMORIES = 8
 export async function loadRelevantMemories(familyId: string, categories: string[] | 'all'): Promise<FamilyMemory[]> {
   if (categories !== 'all' && categories.length === 0) return []
 
-  const supabase = await createClient()
-  let query = supabase.from('family_memories').select(MEMORY_SELECT).eq('family_id', familyId).eq('status', 'confirmed')
+  const lumiCore = await createLumiCoreClient()
+  let query = lumiCore.from('travel_memories').select(MEMORY_SELECT).eq('household_id', familyId).eq('status', 'confirmed')
   if (categories !== 'all') query = query.in('category', categories)
 
   const { data } = await query
@@ -112,11 +112,11 @@ export function formatMemoriesForPrompt(memories: FamilyMemory[]): string {
  * Ähnlichkeitslogik, die neue Fehlerquellen schaffen würde.
  */
 export async function hasDeclinedSimilarMemory(familyId: string, category: string, summary: string): Promise<boolean> {
-  const supabase = await createClient()
-  const { data } = await supabase
-    .from('family_memories')
+  const lumiCore = await createLumiCoreClient()
+  const { data } = await lumiCore
+    .from('travel_memories')
     .select('id')
-    .eq('family_id', familyId)
+    .eq('household_id', familyId)
     .eq('category', category)
     .eq('status', 'declined')
     .ilike('summary', summary)
@@ -144,10 +144,10 @@ export type MemoryCandidateInput = {
 
 /** Legt einen NEUEN Kandidaten mit status='pending' an -- niemals 'confirmed' (das macht ausschließlich die explizite Bestätigung, siehe lib/actions/family-memories.ts). */
 export async function createPendingMemoryCandidate(input: MemoryCandidateInput): Promise<string | null> {
-  const supabase = await createClient()
-  const { data, error } = await supabase.from('family_memories').insert({
-    family_id: input.familyId,
-    person_id: input.personId ?? null,
+  const lumiCore = await createLumiCoreClient()
+  const { data, error } = await lumiCore.from('travel_memories').insert({
+    household_id: input.familyId,
+    household_member_id: input.personId ?? null,
     trip_id: input.tripId ?? null,
     memory_type: input.memoryType,
     category: input.category,
@@ -158,7 +158,7 @@ export async function createPendingMemoryCandidate(input: MemoryCandidateInput):
   }).select('id').single()
 
   if (error) {
-    console.error('[family_memories] Anlegen fehlgeschlagen:', error.message)
+    console.error('[travel_memories] Anlegen fehlgeschlagen:', error.message)
     return null
   }
   return data.id

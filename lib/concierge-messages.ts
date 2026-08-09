@@ -1,4 +1,4 @@
-import { createClient } from './supabase/server'
+import { createLumiCoreClient } from './supabase/lumi-core-server'
 import { generateConciergeAnswer } from './concierge-ai'
 import type { ConciergeLink } from './concierge'
 import { createPendingMemoryCandidate, hasDeclinedSimilarMemory } from './family-memories'
@@ -33,11 +33,11 @@ export async function listTodayConciergeMessages(
   forDate: string,
   currentFingerprint: string,
 ): Promise<CachedConciergeMessage[]> {
-  const supabase = await createClient()
-  let query = supabase
-    .from('concierge_messages')
+  const lumiCore = await createLumiCoreClient()
+  let query = lumiCore
+    .from('travel_concierge_messages')
     .select('question_key, question_text, answer_title, answer_body, actions, context_fingerprint, created_at')
-    .eq('family_id', familyId)
+    .eq('household_id', familyId)
     .eq('for_date', forDate)
   query = tripId ? query.eq('trip_id', tripId) : query.is('trip_id', null)
   const { data } = await query.order('created_at', { ascending: false })
@@ -45,11 +45,11 @@ export async function listTodayConciergeMessages(
   return (data ?? []).map((row) => {
     const actions = (row.actions as unknown as StoredActions) ?? []
     return {
-      questionKey: row.question_key,
-      questionText: row.question_text,
-      title: row.answer_title,
-      body: row.answer_body,
-      eventTitle: actions[0]?.event_title ?? row.answer_title,
+      questionKey: row.question_key ?? '',
+      questionText: row.question_text ?? '',
+      title: row.answer_title ?? '',
+      body: row.answer_body ?? '',
+      eventTitle: actions[0]?.event_title ?? row.answer_title ?? '',
       links: actions[0]?.links ?? [],
       createdAt: row.created_at,
       stale: row.context_fingerprint !== null && row.context_fingerprint !== currentFingerprint,
@@ -60,21 +60,21 @@ export async function listTodayConciergeMessages(
 export async function getCachedConciergeMessage(
   familyId: string, tripId: string, forDate: string, questionKey: string,
 ): Promise<CachedConciergeMessage | null> {
-  const supabase = await createClient()
-  const { data } = await supabase
-    .from('concierge_messages')
+  const lumiCore = await createLumiCoreClient()
+  const { data } = await lumiCore
+    .from('travel_concierge_messages')
     .select('question_key, question_text, answer_title, answer_body, actions, created_at')
-    .eq('family_id', familyId).eq('trip_id', tripId).eq('for_date', forDate).eq('question_key', questionKey)
+    .eq('household_id', familyId).eq('trip_id', tripId).eq('for_date', forDate).eq('question_key', questionKey)
     .maybeSingle()
 
   if (!data) return null
   const actions = (data.actions as unknown as StoredActions) ?? []
   return {
-    questionKey: data.question_key,
-    questionText: data.question_text,
-    title: data.answer_title,
-    body: data.answer_body,
-    eventTitle: actions[0]?.event_title ?? data.answer_title,
+    questionKey: data.question_key ?? '',
+    questionText: data.question_text ?? '',
+    title: data.answer_title ?? '',
+    body: data.answer_body ?? '',
+    eventTitle: actions[0]?.event_title ?? data.answer_title ?? '',
     links: actions[0]?.links ?? [],
     createdAt: data.created_at,
     stale: false,
@@ -116,10 +116,10 @@ export async function generateAndCacheConciergeMessage(
   }
 
   const fingerprint = buildContextFingerprint(context.weatherSummary, context.knownPlanText)
-  const supabase = await createClient()
-  const { data } = await supabase.from('concierge_messages').upsert(
+  const lumiCore = await createLumiCoreClient()
+  const { data } = await lumiCore.from('travel_concierge_messages').upsert(
     {
-      family_id: familyId,
+      household_id: familyId,
       trip_id: tripId,
       for_date: forDate,
       question_key: questionKey,
@@ -130,7 +130,7 @@ export async function generateAndCacheConciergeMessage(
       context_fingerprint: fingerprint,
       created_at: new Date().toISOString(),
     },
-    { onConflict: 'family_id,trip_id,for_date,question_key' },
+    { onConflict: 'household_id,trip_id,for_date,question_key' },
   ).select('created_at').single()
 
   return {

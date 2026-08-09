@@ -1,6 +1,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { redirect } from 'next/navigation'
 import { after } from 'next/server'
 import { createJob, completeJob, failJob } from '@/lib/ai-generation-jobs'
@@ -111,57 +112,55 @@ export async function askConcierge(formData: FormData) {
       }
 
       if (questionKey === 'plan_tomorrow') {
-        const supabase = await createClient()
-        const { data: trip } = await supabase
-          .from('trips')
-          .select(`
-            start_date, end_date,
-            stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code ),
-            bookings ( id, type, title, provider, status, start_datetime, end_datetime, stage_id, details, created_at ),
-            journey_events ( id, stage_id, date, time, category, title, location, status )
-          `)
-          .eq('id', ctx.tripId)
-          .maybeSingle()
+        const lumiCoreRead = await createLumiCoreClient()
+        const { data: trip } = await lumiCoreRead.from('travel_trips').select('start_date, end_date').eq('id', ctx.tripId).maybeSingle()
 
         if (trip) {
-          const stages = sortStagesChronologically((trip.stages ?? []) as StageRow[]) as StageInput[]
-          const bookings = sortBookingsChronologically((trip.bookings ?? []) as BookingRow[]) as TimelineBooking[]
-          const events = (trip.journey_events ?? []) as unknown as TimelineEvent[]
+          const [{ data: stagesRaw }, { data: bookingsRaw }, { data: eventsRaw }] = await Promise.all([
+            lumiCoreRead.from('travel_stages').select('id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code').eq('trip_id', ctx.tripId),
+            lumiCoreRead.from('travel_bookings').select('id, type, title, provider, status, start_datetime, end_datetime, stage_id, details, created_at').eq('trip_id', ctx.tripId),
+            lumiCoreRead.from('travel_journey_events').select('id, stage_id, date, time, category, title, location, status').eq('trip_id', ctx.tripId),
+          ])
+          const stages = sortStagesChronologically((stagesRaw ?? []) as StageRow[]) as StageInput[]
+          const bookings = sortBookingsChronologically((bookingsRaw ?? []) as BookingRow[]) as TimelineBooking[]
+          const events = (eventsRaw ?? []) as unknown as TimelineEvent[]
           const tomorrowIso = addDaysIso(ctx.forDate, 1)
           const timeline = buildJourneyTimeline({ start_date: trip.start_date, end_date: trip.end_date }, stages, bookings, events)
           const allDays: TimelineDay[] = timeline.flatMap((seg) => (seg.kind === 'stay' ? seg.days : [seg.day]))
           const tomorrowDay = allDays.find((d) => d.date === tomorrowIso) ?? null
 
           const answer = buildPlanTomorrowAnswer(tomorrowDay, stages, tomorrowIso, ctx.tripSlug)
-          await supabase.from('concierge_messages').upsert(
+          const lumiCore = await createLumiCoreClient()
+          await lumiCore.from('travel_concierge_messages').upsert(
             {
-              family_id: ctx.familyId, trip_id: ctx.tripId, for_date: ctx.forDate, question_key: questionKey,
+              household_id: ctx.familyId, trip_id: ctx.tripId, for_date: ctx.forDate, question_key: questionKey,
               question_text: questionTextRaw, answer_title: answer.title, answer_body: answer.body,
               actions: [{ event_title: answer.title, links: answer.links }], context_fingerprint: null,
               created_at: new Date().toISOString(),
             },
-            { onConflict: 'family_id,trip_id,for_date,question_key' },
+            { onConflict: 'household_id,trip_id,for_date,question_key' },
           )
         }
-        await completeJob(jobId, ctx.returnTo, supabase)
+        await completeJob(jobId, ctx.returnTo, await createClient())
         return
       }
 
       if (questionKey === 'whats_missing' || questionKey === 'explain_conflict') {
         const supabase = await createClient()
-        const { data: trip } = await supabase.from('trips').select('slug').eq('id', ctx.tripId).maybeSingle()
+        const lumiCore = await createLumiCoreClient()
+        const { data: trip } = await lumiCore.from('travel_trips').select('slug').eq('id', ctx.tripId).maybeSingle()
         const answer = questionKey === 'whats_missing'
           ? await buildWhatsMissingAnswer(ctx.tripId, trip?.slug ?? ctx.tripSlug)
           : await buildExplainConflictAnswer(ctx.tripId)
 
-        await supabase.from('concierge_messages').upsert(
+        await lumiCore.from('travel_concierge_messages').upsert(
           {
-            family_id: ctx.familyId, trip_id: ctx.tripId, for_date: ctx.forDate, question_key: questionKey,
+            household_id: ctx.familyId, trip_id: ctx.tripId, for_date: ctx.forDate, question_key: questionKey,
             question_text: questionTextRaw, answer_title: answer.title, answer_body: answer.body,
             actions: [{ event_title: answer.title, links: answer.links }], context_fingerprint: null,
             created_at: new Date().toISOString(),
           },
-          { onConflict: 'family_id,trip_id,for_date,question_key' },
+          { onConflict: 'household_id,trip_id,for_date,question_key' },
         )
         await completeJob(jobId, ctx.returnTo, supabase)
         return
@@ -239,20 +238,21 @@ export async function askConcierge(formData: FormData) {
             if (answer) {
               await incrementLumiBrainUsage(ctx.familyId)
               const supabase = await createClient()
+              const lumiCore = await createLumiCoreClient()
               const effectiveTripId = matchedTrip?.id ?? ctx.tripId
               const combinedBody = [
                 answer.basisLabel, answer.body,
                 answer.recommendation ? `Empfehlung: ${answer.recommendation}` : null,
                 answer.missingInfo ? `Fehlende Angabe: ${answer.missingInfo}` : null,
               ].filter(Boolean).join('\n\n')
-              await supabase.from('concierge_messages').upsert(
+              await lumiCore.from('travel_concierge_messages').upsert(
                 {
-                  family_id: ctx.familyId, trip_id: effectiveTripId || null, for_date: ctx.forDate, question_key: effectiveKey,
+                  household_id: ctx.familyId, trip_id: effectiveTripId || null, for_date: ctx.forDate, question_key: effectiveKey,
                   question_text: questionTextRaw, answer_title: answer.title, answer_body: combinedBody,
                   actions: [{ event_title: answer.title, links: answer.links }], context_fingerprint: null,
                   created_at: new Date().toISOString(),
                 },
-                { onConflict: 'family_id,trip_id,for_date,question_key' },
+                { onConflict: 'household_id,trip_id,for_date,question_key' },
               )
 
               // §"Frag LUMI darf eine mögliche Erinnerung erkennen, aber nicht
@@ -274,10 +274,11 @@ export async function askConcierge(formData: FormData) {
 
               if (matchedTrip) {
                 // §"Bei eindeutigem Treffer die UI-Auswahl sichtbar auf die
-                // erkannte Reise umstellen" + "nur für diese Familie speichern"
-                // (Nutzervorgabe): dieselbe familiengebundene Persistenz wie die
-                // manuelle Auswahl im Picker (lib/actions/lumi-trip-selection.ts).
-                await supabase.from('families').update({ last_lumi_trip_id: matchedTrip.id }).eq('id', ctx.familyId)
+                // erkannte Reise umstellen" (Nutzervorgabe): das familiengebundene
+                // "last_lumi_trip_id"-Persistieren entfällt seit dem Cutover
+                // bewusst (Schema-Lücke, siehe lib/actions/lumi-trip-selection.ts)
+                // -- die sichtbare Umstellung selbst passiert weiterhin über den
+                // ?trip=-Query-Parameter unten.
                 await completeJob(jobId, `${basePath}?trip=${encodeURIComponent(matchedTrip.slug)}`, supabase)
                 return
               }
@@ -359,9 +360,9 @@ export async function deleteConciergeMessage(formData: FormData) {
   const returnTo = String(formData.get('return_to') ?? '').trim() || '/concierge'
   if (!familyId || !forDate || !questionKey) redirect(returnTo)
 
-  const supabase = await createClient()
-  let query = supabase.from('concierge_messages').delete()
-    .eq('family_id', familyId).eq('for_date', forDate).eq('question_key', questionKey)
+  const lumiCore = await createLumiCoreClient()
+  let query = lumiCore.from('travel_concierge_messages').delete()
+    .eq('household_id', familyId).eq('for_date', forDate).eq('question_key', questionKey)
   query = tripId ? query.eq('trip_id', tripId) : query.is('trip_id', null)
   const { error } = await query
   if (error) redirect(`${returnTo}?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)
@@ -384,8 +385,8 @@ export async function deleteAllConciergeMessages(formData: FormData) {
   const returnTo = String(formData.get('return_to') ?? '').trim() || '/concierge'
   if (!familyId) redirect(returnTo)
 
-  const supabase = await createClient()
-  const { error } = await supabase.from('concierge_messages').delete().eq('family_id', familyId)
+  const lumiCore = await createLumiCoreClient()
+  const { error } = await lumiCore.from('travel_concierge_messages').delete().eq('household_id', familyId)
   if (error) redirect(`${returnTo}?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)
   redirect(returnTo)
 }
@@ -405,8 +406,8 @@ export async function commitConciergeAction(formData: FormData) {
 
   if (!tripId || !forDate || !eventTitle) redirect(`${returnTo}?error=${encodeURIComponent('Konnte nicht übernommen werden')}`)
 
-  const supabase = await createClient()
-  const { error } = await supabase.from('journey_events').insert({
+  const lumiCore = await createLumiCoreClient()
+  const { error } = await lumiCore.from('travel_journey_events').insert({
     trip_id: tripId,
     date: forDate,
     category: 'note',

@@ -1,4 +1,4 @@
-import { createClient } from './supabase/server'
+import { createLumiCoreClient } from './supabase/lumi-core-server'
 import { generateContentStrategy } from './content-strategy-ai'
 import type { ContentStrategy } from './content-strategy-ai'
 import type { ContentPostingPlanContext } from './content-strategy-context'
@@ -9,20 +9,20 @@ export async function getCachedContentStrategy(
   tripId: string,
   forDate: string,
 ): Promise<ContentStrategy | null> {
-  const supabase = await createClient()
-  const { data } = await supabase
-    .from('content_strategies')
+  const lumiCore = await createLumiCoreClient()
+  const { data } = await lumiCore
+    .from('travel_content_strategies')
     .select('content_type, reasoning, storyline, shotlist, best_time, effort')
-    .eq('family_id', familyId)
+    .eq('household_id', familyId)
     .eq('trip_id', tripId)
     .eq('for_date', forDate)
     .maybeSingle()
 
   if (!data) return null
   return {
-    contentType: data.content_type,
-    reasoning: data.reasoning,
-    storyline: data.storyline,
+    contentType: data.content_type ?? '',
+    reasoning: data.reasoning ?? '',
+    storyline: data.storyline ?? '',
     shotlist: data.shotlist as unknown as string[],
     bestTime: data.best_time ?? '',
     effort: data.effort ?? '',
@@ -49,10 +49,10 @@ export async function generateAndCacheContentStrategy(
   const result = await generateContentStrategy({ ...context, regenerate })
   if (!result) return null
 
-  const supabase = await createClient()
-  await supabase.from('content_strategies').upsert(
+  const lumiCore = await createLumiCoreClient()
+  await lumiCore.from('travel_content_strategies').upsert(
     {
-      family_id: familyId,
+      household_id: familyId,
       trip_id: tripId,
       for_date: forDate,
       content_type: result.contentType,
@@ -62,7 +62,7 @@ export async function generateAndCacheContentStrategy(
       best_time: result.bestTime,
       effort: result.effort,
     },
-    { onConflict: 'family_id,trip_id,for_date' },
+    { onConflict: 'household_id,trip_id,for_date' },
   )
 
   return result

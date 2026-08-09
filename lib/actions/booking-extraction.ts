@@ -1,11 +1,12 @@
 'use server'
 
 import OpenAI from 'openai'
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { redirect } from 'next/navigation'
 import { ALLOWED_DOCUMENT_MIME_TYPES, MAX_DOCUMENT_FILE_SIZE, buildBookingStoragePath } from '@/lib/documents'
 import { BOOKING_TYPE_CONFIG, combineDateTime } from '@/lib/bookings'
 import type { BookingType } from '@/lib/supabase/types'
+import { toTravelDocumentsPath } from '@/lib/lumi-core-storage/paths'
 
 /**
  * §Wiederverwendung statt Parallel-Implementierung: identisches Modell und
@@ -157,9 +158,12 @@ export async function extractBookingData(formData: FormData) {
   // Feature, siehe app/(app)/trips/[id]/bookings/[bookingId]/boarding-passes).
   // storage_path dient dem Formular anschließend nur als UI-Signal ("bereits
   // ausgelesen"), nicht als Referenz auf eine gespeicherte Datei.
-  const supabase = await createClient()
-  const storagePath = buildBookingStoragePath(bookingId || 'staging', file.name)
-  const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
+  const supabase = await createLumiCoreClient()
+  const rawPath = buildBookingStoragePath(bookingId || 'staging', file.name)
+  const storagePath = await toTravelDocumentsPath(rawPath)
+  if (!storagePath)
+    fail('Upload fehlgeschlagen: Haushalt nicht gefunden')
+  const { error: uploadError } = await supabase.storage.from('travel-documents').upload(storagePath, file, {
     contentType: file.type,
     cacheControl: '31536000',
   })

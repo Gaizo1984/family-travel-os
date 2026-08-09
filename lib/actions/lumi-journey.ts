@@ -1,7 +1,7 @@
 'use server'
 
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 
 /**
  * §"Aktion Merken" (LUMI Intelligence v1, §2/§6): identisches Insert-Muster
@@ -27,8 +27,8 @@ export async function commitPlaceToJourney(formData: FormData) {
 
   if (!tripId || !date || !title) redirect(`${returnTo}?error=${encodeURIComponent('Konnte nicht gemerkt werden')}`)
 
-  const supabase = await createClient()
-  const { error } = await supabase.from('journey_events').insert({
+  const supabase = await createLumiCoreClient()
+  const { error } = await supabase.from('travel_journey_events').insert({
     trip_id: tripId,
     date,
     category: 'activity',
@@ -73,8 +73,8 @@ export async function commitDayPlanVariantToJourney(formData: FormData) {
     redirect(`/trips/${tripSlug}?error=${encodeURIComponent('Tagesplan konnte nicht gelesen werden')}`)
   }
 
-  const supabase = await createClient()
-  const { data: existing } = await supabase.from('journey_events').select('title, metadata').eq('trip_id', tripId).eq('date', date)
+  const supabase = await createLumiCoreClient()
+  const { data: existing } = await supabase.from('travel_journey_events').select('title, metadata').eq('trip_id', tripId).eq('date', date)
   const existingTitles = new Set((existing ?? []).map((e) => e.title))
   const existingPlaceIds = new Set(
     (existing ?? [])
@@ -93,7 +93,7 @@ export async function commitDayPlanVariantToJourney(formData: FormData) {
     }))
 
   if (rows.length > 0) {
-    const { error } = await supabase.from('journey_events').insert(rows)
+    const { error } = await supabase.from('travel_journey_events').insert(rows)
     if (error) redirect(`/trips/${tripSlug}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
   }
 

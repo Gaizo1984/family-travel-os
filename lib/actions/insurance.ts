@@ -1,8 +1,10 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { redirect } from 'next/navigation'
 import { ALLOWED_DOCUMENT_MIME_TYPES, MAX_DOCUMENT_FILE_SIZE, combineIsoDate } from '@/lib/documents'
+import { toTravelDocumentsPath } from '@/lib/lumi-core-storage/paths'
+import { getFamily } from '@/lib/family'
 
 function readDateGroup(formData: FormData, prefix: string, fieldLabel: string): string | null {
   const day   = String(formData.get(`${prefix}_day`) ?? '').trim()
@@ -59,16 +61,16 @@ export async function createInsurancePolicy(formData: FormData) {
   if (fileError)
     redirect(`${newPath}?error=${encodeURIComponent(fileError)}`)
 
-  const supabase = await createClient()
+  const supabase = await createLumiCoreClient()
 
-  const { data: family } = await supabase.from('families').select('id').limit(1).single()
-  if (!family?.id)
+  const { id: householdId } = await getFamily()
+  if (!householdId)
     redirect(`${newPath}?error=${encodeURIComponent('Familiendaten nicht gefunden')}`)
 
   const { data: policy, error: insertError } = await supabase
-    .from('insurance_policies')
+    .from('travel_insurance_policies')
     .insert({
-      family_id: family.id,
+      household_id: householdId,
       label: f.label,
       provider: f.provider || null,
       policy_type: f.policyType || null,
@@ -85,24 +87,27 @@ export async function createInsurancePolicy(formData: FormData) {
     redirect(`${newPath}?error=${encodeURIComponent('Speicherfehler: ' + (insertError?.message ?? 'Unbekannt'))}`)
 
   if (f.personIds.length > 0)
-    await supabase.from('insurance_policy_persons').insert(
-      f.personIds.map((person_id) => ({ policy_id: policy.id, person_id }))
+    await supabase.from('travel_insurance_policy_persons').insert(
+      f.personIds.map((householdMemberId) => ({ policy_id: policy.id, household_member_id: householdMemberId }))
     )
 
   if (file) {
-    const storagePath = buildPolicyStoragePath(policy.id, file.name)
-    const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
-      contentType: file.type,
-      cacheControl: '31536000',
-    })
-    if (!uploadError)
-      await supabase.from('insurance_policies')
-        .update({ storage_bucket: 'documents', storage_path: storagePath })
-        .eq('id', policy.id)
+    const rawPath = buildPolicyStoragePath(policy.id, file.name)
+    const storagePath = await toTravelDocumentsPath(rawPath)
+    if (storagePath) {
+      const { error: uploadError } = await supabase.storage.from('travel-documents').upload(storagePath, file, {
+        contentType: file.type,
+        cacheControl: '31536000',
+      })
+      if (!uploadError)
+        await supabase.from('travel_insurance_policies')
+          .update({ storage_bucket: 'travel-documents', storage_path: storagePath })
+          .eq('id', policy.id)
+    }
   }
 
   if (f.assignTrip)
-    await supabase.from('insurance_policy_trips').insert({ policy_id: policy.id, trip_id: f.assignTrip })
+    await supabase.from('travel_insurance_policy_trips').insert({ policy_id: policy.id, trip_id: f.assignTrip })
 
   redirect(f.returnTo || `/family/insurance/${policy.id}`)
 }
@@ -125,7 +130,7 @@ export async function updateInsurancePolicy(formData: FormData) {
   if (fileError)
     redirect(`${editPath}?error=${encodeURIComponent(fileError)}`)
 
-  const supabase = await createClient()
+  const supabase = await createLumiCoreClient()
 
   const update: {
     label: string
@@ -151,29 +156,33 @@ export async function updateInsurancePolicy(formData: FormData) {
 
   if (file) {
     const { data: existing } = await supabase
-      .from('insurance_policies').select('storage_path').eq('id', policyId).maybeSingle()
+      .from('travel_insurance_policies').select('storage_path').eq('id', policyId).maybeSingle()
 
-    const storagePath = buildPolicyStoragePath(policyId, file.name)
-    const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
+    const rawPath = buildPolicyStoragePath(policyId, file.name)
+    const storagePath = await toTravelDocumentsPath(rawPath)
+    if (!storagePath)
+      redirect(`${editPath}?error=${encodeURIComponent('Upload fehlgeschlagen: Haushalt nicht gefunden')}`)
+
+    const { error: uploadError } = await supabase.storage.from('travel-documents').upload(storagePath, file, {
       contentType: file.type,
       cacheControl: '31536000',
     })
     if (uploadError)
       redirect(`${editPath}?error=${encodeURIComponent('Upload fehlgeschlagen: ' + uploadError.message)}`)
 
-    update.storage_bucket = 'documents'
+    update.storage_bucket = 'travel-documents'
     update.storage_path = storagePath
-    if (existing?.storage_path) await supabase.storage.from('documents').remove([existing.storage_path])
+    if (existing?.storage_path) await supabase.storage.from('travel-documents').remove([existing.storage_path])
   }
 
-  const { error } = await supabase.from('insurance_policies').update(update).eq('id', policyId)
+  const { error } = await supabase.from('travel_insurance_policies').update(update).eq('id', policyId)
   if (error)
     redirect(`${editPath}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
 
-  await supabase.from('insurance_policy_persons').delete().eq('policy_id', policyId)
+  await supabase.from('travel_insurance_policy_persons').delete().eq('policy_id', policyId)
   if (f.personIds.length > 0)
-    await supabase.from('insurance_policy_persons').insert(
-      f.personIds.map((person_id) => ({ policy_id: policyId, person_id }))
+    await supabase.from('travel_insurance_policy_persons').insert(
+      f.personIds.map((householdMemberId) => ({ policy_id: policyId, household_member_id: householdMemberId }))
     )
 
   redirect(`/family/insurance/${policyId}`)
@@ -183,11 +192,11 @@ export async function deleteInsurancePolicy(formData: FormData) {
   const policyId    = String(formData.get('policy_id') ?? '')
   const storagePath = String(formData.get('storage_path') ?? '')
 
-  const supabase = await createClient()
+  const supabase = await createLumiCoreClient()
 
-  if (storagePath) await supabase.storage.from('documents').remove([storagePath])
+  if (storagePath) await supabase.storage.from('travel-documents').remove([storagePath])
 
-  const { error } = await supabase.from('insurance_policies').delete().eq('id', policyId)
+  const { error } = await supabase.from('travel_insurance_policies').delete().eq('id', policyId)
   if (error)
     redirect(`/family/insurance/${policyId}?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)
 
@@ -203,8 +212,8 @@ export async function assignPolicyToTrip(formData: FormData) {
   if (!tripId)
     redirect(`${detailPath}?error=${encodeURIComponent('Bitte eine Reise auswählen')}`)
 
-  const supabase = await createClient()
-  const { error } = await supabase.from('insurance_policy_trips').insert({ policy_id: policyId, trip_id: tripId })
+  const supabase = await createLumiCoreClient()
+  const { error } = await supabase.from('travel_insurance_policy_trips').insert({ policy_id: policyId, trip_id: tripId })
 
   if (error)
     redirect(`${detailPath}?error=${encodeURIComponent('Zuordnung fehlgeschlagen: ' + error.message)}`)
@@ -218,8 +227,8 @@ export async function unassignPolicyFromTrip(formData: FormData) {
   const returnTo = String(formData.get('return_to') ?? '').trim()
   const detailPath = returnTo || `/family/insurance/${policyId}`
 
-  const supabase = await createClient()
-  await supabase.from('insurance_policy_trips').delete().eq('policy_id', policyId).eq('trip_id', tripId)
+  const supabase = await createLumiCoreClient()
+  await supabase.from('travel_insurance_policy_trips').delete().eq('policy_id', policyId).eq('trip_id', tripId)
 
   redirect(detailPath)
 }

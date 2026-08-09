@@ -1,4 +1,5 @@
 import { createClient } from './supabase/server'
+import { createLumiCoreClient } from './supabase/lumi-core-server'
 import { deriveTripDateRange, formatTripDateRangeLabel, type TripDateRange } from './trip-dates'
 import { isTripCurrentlyRunning, isTripHistorical } from './trip-status'
 import { COUNTRY_NAMES } from './geo-suggestions'
@@ -51,15 +52,49 @@ function buildMatchTerms(title: string, destinationLabel: string | null, stages:
   return [...new Set([title, destinationLabel, ...stageLocations, ...countryNames].filter((t): t is string => Boolean(t)))]
 }
 
-/** Eine Query, alle Reisen der Familie -- laufend, geplant UND vergangen (Vorgabe: "vergangene Reisen im Picker zulassen"). */
+/**
+ * Eine Query, alle Reisen der Familie -- laufend, geplant UND vergangen
+ * (Vorgabe: "vergangene Reisen im Picker zulassen").
+ *
+ * FINALER CUTOVER: `trips`/`stages`/`bookings` sind jetzt separate, flache
+ * Lumi-Core-Abfragen (embedded Supabase-Joins über FK-Relationen
+ * funktionieren nicht mehr 1:1) -- Etappen/Buchungen werden hier per
+ * `trip_id` gruppiert nachgebaut, damit die untenstehende Logik (die
+ * dieselbe verschachtelte `TripPickerRow`-Form erwartet) unverändert bleibt.
+ */
 export async function listTripsForPicker(familyId: string, todayIso: string = new Date().toISOString().slice(0, 10)): Promise<TripPickerEntry[]> {
-  const supabase = await createClient()
-  const { data } = await supabase
-    .from('trips')
-    .select('id, slug, title, status, start_date, end_date, stages ( location, title, country_code, start_date, end_date ), bookings ( type, status, start_datetime, end_datetime )')
-    .eq('family_id', familyId)
+  const lumiCore = await createLumiCoreClient()
+  const { data: tripsRaw } = await lumiCore
+    .from('travel_trips')
+    .select('id, slug, title, status, start_date, end_date')
+    .eq('household_id', familyId)
 
-  const rows = (data ?? []) as unknown as TripPickerRow[]
+  const tripIds = (tripsRaw ?? []).map((t) => t.id)
+  const [{ data: stagesRaw }, { data: bookingsRaw }] = tripIds.length > 0
+    ? await Promise.all([
+        lumiCore.from('travel_stages').select('trip_id, location, title, country_code, start_date, end_date').in('trip_id', tripIds),
+        lumiCore.from('travel_bookings').select('trip_id, type, status, start_datetime, end_datetime').in('trip_id', tripIds),
+      ])
+    : [{ data: [] as { trip_id: string; location: string | null; title: string; country_code: string | null; start_date: string | null; end_date: string | null }[] }, { data: [] as { trip_id: string; type: string; status: string; start_datetime: string | null; end_datetime: string | null }[] }]
+
+  const stagesByTrip = new Map<string, TripPickerRow['stages']>()
+  for (const s of stagesRaw ?? []) {
+    const list = stagesByTrip.get(s.trip_id) ?? []
+    list.push({ location: s.location, title: s.title, country_code: s.country_code, start_date: s.start_date, end_date: s.end_date })
+    stagesByTrip.set(s.trip_id, list)
+  }
+  const bookingsByTrip = new Map<string, TripPickerRow['bookings']>()
+  for (const b of bookingsRaw ?? []) {
+    const list = bookingsByTrip.get(b.trip_id) ?? []
+    list.push({ type: b.type, status: b.status, start_datetime: b.start_datetime, end_datetime: b.end_datetime })
+    bookingsByTrip.set(b.trip_id, list)
+  }
+
+  const rows: TripPickerRow[] = (tripsRaw ?? []).map((t) => ({
+    ...t,
+    stages: stagesByTrip.get(t.id) ?? [],
+    bookings: bookingsByTrip.get(t.id) ?? [],
+  }))
   const entries: TripPickerEntry[] = rows.map((t) => {
     const range = deriveTripDateRange(t, t.bookings, t.stages)
     const destinationLabel = t.stages[0]?.location ?? t.stages[0]?.title ?? null

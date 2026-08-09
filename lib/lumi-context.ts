@@ -1,4 +1,5 @@
-import { createClient } from './supabase/server'
+import { createLumiCoreClient } from './supabase/lumi-core-server'
+import { listHouseholdMembers } from './household-members'
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt, type FamilyDnaSummary } from './family-dna'
 import { resolveReferencePoint, type ReferencePoint } from './providers/places-provider'
 import { ProviderConfigError, ProviderRequestError } from './providers/provider-errors'
@@ -101,21 +102,33 @@ function pickRelevantAccommodation(bookings: TimelineBooking[], isActive: boolea
  * für offene Vorbereitungspunkte) statt sie zu duplizieren.
  */
 export async function buildLumiContext(familyId: string, tripId: string, todayIso: string, preferStopover = false): Promise<LumiContextResult> {
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
-  const [{ data: tripRow }, dna] = await Promise.all([
-    supabase.from('trips').select(`
-      id, slug, title, status, start_date, end_date,
-      trip_members ( persons ( name ) ),
-      stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code, cover_photo_id, is_transit ),
-      bookings ( id, type, title, provider, status, start_datetime, end_datetime, stage_id, details ),
-      journey_events ( id, date, time, category, title, location, status )
-    `).eq('id', tripId).maybeSingle(),
+  const [{ data: tripRow }, { data: tripMemberRows }, { data: stagesRaw }, { data: bookingsRaw }, { data: journeyEventsRaw }, householdMembers, dna] = await Promise.all([
+    lumiCore.from('travel_trips').select('id, slug, title, status, start_date, end_date').eq('id', tripId).maybeSingle(),
+    lumiCore.from('travel_trip_members').select('household_member_id').eq('trip_id', tripId),
+    lumiCore.from('travel_stages').select('id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code, cover_photo_id, is_transit').eq('trip_id', tripId),
+    lumiCore.from('travel_bookings').select('id, type, title, provider, status, start_datetime, end_datetime, stage_id, details').eq('trip_id', tripId),
+    lumiCore.from('travel_journey_events').select('id, date, time, category, title, location, status').eq('trip_id', tripId),
+    listHouseholdMembers(),
     buildFamilyDnaSummary(familyId),
   ])
 
   if (!tripRow) return { ok: false, reason: 'trip_not_found' }
-  const rawTrip = tripRow as unknown as TripRow
+
+  const nameById = new Map(householdMembers.map((m) => [m.id, m.name]))
+  const tripMembers = (tripMemberRows ?? []).map((m) => ({
+    persons: nameById.has(m.household_member_id) ? { name: nameById.get(m.household_member_id)! } : null,
+  }))
+
+  const rawTrip: TripRow = {
+    id: tripRow.id, slug: tripRow.slug, title: tripRow.title, status: tripRow.status,
+    start_date: tripRow.start_date, end_date: tripRow.end_date,
+    trip_members: tripMembers,
+    stages: (stagesRaw ?? []) as unknown as StageInput[],
+    bookings: (bookingsRaw ?? []) as unknown as TimelineBooking[],
+    journey_events: (journeyEventsRaw ?? []) as unknown as TimelineEvent[],
+  }
   // §"Reisezeitraum automatisch ableiten": ohne manuelles Datum, aber mit
   // Buchungen/Etappen, gilt die Reise trotzdem korrekt als laufend (lib/trip-dates.ts).
   const tripDateRange = deriveTripDateRange(rawTrip, rawTrip.bookings, rawTrip.stages)

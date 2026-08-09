@@ -2,6 +2,8 @@
 
 import OpenAI from 'openai'
 import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
+import { uploadToLumiCore } from '@/lib/lumi-core-storage/client'
 import { getFamily } from '@/lib/family'
 import {
   MIN_SCENE_DURATION_SECONDS, MAX_SCENE_DURATION_SECONDS, MIN_SCENES_REMAINING,
@@ -11,7 +13,6 @@ import {
 import { createUploadSlots, type UploadSlot } from '@/lib/actions/photo-staging'
 import { rebalanceScenes } from '@/lib/reel-scene-rebalance'
 import type { ReelStoryboardStructure, ReelTimelineScene } from '@/lib/reel-storyboard-types'
-import type { Json } from '@/lib/supabase/types'
 
 /**
  * §Content Studio 3.0, Sprint 4 -- visuelle Timeline. Bearbeitet das
@@ -25,34 +26,39 @@ import type { Json } from '@/lib/supabase/types'
  * nie über eine klassische Formular-Progressive-Enhancement.
  */
 const OPENAI_MODEL = 'gpt-5.6-terra'
-const STORAGE_BUCKET = 'documents'
+const STORAGE_BUCKET = 'travel-documents'
 
 type Result = { ok: boolean; structure?: ReelStoryboardStructure; error?: string }
 
 async function loadOwnedDraftContext(projectId: string) {
   const { id: familyId } = await getFamily()
+  // FINALER CUTOVER: content_projects/content_drafts/memory_photos/
+  // memory_videos laufen jetzt alle ueber Lumi Core (travel_*). `supabase`
+  // (Travel) bleibt im Rueckgabewert nur aus Kompatibilitaet erhalten,
+  // wird aktuell von keiner Funktion in dieser Datei mehr gelesen.
   const supabase = await createClient()
-  const { data: project } = await supabase
-    .from('content_projects')
-    .select('id, family_id, trip_id, reel_duration_seconds')
-    .eq('id', projectId).eq('family_id', familyId).eq('project_type', 'reel')
+  const lumiCore = await createLumiCoreClient()
+  const { data: project } = await lumiCore
+    .from('travel_content_projects')
+    .select('id, household_id, trip_id, reel_duration_seconds')
+    .eq('id', projectId).eq('household_id', familyId).eq('project_type', 'reel')
     .maybeSingle()
   if (!project) return null
 
-  const { data: draft } = await supabase
-    .from('content_drafts')
+  const { data: draft } = await lumiCore
+    .from('travel_content_drafts')
     .select('id, structure')
     .eq('project_id', projectId).eq('draft_type', 'video_reel')
     .order('created_at', { ascending: false }).limit(1).maybeSingle()
   if (!draft) return null
 
-  return { supabase, familyId, project, draftId: draft.id, structure: draft.structure as unknown as ReelStoryboardStructure }
+  return { supabase, lumiCore, familyId, project, draftId: draft.id, structure: draft.structure as unknown as ReelStoryboardStructure }
 }
 
 async function saveStructure(
-  supabase: Awaited<ReturnType<typeof createClient>>, draftId: string, structure: ReelStoryboardStructure,
+  lumiCore: Awaited<ReturnType<typeof createLumiCoreClient>>, draftId: string, structure: ReelStoryboardStructure,
 ): Promise<Result> {
-  const { error } = await supabase.from('content_drafts').update({ structure: structure as unknown as Json }).eq('id', draftId)
+  const { error } = await lumiCore.from('travel_content_drafts').update({ structure }).eq('id', draftId)
   if (error) return { ok: false, error: 'Speicherfehler: ' + error.message }
   return { ok: true, structure }
 }
@@ -62,7 +68,7 @@ export async function rebalanceReelTimelineDuration(projectId: string): Promise<
   if (!ctx) return { ok: false, error: 'Projekt/Storyboard nicht gefunden.' }
   const target = ctx.project.reel_duration_seconds ?? 30
   const structure = { ...ctx.structure, scenes: rebalanceScenes(ctx.structure.scenes, target) }
-  return saveStructure(ctx.supabase, ctx.draftId, structure)
+  return saveStructure(ctx.lumiCore, ctx.draftId, structure)
 }
 
 export async function reorderReelTimelineScene(projectId: string, index: number, direction: 'up' | 'down'): Promise<Result> {
@@ -72,7 +78,7 @@ export async function reorderReelTimelineScene(projectId: string, index: number,
   const swapWith = direction === 'up' ? index - 1 : index + 1
   if (index < 0 || index >= scenes.length || swapWith < 0 || swapWith >= scenes.length) return { ok: false, error: 'Ungültige Position.' }
   ;[scenes[index], scenes[swapWith]] = [scenes[swapWith], scenes[index]]
-  return saveStructure(ctx.supabase, ctx.draftId, { ...ctx.structure, scenes })
+  return saveStructure(ctx.lumiCore, ctx.draftId, { ...ctx.structure, scenes })
 }
 
 /** §"Szenen entfernen und einmalig wiederherstellen": Schnappschuss VOR der Entfernung, danach automatischer Dauer-Ausgleich (siehe rebalanceScenes). */
@@ -89,7 +95,7 @@ export async function removeReelTimelineScene(projectId: string, index: number):
   const structure: ReelStoryboardStructure = {
     ...ctx.structure, scenes: rebalanceScenes(remainingScenes, target), _previous_scenes: previousScenes,
   }
-  return saveStructure(ctx.supabase, ctx.draftId, structure)
+  return saveStructure(ctx.lumiCore, ctx.draftId, structure)
 }
 
 export async function restoreReelTimelineScenes(projectId: string): Promise<Result> {
@@ -97,7 +103,7 @@ export async function restoreReelTimelineScenes(projectId: string): Promise<Resu
   if (!ctx) return { ok: false, error: 'Projekt/Storyboard nicht gefunden.' }
   if (!ctx.structure._previous_scenes || ctx.structure._previous_scenes.length === 0) return { ok: false, error: 'Nichts zum Wiederherstellen.' }
   const structure: ReelStoryboardStructure = { ...ctx.structure, scenes: ctx.structure._previous_scenes, _previous_scenes: null }
-  return saveStructure(ctx.supabase, ctx.draftId, structure)
+  return saveStructure(ctx.lumiCore, ctx.draftId, structure)
 }
 
 /**
@@ -126,7 +132,7 @@ export async function updateReelTimelineScene(
 
   const target = ctx.project.reel_duration_seconds ?? 30
   const finalScenes = durationChanged ? rebalanceOthersAround(scenes, index, target) : scenes
-  return saveStructure(ctx.supabase, ctx.draftId, { ...ctx.structure, scenes: finalScenes })
+  return saveStructure(ctx.lumiCore, ctx.draftId, { ...ctx.structure, scenes: finalScenes })
 }
 
 /** Hält die SOEBEN geänderte Szene fest und gleicht nur die übrigen Szenen aus -- sonst würde eine Dauer-Änderung durch den anschließenden Ausgleich sofort wieder überschrieben. */
@@ -161,17 +167,17 @@ export async function regenerateReelSceneTextOverlay(projectId: string, index: n
   let storagePath: string | null = null
   let mimeType = 'image/webp'
   if (scene.source_type === 'photo') {
-    const { data: row } = await ctx.supabase.from('memory_photos').select('storage_path').eq('id', scene.source_id).maybeSingle()
+    const { data: row } = await ctx.lumiCore.from('travel_memory_photos').select('storage_path').eq('id', scene.source_id).maybeSingle()
     storagePath = row?.storage_path ?? null
   } else {
-    const { data: row } = await ctx.supabase.from('memory_videos').select('thumbnail_storage_path').eq('id', scene.source_id).maybeSingle()
+    const { data: row } = await ctx.lumiCore.from('travel_memory_videos').select('thumbnail_storage_path').eq('id', scene.source_id).maybeSingle()
     storagePath = row?.thumbnail_storage_path ?? null
     mimeType = 'image/jpeg'
   }
   if (!storagePath) return { ok: false, error: 'Bild für diese Szene nicht gefunden.' }
 
   try {
-    const { data: signed } = await ctx.supabase.storage.from(STORAGE_BUCKET).createSignedUrl(storagePath, 60)
+    const { data: signed } = await ctx.lumiCore.storage.from(STORAGE_BUCKET).createSignedUrl(storagePath, 60)
     if (!signed?.signedUrl) return { ok: false, error: 'Bild konnte nicht geladen werden.' }
     const res = await fetch(signed.signedUrl)
     const buffer = Buffer.from(await res.arrayBuffer())
@@ -199,7 +205,7 @@ export async function regenerateReelSceneTextOverlay(projectId: string, index: n
 
     const scenes = [...ctx.structure.scenes]
     scenes[index] = { ...scenes[index], text_overlay: parsed.text_overlay.slice(0, 140) }
-    const saveResult = await saveStructure(ctx.supabase, ctx.draftId, { ...ctx.structure, scenes })
+    const saveResult = await saveStructure(ctx.lumiCore, ctx.draftId, { ...ctx.structure, scenes })
     return { ...saveResult, textOverlay: parsed.text_overlay }
   } catch {
     return { ok: false, error: 'Der Textvorschlag ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.' }
@@ -221,13 +227,14 @@ export async function updateReelMusicChoice(projectId: string, choice: { source:
   if (!ctx) return { ok: false, error: 'Projekt/Storyboard nicht gefunden.' }
 
   // §Vorherige eigene Musikdatei wird beim Wechsel auf "Keine Musik" entfernt -- keine verwaisten Dateien im Storage.
+  // Liegt jetzt in Lumi Core (travel-documents), siehe uploadReelMusic unten.
   if (ctx.structure.music_source === 'custom' && ctx.structure.music_storage_path)
-    await ctx.supabase.storage.from(STORAGE_BUCKET).remove([ctx.structure.music_storage_path])
+    await ctx.lumiCore.storage.from('travel-documents').remove([ctx.structure.music_storage_path])
 
   const structure: ReelStoryboardStructure = {
     ...ctx.structure, music_source: choice.source, music_preset_key: null, music_storage_path: null,
   }
-  return saveStructure(ctx.supabase, ctx.draftId, structure)
+  return saveStructure(ctx.lumiCore, ctx.draftId, structure)
 }
 
 export async function createReelMusicUploadSlot(): Promise<UploadSlot | null> {
@@ -237,46 +244,55 @@ export async function createReelMusicUploadSlot(): Promise<UploadSlot | null> {
 }
 
 /**
- * §"Eigene private Datei" (Nutzervorgabe): identisches Signed-Upload +
- * `storage.move()`-Muster wie der Videoupload (Sprint 2) -- kein
- * Function-Buffering, Datei bleibt im bereits vorhandenen privaten
- * `documents`-Bucket (kein neuer Bucket/keine neue Migration nötig).
+ * §"Eigene private Datei" (Nutzervorgabe): identisches Signed-Upload-Muster
+ * wie der Videoupload (Sprint 2) -- kein Function-Buffering für den
+ * Client-Upload selbst. Das Staging liegt weiterhin in Travels eigenem
+ * `documents`-Bucket (createReelMusicUploadSlot/createUploadSlots, nicht
+ * umgestellt) -- content_drafts (und damit music_storage_path) ist aber
+ * jetzt Lumi Core, daher hier statt `storage.move()` (kann nicht
+ * bucket-/projektübergreifend verschieben) ein Download aus dem
+ * Travel-Staging + Upload nach Lumi Core (travel-documents), danach wird
+ * die Staging-Datei bei Travel entfernt.
  */
 export async function uploadReelMusic(projectId: string, stagingPath: string, mimeType: string): Promise<Result> {
   const ctx = await loadOwnedDraftContext(projectId)
   if (!ctx) return { ok: false, error: 'Projekt/Storyboard nicht gefunden.' }
 
   if (!ALLOWED_MUSIC_MIME_TYPES.includes(mimeType as (typeof ALLOWED_MUSIC_MIME_TYPES)[number])) {
-    await ctx.supabase.storage.from(STORAGE_BUCKET).remove([stagingPath])
+    await ctx.lumiCore.storage.from(STORAGE_BUCKET).remove([stagingPath])
     return { ok: false, error: 'Nicht unterstütztes Audioformat.' }
   }
   const folder = stagingPath.split('/').slice(0, -1).join('/')
   const fileName = stagingPath.split('/').pop() ?? ''
-  const { data: listing } = await ctx.supabase.storage.from(STORAGE_BUCKET).list(folder, { search: fileName })
+  const { data: listing } = await ctx.lumiCore.storage.from(STORAGE_BUCKET).list(folder, { search: fileName })
   const sizeBytes = listing?.find((f) => f.name === fileName)?.metadata?.size ?? null
   if (sizeBytes !== null && sizeBytes > MAX_MUSIC_FILE_SIZE_BYTES) {
-    await ctx.supabase.storage.from(STORAGE_BUCKET).remove([stagingPath])
+    await ctx.lumiCore.storage.from(STORAGE_BUCKET).remove([stagingPath])
     return { ok: false, error: 'Datei zu groß (max. 15 MB).' }
   }
 
   if (ctx.structure.music_source === 'custom' && ctx.structure.music_storage_path)
-    await ctx.supabase.storage.from(STORAGE_BUCKET).remove([ctx.structure.music_storage_path])
+    await ctx.lumiCore.storage.from('travel-documents').remove([ctx.structure.music_storage_path])
+
+  const { data: staged, error: downloadError } = await ctx.lumiCore.storage.from(STORAGE_BUCKET).download(stagingPath)
+  if (downloadError || !staged) return { ok: false, error: 'Speicherfehler: ' + (downloadError?.message ?? 'Datei nicht gefunden') }
 
   const extension = MUSIC_EXTENSION_BY_MIME[mimeType] ?? 'mp3'
   const finalPath = `${ctx.familyId}/reel-music/${projectId}/${crypto.randomUUID()}.${extension}`
-  const { error: moveError } = await ctx.supabase.storage.from(STORAGE_BUCKET).move(stagingPath, finalPath)
-  if (moveError) return { ok: false, error: 'Speicherfehler: ' + moveError.message }
+  const { error: uploadError } = await uploadToLumiCore('travel-documents', finalPath, staged, { contentType: mimeType })
+  if (uploadError) return { ok: false, error: 'Speicherfehler: ' + uploadError }
+  await ctx.lumiCore.storage.from(STORAGE_BUCKET).remove([stagingPath])
 
   const structure: ReelStoryboardStructure = {
     ...ctx.structure, music_source: 'custom', music_preset_key: null, music_storage_path: finalPath,
   }
-  return saveStructure(ctx.supabase, ctx.draftId, structure)
+  return saveStructure(ctx.lumiCore, ctx.draftId, structure)
 }
 
 export async function removeReelMusic(projectId: string): Promise<Result> {
   const ctx = await loadOwnedDraftContext(projectId)
   if (!ctx) return { ok: false, error: 'Projekt/Storyboard nicht gefunden.' }
-  if (ctx.structure.music_storage_path) await ctx.supabase.storage.from(STORAGE_BUCKET).remove([ctx.structure.music_storage_path])
+  if (ctx.structure.music_storage_path) await ctx.lumiCore.storage.from('travel-documents').remove([ctx.structure.music_storage_path])
   const structure: ReelStoryboardStructure = { ...ctx.structure, music_source: 'none', music_preset_key: null, music_storage_path: null }
-  return saveStructure(ctx.supabase, ctx.draftId, structure)
+  return saveStructure(ctx.lumiCore, ctx.draftId, structure)
 }

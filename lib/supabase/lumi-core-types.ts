@@ -305,14 +305,14 @@ export interface LumiCoreDatabase {
         {
           id: string; household_id: string; trip_id: string | null; stage_id: string | null; title: string; status: string
           project_type: string; content_date: string | null; language: string | null; tonality: string | null
-          output_format: string | null; content_focus: string | null; custom_focus: string | null; mood: string | null
+          output_format: string | null; content_focus: string | null; custom_focus: string | null; mood: string[] | null
           hint_text: string | null; reel_style: string | null; reel_duration_seconds: number | null
           created_at: string; updated_at: string
         },
         {
           id?: string; household_id: string; trip_id?: string | null; stage_id?: string | null; title: string; status?: string
           project_type: string; content_date?: string | null; language?: string | null; tonality?: string | null
-          output_format?: string | null; content_focus?: string | null; custom_focus?: string | null; mood?: string | null
+          output_format?: string | null; content_focus?: string | null; custom_focus?: string | null; mood?: string[] | null
           hint_text?: string | null; reel_style?: string | null; reel_duration_seconds?: number | null
           created_at?: string; updated_at?: string
         }
@@ -453,26 +453,26 @@ export interface LumiCoreDatabase {
       >
       travel_saved_flight_options: TableDef<
         {
-          id: string; household_id: string; route_key: string | null; origin_codes: unknown; destination_code: string | null
-          option_id: string | null; flight_option: unknown; found_departure_date: string | null
+          id: string; household_id: string; route_key: string; origin_codes: string[]; destination_code: string
+          option_id: string; flight_option: unknown; found_departure_date: string
           found_return_date: string | null; search_key: string | null; adults: number | null; children: number | null
-          infants: number | null; status: string | null; trip_id: string | null; booking_id: string | null; created_at: string
+          infants: number | null; status: string; trip_id: string | null; booking_id: string | null; created_at: string
         },
         {
-          id?: string; household_id: string; route_key?: string | null; origin_codes?: unknown; destination_code?: string | null
-          option_id?: string | null; flight_option?: unknown; found_departure_date?: string | null
+          id?: string; household_id: string; route_key: string; origin_codes: string[]; destination_code: string
+          option_id: string; flight_option: unknown; found_departure_date: string
           found_return_date?: string | null; search_key?: string | null; adults?: number | null; children?: number | null
-          infants?: number | null; status?: string | null; trip_id?: string | null; booking_id?: string | null; created_at?: string
+          infants?: number | null; status?: string; trip_id?: string | null; booking_id?: string | null; created_at?: string
         }
       >
       travel_saved_hotel_options: TableDef<
         {
-          id: string; household_id: string; search_key: string | null; destination: string | null; option_id: string | null
-          hotel_option: unknown; status: string | null; trip_id: string | null; booking_id: string | null; created_at: string
+          id: string; household_id: string; search_key: string; destination: string; option_id: string
+          hotel_option: unknown; status: string; trip_id: string | null; booking_id: string | null; created_at: string
         },
         {
-          id?: string; household_id: string; search_key?: string | null; destination?: string | null; option_id?: string | null
-          hotel_option?: unknown; status?: string | null; trip_id?: string | null; booking_id?: string | null; created_at?: string
+          id?: string; household_id: string; search_key: string; destination: string; option_id: string
+          hotel_option: unknown; status?: string; trip_id?: string | null; booking_id?: string | null; created_at?: string
         }
       >
       travel_concierge_messages: TableDef<

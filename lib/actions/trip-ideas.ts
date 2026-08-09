@@ -1,15 +1,16 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
+import { getFamily } from '@/lib/family'
 import { redirect } from 'next/navigation'
 
 export async function chooseTripIdea(formData: FormData) {
   const ideaId = String(formData.get('idea_id') ?? '')
   const sessionId = String(formData.get('session_id') ?? '')
 
-  const supabase = await createClient()
-  await supabase.from('trip_ideas').update({ is_chosen: true }).eq('id', ideaId)
-  await supabase.from('trip_idea_sessions').update({ status: 'idea_chosen' }).eq('id', sessionId)
+  const lumiCore = await createLumiCoreClient()
+  await lumiCore.from('travel_trip_ideas').update({ is_chosen: true }).eq('id', ideaId)
+  await lumiCore.from('travel_trip_idea_sessions').update({ status: 'idea_chosen' }).eq('id', sessionId)
 
   redirect(`/plan/ideas/${sessionId}/${ideaId}`)
 }
@@ -19,8 +20,8 @@ export async function updateTripIdeaNotes(formData: FormData) {
   const sessionId = String(formData.get('session_id') ?? '')
   const developmentNotes = String(formData.get('development_notes') ?? '').trim()
 
-  const supabase = await createClient()
-  const { error } = await supabase.from('trip_ideas').update({ development_notes: developmentNotes || null }).eq('id', ideaId)
+  const lumiCore = await createLumiCoreClient()
+  const { error } = await lumiCore.from('travel_trip_ideas').update({ development_notes: developmentNotes || null }).eq('id', ideaId)
 
   if (error)
     redirect(`/plan/ideas/${sessionId}/${ideaId}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
@@ -40,15 +41,15 @@ export async function deleteTripIdea(formData: FormData) {
   const ideaId = String(formData.get('idea_id') ?? '')
   const returnTo = String(formData.get('return_to') ?? '/discover/ideas')
 
-  const supabase = await createClient()
-  const { data: idea } = await supabase.from('trip_ideas').select('session_id').eq('id', ideaId).maybeSingle()
+  const lumiCore = await createLumiCoreClient()
+  const { data: idea } = await lumiCore.from('travel_trip_ideas').select('session_id').eq('id', ideaId).maybeSingle()
 
-  const { error } = await supabase.from('trip_ideas').delete().eq('id', ideaId)
+  const { error } = await lumiCore.from('travel_trip_ideas').delete().eq('id', ideaId)
   if (error) redirect(`${returnTo}?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)
 
   if (idea?.session_id) {
-    const { count } = await supabase.from('trip_ideas').select('id', { count: 'exact', head: true }).eq('session_id', idea.session_id)
-    if (!count) await supabase.from('trip_idea_sessions').delete().eq('id', idea.session_id)
+    const { count } = await lumiCore.from('travel_trip_ideas').select('id', { count: 'exact', head: true }).eq('session_id', idea.session_id)
+    if (!count) await lumiCore.from('travel_trip_idea_sessions').delete().eq('id', idea.session_id)
   }
 
   redirect(returnTo)
@@ -60,8 +61,8 @@ export async function toggleTripIdeaFavorite(formData: FormData) {
   const currentlyFavorite = String(formData.get('current') ?? '') === 'true'
   const returnTo = String(formData.get('return_to') ?? '/discover/ideas')
 
-  const supabase = await createClient()
-  const { error } = await supabase.from('trip_ideas').update({ is_favorite: !currentlyFavorite }).eq('id', ideaId)
+  const lumiCore = await createLumiCoreClient()
+  const { error } = await lumiCore.from('travel_trip_ideas').update({ is_favorite: !currentlyFavorite }).eq('id', ideaId)
   if (error) redirect(`${returnTo}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
 
   redirect(returnTo)
@@ -80,8 +81,8 @@ export async function chooseComparisonWinner(formData: FormData) {
   const variantType = String(formData.get('variant_type') ?? '').trim() || null
   const returnTo = String(formData.get('return_to') ?? '/discover/ideas')
 
-  const supabase = await createClient()
-  const { error } = await supabase.from('trip_ideas').update({ is_chosen: true, chosen_variant_type: variantType }).eq('id', ideaId)
+  const lumiCore = await createLumiCoreClient()
+  const { error } = await lumiCore.from('travel_trip_ideas').update({ is_chosen: true, chosen_variant_type: variantType }).eq('id', ideaId)
   if (error) redirect(`${returnTo}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
 
   redirect(returnTo)
@@ -95,12 +96,12 @@ export async function bookmarkTripIdea(formData: FormData) {
   const reasoning = String(formData.get('reasoning') ?? '').trim()
   const returnTo = String(formData.get('return_to') ?? '').trim()
 
-  const supabase = await createClient()
-  const { data: family } = await supabase.from('families').select('id').limit(1).single()
-  if (!family?.id) redirect(returnTo || '/discover')
+  const { id: householdId } = await getFamily()
+  if (!householdId) redirect(returnTo || '/discover')
 
-  await supabase.from('trip_ideas').insert({
-    family_id: family.id,
+  const lumiCore = await createLumiCoreClient()
+  await lumiCore.from('travel_trip_ideas').insert({
+    household_id: householdId,
     origin: 'discover_bookmark',
     destination,
     route_summary: routeSummary || null,

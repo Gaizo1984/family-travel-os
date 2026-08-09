@@ -1,6 +1,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { redirect } from 'next/navigation'
 import { BOOKING_TYPE_CONFIG, TRIP_BOUNDED_BOOKING_TYPES, BOOKING_CATEGORIES, combineDateTime, AUTO_STAGE_NOTE_LAYOVER } from '@/lib/bookings'
 import { suggestCountryCode } from '@/lib/geo-suggestions'
@@ -9,7 +10,8 @@ import { deriveTripDateRange } from '@/lib/trip-dates'
 import { getFamily } from '@/lib/family'
 import { maybeSuggestActivityPreference } from '@/lib/actions/activity-preference-learning'
 import type { BookingType, BookingStatus, PaymentStatus } from '@/lib/supabase/types'
-import type { SupabaseClient } from '@supabase/supabase-js'
+
+type LumiCore = Awaited<ReturnType<typeof createLumiCoreClient>>
 
 /** §"Teilnehmerauswahl nur bei Aktivitätsbuchungen, keine Person doppelt speichern" (Nutzervorgabe, wörtlich): dedupliziert, nur für type='activity' gelesen. */
 function readParticipantPersonIds(formData: FormData, type: BookingType): string[] {
@@ -26,13 +28,13 @@ function readParticipantPersonIds(formData: FormData, type: BookingType): string
  * manuelle Auswahl im Formular hat immer Vorrang.
  */
 async function suggestStageId(
-  supabase: SupabaseClient,
+  lumiCore: LumiCore,
   tripId: string,
   startDate: string,
 ): Promise<string | null> {
   if (!startDate) return null
-  const { data: stages } = await supabase
-    .from('stages')
+  const { data: stages } = await lumiCore
+    .from('travel_stages')
     .select('id, start_date, end_date')
     .eq('trip_id', tripId)
 
@@ -58,10 +60,10 @@ const AUTO_STAGE_NOTES: string[] = [AUTO_STAGE_NOTE_LAYOVER, AUTO_STAGE_NOTE_ACC
  * statt eine eigene zu bekommen).
  */
 async function findStageByExactStartDate(
-  supabase: SupabaseClient, tripId: string, startDate: string,
+  lumiCore: LumiCore, tripId: string, startDate: string,
 ): Promise<{ id: string; notes: string | null; country_code: string | null; is_transit: boolean } | null> {
-  const { data: stages } = await supabase
-    .from('stages').select('id, notes, country_code, is_transit').eq('trip_id', tripId).eq('start_date', startDate)
+  const { data: stages } = await lumiCore
+    .from('travel_stages').select('id, notes, country_code, is_transit').eq('trip_id', tripId).eq('start_date', startDate)
   return stages && stages.length === 1 ? stages[0] : null
 }
 
@@ -74,9 +76,9 @@ async function findStageByExactStartDate(
  * nur die falschen Daten der anderen Buchung überschreiben) -- stattdessen
  * muss die Buchung eine eigene, korrekte Etappe bekommen.
  */
-async function isStageSharedWithOtherAccommodation(supabase: SupabaseClient, stageId: string, excludeBookingId: string): Promise<boolean> {
-  const { data } = await supabase
-    .from('bookings').select('id').eq('stage_id', stageId).eq('type', 'accommodation').neq('id', excludeBookingId).limit(1)
+async function isStageSharedWithOtherAccommodation(lumiCore: LumiCore, stageId: string, excludeBookingId: string): Promise<boolean> {
+  const { data } = await lumiCore
+    .from('travel_bookings').select('id').eq('stage_id', stageId).eq('type', 'accommodation').neq('id', excludeBookingId).limit(1)
   return (data?.length ?? 0) > 0
 }
 
@@ -95,7 +97,7 @@ async function isStageSharedWithOtherAccommodation(supabase: SupabaseClient, sta
  * (ggf. manuell korrigiertes) Land.
  */
 async function syncAccommodationIntoStage(
-  supabase: SupabaseClient,
+  lumiCore: LumiCore,
   stageId: string,
   title: string,
   startDate: string,
@@ -105,7 +107,7 @@ async function syncAccommodationIntoStage(
 ): Promise<void> {
   const nights = Math.round((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000)
   if (nights < 0) return
-  await supabase.from('stages').update({
+  await lumiCore.from('travel_stages').update({
     title, location: title, accommodation: title,
     start_date: startDate, end_date: endDate, nights,
     notes: AUTO_STAGE_NOTE_ACCOMMODATION,
@@ -128,7 +130,7 @@ async function syncAccommodationIntoStage(
  * selbst damit verknüpfen kann.
  */
 async function maybeCreateAccommodationStage(
-  supabase: SupabaseClient,
+  lumiCore: LumiCore,
   tripId: string,
   bookingType: BookingType,
   title: string,
@@ -145,23 +147,23 @@ async function maybeCreateAccommodationStage(
   const startDate = startDatetime.slice(0, 10)
   const endDate = endDatetime.slice(0, 10)
 
-  const match = await findStageByExactStartDate(supabase, tripId, startDate)
+  const match = await findStageByExactStartDate(lumiCore, tripId, startDate)
   if (match) {
     if (match.notes && AUTO_STAGE_NOTES.includes(match.notes)) {
-      await syncAccommodationIntoStage(supabase, match.id, title, startDate, endDate, match.country_code, match.is_transit)
+      await syncAccommodationIntoStage(lumiCore, match.id, title, startDate, endDate, match.country_code, match.is_transit)
     }
     return match.id
   }
 
   const [{ data: last }, { data: trip }] = await Promise.all([
-    supabase.from('stages').select('sort_order').eq('trip_id', tripId).order('sort_order', { ascending: false }).limit(1).maybeSingle(),
-    supabase.from('trips').select('title, subtitle').eq('id', tripId).maybeSingle(),
+    lumiCore.from('travel_stages').select('sort_order').eq('trip_id', tripId).order('sort_order', { ascending: false }).limit(1).maybeSingle(),
+    lumiCore.from('travel_trips').select('title, subtitle').eq('id', tripId).maybeSingle(),
   ])
 
   const countryCode = suggestCountryCode(title) ?? suggestCountryCode(`${trip?.title ?? ''} ${trip?.subtitle ?? ''}`, { includeWeak: false })
   const nights = Math.round((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000)
 
-  const { data: created } = await supabase.from('stages').insert({
+  const { data: created } = await lumiCore.from('travel_stages').insert({
     trip_id: tripId,
     title,
     location: title,
@@ -186,7 +188,7 @@ async function maybeCreateAccommodationStage(
  * Rührt manuell angelegte/bearbeitete Etappen NICHT an.
  */
 async function maybeSyncAccommodationStage(
-  supabase: SupabaseClient,
+  lumiCore: LumiCore,
   stageId: string,
   bookingType: BookingType,
   title: string,
@@ -195,10 +197,10 @@ async function maybeSyncAccommodationStage(
 ): Promise<void> {
   if (bookingType !== 'accommodation' || !startDatetime || !endDatetime) return
 
-  const { data: stage } = await supabase.from('stages').select('notes, country_code, is_transit').eq('id', stageId).maybeSingle()
+  const { data: stage } = await lumiCore.from('travel_stages').select('notes, country_code, is_transit').eq('id', stageId).maybeSingle()
   if (!stage?.notes || !AUTO_STAGE_NOTES.includes(stage.notes)) return
 
-  await syncAccommodationIntoStage(supabase, stageId, title, startDatetime.slice(0, 10), endDatetime.slice(0, 10), stage.country_code, stage.is_transit)
+  await syncAccommodationIntoStage(lumiCore, stageId, title, startDatetime.slice(0, 10), endDatetime.slice(0, 10), stage.country_code, stage.is_transit)
 }
 
 function readCommonFields(formData: FormData) {
@@ -300,7 +302,7 @@ function redirectWithDraft(pathWithTrailingSeparator: string, error: string, f: 
  * -- dann gibt es nichts, wogegen zu prüfen wäre, wie clientseitig auch).
  */
 async function checkTripBoundedDateRange(
-  supabase: SupabaseClient,
+  lumiCore: LumiCore,
   tripId: string,
   type: BookingType,
   startDate: string,
@@ -308,18 +310,19 @@ async function checkTripBoundedDateRange(
 ): Promise<string | null> {
   if (!TRIP_BOUNDED_BOOKING_TYPES.includes(type)) return null
 
-  const { data: trip } = await supabase
-    .from('trips')
-    .select(`
-      id, start_date, end_date,
-      stages ( start_date, end_date ),
-      bookings ( type, status, start_datetime, end_datetime )
-    `)
+  const { data: trip } = await lumiCore
+    .from('travel_trips')
+    .select('id, start_date, end_date')
     .eq('id', tripId)
     .maybeSingle()
   if (!trip) return null
 
-  const range = deriveTripDateRange(trip, trip.bookings, trip.stages)
+  const [{ data: stages }, { data: bookings }] = await Promise.all([
+    lumiCore.from('travel_stages').select('start_date, end_date').eq('trip_id', tripId),
+    lumiCore.from('travel_bookings').select('type, status, start_datetime, end_datetime').eq('trip_id', tripId),
+  ])
+
+  const range = deriveTripDateRange(trip, bookings ?? [], stages ?? [])
   if (range.isOpen || !range.startDate || !range.endDate) return null
 
   const { minIso, maxIso } = BOOKING_CATEGORIES.activity.types.includes(type)
@@ -380,8 +383,9 @@ export async function createBooking(formData: FormData) {
     redirectWithDraft(newPath, 'Enddatum darf nicht vor dem Startdatum liegen', f)
 
   const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
-  const rangeError = await checkTripBoundedDateRange(supabase, tripId, f.type, f.startDate, f.endDate)
+  const rangeError = await checkTripBoundedDateRange(lumiCore, tripId, f.type, f.startDate, f.endDate)
   if (rangeError) redirectWithDraft(newPath, rangeError, f)
 
   // §Bugfix "Etappe wird nur für das erste von mehreren Hotels gebildet": bei
@@ -393,9 +397,9 @@ export async function createBooking(formData: FormData) {
   // übernimmt `maybeCreateAccommodationStage` unten die (präzisere)
   // Zuordnung per exaktem Check-in-Datum -- das erkennt u. a. auch eine
   // bereits aus einem Flug-Zwischenstopp erzeugte Etappe als dieselbe.
-  let stageId = f.stageId || (f.type !== 'accommodation' ? await suggestStageId(supabase, tripId, f.startDate) : null)
+  let stageId = f.stageId || (f.type !== 'accommodation' ? await suggestStageId(lumiCore, tripId, f.startDate) : null)
 
-  const { data: created, error } = await supabase.from('bookings').insert({
+  const { data: created, error } = await lumiCore.from('travel_bookings').insert({
     trip_id: tripId,
     stage_id: stageId,
     type: f.type,
@@ -410,7 +414,7 @@ export async function createBooking(formData: FormData) {
     end_datetime: endDatetime,
     details: Object.keys(f.details).length > 0 ? f.details : null,
     notes: f.notes || null,
-    participant_person_ids: participantIds.length > 0 ? participantIds : null,
+    participant_household_member_ids: participantIds.length > 0 ? participantIds : null,
   }).select('id').single()
 
   if (error)
@@ -433,16 +437,16 @@ export async function createBooking(formData: FormData) {
   }
 
   if (fromSavedOptionId && created && (fromSavedOptionTable === 'flight' || fromSavedOptionTable === 'hotel')) {
-    const table = fromSavedOptionTable === 'flight' ? 'saved_flight_options' : 'saved_hotel_options'
+    const table = fromSavedOptionTable === 'flight' ? 'travel_saved_flight_options' : 'travel_saved_hotel_options'
     const { id: familyId } = await getFamily()
-    await supabase.from(table).update({ status: 'booked', booking_id: created.id }).eq('id', fromSavedOptionId).eq('family_id', familyId)
+    await lumiCore.from(table).update({ status: 'booked', booking_id: created.id }).eq('id', fromSavedOptionId).eq('household_id', familyId)
   }
 
   if (!stageId) {
-    const newStageId = await maybeCreateAccommodationStage(supabase, tripId, f.type, f.title, startDatetime, endDatetime)
+    const newStageId = await maybeCreateAccommodationStage(lumiCore, tripId, f.type, f.title, startDatetime, endDatetime)
     if (newStageId && created) {
       stageId = newStageId
-      await supabase.from('bookings').update({ stage_id: newStageId }).eq('id', created.id)
+      await lumiCore.from('travel_bookings').update({ stage_id: newStageId }).eq('id', created.id)
     }
   }
 
@@ -472,13 +476,13 @@ export async function updateBooking(formData: FormData) {
   if (f.type === 'accommodation' && !f.endDate)
     redirectWithDraft(editPath, `${f.config.endLabel}: Datum ist erforderlich`, f)
 
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
   // §Regressionsschutz seit Entfernung des manuellen Etappe-Felds: eine
   // bereits gesetzte stage_id (manuell oder automatisch) darf beim Speichern
   // anderer Felder NIE stumm überschrieben werden — nur fehlende Zuordnungen
   // werden per suggestStageId nachträglich ergänzt.
-  const { data: existing } = await supabase.from('bookings').select('trip_id, stage_id').eq('id', bookingId).maybeSingle()
+  const { data: existing } = await lumiCore.from('travel_bookings').select('trip_id, stage_id').eq('id', bookingId).maybeSingle()
   const tripId = existing?.trip_id ?? ''
 
   const startDatetime = combineDateTime(f.startDate, f.startTime)
@@ -487,34 +491,34 @@ export async function updateBooking(formData: FormData) {
   if (endDatetime && startDatetime && new Date(endDatetime) < new Date(startDatetime))
     redirectWithDraft(editPath, 'Enddatum darf nicht vor dem Startdatum liegen', f)
 
-  const rangeError = tripId ? await checkTripBoundedDateRange(supabase, tripId, f.type, f.startDate, f.endDate) : null
+  const rangeError = tripId ? await checkTripBoundedDateRange(lumiCore, tripId, f.type, f.startDate, f.endDate) : null
   if (rangeError) redirectWithDraft(editPath, rangeError, f)
 
   let stageId = existing?.stage_id ?? null
   // §Wie in createBooking: für Unterkünfte keine breite Datumsbereich-
   // Überlappung nutzen, um Hotelwechsel am selben Tag nicht der vorherigen
   // Etappe zuzuschlagen.
-  if (!stageId && tripId && f.type !== 'accommodation') stageId = await suggestStageId(supabase, tripId, f.startDate)
+  if (!stageId && tripId && f.type !== 'accommodation') stageId = await suggestStageId(lumiCore, tripId, f.startDate)
 
   // §Altdaten-Reparatur (Mauritius-Bug): eine gesetzte stage_id, die sich
   // eine ANDERE Unterkunftsbuchung teilt, ist eine Fehlzuordnung aus der Zeit
   // vor diesem Fix -- statt sie zu synchronisieren (und damit die andere
   // Buchung zu überschreiben), wird sie verworfen und `maybeCreateAccommodationStage`
   // sucht/erzeugt die richtige, eigene Etappe.
-  if (stageId && f.type === 'accommodation' && await isStageSharedWithOtherAccommodation(supabase, stageId, bookingId)) {
+  if (stageId && f.type === 'accommodation' && await isStageSharedWithOtherAccommodation(lumiCore, stageId, bookingId)) {
     stageId = null
   }
 
   if (!stageId && tripId) {
-    stageId = await maybeCreateAccommodationStage(supabase, tripId, f.type, f.title, startDatetime, endDatetime)
+    stageId = await maybeCreateAccommodationStage(lumiCore, tripId, f.type, f.title, startDatetime, endDatetime)
   } else if (stageId) {
     // §Reparaturpfad: eine bereits verknüpfte, automatisch erzeugte Etappe
     // zieht korrigierte Check-in/-out-Daten nach (siehe maybeSyncAccommodationStage).
-    await maybeSyncAccommodationStage(supabase, stageId, f.type, f.title, startDatetime, endDatetime)
+    await maybeSyncAccommodationStage(lumiCore, stageId, f.type, f.title, startDatetime, endDatetime)
   }
 
-  const { error } = await supabase
-    .from('bookings')
+  const { error } = await lumiCore
+    .from('travel_bookings')
     .update({
       stage_id: stageId,
       title: f.title,
@@ -528,7 +532,7 @@ export async function updateBooking(formData: FormData) {
       end_datetime: endDatetime,
       details: Object.keys(f.details).length > 0 ? f.details : null,
       notes: f.notes || null,
-      participant_person_ids: participantIds.length > 0 ? participantIds : null,
+      participant_household_member_ids: participantIds.length > 0 ? participantIds : null,
     })
     .eq('id', bookingId)
 
@@ -541,9 +545,9 @@ export async function updateBooking(formData: FormData) {
 export async function deleteBooking(formData: FormData) {
   const bookingId = String(formData.get('booking_id') ?? '')
   const slug       = String(formData.get('slug') ?? '')
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
-  const { error } = await supabase.from('bookings').delete().eq('id', bookingId)
+  const { error } = await lumiCore.from('travel_bookings').delete().eq('id', bookingId)
 
   if (error)
     redirect(`/trips/${slug}/bookings/${bookingId}?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)
@@ -562,9 +566,9 @@ export async function toggleBookingCancelled(formData: FormData) {
   const slug       = String(formData.get('slug') ?? '')
   const currentlyCancelled = String(formData.get('currently_cancelled') ?? '') === 'true'
 
-  const supabase = await createClient()
-  const { error } = await supabase
-    .from('bookings')
+  const lumiCore = await createLumiCoreClient()
+  const { error } = await lumiCore
+    .from('travel_bookings')
     .update({ status: currentlyCancelled ? 'confirmed' : 'cancelled' })
     .eq('id', bookingId)
 

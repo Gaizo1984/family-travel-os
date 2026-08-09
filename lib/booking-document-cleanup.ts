@@ -1,4 +1,5 @@
 import { createServiceRoleClient } from '@/lib/supabase/service-role'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { addDaysIso } from '@/lib/date-utils'
 import { todayIsoInFamilyTimezone } from '@/lib/time'
 
@@ -21,6 +22,15 @@ const DELETE_AFTER_TRIP_END_DAYS = 2
  */
 export async function cleanupExpiredBookingDocuments(): Promise<BookingDocumentCleanupResult> {
   const supabase = createServiceRoleClient()
+  // Hinweis: es existiert (noch) kein Service-Role-Äquivalent für Lumi Core --
+  // createLumiCoreClient() ist cookie-/session-basiert (siehe
+  // lib/supabase/lumi-core-server.ts) und liefert in diesem sitzungslosen
+  // Cron-Kontext keine authentifizierte Lumi-Core-Session, wodurch RLS jede
+  // Abfrage still auf 0 Zeilen filtert (gleiches Muster wie beim Fehlen des
+  // Service-Role-Keys, siehe Kommentar in lib/supabase/service-role.ts).
+  // Ohne einen künftigen Lumi-Core-Service-Role-Client bleibt dieser Cleanup
+  // für travel_documents wirkungslos.
+  const lumiCore = await createLumiCoreClient()
   const cutoff = addDaysIso(todayIsoInFamilyTimezone(), -DELETE_AFTER_TRIP_END_DAYS)
 
   const { data: expiredTripsRaw } = await supabase
@@ -32,8 +42,8 @@ export async function cleanupExpiredBookingDocuments(): Promise<BookingDocumentC
   const tripIds = (expiredTripsRaw ?? []).map((t) => t.id)
   if (tripIds.length === 0) return { deleted: 0, failed: 0 }
 
-  const { data: docsRaw } = await supabase
-    .from('documents')
+  const { data: docsRaw } = await lumiCore
+    .from('travel_documents')
     .select('id, storage_path')
     .eq('doc_type', 'booking_document')
     .in('trip_id', tripIds)
@@ -43,14 +53,15 @@ export async function cleanupExpiredBookingDocuments(): Promise<BookingDocumentC
   let failed = 0
 
   for (const doc of docs) {
-    const { error: storageError } = await supabase.storage.from('documents').remove([doc.storage_path])
+    if (!doc.storage_path) { failed++; continue }
+    const { error: storageError } = await lumiCore.storage.from('travel-documents').remove([doc.storage_path])
     if (storageError) {
       // Nur Dokument-ID loggen -- kein Pfad/Inhalt.
       console.error('[booking-document-cleanup] storage delete failed', { documentId: doc.id })
       failed++
       continue
     }
-    const { error: dbError } = await supabase.from('documents').delete().eq('id', doc.id)
+    const { error: dbError } = await lumiCore.from('travel_documents').delete().eq('id', doc.id)
     if (dbError) {
       console.error('[booking-document-cleanup] db delete failed', { documentId: doc.id })
       failed++

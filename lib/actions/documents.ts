@@ -1,9 +1,12 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { redirect } from 'next/navigation'
 import { ALLOWED_DOCUMENT_MIME_TYPES, MAX_DOCUMENT_FILE_SIZE, buildStoragePath, buildBookingStoragePath, buildJourneyEventStoragePath, readDateGroupFromFormData } from '@/lib/documents'
 import type { DocumentType, DocumentDetails } from '@/lib/documents'
+import { toTravelDocumentsPath } from '@/lib/lumi-core-storage/paths'
+import { getFamily } from '@/lib/family'
+import { getHouseholdMemberById } from '@/lib/household-members'
 
 const readDateGroup = readDateGroupFromFormData
 
@@ -81,22 +84,27 @@ export async function createDocument(formData: FormData) {
   if (!file && !f.existingStoragePath)
     redirect(`${newPath}&error=${encodeURIComponent('Datei fehlt')}`)
 
-  const supabase = await createClient()
+  const supabase = await createLumiCoreClient()
+  const { id: householdId } = await getFamily()
 
   // Kommt die Datei bereits aus einer vorangegangenen KI-Auslesung (existing_storage_path),
   // wird sie nicht erneut hochgeladen — sonst nur, wenn der Nutzer sie hier ersetzt hat.
   let storagePath: string
   let source: 'manual' | 'extracted'
   if (file) {
-    storagePath = buildStoragePath(f.personId, file.name)
-    const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
+    const rawPath = buildStoragePath(f.personId, file.name)
+    const uploadPath = await toTravelDocumentsPath(rawPath)
+    if (!uploadPath)
+      redirect(`${newPath}&error=${encodeURIComponent('Upload fehlgeschlagen: Haushalt nicht gefunden')}`)
+    const { error: uploadError } = await supabase.storage.from('travel-documents').upload(uploadPath, file, {
       contentType: file.type,
       cacheControl: '31536000',
     })
     if (uploadError)
       redirect(`${newPath}&error=${encodeURIComponent('Upload fehlgeschlagen: ' + uploadError.message)}`)
     // Nutzer hat die automatisch ausgelesene Datei durch eine eigene ersetzt — die alte wird verwaist, also entfernen.
-    if (f.existingStoragePath) await supabase.storage.from('documents').remove([f.existingStoragePath])
+    if (f.existingStoragePath) await supabase.storage.from('travel-documents').remove([f.existingStoragePath])
+    storagePath = uploadPath
     source = 'manual'
   } else {
     storagePath = f.existingStoragePath
@@ -104,28 +112,29 @@ export async function createDocument(formData: FormData) {
   }
 
   const { data: inserted, error: insertError } = await supabase
-    .from('documents')
+    .from('travel_documents')
     .insert({
-      person_id: f.personId,
+      household_id: householdId,
+      household_member_id: f.personId,
       doc_type: f.docType,
       label: f.label,
       expires_at: f.expiresAt || null,
       notes: f.notes || null,
       details: { ...f.details, source },
       storage_provider: 'supabase_storage',
-      storage_bucket: 'documents',
+      storage_bucket: 'travel-documents',
       storage_path: storagePath,
     })
     .select('id')
     .single()
 
   if (insertError || !inserted) {
-    await supabase.storage.from('documents').remove([storagePath])
+    await supabase.storage.from('travel-documents').remove([storagePath])
     redirect(`${newPath}&error=${encodeURIComponent('Speicherfehler: ' + (insertError?.message ?? 'Unbekannt'))}`)
   }
 
   if (f.assignTrip)
-    await supabase.from('document_trips').insert({ document_id: inserted.id, trip_id: f.assignTrip })
+    await supabase.from('travel_document_trips').insert({ document_id: inserted.id, trip_id: f.assignTrip })
 
   redirect(f.returnTo || `/family/${f.personId}`)
 }
@@ -149,7 +158,7 @@ export async function updateDocument(formData: FormData) {
   if (fileError)
     redirect(`${editPath}?error=${encodeURIComponent(fileError)}`)
 
-  const supabase = await createClient()
+  const supabase = await createLumiCoreClient()
 
   // Herkunft (manuell/KI) bestimmen: eigener Datei-Upload macht es wieder "manuell",
   // eine übernommene KI-Auslesung (existing_storage_path) macht es "extracted", ohne
@@ -158,12 +167,12 @@ export async function updateDocument(formData: FormData) {
   let previousStoragePath: string | undefined
   if (file || f.existingStoragePath) {
     const { data: existing } = await supabase
-      .from('documents').select('storage_path').eq('id', documentId).maybeSingle()
-    previousStoragePath = existing?.storage_path
+      .from('travel_documents').select('storage_path').eq('id', documentId).maybeSingle()
+    previousStoragePath = existing?.storage_path ?? undefined
     source = file ? 'manual' : 'extracted'
   } else {
     const { data: existing } = await supabase
-      .from('documents').select('details').eq('id', documentId).maybeSingle()
+      .from('travel_documents').select('details').eq('id', documentId).maybeSingle()
     source = (existing?.details as DocumentDetails | null)?.source ?? 'manual'
   }
 
@@ -183,22 +192,25 @@ export async function updateDocument(formData: FormData) {
   }
 
   if (file) {
-    const storagePath = buildStoragePath(f.personId, file.name)
-    const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
+    const rawPath = buildStoragePath(f.personId, file.name)
+    const uploadPath = await toTravelDocumentsPath(rawPath)
+    if (!uploadPath)
+      redirect(`${editPath}?error=${encodeURIComponent('Upload fehlgeschlagen: Haushalt nicht gefunden')}`)
+    const { error: uploadError } = await supabase.storage.from('travel-documents').upload(uploadPath, file, {
       contentType: file.type,
       cacheControl: '31536000',
     })
     if (uploadError)
       redirect(`${editPath}?error=${encodeURIComponent('Upload fehlgeschlagen: ' + uploadError.message)}`)
 
-    update.storage_path = storagePath
-    if (previousStoragePath) await supabase.storage.from('documents').remove([previousStoragePath])
+    update.storage_path = uploadPath
+    if (previousStoragePath) await supabase.storage.from('travel-documents').remove([previousStoragePath])
   } else if (f.existingStoragePath) {
     update.storage_path = f.existingStoragePath
-    if (previousStoragePath) await supabase.storage.from('documents').remove([previousStoragePath])
+    if (previousStoragePath) await supabase.storage.from('travel-documents').remove([previousStoragePath])
   }
 
-  const { error } = await supabase.from('documents').update(update).eq('id', documentId)
+  const { error } = await supabase.from('travel_documents').update(update).eq('id', documentId)
 
   if (error)
     redirect(`${editPath}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
@@ -215,8 +227,8 @@ export async function assignDocumentToTrip(formData: FormData) {
   if (!tripId)
     redirect(`${detailPath}?error=${encodeURIComponent('Bitte eine Reise auswählen')}`)
 
-  const supabase = await createClient()
-  const { error } = await supabase.from('document_trips').insert({ document_id: documentId, trip_id: tripId })
+  const supabase = await createLumiCoreClient()
+  const { error } = await supabase.from('travel_document_trips').insert({ document_id: documentId, trip_id: tripId })
 
   if (error)
     redirect(`${detailPath}?error=${encodeURIComponent('Zuordnung fehlgeschlagen: ' + error.message)}`)
@@ -230,8 +242,8 @@ export async function unassignDocumentFromTrip(formData: FormData) {
   const tripId      = String(formData.get('trip_id') ?? '')
   const detailPath  = `/family/${personId}/documents/${documentId}`
 
-  const supabase = await createClient()
-  await supabase.from('document_trips').delete().eq('document_id', documentId).eq('trip_id', tripId)
+  const supabase = await createLumiCoreClient()
+  await supabase.from('travel_document_trips').delete().eq('document_id', documentId).eq('trip_id', tripId)
 
   redirect(detailPath)
 }
@@ -239,7 +251,7 @@ export async function unassignDocumentFromTrip(formData: FormData) {
 /**
  * Dokumenten-Hub §11: eine Buchungsunterlage (Flugticket, Hotel-Voucher,
  * Mietwagenunterlage, ...) gehört zur Buchung selbst, nicht zu einer Person —
- * `person_id` bleibt leer. Dieselbe Datei erscheint dadurch automatisch sowohl
+ * `household_member_id` bleibt leer. Dieselbe Datei erscheint dadurch automatisch sowohl
  * auf der Buchungsdetailseite als auch im Dokumenten-Hub der Reise (kein
  * zweiter Upload, keine zweite Storage-Datei, nur eine gemeinsame Referenz).
  */
@@ -258,30 +270,35 @@ export async function uploadBookingDocument(formData: FormData) {
   if (label.length < 2)
     redirect(`${detailPath}?error=${encodeURIComponent('Dokumentname: mindestens 2 Zeichen erforderlich')}`)
 
-  const supabase = await createClient()
+  const supabase = await createLumiCoreClient()
+  const { id: householdId } = await getFamily()
 
-  const storagePath = buildBookingStoragePath(bookingId, file.name)
-  const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
+  const rawPath = buildBookingStoragePath(bookingId, file.name)
+  const storagePath = await toTravelDocumentsPath(rawPath)
+  if (!storagePath)
+    redirect(`${detailPath}?error=${encodeURIComponent('Upload fehlgeschlagen: Haushalt nicht gefunden')}`)
+  const { error: uploadError } = await supabase.storage.from('travel-documents').upload(storagePath, file, {
     contentType: file.type,
     cacheControl: '31536000',
   })
   if (uploadError)
     redirect(`${detailPath}?error=${encodeURIComponent('Upload fehlgeschlagen: ' + uploadError.message)}`)
 
-  const { error: insertError } = await supabase.from('documents').insert({
+  const { error: insertError } = await supabase.from('travel_documents').insert({
+    household_id: householdId,
     trip_id: tripId,
     booking_id: bookingId,
-    person_id: null,
+    household_member_id: null,
     doc_type: 'booking_document',
     label,
     details: { source: 'manual' },
     storage_provider: 'supabase_storage',
-    storage_bucket: 'documents',
+    storage_bucket: 'travel-documents',
     storage_path: storagePath,
   })
 
   if (insertError) {
-    await supabase.storage.from('documents').remove([storagePath])
+    await supabase.storage.from('travel-documents').remove([storagePath])
     redirect(`${detailPath}?error=${encodeURIComponent('Speicherfehler: ' + insertError.message)}`)
   }
 
@@ -290,7 +307,7 @@ export async function uploadBookingDocument(formData: FormData) {
 
 /**
  * §7.1: Boardingpass einer Person zu einem Flug. Anders als generische
- * Buchungsunterlagen (person_id leer) ist hier person_id zwingend gesetzt —
+ * Buchungsunterlagen (household_member_id leer) ist hier household_member_id zwingend gesetzt —
  * ein Boardingpass gehört immer einem konkreten Familienmitglied.
  */
 export async function uploadBoardingPass(formData: FormData) {
@@ -315,31 +332,36 @@ export async function uploadBoardingPass(formData: FormData) {
   if (!file)
     redirect(`${detailPath}?error=${encodeURIComponent('Datei fehlt')}`)
 
-  const supabase = await createClient()
-  const { data: person } = await supabase.from('persons').select('name').eq('id', personId).maybeSingle()
+  const supabase = await createLumiCoreClient()
+  const { id: householdId } = await getFamily()
+  const person = await getHouseholdMemberById(personId)
 
-  const storagePath = buildStoragePath(personId, file.name)
-  const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
+  const rawPath = buildStoragePath(personId, file.name)
+  const storagePath = await toTravelDocumentsPath(rawPath)
+  if (!storagePath)
+    redirect(`${detailPath}?error=${encodeURIComponent('Upload fehlgeschlagen: Haushalt nicht gefunden')}`)
+  const { error: uploadError } = await supabase.storage.from('travel-documents').upload(storagePath, file, {
     contentType: file.type,
     cacheControl: '31536000',
   })
   if (uploadError)
     redirect(`${detailPath}?error=${encodeURIComponent('Upload fehlgeschlagen: ' + uploadError.message)}`)
 
-  const { error: insertError } = await supabase.from('documents').insert({
+  const { error: insertError } = await supabase.from('travel_documents').insert({
+    household_id: householdId,
     trip_id: tripId,
     booking_id: bookingId,
-    person_id: personId,
+    household_member_id: personId,
     doc_type: 'boarding_pass',
     label: person?.name ? `Boardingpass ${person.name}` : 'Boardingpass',
     details: leg ? { source: 'manual', leg } : { source: 'manual' },
     storage_provider: 'supabase_storage',
-    storage_bucket: 'documents',
+    storage_bucket: 'travel-documents',
     storage_path: storagePath,
   })
 
   if (insertError) {
-    await supabase.storage.from('documents').remove([storagePath])
+    await supabase.storage.from('travel-documents').remove([storagePath])
     redirect(`${detailPath}?error=${encodeURIComponent('Speicherfehler: ' + insertError.message)}`)
   }
 
@@ -364,11 +386,15 @@ export async function uploadBaggageTag(formData: FormData) {
   if (!file)
     redirect(`${detailPath}?error=${encodeURIComponent('Datei fehlt')}`)
 
-  const supabase = await createClient()
-  const { data: person } = await supabase.from('persons').select('name').eq('id', personId).maybeSingle()
+  const supabase = await createLumiCoreClient()
+  const { id: householdId } = await getFamily()
+  const person = await getHouseholdMemberById(personId)
 
-  const storagePath = buildStoragePath(personId, file.name)
-  const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
+  const rawPath = buildStoragePath(personId, file.name)
+  const storagePath = await toTravelDocumentsPath(rawPath)
+  if (!storagePath)
+    redirect(`${detailPath}?error=${encodeURIComponent('Upload fehlgeschlagen: Haushalt nicht gefunden')}`)
+  const { error: uploadError } = await supabase.storage.from('travel-documents').upload(storagePath, file, {
     contentType: file.type,
     cacheControl: '31536000',
   })
@@ -377,20 +403,21 @@ export async function uploadBaggageTag(formData: FormData) {
 
   const label = bagLabel || (person?.name ? `Gepäckbeleg ${person.name}` : 'Gepäckbeleg')
 
-  const { error: insertError } = await supabase.from('documents').insert({
+  const { error: insertError } = await supabase.from('travel_documents').insert({
+    household_id: householdId,
     trip_id: tripId,
     booking_id: bookingId,
-    person_id: personId,
+    household_member_id: personId,
     doc_type: 'baggage_tag',
     label,
     details: { source: 'manual' },
     storage_provider: 'supabase_storage',
-    storage_bucket: 'documents',
+    storage_bucket: 'travel-documents',
     storage_path: storagePath,
   })
 
   if (insertError) {
-    await supabase.storage.from('documents').remove([storagePath])
+    await supabase.storage.from('travel-documents').remove([storagePath])
     redirect(`${detailPath}?error=${encodeURIComponent('Speicherfehler: ' + insertError.message)}`)
   }
 
@@ -404,15 +431,15 @@ export async function deleteBookingDocument(formData: FormData) {
   const bookingId   = String(formData.get('booking_id') ?? '')
   const detailPath  = `/trips/${slug}/bookings/${bookingId}`
 
-  const supabase = await createClient()
+  const supabase = await createLumiCoreClient()
 
   if (storagePath) {
-    const { error: storageError } = await supabase.storage.from('documents').remove([storagePath])
+    const { error: storageError } = await supabase.storage.from('travel-documents').remove([storagePath])
     if (storageError)
       redirect(`${detailPath}?error=${encodeURIComponent('Datei konnte nicht gelöscht werden: ' + storageError.message)}`)
   }
 
-  const { error } = await supabase.from('documents').delete().eq('id', documentId)
+  const { error } = await supabase.from('travel_documents').delete().eq('id', documentId)
   if (error)
     redirect(`${detailPath}?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)
 
@@ -442,30 +469,35 @@ export async function uploadJourneyEventDocument(formData: FormData) {
   if (label.length < 2)
     redirect(`${detailPath}?error=${encodeURIComponent('Dokumentname: mindestens 2 Zeichen erforderlich')}`)
 
-  const supabase = await createClient()
+  const supabase = await createLumiCoreClient()
+  const { id: householdId } = await getFamily()
 
-  const storagePath = buildJourneyEventStoragePath(journeyEventId, file.name)
-  const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
+  const rawPath = buildJourneyEventStoragePath(journeyEventId, file.name)
+  const storagePath = await toTravelDocumentsPath(rawPath)
+  if (!storagePath)
+    redirect(`${detailPath}?error=${encodeURIComponent('Upload fehlgeschlagen: Haushalt nicht gefunden')}`)
+  const { error: uploadError } = await supabase.storage.from('travel-documents').upload(storagePath, file, {
     contentType: file.type,
     cacheControl: '31536000',
   })
   if (uploadError)
     redirect(`${detailPath}?error=${encodeURIComponent('Upload fehlgeschlagen: ' + uploadError.message)}`)
 
-  const { error: insertError } = await supabase.from('documents').insert({
+  const { error: insertError } = await supabase.from('travel_documents').insert({
+    household_id: householdId,
     trip_id: tripId,
     journey_event_id: journeyEventId,
-    person_id: null,
+    household_member_id: null,
     doc_type: 'booking_document',
     label,
     details: { source: 'manual' },
     storage_provider: 'supabase_storage',
-    storage_bucket: 'documents',
+    storage_bucket: 'travel-documents',
     storage_path: storagePath,
   })
 
   if (insertError) {
-    await supabase.storage.from('documents').remove([storagePath])
+    await supabase.storage.from('travel-documents').remove([storagePath])
     redirect(`${detailPath}?error=${encodeURIComponent('Speicherfehler: ' + insertError.message)}`)
   }
 
@@ -479,15 +511,15 @@ export async function deleteJourneyEventDocument(formData: FormData) {
   const journeyEventId = String(formData.get('journey_event_id') ?? '')
   const detailPath      = `/trips/${slug}/journey-events/${journeyEventId}/edit`
 
-  const supabase = await createClient()
+  const supabase = await createLumiCoreClient()
 
   if (storagePath) {
-    const { error: storageError } = await supabase.storage.from('documents').remove([storagePath])
+    const { error: storageError } = await supabase.storage.from('travel-documents').remove([storagePath])
     if (storageError)
       redirect(`${detailPath}?error=${encodeURIComponent('Datei konnte nicht gelöscht werden: ' + storageError.message)}`)
   }
 
-  const { error } = await supabase.from('documents').delete().eq('id', documentId)
+  const { error } = await supabase.from('travel_documents').delete().eq('id', documentId)
   if (error)
     redirect(`${detailPath}?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)
 
@@ -501,17 +533,17 @@ export async function deleteDocument(formData: FormData) {
   const returnTo    = String(formData.get('return_to') ?? '').trim()
   const detailPath  = `/family/${personId}/documents/${documentId}`
 
-  const supabase = await createClient()
+  const supabase = await createLumiCoreClient()
 
   if (storagePath) {
-    const { error: storageError } = await supabase.storage.from('documents').remove([storagePath])
+    const { error: storageError } = await supabase.storage.from('travel-documents').remove([storagePath])
     // Abbrechen statt die DB-Zeile trotzdem zu löschen — sonst bliebe die Datei als
     // nicht mehr referenzierter Storage-Orphan zurück, unauffindbar für jeden Retry.
     if (storageError)
       redirect(`${detailPath}?error=${encodeURIComponent('Datei konnte nicht gelöscht werden: ' + storageError.message)}`)
   }
 
-  const { error } = await supabase.from('documents').delete().eq('id', documentId)
+  const { error } = await supabase.from('travel_documents').delete().eq('id', documentId)
 
   if (error)
     redirect(`${detailPath}?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)

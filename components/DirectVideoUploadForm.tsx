@@ -1,12 +1,26 @@
 'use client'
 
 import { useRef, useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { createBrowserClient } from '@supabase/ssr'
 import { MAX_REEL_VIDEO_CLIP_SECONDS, MAX_REEL_VIDEO_FILE_SIZE_BYTES, ALLOWED_REEL_VIDEO_MIME_TYPES } from '@/lib/reel-media-limits'
 import { compressVideoFile, isVideoCompressionSupported, VideoCompressionCancelledError } from '@/lib/video-compression-client'
 
 type UploadSlot = { path: string; token: string }
 type CompressionSummary = { fileName: string; originalSizeBytes: number; compressedSizeBytes: number }
+
+/**
+ * Eigener, minimaler Lumi-Core-Browser-Client für den direkten
+ * Signed-Upload-Schritt (siehe lib/supabase/lumi-core-server.ts für das
+ * serverseitige Pendant) -- kein Session-/Cookie-Handling nötig, da
+ * `uploadToSignedUrl` allein über das von `createUploadSlots`
+ * (lib/actions/photo-staging.ts) erzeugte Token autorisiert wird.
+ */
+function createLumiCoreBrowserClient() {
+  return createBrowserClient(
+    process.env.NEXT_PUBLIC_LUMI_CORE_URL!,
+    process.env.NEXT_PUBLIC_LUMI_CORE_PUBLISHABLE_KEY!,
+  )
+}
 
 /**
  * §Content Studio 3.0: Video-Pendant zu `DirectPhotoUploadForm`
@@ -156,11 +170,11 @@ export function DirectVideoUploadForm({
         return
       }
 
-      const supabase = createClient()
+      const supabase = createLumiCoreBrowserClient()
       const slots = await createSlots(accepted.length)
       for (let i = 0; i < accepted.length; i++) {
         try {
-          const { error } = await supabase.storage.from('documents')
+          const { error } = await supabase.storage.from('travel-documents')
             .uploadToSignedUrl(slots[i].path, slots[i].token, accepted[i], { contentType: accepted[i].type })
           if (error) throw error
           paths.push(slots[i].path)

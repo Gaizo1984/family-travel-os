@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { createClient } from './supabase/server'
+import { createLumiCoreClient } from './supabase/lumi-core-server'
+import { listHouseholdMembers, resolveLegacyTravelPersonId } from './household-members'
 import type { DocumentType } from './documents'
 import { deriveTripDateRange } from './trip-dates'
 
@@ -57,10 +58,10 @@ type RequirementContext = {
   tripSlug: string
   tripEnd: string
   returnTo: string
-  members: Array<{ id: string; name: string }>
+  members: Array<{ id: string; name: string; legacyPersonId: string | null }>
   countryCodes: Set<string>
   documentsByPerson: Map<string, PersonDoc[]>
-  supabase: SupabaseClient
+  lumiCore: Awaited<ReturnType<typeof createLumiCoreClient>>
 }
 
 type RequirementRule = {
@@ -130,14 +131,16 @@ export function resolveWaypointCountry(text: string | null | undefined): 'US' | 
  * dokumente — auch für z. B. die Reisepass-Regel wiederverwendbar).
  */
 async function buildRequirementContext(tripId: string, returnTo?: string, supabaseOverride?: SupabaseClient): Promise<RequirementContext | null> {
-  const supabase = supabaseOverride ?? await createClient()
-  const { data: trip } = await supabase.from('trips').select('slug, start_date, end_date').eq('id', tripId).maybeSingle()
+  void supabaseOverride
+  const lumiCore = await createLumiCoreClient()
+  const { data: trip } = await lumiCore.from('travel_trips').select('slug, start_date, end_date').eq('id', tripId).maybeSingle()
   if (!trip) return null
 
-  const [{ data: memberRows }, { data: stagesRaw }, { data: bookingsRaw }] = await Promise.all([
-    supabase.from('trip_members').select('persons ( id, name )').eq('trip_id', tripId),
-    supabase.from('stages').select('country_code, start_date, end_date').eq('trip_id', tripId),
-    supabase.from('bookings').select('type, status, start_datetime, end_datetime, details').eq('trip_id', tripId).neq('status', 'cancelled'),
+  const [{ data: tripMemberRows }, { data: stagesRaw }, { data: bookingsRaw }, householdMembers] = await Promise.all([
+    lumiCore.from('travel_trip_members').select('household_member_id').eq('trip_id', tripId),
+    lumiCore.from('travel_stages').select('country_code, start_date, end_date').eq('trip_id', tripId),
+    lumiCore.from('travel_bookings').select('type, status, start_datetime, end_datetime, details').eq('trip_id', tripId).neq('status', 'cancelled'),
+    listHouseholdMembers(),
   ])
   const stages = (stagesRaw ?? []) as Array<{ country_code: string | null; start_date: string | null; end_date: string | null }>
   const bookings = (bookingsRaw ?? []) as Array<{ type: string; status: string; start_datetime: string | null; end_datetime: string | null; details: Record<string, string> | null }>
@@ -155,8 +158,12 @@ async function buildRequirementContext(tripId: string, returnTo?: string, supaba
   const dateRange = deriveTripDateRange({ start_date: trip.start_date, end_date: trip.end_date }, bookings, stages)
   if (!dateRange.endDate) return null
 
-  const members = (memberRows ?? [])
-    .flatMap((m) => (m.persons ? [m.persons as unknown as { id: string; name: string }] : []))
+  const memberIdSet = new Set((tripMemberRows ?? []).map((m) => m.household_member_id))
+  const members = await Promise.all(
+    householdMembers
+      .filter((m) => memberIdSet.has(m.id))
+      .map(async (m) => ({ id: m.id, name: m.name, legacyPersonId: await resolveLegacyTravelPersonId(m.id) })),
+  )
 
   const countryCodes = new Set<string>()
   for (const s of stages) {
@@ -172,21 +179,21 @@ async function buildRequirementContext(tripId: string, returnTo?: string, supaba
 
   const memberIds = members.map((m) => m.id)
   const { data: docsRaw } = memberIds.length > 0
-    ? await supabase.from('documents').select('id, person_id, doc_type, expires_at').in('person_id', memberIds)
+    ? await lumiCore.from('travel_documents').select('id, household_member_id, doc_type, expires_at').in('household_member_id', memberIds)
     : { data: [] }
 
   const documentsByPerson = new Map<string, PersonDoc[]>()
-  for (const d of (docsRaw ?? []) as Array<{ id: string; person_id: string | null; doc_type: DocumentType; expires_at: string | null }>) {
-    if (!d.person_id) continue
-    const list = documentsByPerson.get(d.person_id) ?? []
+  for (const d of (docsRaw ?? []) as Array<{ id: string; household_member_id: string | null; doc_type: DocumentType; expires_at: string | null }>) {
+    if (!d.household_member_id) continue
+    const list = documentsByPerson.get(d.household_member_id) ?? []
     list.push({ id: d.id, doc_type: d.doc_type, expires_at: d.expires_at })
-    documentsByPerson.set(d.person_id, list)
+    documentsByPerson.set(d.household_member_id, list)
   }
 
   return {
     tripId, tripSlug: trip.slug, tripEnd: dateRange.endDate,
     returnTo: returnTo ?? `/trips/${trip.slug}/documents`,
-    members, countryCodes, documentsByPerson, supabase,
+    members, countryCodes, documentsByPerson, lumiCore,
   }
 }
 
@@ -229,7 +236,7 @@ function createDocumentRequirementRule(opts: {
           if (opts.autoLink) toLink.push({ document_id: validForTrip.id, trip_id: ctx.tripId })
           results.push({
             type: opts.type, category: 'document', label: opts.label, status: 'satisfied', priority: opts.priority,
-            personId: member.id, personName: member.name,
+            personId: member.legacyPersonId, personName: member.name,
             reason: `${opts.label} von ${member.name} ist bis mindestens Reiseende gültig.`,
             actionLabel: null, actionHref: null, documentId: validForTrip.id,
           })
@@ -250,24 +257,26 @@ function createDocumentRequirementRule(opts: {
         results.push({
           type: opts.type, category: 'document', label: opts.label,
           status: hasAnyDocOfType ? 'expired' : 'missing', priority: opts.priority,
-          personId: member.id, personName: member.name,
+          personId: member.legacyPersonId, personName: member.name,
           reason: hasAnyDocOfType
             ? `${opts.label} von ${member.name} läuft vor oder während des Reiseendes ab.`
             : `${member.name} hat kein/e gültige/n ${opts.label} hinterlegt.`,
           actionLabel: hasAnyDocOfType ? `${opts.label} erneuern` : `${opts.label} hinzufügen`,
-          actionHref: hasAnyDocOfType
-            ? `/family/${member.id}/documents/${mostRecentExpiring!.id}`
-            : `/family/${member.id}/documents/new?type=${opts.docType}&return_to=${encodeURIComponent(ctx.returnTo)}&assign_trip=${ctx.tripId}`,
+          actionHref: member.legacyPersonId
+            ? (hasAnyDocOfType
+              ? `/family/${member.legacyPersonId}/documents/${mostRecentExpiring!.id}`
+              : `/family/${member.legacyPersonId}/documents/new?type=${opts.docType}&return_to=${encodeURIComponent(ctx.returnTo)}&assign_trip=${ctx.tripId}`)
+            : '/family',
           documentId: null,
         })
       }
 
       if (opts.autoLink && toLink.length > 0) {
-        // document_trips hat einen Composite-Primary-Key (document_id, trip_id)
-        // -- ein rohes insert() wäre bei wiederholten Aufrufen (Route ändert
-        // sich, Seite wird neu geladen) nicht idempotent. upsert() mit
+        // travel_document_trips hat einen Composite-Primary-Key (document_id,
+        // trip_id) -- ein rohes insert() wäre bei wiederholten Aufrufen (Route
+        // ändert sich, Seite wird neu geladen) nicht idempotent. upsert() mit
         // ignoreDuplicates ist die korrekte, tatsächlich idempotente Operation.
-        await ctx.supabase.from('document_trips').upsert(toLink, { onConflict: 'document_id,trip_id', ignoreDuplicates: true })
+        await ctx.lumiCore.from('travel_document_trips').upsert(toLink, { onConflict: 'document_id,trip_id', ignoreDuplicates: true })
       }
 
       return results
@@ -301,12 +310,14 @@ const REGISTERED_RULES: RequirementRule[] = [passportRule, estaRule, etaRule]
  * `returnTo` steuert, wohin ein "Dokument hinzufügen"-Flow nach dem
  * Speichern zurückführt (Default: die Reisedokumente-Übersicht selbst).
  *
- * `supabaseOverride` erlaubt den Aufruf aus einem sitzungslosen Kontext
- * (z. B. dem Hinweis-Generierungs-Cron, lib/hints/rules/document-expiring.ts)
- * mit einem Service-Role-Client -- ohne diesen Parameter würde der
- * cookie-basierte Default-Client (lib/supabase/server.ts) dort mangels
- * Nutzer-Session jede Abfrage still auf 0 Zeilen filtern (siehe Kommentar in
- * lib/supabase/service-role.ts).
+ * FINALER CUTOVER, bekannte Lücke (gleiche Kategorie wie
+ * lib/trip-digest.ts/lib/hint-generation.ts): alle Abfragen laufen jetzt
+ * gegen Lumi Core (cookie-basiert). `supabaseOverride` erlaubte bisher den
+ * Aufruf aus einem sitzungslosen Kontext (z. B. dem Hinweis-Generierungs-
+ * Cron, lib/hints/rules/document-expiring.ts) mit einem Travel-Service-
+ * Role-Client -- hat für die (jetzt Lumi-Core-only) Abfragen hier aktuell
+ * KEINE Wirkung mehr, solange es keinen Lumi-Core-Service-Role-Client gibt.
+ * Parameter bleibt aus Kompatibilitätsgründen erhalten.
  */
 export async function computeTripRequirements(tripId: string, returnTo?: string, supabaseOverride?: SupabaseClient): Promise<TravelRequirement[]> {
   const ctx = await buildRequirementContext(tripId, returnTo, supabaseOverride)

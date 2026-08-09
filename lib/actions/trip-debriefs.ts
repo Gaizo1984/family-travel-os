@@ -2,6 +2,8 @@
 
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
+import { tripDebriefs } from '@/lib/lumi-core-data/group1-documents-insurance-journey-packing'
 import { createPendingMemoryCandidate, hasDeclinedSimilarMemory } from '@/lib/family-memories'
 import {
   DEBRIEF_STEPS, nextDebriefStep, previousDebriefStep, buildDebriefMemoryCandidates, PACKING_FEEDBACK_TYPES,
@@ -36,8 +38,7 @@ export async function saveDebriefStep(formData: FormData) {
   const step = String(formData.get('step') ?? '')
   if (!isDebriefStep(step)) redirect(debriefPath(slug))
 
-  const supabase = await createClient()
-  const { data: existing } = await supabase.from('trip_debriefs').select('trip_id, answers').eq('id', debriefId).maybeSingle()
+  const existing = await tripDebriefs.getById(debriefId)
   const answers: DebriefAnswers = (existing?.answers as DebriefAnswers) ?? {}
 
   if (step === 'hotel_rating') {
@@ -69,6 +70,7 @@ export async function saveDebriefStep(formData: FormData) {
     // (packing_feedback_<typ>_text). Die Person wird bei ausgewählten Items
     // automatisch aus dem Item selbst übernommen (nicht redundant erneut
     // abgefragt) -- nur Freitext-Ergänzungen bleiben ohne Personenbezug.
+    const supabase = await createClient()
     const packingItems = existing?.trip_id ? await loadPackingItems(supabase, existing.trip_id) : []
     const itemById = new Map(packingItems.map((i) => [i.id, i]))
     const entries: PackingFeedbackEntry[] = []
@@ -88,7 +90,7 @@ export async function saveDebriefStep(formData: FormData) {
   }
 
   const next = nextDebriefStep(step)
-  await supabase.from('trip_debriefs').update({ answers, current_step: next ?? step, updated_at: new Date().toISOString() }).eq('id', debriefId)
+  await tripDebriefs.update(debriefId, { answers, current_step: next ?? step, updated_at: new Date().toISOString() })
 
   redirect(debriefPath(slug))
 }
@@ -102,8 +104,7 @@ export async function goToPreviousDebriefStep(formData: FormData) {
   const prev = previousDebriefStep(step)
   if (!prev) redirect(debriefPath(slug))
 
-  const supabase = await createClient()
-  await supabase.from('trip_debriefs').update({ current_step: prev }).eq('id', debriefId)
+  await tripDebriefs.update(debriefId, { current_step: prev })
   redirect(debriefPath(slug))
 }
 
@@ -112,8 +113,7 @@ export async function skipDebrief(formData: FormData) {
   const debriefId = String(formData.get('debrief_id') ?? '')
   const returnTo = String(formData.get('return_to') ?? '/today')
 
-  const supabase = await createClient()
-  await supabase.from('trip_debriefs').update({ status: 'skipped' }).eq('id', debriefId)
+  await tripDebriefs.update(debriefId, { status: 'skipped' })
   redirect(returnTo)
 }
 
@@ -122,8 +122,7 @@ export async function closeDebrief(formData: FormData) {
   const debriefId = String(formData.get('debrief_id') ?? '')
   const returnTo = String(formData.get('return_to') ?? '/today')
 
-  const supabase = await createClient()
-  await supabase.from('trip_debriefs').update({ status: 'closed' }).eq('id', debriefId)
+  await tripDebriefs.update(debriefId, { status: 'closed' })
   redirect(returnTo)
 }
 
@@ -176,15 +175,14 @@ export async function confirmDebrief(formData: FormData) {
   const slug = String(formData.get('slug') ?? '')
   const participantsRaw = String(formData.get('participants_json') ?? '[]')
 
-  const supabase = await createClient()
-  const { data: existing } = await supabase.from('trip_debriefs').select('answers').eq('id', debriefId).maybeSingle()
+  const existing = await tripDebriefs.getById(debriefId)
   const answers: DebriefAnswers = (existing?.answers as DebriefAnswers) ?? {}
 
   let participants: Array<{ id: string; name: string }> = []
   try { participants = JSON.parse(participantsRaw) } catch { participants = [] }
 
   await proposeDebriefMemories(familyId, tripId, tripTitle, answers, participants)
-  await supabase.from('trip_debriefs').update({ status: 'completed' }).eq('id', debriefId)
+  await tripDebriefs.update(debriefId, { status: 'completed' })
 
   // §"Kontrolliertes Mehrfach-Reisen-Lernen" (Nutzervorgabe): best-effort,
   // niemals blockierend -- läuft nur für die Personen (inkl. "Gemeinsam" =
@@ -208,8 +206,8 @@ export async function toggleMemoryPhotoHighlight(formData: FormData) {
   const slug = String(formData.get('slug') ?? '')
   const currentlyHighlighted = String(formData.get('currently_highlighted') ?? '') === 'true'
 
-  const supabase = await createClient()
-  await supabase.from('memory_photos').update({ is_highlight: !currentlyHighlighted }).eq('id', photoId)
+  const lumiCore = await createLumiCoreClient()
+  await lumiCore.from('travel_memory_photos').update({ is_highlight: !currentlyHighlighted }).eq('id', photoId)
 
   redirect(debriefPath(slug))
 }

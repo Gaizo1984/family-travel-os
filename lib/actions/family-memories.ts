@@ -1,6 +1,6 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { redirect } from 'next/navigation'
 
 /**
@@ -24,10 +24,10 @@ export async function confirmFamilyMemory(formData: FormData) {
   const editedSummary = String(formData.get('summary') ?? '').trim()
   if (!memoryId) redirect(returnTo)
 
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const update: { status: string; updated_at: string; summary?: string } = { status: 'confirmed', updated_at: new Date().toISOString() }
   if (editedSummary) update.summary = editedSummary
-  const { error } = await supabase.from('family_memories').update(update).eq('id', memoryId)
+  const { error } = await lumiCore.from('travel_memories').update(update).eq('id', memoryId)
   if (error) redirect(`${returnTo}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
   redirect(returnTo)
 }
@@ -38,8 +38,8 @@ export async function declineFamilyMemory(formData: FormData) {
   const returnTo = String(formData.get('return_to') ?? '').trim() || '/concierge'
   if (!memoryId) redirect(returnTo)
 
-  const supabase = await createClient()
-  const { error } = await supabase.from('family_memories').update({ status: 'declined', updated_at: new Date().toISOString() }).eq('id', memoryId)
+  const lumiCore = await createLumiCoreClient()
+  const { error } = await lumiCore.from('travel_memories').update({ status: 'declined', updated_at: new Date().toISOString() }).eq('id', memoryId)
   if (error) redirect(`${returnTo}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
   redirect(returnTo)
 }
@@ -51,8 +51,8 @@ export async function updateFamilyMemorySummary(formData: FormData) {
   const returnTo = String(formData.get('return_to') ?? '').trim() || '/today/preferences'
   if (!memoryId || !summary) redirect(returnTo)
 
-  const supabase = await createClient()
-  const { error } = await supabase.from('family_memories').update({ summary, updated_at: new Date().toISOString() }).eq('id', memoryId)
+  const lumiCore = await createLumiCoreClient()
+  const { error } = await lumiCore.from('travel_memories').update({ summary, updated_at: new Date().toISOString() }).eq('id', memoryId)
   if (error) redirect(`${returnTo}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
   redirect(returnTo)
 }
@@ -63,8 +63,8 @@ export async function deleteFamilyMemory(formData: FormData) {
   const returnTo = String(formData.get('return_to') ?? '').trim() || '/concierge'
   if (!memoryId) redirect(returnTo)
 
-  const supabase = await createClient()
-  const { error } = await supabase.from('family_memories').delete().eq('id', memoryId)
+  const lumiCore = await createLumiCoreClient()
+  const { error } = await lumiCore.from('travel_memories').delete().eq('id', memoryId)
   if (error) redirect(`${returnTo}?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)
   redirect(returnTo)
 }

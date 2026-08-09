@@ -1,9 +1,23 @@
 'use client'
 
 import { useRef, useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { createBrowserClient } from '@supabase/ssr'
 
 type UploadSlot = { path: string; token: string }
+
+/**
+ * Eigener, minimaler Lumi-Core-Browser-Client für den direkten
+ * Signed-Upload-Schritt (siehe lib/supabase/lumi-core-server.ts für das
+ * serverseitige Pendant) -- kein Session-/Cookie-Handling nötig, da
+ * `uploadToSignedUrl` allein über das von `createUploadSlots`
+ * (lib/actions/photo-staging.ts) erzeugte Token autorisiert wird.
+ */
+function createLumiCoreBrowserClient() {
+  return createBrowserClient(
+    process.env.NEXT_PUBLIC_LUMI_CORE_URL!,
+    process.env.NEXT_PUBLIC_LUMI_CORE_PUBLISHABLE_KEY!,
+  )
+}
 
 /** `createUploadSlots` (lib/actions/photo-staging.ts) lehnt count>20 pro Aufruf ab -- größere Auswahlen werden clientseitig in Batches dieser Größe aufgeteilt, ein einziges finales Formular-Submit trägt alle gesammelten Pfade. */
 const SLOT_BATCH_SIZE = 20
@@ -89,7 +103,7 @@ export function DirectPhotoUploadForm({
     let failedCount = 0
 
     try {
-      const supabase = createClient()
+      const supabase = createLumiCoreBrowserClient()
       for (let start = 0; start < files.length; start += SLOT_BATCH_SIZE) {
         const batch = files.slice(start, start + SLOT_BATCH_SIZE)
         let slots: UploadSlot[]
@@ -102,7 +116,7 @@ export function DirectPhotoUploadForm({
         }
         for (let i = 0; i < batch.length; i++) {
           try {
-            const { error } = await supabase.storage.from('documents')
+            const { error } = await supabase.storage.from('travel-documents')
               .uploadToSignedUrl(slots[i].path, slots[i].token, batch[i], { contentType: batch[i].type })
             if (error) throw error
             paths.push(slots[i].path)

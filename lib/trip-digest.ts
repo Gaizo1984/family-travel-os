@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { formatDateDE } from '@/lib/demo-data'
 
 /**
@@ -8,20 +8,27 @@ import { formatDateDE } from '@/lib/demo-data'
  * (z. B. Content-Ideen), damit nie über die Reise hinaus erfundene Fakten
  * in einen Prompt gelangen.
  *
- * `supabaseOverride` erlaubt den Aufruf aus einem sitzungslosen Kontext (z. B.
- * dem Urlaubsbeitrag-Kurations-Cron) mit einem Service-Role-Client -- ohne
- * diesen Parameter würde der cookie-basierte Default-Client dort mangels
- * Nutzer-Session jede Abfrage still auf 0 Zeilen filtern (gleiches Muster wie
- * lib/travel-requirements.ts::computeTripRequirements).
+ * FINALER CUTOVER, bekannte Lücke: alle vier Abfragen laufen jetzt gegen
+ * Lumi Core (`createLumiCoreClient()`, cookie-basiert). `supabaseOverride`
+ * existierte, damit ein sitzungsloser Cron-Aufrufer (z. B. der Urlaubsbeitrag-
+ * Kurations-Cron in trip-debrief-generation.ts) einen Service-Role-Client
+ * übergeben konnte -- das griff bisher für die Travel-Abfragen. Es gibt noch
+ * KEINEN Lumi-Core-Service-Role-Client, daher hat `supabaseOverride` fuer
+ * diese Funktion aktuell KEINE Wirkung mehr: ein Cron-Aufruf bekommt über den
+ * cookie-losen `lumiCore`-Client leere Ergebnisse. Bewusst nicht selbst
+ * gelöst (gleiche Kategorie wie lib/hint-generation.ts) -- Parameter bleibt
+ * aus Kompatibilitätsgründen erhalten, bis ein Lumi-Core-Service-Role-Client
+ * eingeführt wird.
  */
 export async function buildTripDigest(tripId: string, supabaseOverride?: SupabaseClient): Promise<string> {
-  const supabase = supabaseOverride ?? await createClient()
+  void supabaseOverride
+  const lumiCore = await createLumiCoreClient()
 
   const [{ data: trip }, { data: stages }, { data: bookings }, { data: events }] = await Promise.all([
-    supabase.from('trips').select('title, subtitle, start_date, end_date').eq('id', tripId).maybeSingle(),
-    supabase.from('stages').select('title, location, start_date, end_date, accommodation').eq('trip_id', tripId).order('sort_order'),
-    supabase.from('bookings').select('type, title, provider').eq('trip_id', tripId).neq('status', 'cancelled'),
-    supabase.from('journey_events').select('category, title, location').eq('trip_id', tripId),
+    lumiCore.from('travel_trips').select('title, subtitle, start_date, end_date').eq('id', tripId).maybeSingle(),
+    lumiCore.from('travel_stages').select('title, location, start_date, end_date, accommodation').eq('trip_id', tripId).order('sort_order'),
+    lumiCore.from('travel_bookings').select('type, title, provider').eq('trip_id', tripId).neq('status', 'cancelled'),
+    lumiCore.from('travel_journey_events').select('category, title, location').eq('trip_id', tripId),
   ])
 
   const lines: string[] = []

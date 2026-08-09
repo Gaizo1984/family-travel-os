@@ -1,6 +1,7 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
+import { toTravelDocumentsPath } from '@/lib/lumi-core-storage/paths'
 
 export type UploadSlot = { path: string; token: string }
 
@@ -20,11 +21,13 @@ export type UploadSlot = { path: string; token: string }
  */
 export async function createUploadSlots(familyId: string, count: number): Promise<UploadSlot[]> {
   if (count <= 0 || count > 20) throw new Error('Ungültige Foto-Anzahl')
-  const supabase = await createClient()
+  const supabase = await createLumiCoreClient()
   return Promise.all(
     Array.from({ length: count }, async () => {
-      const path = `uploads-staging/${familyId}/${crypto.randomUUID()}`
-      const { data, error } = await supabase.storage.from('documents').createSignedUploadUrl(path)
+      const rawPath = `uploads-staging/${familyId}/${crypto.randomUUID()}`
+      const path = await toTravelDocumentsPath(rawPath)
+      if (!path) throw new Error('Haushalt nicht gefunden')
+      const { data, error } = await supabase.storage.from('travel-documents').createSignedUploadUrl(path)
       if (error || !data) throw new Error(error?.message ?? 'Signed-Upload-URL konnte nicht erzeugt werden')
       return { path, token: data.token }
     }),
@@ -41,10 +44,10 @@ export async function createUploadSlots(familyId: string, count: number): Promis
 export async function downloadAndClearStagedUpload(
   stagingPath: string,
 ): Promise<{ buffer: Buffer; mimeType: string } | null> {
-  const supabase = await createClient()
-  const { data, error } = await supabase.storage.from('documents').download(stagingPath)
+  const supabase = await createLumiCoreClient()
+  const { data, error } = await supabase.storage.from('travel-documents').download(stagingPath)
   if (error || !data) return null
   const buffer = Buffer.from(await data.arrayBuffer())
-  await supabase.storage.from('documents').remove([stagingPath])
+  await supabase.storage.from('travel-documents').remove([stagingPath])
   return { buffer, mimeType: data.type || 'application/octet-stream' }
 }

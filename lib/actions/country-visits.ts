@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { getFamily } from '@/lib/family'
 
 function appendError(returnTo: string, error: string): string {
@@ -46,9 +47,10 @@ export async function addManualCountryVisit(formData: FormData): Promise<void> {
   const { data: person } = await supabase.from('persons').select('id').eq('id', personId).eq('family_id', familyId).maybeSingle()
   if (!person) redirect(appendError(returnTo, 'Person nicht gefunden.'))
 
-  const { error } = await supabase.from('person_country_visits').upsert(
-    { person_id: personId, country_code: countryCode, source: 'manual' },
-    { onConflict: 'person_id,country_code', ignoreDuplicates: true },
+  const lumiCore = await createLumiCoreClient()
+  const { error } = await lumiCore.from('travel_person_country_visits').upsert(
+    { household_member_id: personId, country_code: countryCode, source: 'manual' },
+    { onConflict: 'household_member_id,country_code', ignoreDuplicates: true },
   )
   if (error) redirect(appendError(returnTo, 'Speichern fehlgeschlagen: ' + error.message))
 
@@ -75,8 +77,9 @@ export async function removeManualCountryVisit(formData: FormData): Promise<void
   const { data: person } = await supabase.from('persons').select('id').eq('id', personId).eq('family_id', familyId).maybeSingle()
   if (!person) redirect(appendError(returnTo, 'Person nicht gefunden.'))
 
-  await supabase.from('person_country_visits').delete()
-    .eq('person_id', personId).eq('country_code', countryCode).eq('source', 'manual')
+  const lumiCore = await createLumiCoreClient()
+  await lumiCore.from('travel_person_country_visits').delete()
+    .eq('household_member_id', personId).eq('country_code', countryCode).eq('source', 'manual')
 
   revalidateCountryVisitViews()
   redirect(returnTo)

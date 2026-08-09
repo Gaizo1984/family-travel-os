@@ -1,8 +1,7 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { redirect } from 'next/navigation'
-import type { Json } from '@/lib/supabase/types'
 
 type SuggestionJson = {
   title: string; format: string; hook: string; angle: string
@@ -14,8 +13,8 @@ export async function chooseContentIdeaSuggestion(formData: FormData) {
   const ideaId = String(formData.get('idea_id') ?? '')
   const chosenIndex = Number(formData.get('chosen_index') ?? '0')
 
-  const supabase = await createClient()
-  await supabase.from('content_ideas').update({ chosen_index: chosenIndex, status: 'chosen' }).eq('id', ideaId)
+  const lumiCore = await createLumiCoreClient()
+  await lumiCore.from('travel_content_ideas').update({ chosen_index: chosenIndex, status: 'chosen' }).eq('id', ideaId)
 
   redirect(`/content-studio/ideas/${ideaId}`)
 }
@@ -25,8 +24,8 @@ export async function createContentDraftFromIdea(formData: FormData) {
   const ideaId = String(formData.get('idea_id') ?? '')
   const suggestionIndex = Number(formData.get('suggestion_index') ?? '0')
 
-  const supabase = await createClient()
-  const { data: idea } = await supabase.from('content_ideas').select('project_id, suggestions').eq('id', ideaId).maybeSingle()
+  const lumiCore = await createLumiCoreClient()
+  const { data: idea } = await lumiCore.from('travel_content_ideas').select('project_id, suggestions').eq('id', ideaId).maybeSingle()
 
   if (!idea)
     redirect(`/content-studio/ideas/${ideaId}?error=${encodeURIComponent('Idee nicht gefunden')}`)
@@ -54,7 +53,7 @@ export async function createContentDraftFromIdea(formData: FormData) {
     : suggestion.format === 'story' ? 'story_plan'
     : 'caption'
 
-  const { data: draft, error } = await supabase.from('content_drafts').insert({
+  const { data: draft, error } = await lumiCore.from('travel_content_drafts').insert({
     idea_id: ideaId,
     project_id: idea.project_id,
     draft_type: draftType,
@@ -65,7 +64,7 @@ export async function createContentDraftFromIdea(formData: FormData) {
   if (error || !draft)
     redirect(`/content-studio/ideas/${ideaId}?error=${encodeURIComponent('Speicherfehler: ' + (error?.message ?? 'unbekannt'))}`)
 
-  await supabase.from('content_ideas').update({ chosen_index: suggestionIndex, status: 'chosen' }).eq('id', ideaId)
+  await lumiCore.from('travel_content_ideas').update({ chosen_index: suggestionIndex, status: 'chosen' }).eq('id', ideaId)
 
   redirect(`/content-studio/drafts/${draft.id}`)
 }
@@ -76,8 +75,8 @@ export async function toggleFavoriteContentIdea(formData: FormData) {
   const nextValue = formData.get('next_value') === 'true'
   const returnTo = String(formData.get('return_to') ?? '').trim()
 
-  const supabase = await createClient()
-  await supabase.from('content_ideas').update({ is_favorite: nextValue }).eq('id', ideaId)
+  const lumiCore = await createLumiCoreClient()
+  await lumiCore.from('travel_content_ideas').update({ is_favorite: nextValue }).eq('id', ideaId)
 
   redirect(returnTo || `/content-studio/ideas/${ideaId}`)
 }
@@ -86,8 +85,8 @@ export async function archiveContentIdea(formData: FormData) {
   const ideaId = String(formData.get('idea_id') ?? '')
   const returnTo = String(formData.get('return_to') ?? '').trim()
 
-  const supabase = await createClient()
-  await supabase.from('content_ideas').update({ status: 'archived' }).eq('id', ideaId)
+  const lumiCore = await createLumiCoreClient()
+  await lumiCore.from('travel_content_ideas').update({ status: 'archived' }).eq('id', ideaId)
 
   redirect(returnTo || '/content-studio/ideas')
 }
@@ -96,9 +95,9 @@ export async function unarchiveContentIdea(formData: FormData) {
   const ideaId = String(formData.get('idea_id') ?? '')
   const returnTo = String(formData.get('return_to') ?? '').trim()
 
-  const supabase = await createClient()
-  const { data: idea } = await supabase.from('content_ideas').select('chosen_index').eq('id', ideaId).maybeSingle()
-  await supabase.from('content_ideas').update({ status: idea?.chosen_index !== null ? 'chosen' : 'suggested' }).eq('id', ideaId)
+  const lumiCore = await createLumiCoreClient()
+  const { data: idea } = await lumiCore.from('travel_content_ideas').select('chosen_index').eq('id', ideaId).maybeSingle()
+  await lumiCore.from('travel_content_ideas').update({ status: idea?.chosen_index !== null ? 'chosen' : 'suggested' }).eq('id', ideaId)
 
   redirect(returnTo || `/content-studio/ideas/${ideaId}`)
 }
@@ -108,13 +107,13 @@ export async function deleteContentIdea(formData: FormData) {
   const ideaId = String(formData.get('idea_id') ?? '')
   const returnTo = String(formData.get('return_to') ?? '').trim()
 
-  const supabase = await createClient()
-  const { data: idea } = await supabase.from('content_ideas').select('source_media_storage_path').eq('id', ideaId).maybeSingle()
+  const lumiCore = await createLumiCoreClient()
+  const { data: idea } = await lumiCore.from('travel_content_ideas').select('source_media_storage_path').eq('id', ideaId).maybeSingle()
 
   if (idea?.source_media_storage_path)
-    await supabase.storage.from('documents').remove([idea.source_media_storage_path])
+    await lumiCore.storage.from('travel-documents').remove([idea.source_media_storage_path])
 
-  const { error } = await supabase.from('content_ideas').delete().eq('id', ideaId)
+  const { error } = await lumiCore.from('travel_content_ideas').delete().eq('id', ideaId)
   if (error)
     redirect(`/content-studio/ideas/${ideaId}?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)
 
@@ -129,7 +128,7 @@ export async function updateContentDraft(formData: FormData) {
   const notes = String(formData.get('notes') ?? '').trim()
   const instagramReady = formData.get('instagram_ready') === 'on'
 
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
   let structure: Record<string, unknown>
   if (draftType === 'reel_plan') {
@@ -143,7 +142,7 @@ export async function updateContentDraft(formData: FormData) {
     // editierbare) Teilabschnitte (Familienperspektive/Design/Essen/Pool-
     // Strand/Bewertung) -- beim Speichern aus der bestehenden Struktur
     // übernehmen, statt sie stillschweigend zu verwerfen.
-    const { data: existing } = await supabase.from('content_drafts').select('structure').eq('id', draftId).maybeSingle()
+    const { data: existing } = await lumiCore.from('travel_content_drafts').select('structure').eq('id', draftId).maybeSingle()
     const existingStructure = (existing?.structure ?? {}) as Record<string, unknown>
     structure = { ...existingStructure, text: String(formData.get('caption_text') ?? '') }
   } else {
@@ -151,8 +150,8 @@ export async function updateContentDraft(formData: FormData) {
   }
   structure.hashtags = String(formData.get('hashtags') ?? '').split(',').map((h) => h.trim()).filter(Boolean)
 
-  const { error } = await supabase.from('content_drafts').update({
-    structure: structure as Json,
+  const { error } = await lumiCore.from('travel_content_drafts').update({
+    structure,
     visibility,
     scheduled_at: scheduledAt || null,
     notes: notes || null,
@@ -170,8 +169,8 @@ export async function deleteContentDraft(formData: FormData) {
   const draftId = String(formData.get('draft_id') ?? '')
   const returnTo = String(formData.get('return_to') ?? '').trim()
 
-  const supabase = await createClient()
-  const { error } = await supabase.from('content_drafts').delete().eq('id', draftId)
+  const lumiCore = await createLumiCoreClient()
+  const { error } = await lumiCore.from('travel_content_drafts').delete().eq('id', draftId)
   if (error)
     redirect(`/content-studio/drafts/${draftId}?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)
 

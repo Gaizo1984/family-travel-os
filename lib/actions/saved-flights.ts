@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { getFamily } from '@/lib/family'
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt } from '@/lib/family-dna'
 import { getOrSearchFlightOptions, type FlightSearchOutcome } from '@/lib/actions/flight-search'
@@ -34,6 +35,7 @@ export async function saveFlightOption(formData: FormData): Promise<void> {
 
   const { id: familyId } = await getFamily()
   const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
   const { data: cacheRow } = await supabase
     .from('flight_search_cache')
@@ -49,28 +51,28 @@ export async function saveFlightOption(formData: FormData): Promise<void> {
 
   const routeKey = buildRouteKey(cacheRow.origin_codes, cacheRow.destination_code)
 
-  const { data: existingSame } = await supabase
-    .from('saved_flight_options')
+  const { data: existingSame } = await lumiCore
+    .from('travel_saved_flight_options')
     .select('id')
-    .eq('family_id', familyId)
+    .eq('household_id', familyId)
     .eq('route_key', routeKey)
     .eq('option_id', optionId)
     .maybeSingle()
 
   if (!existingSame) {
-    const { count } = await supabase
-      .from('saved_flight_options')
+    const { count } = await lumiCore
+      .from('travel_saved_flight_options')
       .select('id', { count: 'exact', head: true })
-      .eq('family_id', familyId)
+      .eq('household_id', familyId)
       .eq('route_key', routeKey)
     if ((count ?? 0) >= MAX_SAVED_FLIGHTS_PER_ROUTE) {
       redirect(appendError(returnTo, `Für diese Strecke sind bereits ${MAX_SAVED_FLIGHTS_PER_ROUTE} Verbindungen gemerkt -- bitte zuerst eine löschen.`))
     }
   }
 
-  const { error } = await supabase.from('saved_flight_options').upsert(
+  const { error } = await lumiCore.from('travel_saved_flight_options').upsert(
     {
-      family_id: familyId, route_key: routeKey, origin_codes: cacheRow.origin_codes, destination_code: cacheRow.destination_code,
+      household_id: familyId, route_key: routeKey, origin_codes: cacheRow.origin_codes, destination_code: cacheRow.destination_code,
       option_id: optionId, flight_option: option as unknown as Json,
       found_departure_date: cacheRow.departure_date, found_return_date: cacheRow.return_date,
       // §"Aus der Merkliste direkt zum Treffer" (Nutzervorgabe): search_key
@@ -78,7 +80,7 @@ export async function saveFlightOption(formData: FormData): Promise<void> {
       // die Originalsuche neu zusammensetzen zu müssen.
       search_key: searchKey, adults: cacheRow.adults, children: cacheRow.children, infants: cacheRow.infants,
     },
-    { onConflict: 'family_id,route_key,option_id' },
+    { onConflict: 'household_id,route_key,option_id' },
   )
   if (error) redirect(appendError(returnTo, 'Speichern fehlgeschlagen: ' + error.message))
 
@@ -89,9 +91,9 @@ export async function deleteSavedFlightOption(formData: FormData): Promise<void>
   const id = String(formData.get('id') ?? '')
   const returnTo = String(formData.get('return_to') ?? '/discover/flights')
   const { id: familyId } = await getFamily()
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
-  if (id) await supabase.from('saved_flight_options').delete().eq('id', id).eq('family_id', familyId)
+  if (id) await lumiCore.from('travel_saved_flight_options').delete().eq('id', id).eq('household_id', familyId)
 
   redirect(returnTo)
 }
@@ -110,11 +112,11 @@ export async function assignTripToSavedFlightOption(formData: FormData): Promise
   const tripId = String(formData.get('trip_id') ?? '')
   const returnTo = String(formData.get('return_to') ?? '/discover/flights')
   const { id: familyId } = await getFamily()
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
   if (id && tripId) {
-    const { data: trip } = await supabase.from('trips').select('id').eq('id', tripId).eq('family_id', familyId).maybeSingle()
-    if (trip) await supabase.from('saved_flight_options').update({ trip_id: tripId }).eq('id', id).eq('family_id', familyId)
+    const { data: trip } = await lumiCore.from('travel_trips').select('id').eq('id', tripId).eq('household_id', familyId).maybeSingle()
+    if (trip) await lumiCore.from('travel_saved_flight_options').update({ trip_id: tripId }).eq('id', id).eq('household_id', familyId)
   }
 
   redirect(returnTo)
@@ -125,10 +127,10 @@ export async function markSavedFlightOptionSelected(formData: FormData): Promise
   const id = String(formData.get('id') ?? '')
   const returnTo = String(formData.get('return_to') ?? '/discover/flights')
   const { id: familyId } = await getFamily()
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
   if (id) {
-    await supabase.from('saved_flight_options').update({ status: 'selected' }).eq('id', id).eq('family_id', familyId).not('trip_id', 'is', null)
+    await lumiCore.from('travel_saved_flight_options').update({ status: 'selected' }).eq('id', id).eq('household_id', familyId).not('trip_id', 'is', null)
   }
 
   redirect(returnTo)
@@ -138,9 +140,9 @@ export async function unmarkSavedFlightOptionSelected(formData: FormData): Promi
   const id = String(formData.get('id') ?? '')
   const returnTo = String(formData.get('return_to') ?? '/discover/flights')
   const { id: familyId } = await getFamily()
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
-  if (id) await supabase.from('saved_flight_options').update({ status: 'saved' }).eq('id', id).eq('family_id', familyId)
+  if (id) await lumiCore.from('travel_saved_flight_options').update({ status: 'saved' }).eq('id', id).eq('household_id', familyId)
 
   redirect(returnTo)
 }
@@ -170,13 +172,13 @@ export async function refreshSavedFlightOption(formData: FormData): Promise<void
   const id = String(formData.get('id') ?? '')
   const returnTo = String(formData.get('return_to') ?? '/discover/flights')
   const { id: familyId } = await getFamily()
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
-  const { data: saved } = await supabase
-    .from('saved_flight_options')
+  const { data: saved } = await lumiCore
+    .from('travel_saved_flight_options')
     .select('origin_codes, destination_code, found_departure_date, found_return_date, adults, children, infants')
     .eq('id', id)
-    .eq('family_id', familyId)
+    .eq('household_id', familyId)
     .maybeSingle()
   if (!saved) redirect(appendError(returnTo, 'Dieser gemerkte Flug wurde nicht gefunden.'))
 

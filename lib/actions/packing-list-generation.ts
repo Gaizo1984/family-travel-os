@@ -4,7 +4,10 @@ import OpenAI from 'openai'
 import { redirect } from 'next/navigation'
 import { after } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { getFamily } from '@/lib/family'
+import { listHouseholdMembers } from '@/lib/household-members'
+import { listTripMembers } from '@/lib/lumi-core-data/trip-members'
 import { ageAtDate } from '@/lib/family-dna'
 import { todayIsoInFamilyTimezone } from '@/lib/time'
 import { getWeatherForLocation, formatDailyWeatherSummary } from '@/lib/weather'
@@ -68,10 +71,11 @@ export async function generatePackingList(formData: FormData) {
   }
 
   const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const { id: familyId } = await getFamily()
 
-  const { data: trip } = await supabase
-    .from('trips')
+  const { data: trip } = await lumiCore
+    .from('travel_trips')
     .select('id, slug, title, start_date, end_date')
     .eq('id', tripId)
     .maybeSingle()
@@ -86,17 +90,18 @@ export async function generatePackingList(formData: FormData) {
 
   after(async () => {
     try {
-      const [{ data: memberRows }, { data: stagesRaw }, { data: bookingsRaw }, confirmedMemories] = await Promise.all([
-        supabase.from('trip_members').select('persons ( id, name, birth_date, is_minor )').eq('trip_id', tripId),
-        supabase.from('stages').select('title, location, start_date, end_date, nights, accommodation, is_transit').eq('trip_id', tripId).order('sort_order'),
-        supabase.from('bookings').select('type, title').eq('trip_id', tripId).in('type', ['activity', 'restaurant']).neq('status', 'cancelled'),
+      const [tripMembers, allHouseholdMembers, { data: stagesRaw }, { data: bookingsRaw }, confirmedMemories] = await Promise.all([
+        listTripMembers(tripId),
+        listHouseholdMembers(),
+        lumiCore.from('travel_stages').select('title, location, start_date, end_date, nights, accommodation, is_transit').eq('trip_id', tripId).order('sort_order'),
+        lumiCore.from('travel_bookings').select('type, title').eq('trip_id', tripId).in('type', ['activity', 'restaurant']).neq('status', 'cancelled'),
         loadRelevantMemories(familyId, ['packing']),
       ])
 
-      const participants = (memberRows ?? [])
-        .map((m) => m.persons as unknown as { id: string; name: string; birth_date: string | null; is_minor: boolean } | null)
-        .filter((p): p is { id: string; name: string; birth_date: string | null; is_minor: boolean } => Boolean(p))
-        .map((p) => ({ id: p.id, name: p.name, ageAtTrip: trip.start_date ? ageAtDate(p.birth_date, trip.start_date) : ageAtDate(p.birth_date, todayIsoInFamilyTimezone()), isMinor: p.is_minor }))
+      const tripMemberIds = new Set(tripMembers.map((m) => m.householdMemberId))
+      const participants = allHouseholdMembers
+        .filter((m) => tripMemberIds.has(m.id))
+        .map((p) => ({ id: p.id, name: p.name, ageAtTrip: trip.start_date ? ageAtDate(p.birthDate, trip.start_date) : ageAtDate(p.birthDate, todayIsoInFamilyTimezone()), isMinor: p.isMinor }))
 
       const stages = stagesRaw ?? []
       const nonTransitAccommodationStages = stages.filter((s) => !s.is_transit && s.accommodation)
@@ -168,7 +173,7 @@ export async function generatePackingList(formData: FormData) {
         return
       }
 
-      const existingItems = await loadPackingItems(supabase, tripId)
+      const existingItems = await loadPackingItems(lumiCore, tripId)
       const hasExistingGenerated = existingItems.some((i) => i.sourceKey !== null)
 
       if (!hasExistingGenerated) {
@@ -183,15 +188,19 @@ export async function generatePackingList(formData: FormData) {
           const status = initialStatusForItem(item, readyPassportPersonKeys)
           return {
             trip_id: tripId,
-            person_id: item.personKey.toLowerCase() === 'gemeinsam' ? null : (personIdByName.get(item.personKey.toLowerCase()) ?? null),
+            household_member_id: item.personKey.toLowerCase() === 'gemeinsam' ? null : (personIdByName.get(item.personKey.toLowerCase()) ?? null),
             label: item.label, category: item.category, quantity: item.quantity,
-            priority: item.priority, is_last_minute: item.isLastMinute, needs_check: needsCheckFlagToPersisted(item.needsCheckFlag),
+            priority: item.priority, is_last_minute: item.isLastMinute,
+            // travel_packing_items.needs_check ist in Lumi Core ein reines boolean-Flag
+            // (anders als Travels bisheriges Grund-Enum) -- die konkrete Prüf-Ursache
+            // steckt weiterhin im reasoning-Text, siehe needsCheckFlagToPersisted.
+            needs_check: needsCheckFlagToPersisted(item.needsCheckFlag) !== null,
             reasoning: reasoningWithReadinessNotice(item.reasoning, status === 'eingepackt'),
             source: item.source, source_key: item.sourceKey,
             status, luggage_assignment: 'unassigned', sort_order: index,
           }
         })
-        const { error: insertError } = await supabase.from('packing_items').insert(rows)
+        const { error: insertError } = await lumiCore.from('travel_packing_items').insert(rows)
         if (insertError) {
           console.error('[packing-list-generation] Insert fehlgeschlagen:', insertError.message)
           await failJob(jobId, 'Die Packliste konnte nicht gespeichert werden. Bitte erneut versuchen.', supabase)
@@ -202,8 +211,8 @@ export async function generatePackingList(formData: FormData) {
       }
 
       // §Aktualisierung: Entwurf zwischenspeichern, Diff-Ansicht entscheidet über die Übernahme (siehe app/(app)/trips/[id]/packing/diff/page.tsx).
-      const { error: draftError } = await supabase.from('packing_list_drafts').upsert(
-        { trip_id: tripId, family_id: familyId, items: parsedItems, created_at: new Date().toISOString() },
+      const { error: draftError } = await lumiCore.from('travel_packing_list_drafts').upsert(
+        { trip_id: tripId, household_id: familyId, items: parsedItems, created_at: new Date().toISOString() },
         { onConflict: 'trip_id' },
       )
       if (draftError) {
@@ -227,16 +236,17 @@ export async function applyPackingListDiff(formData: FormData) {
   const slug = String(formData.get('slug') ?? '')
   const approvedKeys = new Set(formData.getAll('approved_keys').map(String))
 
-  const supabase = await createClient()
-  const { data: draft } = await supabase.from('packing_list_drafts').select('items').eq('trip_id', tripId).maybeSingle()
+  const lumiCore = await createLumiCoreClient()
+  const { data: draft } = await lumiCore.from('travel_packing_list_drafts').select('items').eq('trip_id', tripId).maybeSingle()
   if (!draft) redirect(packingPath(slug))
 
-  const { data: memberRows } = await supabase.from('trip_members').select('persons ( id, name )').eq('trip_id', tripId)
-  const participants = (memberRows ?? [])
-    .map((m) => m.persons as unknown as { id: string; name: string } | null)
-    .filter((p): p is { id: string; name: string } => Boolean(p))
+  const [tripMembers, allHouseholdMembers] = await Promise.all([listTripMembers(tripId), listHouseholdMembers()])
+  const tripMemberIds = new Set(tripMembers.map((m) => m.householdMemberId))
+  const participants = allHouseholdMembers
+    .filter((m) => tripMemberIds.has(m.id))
+    .map((p) => ({ id: p.id, name: p.name }))
 
-  const existingItems = await loadPackingItems(supabase, tripId)
+  const existingItems = await loadPackingItems(lumiCore, tripId)
   const generated = draft.items as Awaited<ReturnType<typeof parseGeneratedItems>>
   const diff = computeRegenerationDiff(existingItems, generated, participants)
 
@@ -247,11 +257,12 @@ export async function applyPackingListDiff(formData: FormData) {
   if (toInsert.length > 0) {
     const requirements = await computeTripRequirements(tripId)
     const readyPassportPersonKeys = buildReadyPassportPersonKeys(requirements, participants)
-    await supabase.from('packing_items').insert(toInsert.map((d) => {
+    await lumiCore.from('travel_packing_items').insert(toInsert.map((d) => {
       const status = initialStatusForItem({ category: d.category, label: d.label, personKey: d.personLabel }, readyPassportPersonKeys)
       return {
-        trip_id: tripId, person_id: d.personId, label: d.label, category: d.category, quantity: d.quantity,
-        priority: d.priority, is_last_minute: d.isLastMinute, needs_check: d.needsCheck,
+        trip_id: tripId, household_member_id: d.personId, label: d.label, category: d.category, quantity: d.quantity,
+        // s. o.: travel_packing_items.needs_check ist in Lumi Core boolean, nicht das Grund-Enum.
+        priority: d.priority, is_last_minute: d.isLastMinute, needs_check: d.needsCheck !== null,
         reasoning: reasoningWithReadinessNotice(d.reasoning, status === 'eingepackt'),
         source: d.source, source_key: d.sourceKey,
         status, luggage_assignment: 'unassigned',
@@ -259,16 +270,16 @@ export async function applyPackingListDiff(formData: FormData) {
     }))
   }
   for (const d of toUpdate) {
-    await supabase.from('packing_items').update({
+    await lumiCore.from('travel_packing_items').update({
       label: d.label, category: d.category, quantity: d.quantity, reasoning: d.reasoning,
-      priority: d.priority, is_last_minute: d.isLastMinute, needs_check: d.needsCheck,
+      priority: d.priority, is_last_minute: d.isLastMinute, needs_check: d.needsCheck !== null,
     }).eq('id', d.existingItemId as string)
   }
   if (toRemove.length > 0) {
-    await supabase.from('packing_items').update({ status: 'nicht_benoetigt' }).in('id', toRemove.map((d) => d.existingItemId as string))
+    await lumiCore.from('travel_packing_items').update({ status: 'nicht_benoetigt' }).in('id', toRemove.map((d) => d.existingItemId as string))
   }
 
-  await supabase.from('packing_list_drafts').delete().eq('trip_id', tripId)
+  await lumiCore.from('travel_packing_list_drafts').delete().eq('trip_id', tripId)
   redirect(packingPath(slug))
 }
 
@@ -276,8 +287,8 @@ export async function discardPackingListDraft(formData: FormData) {
   const tripId = String(formData.get('trip_id') ?? '')
   const slug = String(formData.get('slug') ?? '')
 
-  const supabase = await createClient()
-  await supabase.from('packing_list_drafts').delete().eq('trip_id', tripId)
+  const lumiCore = await createLumiCoreClient()
+  await lumiCore.from('travel_packing_list_drafts').delete().eq('trip_id', tripId)
 
   redirect(packingPath(slug))
 }

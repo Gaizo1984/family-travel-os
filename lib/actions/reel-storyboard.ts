@@ -4,6 +4,7 @@ import OpenAI from 'openai'
 import { redirect } from 'next/navigation'
 import { after } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { getFamily } from '@/lib/family'
 import { createJob, completeJob, failJob } from '@/lib/ai-generation-jobs'
 import { buildTripDigest } from '@/lib/trip-digest'
@@ -12,7 +13,6 @@ import { reelMediaLimitFor } from '@/lib/reel-media-limits'
 import { REEL_STYLE_LABELS } from '@/lib/ai-style-guidelines'
 import { FACT_RULE_INSTRUCTION, NO_CLICHE_INSTRUCTION } from '@/lib/ai-style-guidelines'
 import { BASE_CONTENT_PROPS } from '@/lib/content-schema-fragments'
-import type { Json } from '@/lib/supabase/types'
 
 /**
  * §Content Studio 3.0, Sprint 3 -- KI-Storyboard für ein Reel-Projekt.
@@ -29,7 +29,7 @@ import type { Json } from '@/lib/supabase/types'
  */
 const OPENAI_MODEL = 'gpt-5.6-terra'
 
-const STORAGE_BUCKET = 'documents'
+const STORAGE_BUCKET = 'travel-documents'
 
 type Candidate = {
   sourceType: 'photo' | 'video'
@@ -80,12 +80,12 @@ function buildStoryboardSchema(minScenes: number, maxScenes: number) {
 }
 
 async function loadOwnedReelProjectWithDetails(projectId: string, familyId: string) {
-  const supabase = await createClient()
-  const { data: project } = await supabase
-    .from('content_projects')
-    .select('id, family_id, trip_id, project_type, reel_style, reel_duration_seconds')
+  const lumiCore = await createLumiCoreClient()
+  const { data: project } = await lumiCore
+    .from('travel_content_projects')
+    .select('id, household_id, trip_id, project_type, reel_style, reel_duration_seconds')
     .eq('id', projectId)
-    .eq('family_id', familyId)
+    .eq('household_id', familyId)
     .eq('project_type', 'reel')
     .maybeSingle()
   return project
@@ -112,6 +112,7 @@ export async function generateReelStoryboard(formData: FormData) {
   if (!project || !project.trip_id) redirect(returnTo || '/content-studio')
 
   const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const jobId = await createJob(familyId, 'reel_storyboard_generate', supabase)
 
   after(async () => {
@@ -120,8 +121,8 @@ export async function generateReelStoryboard(formData: FormData) {
       const limit = reelMediaLimitFor(durationSeconds)
       const reelStyleLabel = REEL_STYLE_LABELS[project.reel_style ?? ''] ?? project.reel_style ?? 'Family Memory'
 
-      const { data: itemsRaw } = await supabase
-        .from('content_reel_media_items')
+      const { data: itemsRaw } = await lumiCore
+        .from('travel_content_reel_media_items')
         .select('source_type, source_id')
         .eq('project_id', projectId)
         .order('sort_order', { ascending: true })
@@ -136,10 +137,10 @@ export async function generateReelStoryboard(formData: FormData) {
 
       const [{ data: photoRowsRaw }, { data: videoRowsRaw }] = await Promise.all([
         photoIds.length > 0
-          ? supabase.from('memory_photos').select('id, storage_path').in('id', photoIds)
+          ? lumiCore.from('travel_memory_photos').select('id, storage_path').in('id', photoIds)
           : Promise.resolve({ data: [] as { id: string; storage_path: string }[] }),
         videoIds.length > 0
-          ? supabase.from('memory_videos').select('id, storage_path, thumbnail_storage_path, duration_seconds').in('id', videoIds)
+          ? lumiCore.from('travel_memory_videos').select('id, storage_path, thumbnail_storage_path, duration_seconds').in('id', videoIds)
           : Promise.resolve({ data: [] as { id: string; storage_path: string; thumbnail_storage_path: string | null; duration_seconds: number | null }[] }),
       ])
       const photoRows = photoRowsRaw ?? []
@@ -160,7 +161,7 @@ export async function generateReelStoryboard(formData: FormData) {
           if (item.source_type === 'photo') {
             const row = photoById.get(item.source_id)
             if (!row) return null
-            const { data: signed } = await supabase.storage.from(STORAGE_BUCKET).createSignedUrl(row.storage_path, 60)
+            const { data: signed } = await lumiCore.storage.from(STORAGE_BUCKET).createSignedUrl(row.storage_path, 60)
             if (!signed?.signedUrl) return null
             const res = await fetch(signed.signedUrl)
             const buffer = Buffer.from(await res.arrayBuffer())
@@ -168,7 +169,7 @@ export async function generateReelStoryboard(formData: FormData) {
           }
           const row = videoById.get(item.source_id)
           if (!row?.thumbnail_storage_path) return null
-          const { data: signed } = await supabase.storage.from(STORAGE_BUCKET).createSignedUrl(row.thumbnail_storage_path, 60)
+          const { data: signed } = await lumiCore.storage.from(STORAGE_BUCKET).createSignedUrl(row.thumbnail_storage_path, 60)
           if (!signed?.signedUrl) return null
           const res = await fetch(signed.signedUrl)
           const buffer = Buffer.from(await res.arrayBuffer())
@@ -186,7 +187,7 @@ export async function generateReelStoryboard(formData: FormData) {
       const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
       const tripDigest = await buildTripDigest(project.trip_id as string)
 
-      await supabase.from('content_projects').update({ status: 'analyzing' }).eq('id', projectId)
+      await lumiCore.from('travel_content_projects').update({ status: 'analyzing' }).eq('id', projectId)
 
       // ── Stufe 1: Kuratierung über die einzige, gemeinsame Bildbewertungs-Implementierung ──
       const assessments = await assessPhotoBatch(
@@ -282,15 +283,15 @@ export async function generateReelStoryboard(formData: FormData) {
         reasoning: result.reasoning,
       }
 
-      const { error: draftError } = await supabase.from('content_drafts').insert({
-        project_id: projectId, draft_type: 'video_reel', structure: structure as Json,
+      const { error: draftError } = await lumiCore.from('travel_content_drafts').insert({
+        project_id: projectId, draft_type: 'video_reel', structure,
       })
       if (draftError) {
         await failJob(jobId, 'Speicherfehler: ' + draftError.message, supabase)
         return
       }
 
-      await supabase.from('content_projects').update({ status: 'draft_created' }).eq('id', projectId)
+      await lumiCore.from('travel_content_projects').update({ status: 'draft_created' }).eq('id', projectId)
       await completeJob(jobId, `${returnTo}?storyboard=1`, supabase)
     } catch (e) {
       console.error('[reel-storyboard] generateReelStoryboard fehlgeschlagen:', e instanceof Error ? e.message : e)

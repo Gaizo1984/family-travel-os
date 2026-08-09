@@ -1,4 +1,4 @@
-import { createClient } from './supabase/server'
+import { createLumiCoreClient } from './supabase/lumi-core-server'
 import type { BookingType } from './supabase/types'
 
 export type BudgetCategory =
@@ -58,10 +58,10 @@ export type BudgetResult = {
 }
 
 export async function computeTripBudget(tripId: string): Promise<BudgetResult> {
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
-  const { data: trip } = await supabase
-    .from('trips')
+  const { data: trip } = await lumiCore
+    .from('travel_trips')
     .select('id, slug, budget_amount, budget_currency')
     .eq('id', tripId)
     .maybeSingle()
@@ -70,20 +70,20 @@ export async function computeTripBudget(tripId: string): Promise<BudgetResult> {
   const budgetAmount = trip?.budget_amount ?? null
   const slug = trip?.slug ?? ''
 
-  const { data: rateRows } = await supabase
-    .from('trip_exchange_rates')
+  const { data: rateRows } = await lumiCore
+    .from('travel_trip_exchange_rates')
     .select('currency, rate')
     .eq('trip_id', tripId)
   const rates = new Map<string, number>((rateRows ?? []).map((r) => [r.currency, r.rate]))
   rates.set(tripCurrency, 1)
 
-  const { data: bookingsRaw } = await supabase
-    .from('bookings')
+  const { data: bookingsRaw } = await lumiCore
+    .from('travel_bookings')
     .select('id, type, title, amount, currency, status')
     .eq('trip_id', tripId)
 
-  const { data: itemsRaw } = await supabase
-    .from('budget_items')
+  const { data: itemsRaw } = await lumiCore
+    .from('travel_budget_items')
     .select('id, category, label, amount_actual, amount_planned, currency')
     .eq('trip_id', tripId)
 

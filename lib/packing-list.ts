@@ -109,18 +109,18 @@ export type PackingItem = {
 }
 
 type PackingItemRow = {
-  id: string; trip_id: string; person_id: string | null; label: string; category: string | null
+  id: string; trip_id: string; household_member_id: string | null; label: string; category: string | null
   quantity: number; status: string; luggage_assignment: string; luggage_id: string | null; weight_grams: number | null
   priority: string; needs_check: string | null; is_last_minute: boolean
   reasoning: string | null; source: string; source_key: string | null; note: string | null
   sort_order: number; created_at: string; updated_at: string
 }
 
-const PACKING_ITEM_SELECT = 'id, trip_id, person_id, label, category, quantity, status, luggage_assignment, luggage_id, weight_grams, priority, needs_check, is_last_minute, reasoning, source, source_key, note, sort_order, created_at, updated_at'
+const PACKING_ITEM_SELECT = 'id, trip_id, household_member_id, label, category, quantity, status, luggage_assignment, luggage_id, weight_grams, priority, needs_check, is_last_minute, reasoning, source, source_key, note, sort_order, created_at, updated_at'
 
 function mapRow(row: PackingItemRow): PackingItem {
   return {
-    id: row.id, tripId: row.trip_id, personId: row.person_id, label: row.label, category: row.category,
+    id: row.id, tripId: row.trip_id, personId: row.household_member_id, label: row.label, category: row.category,
     quantity: row.quantity, status: row.status as PackingStatus, luggageAssignment: row.luggage_assignment as LuggageAssignment,
     luggageId: row.luggage_id, weightGrams: row.weight_grams,
     priority: row.priority as PackingPriority, needsCheck: row.needs_check as NeedsCheck | null, isLastMinute: row.is_last_minute,
@@ -131,7 +131,7 @@ function mapRow(row: PackingItemRow): PackingItem {
 
 export async function loadPackingItems(supabase: SupabaseClient, tripId: string): Promise<PackingItem[]> {
   const { data } = await supabase
-    .from('packing_items')
+    .from('travel_packing_items')
     .select(PACKING_ITEM_SELECT)
     .eq('trip_id', tripId)
     .order('sort_order', { ascending: true })
@@ -198,21 +198,21 @@ export type PackingLuggage = {
 }
 
 type PackingLuggageRow = {
-  id: string; trip_id: string; person_id: string | null; label: string
+  id: string; trip_id: string; household_member_id: string | null; label: string
   allowed_weight_grams: number | null; sort_order: number; created_at: string; updated_at: string
 }
 
 function mapLuggageRow(row: PackingLuggageRow): PackingLuggage {
   return {
-    id: row.id, tripId: row.trip_id, personId: row.person_id, label: row.label,
+    id: row.id, tripId: row.trip_id, personId: row.household_member_id, label: row.label,
     allowedWeightGrams: row.allowed_weight_grams, sortOrder: row.sort_order, createdAt: row.created_at, updatedAt: row.updated_at,
   }
 }
 
 export async function loadPackingLuggage(supabase: SupabaseClient, tripId: string): Promise<PackingLuggage[]> {
   const { data } = await supabase
-    .from('packing_luggage')
-    .select('id, trip_id, person_id, label, allowed_weight_grams, sort_order, created_at, updated_at')
+    .from('travel_packing_luggage')
+    .select('id, trip_id, household_member_id, label, allowed_weight_grams, sort_order, created_at, updated_at')
     .eq('trip_id', tripId)
     .order('sort_order', { ascending: true })
   return ((data ?? []) as PackingLuggageRow[]).map(mapLuggageRow)

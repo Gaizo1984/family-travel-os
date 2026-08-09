@@ -1,31 +1,49 @@
 import { cache } from 'react'
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 
 /**
- * Phase 3A: bisher gab es im gesamten Code keine Stelle, die "welche Person
- * ist gerade eingeloggt" auflöst (siehe persons.auth_user_id) -- proxy.ts
- * prüft nur, OB überhaupt eine Session existiert. Für die Lumi-Core-Brücke
- * wird das erstmals gebraucht (welche persons-Zeile bekommt
- * lumi_core_profile_id). Request-scoped via React cache(), wie lib/family.ts.
+ * FINALER CUTOVER: primäre Identität kommt jetzt aus Lumi Core
+ * (household_members), nicht mehr aus Travels eigener persons-Tabelle.
+ * `id`/`familyId` im Rückgabewert sind jetzt household_member_id/
+ * household_id -- die Feldnamen bleiben aus Kompatibilitätsgründen
+ * gleich benannt (alle bestehenden Konsumenten erwarten `id`/`familyId`),
+ * ihre BEDEUTUNG hat sich aber geändert (Lumi-Core-IDs statt
+ * Travel-Person-IDs). `legacyTravelPersonId` steht für die verbleibenden,
+ * noch nicht umgestellten Stellen zur Verfügung (siehe
+ * travel_person_migration_map).
  */
 export const getCurrentPerson = cache(async (): Promise<{
   id: string
   name: string
   familyId: string
   lumiCoreProfileId: string | null
+  legacyTravelPersonId: string | null
 } | null> => {
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const {
     data: { user },
-  } = await supabase.auth.getUser()
+  } = await lumiCore.auth.getUser()
   if (!user) return null
 
-  const { data } = await supabase
-    .from('persons')
-    .select('id, name, family_id, lumi_core_profile_id')
-    .eq('auth_user_id', user.id)
+  const { data: member } = await lumiCore
+    .from('household_members')
+    .select('id, household_id, name')
+    .eq('profile_id', user.id)
+    .is('deleted_at', null)
+    .maybeSingle()
+  if (!member) return null
+
+  const { data: mapping } = await lumiCore
+    .from('travel_person_migration_map')
+    .select('travel_person_id')
+    .eq('household_member_id', member.id)
     .maybeSingle()
 
-  if (!data) return null
-  return { id: data.id, name: data.name, familyId: data.family_id, lumiCoreProfileId: data.lumi_core_profile_id }
+  return {
+    id: member.id,
+    name: member.name,
+    familyId: member.household_id,
+    lumiCoreProfileId: user.id,
+    legacyTravelPersonId: mapping?.travel_person_id ?? null,
+  }
 })

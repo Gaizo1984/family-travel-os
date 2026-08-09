@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { getFamily } from '@/lib/family'
 import { createUploadSlots, type UploadSlot } from '@/lib/actions/photo-staging'
 import { parseStagedPaths } from '@/lib/staged-paths'
@@ -11,7 +12,6 @@ import {
 } from '@/lib/reel-media-limits'
 import { rebalanceScenes } from '@/lib/reel-scene-rebalance'
 import type { ReelStoryboardStructure } from '@/lib/reel-storyboard-types'
-import type { Json } from '@/lib/supabase/types'
 
 /**
  * §Content Studio 3.0, Sprint 2 -- Medienauswahl für ein Reel-Projekt.
@@ -20,14 +20,14 @@ import type { Json } from '@/lib/supabase/types'
  * hat, siehe `uploadReelVideos`) -- keine KI-Analyse, kein Storyboard.
  */
 
-const STORAGE_BUCKET = 'documents'
+const STORAGE_BUCKET = 'travel-documents'
 
-async function loadOwnedReelProject(supabase: Awaited<ReturnType<typeof createClient>>, projectId: string, familyId: string) {
-  const { data: project } = await supabase
-    .from('content_projects')
-    .select('id, family_id, trip_id, project_type, reel_duration_seconds')
+async function loadOwnedReelProject(lumiCore: Awaited<ReturnType<typeof createLumiCoreClient>>, projectId: string, familyId: string) {
+  const { data: project } = await lumiCore
+    .from('travel_content_projects')
+    .select('id, household_id, trip_id, project_type, reel_duration_seconds')
     .eq('id', projectId)
-    .eq('family_id', familyId)
+    .eq('household_id', familyId)
     .eq('project_type', 'reel')
     .maybeSingle()
   return project
@@ -78,9 +78,9 @@ export async function uploadReelVideos(formData: FormData) {
     durations = []
   }
 
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const { id: familyId } = await getFamily()
-  const project = await loadOwnedReelProject(supabase, projectId, familyId)
+  const project = await loadOwnedReelProject(lumiCore, projectId, familyId)
   if (!project) redirect(returnTo || '/content-studio')
 
   if (stagedPaths.length === 0) redirect(`${returnTo}?error=${encodeURIComponent('Kein Video hochgeladen.')}`)
@@ -93,7 +93,7 @@ export async function uploadReelVideos(formData: FormData) {
     const mimeType = mimeTypes[i] ?? ''
 
     if (!ALLOWED_REEL_VIDEO_MIME_TYPES.includes(mimeType as (typeof ALLOWED_REEL_VIDEO_MIME_TYPES)[number])) {
-      await supabase.storage.from(STORAGE_BUCKET).remove([stagingPath])
+      await lumiCore.storage.from(STORAGE_BUCKET).remove([stagingPath])
       rejectedCount++
       continue
     }
@@ -101,10 +101,10 @@ export async function uploadReelVideos(formData: FormData) {
     // §Dateigröße ohne Byte-Download prüfen: list() liefert nur Metadaten.
     const folder = stagingPath.split('/').slice(0, -1).join('/')
     const fileName = stagingPath.split('/').pop() ?? ''
-    const { data: listing } = await supabase.storage.from(STORAGE_BUCKET).list(folder, { search: fileName })
+    const { data: listing } = await lumiCore.storage.from(STORAGE_BUCKET).list(folder, { search: fileName })
     const sizeBytes = listing?.find((f) => f.name === fileName)?.metadata?.size ?? null
     if (sizeBytes !== null && sizeBytes > MAX_REEL_VIDEO_FILE_SIZE_BYTES) {
-      await supabase.storage.from(STORAGE_BUCKET).remove([stagingPath])
+      await lumiCore.storage.from(STORAGE_BUCKET).remove([stagingPath])
       rejectedCount++
       continue
     }
@@ -112,7 +112,7 @@ export async function uploadReelVideos(formData: FormData) {
     const extension = REEL_VIDEO_EXTENSION_BY_MIME[mimeType] ?? 'mp4'
     const finalPath = `${familyId}/${crypto.randomUUID()}.${extension}`
 
-    const { error: moveError } = await supabase.storage.from(STORAGE_BUCKET).move(stagingPath, finalPath)
+    const { error: moveError } = await lumiCore.storage.from(STORAGE_BUCKET).move(stagingPath, finalPath)
     if (moveError) {
       rejectedCount++
       continue
@@ -123,9 +123,24 @@ export async function uploadReelVideos(formData: FormData) {
     // ab, wenn das Video zu diesem Zeitpunkt in KEINEM Reel-Projekt mehr
     // ausgewählt ist (siehe lib/reel-video-cleanup.ts). Manuelles, früheres
     // Löschen bleibt jederzeit möglich (lib/actions/content-reel-media.ts::deleteReelVideo).
+    //
+    // FINALER CUTOVER, bekannte Schema-Lücke: travel_memory_videos fehlen
+    // aktuell temporary/expires_at/retained_as_memory (in Travels eigenem
+    // memory_videos erst per Migration 20260727000012 ergänzt, NACH dem
+    // urspruenglichen 38-Tabellen-Copy-Lauf -- echte fehlende Spalten in
+    // Lumi Core, kein reines TypeScript-Typproblem). Dieser eine
+    // Insert-Pfad bleibt daher bewusst auf Travel, bis eine Nachtrags-
+    // Migration diese 3 Spalten ergänzt (gleiche Kategorie wie
+    // travel_content_reel_renders in lib/actions/reel-render.ts).
     const REEL_VIDEO_TTL_HOURS = 48
+    const supabase = await createClient()
+    // familyId (getFamily()) ist seit dem Cutover die Lumi-Core household_id,
+    // nicht Travels eigene families.id -- fuer diesen einen Travel-Schreib-
+    // zugriff hier explizit Travels echte (einzige) family_id auflösen.
+    const { data: travelFamily } = await supabase.from('families').select('id').limit(1).single()
+    if (!travelFamily) { rejectedCount++; continue }
     const { error: insertError } = await supabase.from('memory_videos').insert({
-      family_id: familyId,
+      family_id: travelFamily.id,
       trip_id: project.trip_id,
       storage_path: finalPath,
       duration_seconds: durations[i] ?? null,
@@ -152,14 +167,14 @@ export async function addReelMediaItem(formData: FormData) {
   const sourceId = String(formData.get('source_id') ?? '')
   const returnTo = String(formData.get('return_to') ?? '').trim()
 
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const { id: familyId } = await getFamily()
-  const project = await loadOwnedReelProject(supabase, projectId, familyId)
+  const project = await loadOwnedReelProject(lumiCore, projectId, familyId)
   if (!project) redirect(returnTo || '/content-studio')
   if (sourceType !== 'photo' && sourceType !== 'video') redirect(returnTo)
 
-  const { count } = await supabase
-    .from('content_reel_media_items')
+  const { count } = await lumiCore
+    .from('travel_content_reel_media_items')
     .select('id', { count: 'exact', head: true })
     .eq('project_id', projectId)
 
@@ -168,7 +183,7 @@ export async function addReelMediaItem(formData: FormData) {
     redirect(`${returnTo}?error=${encodeURIComponent(`Maximal ${limit.max} Medien für ${project.reel_duration_seconds}s-Reels.`)}`)
   }
 
-  await supabase.from('content_reel_media_items').insert({
+  await lumiCore.from('travel_content_reel_media_items').insert({
     project_id: projectId, source_type: sourceType, source_id: sourceId, sort_order: count ?? 0,
   })
 
@@ -180,12 +195,12 @@ export async function removeReelMediaItem(formData: FormData) {
   const projectId = String(formData.get('project_id') ?? '')
   const returnTo = String(formData.get('return_to') ?? '').trim()
 
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const { id: familyId } = await getFamily()
-  const project = await loadOwnedReelProject(supabase, projectId, familyId)
+  const project = await loadOwnedReelProject(lumiCore, projectId, familyId)
   if (!project) redirect(returnTo || '/content-studio')
 
-  await supabase.from('content_reel_media_items').delete().eq('id', itemId).eq('project_id', projectId)
+  await lumiCore.from('travel_content_reel_media_items').delete().eq('id', itemId).eq('project_id', projectId)
 
   redirect(returnTo)
 }
@@ -210,17 +225,17 @@ export async function saveReelVideoThumbnail(formData: FormData): Promise<{ ok: 
   const stagingPath = String(formData.get('staging_path') ?? '')
   if (!videoId || !stagingPath) return { ok: false }
 
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const { id: familyId } = await getFamily()
 
-  const { data: video } = await supabase.from('memory_videos').select('id, family_id').eq('id', videoId).eq('family_id', familyId).maybeSingle()
+  const { data: video } = await lumiCore.from('travel_memory_videos').select('id, household_id').eq('id', videoId).eq('household_id', familyId).maybeSingle()
   if (!video) return { ok: false }
 
   const finalPath = `${familyId}/thumb-${crypto.randomUUID()}.jpg`
-  const { error: moveError } = await supabase.storage.from(STORAGE_BUCKET).move(stagingPath, finalPath)
+  const { error: moveError } = await lumiCore.storage.from(STORAGE_BUCKET).move(stagingPath, finalPath)
   if (moveError) return { ok: false }
 
-  const { error: updateError } = await supabase.from('memory_videos').update({ thumbnail_storage_path: finalPath }).eq('id', videoId)
+  const { error: updateError } = await lumiCore.from('travel_memory_videos').update({ thumbnail_storage_path: finalPath }).eq('id', videoId)
   return { ok: !updateError }
 }
 
@@ -236,24 +251,24 @@ export async function saveReelVideoThumbnail(formData: FormData): Promise<{ ok: 
  * dabei erhalten (nur die eine Szene fällt weg), wie gefordert.
  */
 export async function deleteReelVideo(videoId: string, returnTo: string): Promise<void> {
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const { id: familyId } = await getFamily()
 
-  const { data: video } = await supabase
-    .from('memory_videos')
-    .select('id, family_id, trip_id, storage_path, thumbnail_storage_path')
-    .eq('id', videoId).eq('family_id', familyId).maybeSingle()
+  const { data: video } = await lumiCore
+    .from('travel_memory_videos')
+    .select('id, household_id, trip_id, storage_path, thumbnail_storage_path')
+    .eq('id', videoId).eq('household_id', familyId).maybeSingle()
   if (!video) redirect(`${returnTo}?error=${encodeURIComponent('Video nicht gefunden.')}`)
 
   // §Storyboards derselben Reise durchsuchen (ein Video kann in mehreren Reel-Projekten ausgewählt sein).
   const { data: reelProjects } = video.trip_id
-    ? await supabase.from('content_projects').select('id').eq('trip_id', video.trip_id).eq('project_type', 'reel')
+    ? await lumiCore.from('travel_content_projects').select('id').eq('trip_id', video.trip_id).eq('project_type', 'reel')
     : { data: [] as { id: string }[] }
   const projectIds = (reelProjects ?? []).map((p) => p.id)
 
   if (projectIds.length > 0) {
-    const { data: drafts } = await supabase
-      .from('content_drafts')
+    const { data: drafts } = await lumiCore
+      .from('travel_content_drafts')
       .select('id, structure')
       .eq('draft_type', 'video_reel')
       .in('project_id', projectIds)
@@ -269,17 +284,17 @@ export async function deleteReelVideo(videoId: string, returnTo: string): Promis
       const newStructure: ReelStoryboardStructure = {
         ...structure, scenes: rebalanceScenes(remainingScenes, target), _previous_scenes: previousScenes,
       }
-      await supabase.from('content_drafts').update({ structure: newStructure as unknown as Json }).eq('id', draft.id)
+      await lumiCore.from('travel_content_drafts').update({ structure: newStructure }).eq('id', draft.id)
     }
   }
 
-  await supabase.from('content_reel_media_items').delete().eq('source_type', 'video').eq('source_id', videoId)
+  await lumiCore.from('travel_content_reel_media_items').delete().eq('source_type', 'video').eq('source_id', videoId)
 
   const pathsToRemove = [video.storage_path, video.thumbnail_storage_path].filter((p): p is string => Boolean(p))
-  const { error: removeError } = await supabase.storage.from(STORAGE_BUCKET).remove(pathsToRemove)
+  const { error: removeError } = await lumiCore.storage.from(STORAGE_BUCKET).remove(pathsToRemove)
   if (removeError) redirect(`${returnTo}?error=${encodeURIComponent('Storage-Datei konnte nicht gelöscht werden.')}`)
 
-  const { error: deleteError } = await supabase.from('memory_videos').delete().eq('id', videoId)
+  const { error: deleteError } = await lumiCore.from('travel_memory_videos').delete().eq('id', videoId)
   if (deleteError) redirect(`${returnTo}?error=${encodeURIComponent('Speicherfehler beim Löschen.')}`)
 
   redirect(returnTo)
@@ -292,13 +307,13 @@ export async function reorderReelMediaItem(formData: FormData) {
   const direction = String(formData.get('direction') ?? '')
   const returnTo = String(formData.get('return_to') ?? '').trim()
 
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const { id: familyId } = await getFamily()
-  const project = await loadOwnedReelProject(supabase, projectId, familyId)
+  const project = await loadOwnedReelProject(lumiCore, projectId, familyId)
   if (!project) redirect(returnTo || '/content-studio')
 
-  const { data: itemsRaw } = await supabase
-    .from('content_reel_media_items')
+  const { data: itemsRaw } = await lumiCore
+    .from('travel_content_reel_media_items')
     .select('id, sort_order')
     .eq('project_id', projectId)
     .order('sort_order', { ascending: true })
@@ -311,7 +326,7 @@ export async function reorderReelMediaItem(formData: FormData) {
   const reordered = [...items]
   ;[reordered[index], reordered[swapWith]] = [reordered[swapWith], reordered[index]]
 
-  await Promise.all(reordered.map((it, i) => supabase.from('content_reel_media_items').update({ sort_order: i }).eq('id', it.id)))
+  await Promise.all(reordered.map((it, i) => lumiCore.from('travel_content_reel_media_items').update({ sort_order: i }).eq('id', it.id)))
 
   redirect(returnTo)
 }

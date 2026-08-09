@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation'
 import { after } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { createJob, completeJob, failJob } from '@/lib/ai-generation-jobs'
 import { geocodeLocation, searchLodging, computeLodgingRadiusMeters, type LodgingResult } from '@/lib/providers/places-provider'
 import { computeRouteMatrix } from '@/lib/providers/routes-provider'
@@ -14,7 +15,7 @@ import type { HotelShortlist } from '@/lib/trip-idea-hotel-types'
 
 type IdeaRow = {
   id: string
-  family_id: string
+  household_id: string
   session_id: string | null
   destination: string
   route_summary: string | null
@@ -29,23 +30,24 @@ type IdeaRow = {
 
 async function loadIdeaContext(ideaId: string) {
   const supabase = await createClient()
-  const { data: idea } = await supabase
-    .from('trip_ideas')
-    .select('id, family_id, session_id, destination, route_summary, duration_days_min, duration_days_max, budget_range_min, budget_range_max, budget_currency, includes_flights, hotel_shortlist')
+  const lumiCore = await createLumiCoreClient()
+  const { data: idea } = await lumiCore
+    .from('travel_trip_ideas')
+    .select('id, household_id, session_id, destination, route_summary, duration_days_min, duration_days_max, budget_range_min, budget_range_max, budget_currency, includes_flights, hotel_shortlist')
     .eq('id', ideaId)
     .maybeSingle()
   if (!idea) return null
 
   const { data: session } = idea.session_id
-    ? await supabase
-      .from('trip_idea_sessions')
-      .select('traveler_ids, travel_start_date, climate_preference, trip_type_preference, stopover_preference, max_stopovers')
+    ? await lumiCore
+      .from('travel_trip_idea_sessions')
+      .select('traveler_household_member_ids, travel_start_date, climate_preference, trip_type_preference, stopover_preference, max_stopovers')
       .eq('id', idea.session_id)
       .maybeSingle()
     : { data: null }
 
-  const dnaSummary = await buildFamilyDnaSummary(idea.family_id)
-  const travelerIds = session?.traveler_ids as string[] | null
+  const dnaSummary = await buildFamilyDnaSummary(idea.household_id)
+  const travelerIds = session?.traveler_household_member_ids as string[] | null
   const selectedPersons = travelerIds && travelerIds.length > 0
     ? dnaSummary.persons.filter((p) => travelerIds.includes(p.id))
     : dnaSummary.persons
@@ -57,7 +59,7 @@ async function loadIdeaContext(ideaId: string) {
   const effectiveDate = session?.travel_start_date ?? new Date().toISOString().slice(0, 10)
 
   return {
-    supabase, idea: idea as unknown as IdeaRow, dnaSummary, selectedPersons, effectiveDate,
+    supabase, lumiCore, idea: idea as unknown as IdeaRow, dnaSummary, selectedPersons, effectiveDate,
     climatePreference: (session?.climate_preference as string | null) ?? null,
     tripTypePreference: (session?.trip_type_preference as string | null) ?? null,
     stopoverPreference: (session?.stopover_preference as string | null) ?? null,
@@ -79,9 +81,9 @@ export async function generateHotelShortlist(formData: FormData) {
 
   const ctx = await loadIdeaContext(ideaId)
   if (!ctx) redirect(returnTo)
-  const { supabase, idea, dnaSummary, selectedPersons, effectiveDate } = ctx
+  const { supabase, lumiCore, idea, dnaSummary, selectedPersons, effectiveDate } = ctx
 
-  const jobId = await createJob(idea.family_id, 'trip_idea_hotel_shortlist', supabase)
+  const jobId = await createJob(idea.household_id, 'trip_idea_hotel_shortlist', supabase)
 
   after(async () => {
     try {
@@ -237,8 +239,8 @@ export async function generateHotelShortlist(formData: FormData) {
         return
       }
 
-      const { error: updateError } = await supabase
-        .from('trip_ideas')
+      const { error: updateError } = await lumiCore
+        .from('travel_trip_ideas')
         .update({
           hotel_shortlist: { items: shortlist, belowStandard: belowStandardMode, limitedInventory },
           hotel_shortlist_updated_at: new Date().toISOString(),
@@ -272,9 +274,9 @@ export async function estimateTripIdeaBudget(formData: FormData) {
 
   const ctx = await loadIdeaContext(ideaId)
   if (!ctx) redirect(returnTo)
-  const { supabase, idea, dnaSummary, selectedPersons, effectiveDate } = ctx
+  const { supabase, lumiCore, idea, dnaSummary, selectedPersons, effectiveDate } = ctx
 
-  const jobId = await createJob(idea.family_id, 'trip_idea_budget_estimate', supabase)
+  const jobId = await createJob(idea.household_id, 'trip_idea_budget_estimate', supabase)
 
   after(async () => {
     try {
@@ -298,8 +300,8 @@ export async function estimateTripIdeaBudget(formData: FormData) {
         return
       }
 
-      const { error: updateError } = await supabase
-        .from('trip_ideas')
+      const { error: updateError } = await lumiCore
+        .from('travel_trip_ideas')
         .update({ budget_breakdown: estimate, budget_breakdown_updated_at: new Date().toISOString() })
         .eq('id', ideaId)
 
@@ -332,9 +334,9 @@ export async function generateTripVariants(formData: FormData) {
 
   const ctx = await loadIdeaContext(ideaId)
   if (!ctx) redirect(returnTo)
-  const { supabase, idea, dnaSummary, selectedPersons, effectiveDate, climatePreference, tripTypePreference, stopoverPreference, maxStopovers } = ctx
+  const { supabase, lumiCore, idea, dnaSummary, selectedPersons, effectiveDate, climatePreference, tripTypePreference, stopoverPreference, maxStopovers } = ctx
 
-  const jobId = await createJob(idea.family_id, 'trip_idea_variants_generate', supabase)
+  const jobId = await createJob(idea.household_id, 'trip_idea_variants_generate', supabase)
 
   after(async () => {
     try {
@@ -398,8 +400,8 @@ export async function generateTripVariants(formData: FormData) {
         recommendedHotel: v.recommendedHotelName ? shortlistByName.get(v.recommendedHotelName) ?? null : null,
       }))
 
-      const { error: updateError } = await supabase
-        .from('trip_ideas')
+      const { error: updateError } = await lumiCore
+        .from('travel_trip_ideas')
         .update({ variants: storedVariants, variants_generated_at: new Date().toISOString() })
         .eq('id', ideaId)
 

@@ -1,6 +1,7 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
+import { toTravelDocumentsPath } from '@/lib/lumi-core-storage/paths'
 import { redirect } from 'next/navigation'
 import { readDateGroupFromFormData } from '@/lib/documents'
 import { getFamily } from '@/lib/family'
@@ -66,29 +67,27 @@ export async function createTrip(formData: FormData) {
 
   const finalTitle = title || destination
 
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
-  const { data: family } = await supabase
-    .from('families').select('id').limit(1).single()
-
-  if (!family?.id)
-    redirect(`${referer}?error=${encodeURIComponent('Familiendaten nicht gefunden')}`)
+  const { id: householdId } = await getFamily()
+  if (!householdId)
+    redirect(`${referer}?error=${encodeURIComponent('Haushaltsdaten nicht gefunden')}`)
 
   // Eindeutigen Slug sicherstellen
   const baseSlug = slugify(finalTitle) || 'reise'
   let slug = baseSlug
   for (let i = 1; i <= 99; i++) {
-    const { data: existing } = await supabase
-      .from('trips').select('id').eq('slug', slug).maybeSingle()
+    const { data: existing } = await lumiCore
+      .from('travel_trips').select('id').eq('slug', slug).maybeSingle()
     if (!existing) break
     slug = `${baseSlug}-${i}`
   }
 
-  const { data: trip, error } = await supabase
-    .from('trips')
+  const { data: trip, error } = await lumiCore
+    .from('travel_trips')
     .insert({
       slug,
-      family_id: family.id,
+      household_id: householdId,
       title: finalTitle,
       subtitle: destination,
       status,
@@ -101,14 +100,14 @@ export async function createTrip(formData: FormData) {
   if (error || !trip)
     redirect(`${referer}?error=${encodeURIComponent('Speicherfehler: ' + (error?.message ?? 'Unbekannt'))}`)
 
-  await supabase.from('trip_members').insert(
-    memberIds.map(person_id => ({ trip_id: trip.id, person_id }))
+  await lumiCore.from('travel_trip_members').insert(
+    memberIds.map(household_member_id => ({ trip_id: trip.id, household_member_id }))
   )
 
   // §"Vorhandene Etappen als Fallback": eine erste, undatierte Etappe mit dem
   // angegebenen Reiseziel gibt der Zeitraum-Ableitung (und der Wetter-/
   // Standort-Auflösung) von Anfang an eine Grundlage, auch ganz ohne Buchungen.
-  await supabase.from('stages').insert({
+  await lumiCore.from('travel_stages').insert({
     trip_id: trip.id, title: destination, location: destination,
     start_date: startDate, end_date: endDate, sort_order: 0,
   })
@@ -121,14 +120,16 @@ export async function createTrip(formData: FormData) {
       const staged = await downloadAndClearStagedUpload(stagedPaths[0])
       if (staged?.mimeType.startsWith('image/')) {
         const compressed = await compressImageForStorage(staged.buffer)
-        const coverPath = `memories/${family!.id}/${crypto.randomUUID()}.webp`
-        const { error: uploadError } = await supabase.storage.from('documents')
-          .upload(coverPath, new Blob([new Uint8Array(compressed)], { type: 'image/webp' }), { contentType: 'image/webp', cacheControl: '31536000' })
-        if (!uploadError) {
-          const { data: coverPhoto } = await supabase.from('memory_photos').insert({
-            family_id: family!.id, trip_id: trip.id, storage_path: coverPath, is_selected: true,
-          }).select('id').single()
-          if (coverPhoto) await supabase.from('trips').update({ cover_photo_id: coverPhoto.id }).eq('id', trip.id)
+        const coverPath = await toTravelDocumentsPath(`memories/${crypto.randomUUID()}.webp`)
+        if (coverPath) {
+          const { error: uploadError } = await lumiCore.storage.from('travel-documents')
+            .upload(coverPath, new Blob([new Uint8Array(compressed)], { type: 'image/webp' }), { contentType: 'image/webp', cacheControl: '31536000' })
+          if (!uploadError) {
+            const { data: coverPhoto } = await lumiCore.from('travel_memory_photos').insert({
+              household_id: householdId, trip_id: trip.id, storage_path: coverPath, is_selected: true,
+            }).select('id').single()
+            if (coverPhoto) await lumiCore.from('travel_trips').update({ cover_photo_id: coverPhoto.id }).eq('id', trip.id)
+          }
         }
       }
     } catch {
@@ -139,10 +140,10 @@ export async function createTrip(formData: FormData) {
   // Reiseidee → echte Reise: nur Nachverfolgung (converted_trip_id), keine
   // Doppelanlage und keine Änderung an der neu angelegten Reise selbst.
   if (sourceTripIdeaId) {
-    const { data: idea } = await supabase.from('trip_ideas').select('session_id').eq('id', sourceTripIdeaId).maybeSingle()
-    await supabase.from('trip_ideas').update({ converted_trip_id: trip.id, is_chosen: true }).eq('id', sourceTripIdeaId)
+    const { data: idea } = await lumiCore.from('travel_trip_ideas').select('session_id').eq('id', sourceTripIdeaId).maybeSingle()
+    await lumiCore.from('travel_trip_ideas').update({ converted_trip_id: trip.id, is_chosen: true }).eq('id', sourceTripIdeaId)
     if (idea?.session_id)
-      await supabase.from('trip_idea_sessions').update({ status: 'converted' }).eq('id', idea.session_id)
+      await lumiCore.from('travel_trip_idea_sessions').update({ status: 'converted' }).eq('id', idea.session_id)
   }
 
   redirect(`/trips/${trip.slug}`)
@@ -155,10 +156,10 @@ export async function updateTrip(formData: FormData) {
   const status    = String(formData.get('status') ?? '').trim()
   const memberIds = formData.getAll('members').map(String)
 
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
-  const { data: trip } = await supabase
-    .from('trips').select('slug').eq('id', tripId).maybeSingle()
+  const { data: trip } = await lumiCore
+    .from('travel_trips').select('slug').eq('id', tripId).maybeSingle()
 
   if (!trip?.slug)
     redirect(`/trips?error=${encodeURIComponent('Reise nicht gefunden')}`)
@@ -189,8 +190,8 @@ export async function updateTrip(formData: FormData) {
   if (memberIds.length === 0)
     redirect(`${editPath}?error=${encodeURIComponent('Mindestens eine Person muss ausgewählt sein')}`)
 
-  const { error } = await supabase
-    .from('trips')
+  const { error } = await lumiCore
+    .from('travel_trips')
     .update({
       title,
       subtitle: subtitle || null,
@@ -203,9 +204,9 @@ export async function updateTrip(formData: FormData) {
   if (error)
     redirect(`${editPath}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
 
-  await supabase.from('trip_members').delete().eq('trip_id', tripId)
-  await supabase.from('trip_members').insert(
-    memberIds.map(person_id => ({ trip_id: tripId, person_id }))
+  await lumiCore.from('travel_trip_members').delete().eq('trip_id', tripId)
+  await lumiCore.from('travel_trip_members').insert(
+    memberIds.map(household_member_id => ({ trip_id: tripId, household_member_id }))
   )
 
   redirect(`/trips/${trip.slug}`)
@@ -213,19 +214,19 @@ export async function updateTrip(formData: FormData) {
 
 export async function archiveTrip(formData: FormData) {
   const tripId = String(formData.get('trip_id') ?? '')
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
-  await supabase.from('trips').update({ status: 'archived' }).eq('id', tripId)
+  await lumiCore.from('travel_trips').update({ status: 'archived' }).eq('id', tripId)
 
   redirect('/trips')
 }
 
 export async function restoreTrip(formData: FormData) {
   const tripId = String(formData.get('trip_id') ?? '')
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
-  await supabase
-    .from('trips')
+  await lumiCore
+    .from('travel_trips')
     .update({ status: 'planned' })
     .eq('id', tripId)
     .eq('status', 'archived')
@@ -235,10 +236,10 @@ export async function restoreTrip(formData: FormData) {
 
 export async function deleteTripPermanently(formData: FormData) {
   const tripId = String(formData.get('trip_id') ?? '')
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
-  const { data: trip } = await supabase
-    .from('trips').select('status').eq('id', tripId).maybeSingle()
+  const { data: trip } = await lumiCore
+    .from('travel_trips').select('status').eq('id', tripId).maybeSingle()
 
   // Endgültiges Löschen ist ausschließlich aus dem Archiv erreichbar — auch
   // serverseitig erzwungen, falls die Action jemals außerhalb dieses Flows
@@ -246,7 +247,7 @@ export async function deleteTripPermanently(formData: FormData) {
   if (trip?.status !== 'archived')
     redirect(`/trips?error=${encodeURIComponent('Nur archivierte Reisen können endgültig gelöscht werden')}`)
 
-  await supabase.from('trips').delete().eq('id', tripId)
+  await lumiCore.from('travel_trips').delete().eq('id', tripId)
 
   redirect('/trips?f=archiviert')
 }

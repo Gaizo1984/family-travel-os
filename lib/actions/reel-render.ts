@@ -5,6 +5,7 @@ import os from 'node:os'
 import { existsSync, readFileSync, unlinkSync } from 'node:fs'
 import { deployFunction, getOrCreateBucket, deploySiteFromBundle, renderMediaOnLambda, getRenderProgress, downloadMedia, deleteRender } from '@remotion/lambda'
 import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { getFamily } from '@/lib/family'
 import { getRemotionLambdaEnv } from '@/lib/server-env'
 import { REMOTION_LAMBDA_REGION, REMOTION_LAMBDA_SITE_NAME, REMOTION_LAMBDA_DELETE_AFTER, REMOTION_LAMBDA_COMPOSITION_BY_STYLE } from '@/lib/remotion-lambda-config'
@@ -26,7 +27,7 @@ import type { ReelCompositionScene } from '@/remotion/ReelTimelineComposition'
  */
 
 const RENDER_URL_TTL_SECONDS = 3600 // §"ausschließlich kurzlebige Signed URLs" (Nutzervorgabe): lang genug für einen kompletten Lambda-Render, trotzdem befristet.
-const SOURCE_BUCKET = 'documents'
+const SOURCE_BUCKET = 'travel-documents'
 const OUTPUT_BUCKET = 'content-reels'
 const BUNDLE_DIR = path.join(process.cwd(), 'remotion', '.output')
 const MAX_ERROR_MESSAGE_LENGTH = 500
@@ -49,22 +50,32 @@ type PollResult = { ok: boolean; render?: ReelRenderStatus; error?: string }
 
 async function loadOwnedRenderContext(projectId: string) {
   const { id: familyId } = await getFamily()
+  // §content_projects/content_drafts sind jetzt Lumi Core (travel_*).
+  // content_reel_renders bleibt bewusst bei Travel: lib/supabase/lumi-core-types.ts
+  // travel_content_reel_renders fehlen aktuell aws_bucket_name/aws_function_name/
+  // cost_estimate_usd/output_size_bytes/render_duration_seconds (von diesem
+  // Remotion-Lambda-Pfad zwingend benötigt) -- eine Umstellung würde die
+  // Render-Status-/Kosten-Verfolgung brechen, bis dieser Typ-/Schema-Stand
+  // ergänzt ist. Die Storage-Buckets 'documents' (memory_photos/memory_videos-
+  // Quellmedien) und 'content-reels' (Render-Ausgabe, in Lumi Core noch nicht
+  // angelegt) bleiben ebenfalls bewusst bei Travels eigenem Storage.
   const supabase = await createClient()
-  const { data: project } = await supabase
-    .from('content_projects')
-    .select('id, family_id, trip_id, reel_style, reel_duration_seconds')
-    .eq('id', projectId).eq('family_id', familyId).eq('project_type', 'reel')
+  const lumiCore = await createLumiCoreClient()
+  const { data: project } = await lumiCore
+    .from('travel_content_projects')
+    .select('id, household_id, trip_id, reel_style, reel_duration_seconds')
+    .eq('id', projectId).eq('household_id', familyId).eq('project_type', 'reel')
     .maybeSingle()
   if (!project) return null
 
-  const { data: draft } = await supabase
-    .from('content_drafts')
+  const { data: draft } = await lumiCore
+    .from('travel_content_drafts')
     .select('id, structure')
     .eq('project_id', projectId).eq('draft_type', 'video_reel')
     .order('created_at', { ascending: false }).limit(1).maybeSingle()
   if (!draft) return null
 
-  return { supabase, familyId, project, draftId: draft.id, structure: draft.structure as unknown as ReelStoryboardStructure }
+  return { supabase, lumiCore, familyId, project, draftId: draft.id, structure: draft.structure as unknown as ReelStoryboardStructure }
 }
 
 /**
@@ -76,14 +87,14 @@ async function loadOwnedRenderContext(projectId: string) {
  * nicht gibt.
  */
 async function resolveScenesForRender(
-  supabase: Awaited<ReturnType<typeof createClient>>, structure: ReelStoryboardStructure, photoVariant: 'thumb800' | 'original',
+  lumiCore: Awaited<ReturnType<typeof createLumiCoreClient>>, structure: ReelStoryboardStructure, photoVariant: 'thumb800' | 'original',
 ): Promise<{ scenes: ReelCompositionScene[]; musicUrl: string | null } | null> {
   const photoIds = structure.scenes.filter((s) => s.source_type === 'photo').map((s) => s.source_id)
   const videoIds = structure.scenes.filter((s) => s.source_type === 'video').map((s) => s.source_id)
 
   const [{ data: photoRows }, { data: videoRows }] = await Promise.all([
-    photoIds.length > 0 ? supabase.from('memory_photos').select('id, storage_path').in('id', photoIds) : Promise.resolve({ data: [] as { id: string; storage_path: string }[] }),
-    videoIds.length > 0 ? supabase.from('memory_videos').select('id, storage_path').in('id', videoIds) : Promise.resolve({ data: [] as { id: string; storage_path: string }[] }),
+    photoIds.length > 0 ? lumiCore.from('travel_memory_photos').select('id, storage_path').in('id', photoIds) : Promise.resolve({ data: [] as { id: string; storage_path: string }[] }),
+    videoIds.length > 0 ? lumiCore.from('travel_memory_videos').select('id, storage_path').in('id', videoIds) : Promise.resolve({ data: [] as { id: string; storage_path: string }[] }),
   ])
 
   const photoPathById = new Map((photoRows ?? []).map((p) => [p.id, p.storage_path]))
@@ -93,7 +104,7 @@ async function resolveScenesForRender(
 
   const videoUrlById = new Map<string, string>()
   for (const v of videoRows ?? []) {
-    const { data: signed } = await supabase.storage.from(SOURCE_BUCKET).createSignedUrl(v.storage_path, RENDER_URL_TTL_SECONDS)
+    const { data: signed } = await lumiCore.storage.from(SOURCE_BUCKET).createSignedUrl(v.storage_path, RENDER_URL_TTL_SECONDS)
     if (signed?.signedUrl) videoUrlById.set(v.id, signed.signedUrl)
   }
 
@@ -116,7 +127,7 @@ async function resolveScenesForRender(
 
   let musicUrl: string | null = null
   if (structure.music_source === 'custom' && structure.music_storage_path) {
-    const { data: signed } = await supabase.storage.from(SOURCE_BUCKET).createSignedUrl(structure.music_storage_path, RENDER_URL_TTL_SECONDS)
+    const { data: signed } = await lumiCore.storage.from(SOURCE_BUCKET).createSignedUrl(structure.music_storage_path, RENDER_URL_TTL_SECONDS)
     musicUrl = signed?.signedUrl ?? null
   }
   return { scenes, musicUrl }
@@ -191,7 +202,7 @@ export async function startReelRender(projectId: string, quality: 'preview_lowre
     if (await isReelRenderLimitReached(ctx.familyId)) return { ok: false, error: 'Monatslimit für Reel-Renders erreicht.' }
 
     const compositionId = REMOTION_LAMBDA_COMPOSITION_BY_STYLE[ctx.project.reel_style ?? ''] ?? 'FamilyMemoryReel'
-    const resolved = await resolveScenesForRender(ctx.supabase, ctx.structure, quality === 'final' ? 'original' : 'thumb800')
+    const resolved = await resolveScenesForRender(ctx.lumiCore, ctx.structure, quality === 'final' ? 'original' : 'thumb800')
     if (!resolved) return { ok: false, error: 'Mindestens ein Medium konnte nicht geladen werden. Bitte gleich noch einmal versuchen.' }
 
     const { data: renderRow, error: insertError } = await ctx.supabase.from('content_reel_renders').insert({

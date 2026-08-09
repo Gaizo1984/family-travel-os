@@ -1,10 +1,18 @@
 'use client'
 
 import { useRef, useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { createBrowserClient } from '@supabase/ssr'
 
 type UploadSlot = { path: string; token: string }
 type VideoNeedingThumbnail = { videoId: string; signedUrl: string }
+
+/** Eigener, minimaler Lumi-Core-Browser-Client für den Signed-Upload-Schritt -- siehe components/DirectPhotoUploadForm.tsx für das gleiche Muster. */
+function createLumiCoreBrowserClient() {
+  return createBrowserClient(
+    process.env.NEXT_PUBLIC_LUMI_CORE_URL!,
+    process.env.NEXT_PUBLIC_LUMI_CORE_PUBLISHABLE_KEY!,
+  )
+}
 
 /**
  * §"Bei Videos nur ein Standbild/Posterframe analysieren, niemals das
@@ -86,7 +94,7 @@ export function GenerateReelStoryboardButton({
 
     try {
       if (videosNeedingThumbnail.length > 0) {
-        const supabase = createClient()
+        const lumiCore = createLumiCoreBrowserClient()
         const slots = await createThumbnailSlots(videosNeedingThumbnail.length)
         for (let i = 0; i < videosNeedingThumbnail.length; i++) {
           const video = videosNeedingThumbnail[i]
@@ -94,7 +102,7 @@ export function GenerateReelStoryboardButton({
           if (!slot) continue
           const blob = await capturePosterframe(video.signedUrl)
           if (!blob) continue
-          const { error: uploadError } = await supabase.storage.from('documents')
+          const { error: uploadError } = await lumiCore.storage.from('travel-documents')
             .uploadToSignedUrl(slot.path, slot.token, blob, { contentType: 'image/jpeg' })
           if (uploadError) continue
           const fd = new FormData()

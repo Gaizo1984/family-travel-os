@@ -1,4 +1,5 @@
-import { createClient } from './supabase/server'
+import { createLumiCoreClient } from './supabase/lumi-core-server'
+import { listHouseholdMembers } from './household-members'
 import { isTripCurrentlyRunning } from './trip-status'
 import { deriveTripDateRange } from './trip-dates'
 import { sortStagesChronologically, buildJourneyTimeline } from './journey'
@@ -25,7 +26,6 @@ export type ContentStrategyContext = {
   memberNames: string[]
 }
 
-type PersonRow = { id: string; name: string }
 type StageRow = {
   id: string; title: string; location: string | null; nights: number | null
   start_date: string | null; end_date: string | null; accommodation: string | null
@@ -43,8 +43,45 @@ type JourneyEventRow = {
 type TripRow = {
   id: string; slug: string; title: string; subtitle: string | null; status: string
   start_date: string | null; end_date: string | null
-  trip_members: Array<{ persons: PersonRow | null }>
+  trip_members: Array<{ household_member_id: string }>
   stages: StageRow[]; bookings: BookingRow[]; journey_events: JourneyEventRow[]
+}
+
+/** Lädt eine Reise mitsamt Etappen/Buchungen/Journey-Terminen/Mitgliedern flach aus den travel_*-Tabellen (Lumi Core kennt keine verschachtelten Selects über Fremdschlüssel-Relationen wie Travel). */
+async function fetchTripsWithRelations(lumiCore: Awaited<ReturnType<typeof createLumiCoreClient>>, householdId: string): Promise<TripRow[]> {
+  const { data: tripsRaw } = await lumiCore
+    .from('travel_trips')
+    .select('id, slug, title, subtitle, status, start_date, end_date')
+    .eq('household_id', householdId)
+  const trips = tripsRaw ?? []
+  const tripIds = trips.map((t) => t.id)
+  if (tripIds.length === 0) return []
+
+  const [{ data: membersRaw }, { data: stagesRaw }, { data: bookingsRaw }, { data: eventsRaw }] = await Promise.all([
+    lumiCore.from('travel_trip_members').select('trip_id, household_member_id').in('trip_id', tripIds),
+    lumiCore.from('travel_stages').select('trip_id, id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code').in('trip_id', tripIds),
+    lumiCore.from('travel_bookings').select('trip_id, id, type, title, provider, status, start_datetime, end_datetime, stage_id, details, created_at').in('trip_id', tripIds),
+    lumiCore.from('travel_journey_events').select('trip_id, id, stage_id, date, time, category, title, location, status').in('trip_id', tripIds),
+  ])
+
+  const byTrip = <T extends { trip_id: string }>(rows: T[] | null) => {
+    const map = new Map<string, T[]>()
+    for (const r of rows ?? []) { const list = map.get(r.trip_id) ?? []; list.push(r); map.set(r.trip_id, list) }
+    return map
+  }
+  const membersByTrip = byTrip(membersRaw)
+  const stagesByTrip = byTrip(stagesRaw)
+  const bookingsByTrip = byTrip(bookingsRaw)
+  const eventsByTrip = byTrip(eventsRaw)
+
+  return trips.map((t) => ({
+    id: t.id, slug: t.slug, title: t.title, subtitle: t.subtitle, status: t.status,
+    start_date: t.start_date, end_date: t.end_date,
+    trip_members: (membersByTrip.get(t.id) ?? []).map((m) => ({ household_member_id: m.household_member_id })),
+    stages: (stagesByTrip.get(t.id) ?? []) as unknown as StageRow[],
+    bookings: (bookingsByTrip.get(t.id) ?? []) as unknown as BookingRow[],
+    journey_events: (eventsByTrip.get(t.id) ?? []) as unknown as JourneyEventRow[],
+  }))
 }
 
 /**
@@ -55,21 +92,12 @@ type TripRow = {
  * Tag", über den eine Strategie sinnvoll wäre).
  */
 export async function buildContentStrategyContext(familyId: string, tripIdOverride?: string | null): Promise<ContentStrategyContext | null> {
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const todayIso = todayIsoInFamilyTimezone()
 
-  const { data: trips } = await supabase
-    .from('trips')
-    .select(`
-      id, slug, title, subtitle, status, start_date, end_date,
-      trip_members ( persons ( id, name ) ),
-      stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code ),
-      bookings ( id, type, title, provider, status, start_datetime, end_datetime, stage_id, details, created_at ),
-      journey_events ( id, stage_id, date, time, category, title, location, status )
-    `)
-    .eq('family_id', familyId)
+  const trips = await fetchTripsWithRelations(lumiCore, familyId)
 
-  const tripsWithDerivedDates = ((trips ?? []) as unknown as TripRow[]).map((t) => { const range = deriveTripDateRange(t, t.bookings, t.stages); return { ...t, start_date: range.startDate, end_date: range.endDate } })
+  const tripsWithDerivedDates = trips.map((t) => { const range = deriveTripDateRange(t, t.bookings, t.stages); return { ...t, start_date: range.startDate, end_date: range.endDate } })
   // §"Reiseauswahl in Frag LUMI" (Nutzervorgabe): "heutiger Plan"/Wetter/
   // `today_important` etc. ergeben nur für eine AKTIV laufende Reise Sinn --
   // ist die per Override gewählte Reise nicht aktiv, liefert diese Funktion
@@ -110,7 +138,12 @@ export async function buildContentStrategyContext(familyId: string, tripIdOverri
     weekday: 'long', day: '2-digit', month: 'long', year: 'numeric',
   })
 
-  const memberNames = activeTrip.trip_members.flatMap((m) => (m.persons ? [m.persons.name] : []))
+  const allHouseholdMembers = await listHouseholdMembers()
+  const nameById = new Map(allHouseholdMembers.map((m) => [m.id, m.name]))
+  const memberNames = activeTrip.trip_members.flatMap((m) => {
+    const name = nameById.get(m.household_member_id)
+    return name ? [name] : []
+  })
 
   return {
     tripId: activeTrip.id,
@@ -154,21 +187,11 @@ const POSTING_PLAN_DAYS_AHEAD = 5
  * weggelassen statt für einen anderen Ort geraten.
  */
 export async function buildContentPostingPlanContext(familyId: string): Promise<ContentPostingPlanContext | null> {
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const todayIso = todayIsoInFamilyTimezone()
 
-  const { data: trips } = await supabase
-    .from('trips')
-    .select(`
-      id, slug, title, subtitle, status, start_date, end_date,
-      trip_members ( persons ( id, name ) ),
-      stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code ),
-      bookings ( id, type, title, provider, status, start_datetime, end_datetime, stage_id, details, created_at ),
-      journey_events ( id, stage_id, date, time, category, title, location, status )
-    `)
-    .eq('family_id', familyId)
-
-  const tripsWithDerivedDates = ((trips ?? []) as unknown as TripRow[]).map((t) => { const range = deriveTripDateRange(t, t.bookings, t.stages); return { ...t, start_date: range.startDate, end_date: range.endDate } })
+  const trips = await fetchTripsWithRelations(lumiCore, familyId)
+  const tripsWithDerivedDates = trips.map((t) => { const range = deriveTripDateRange(t, t.bookings, t.stages); return { ...t, start_date: range.startDate, end_date: range.endDate } })
   const activeTrip = tripsWithDerivedDates.find((t) => isTripCurrentlyRunning(t, todayIso))
   if (!activeTrip) return null
 
@@ -214,7 +237,12 @@ export async function buildContentPostingPlanContext(familyId: string): Promise<
     return { forDate: dateIso, dateLabel, locationLabel: dayLocation.label, weatherSummary, knownPlanText, highlightTitle }
   })
 
-  const memberNames = activeTrip.trip_members.flatMap((m) => (m.persons ? [m.persons.name] : []))
+  const allHouseholdMembers = await listHouseholdMembers()
+  const nameById = new Map(allHouseholdMembers.map((m) => [m.id, m.name]))
+  const memberNames = activeTrip.trip_members.flatMap((m) => {
+    const name = nameById.get(m.household_member_id)
+    return name ? [name] : []
+  })
 
   return { tripId: activeTrip.id, tripTitle: activeTrip.title, memberNames, days }
 }

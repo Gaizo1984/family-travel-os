@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Player } from '@remotion/player'
 import { ArrowUp, ArrowDown, Trash2, Sparkles, RotateCcw, Music, Upload, X, Scale } from 'lucide-react'
-import { createClient } from '@/lib/supabase/client'
+import { createBrowserClient } from '@supabase/ssr'
 import { ReelTimelineComposition, type ReelCompositionScene, type ReelStyleId } from '@/remotion/ReelTimelineComposition'
 import type { ReelStoryboardStructure } from '@/lib/reel-storyboard-types'
 import {
@@ -27,6 +27,14 @@ type Actions = {
   createMusicSlot: () => Promise<{ path: string; token: string } | null>
   uploadMusic: (projectId: string, stagingPath: string, mimeType: string) => Promise<MutationResult>
   removeMusic: (projectId: string) => Promise<MutationResult>
+}
+
+/** Eigener, minimaler Lumi-Core-Browser-Client für den Signed-Upload-Schritt -- siehe components/DirectPhotoUploadForm.tsx für das gleiche Muster. */
+function createLumiCoreBrowserClient() {
+  return createBrowserClient(
+    process.env.NEXT_PUBLIC_LUMI_CORE_URL!,
+    process.env.NEXT_PUBLIC_LUMI_CORE_PUBLISHABLE_KEY!,
+  )
 }
 
 const FPS = 30
@@ -122,8 +130,8 @@ export function ReelTimelineEditor({
     try {
       const slot = await actions.createMusicSlot()
       if (!slot) { setGlobalError('Upload aktuell nicht möglich.'); return }
-      const supabase = createClient()
-      const { error: uploadError } = await supabase.storage.from('documents')
+      const lumiCore = createLumiCoreBrowserClient()
+      const { error: uploadError } = await lumiCore.storage.from('travel-documents')
         .uploadToSignedUrl(slot.path, slot.token, file, { contentType: file.type })
       if (uploadError) { setGlobalError('Upload fehlgeschlagen.'); return }
       const result = await runMutation(() => actions.uploadMusic(projectId, slot.path, file.type))

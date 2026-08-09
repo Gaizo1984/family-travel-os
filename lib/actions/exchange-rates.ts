@@ -1,6 +1,6 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { redirect } from 'next/navigation'
 import { resolveQuickCurrency } from '@/components/CurrencyQuickSelect'
 
@@ -24,8 +24,8 @@ export async function refreshExchangeRate(formData: FormData) {
   if (!process.env.EODHD_API_KEY)
     redirect(`${detailPath}?error=${encodeURIComponent('Automatischer Kursabruf ist aktuell nicht konfiguriert. Bitte Kurs manuell eintragen.')}`)
 
-  const supabase = await createClient()
-  const { data: trip } = await supabase.from('trips').select('budget_currency').eq('id', tripId).maybeSingle()
+  const lumiCore = await createLumiCoreClient()
+  const { data: trip } = await lumiCore.from('travel_trips').select('budget_currency').eq('id', tripId).maybeSingle()
   const tripCurrency = trip?.budget_currency ?? 'EUR'
 
   if (currency === tripCurrency)
@@ -45,7 +45,7 @@ export async function refreshExchangeRate(formData: FormData) {
     redirect(`${detailPath}?error=${encodeURIComponent('Kursabruf fehlgeschlagen: ' + (e instanceof Error ? e.message : 'unbekannter Fehler') + '. Bitte manuell eintragen oder erneut versuchen.')}`)
   }
 
-  const { error } = await supabase.from('trip_exchange_rates').upsert({
+  const { error } = await lumiCore.from('travel_trip_exchange_rates').upsert({
     trip_id: tripId, currency, rate, source: 'eodhd', updated_at: new Date().toISOString(),
   })
   if (error)
@@ -66,8 +66,8 @@ export async function setManualExchangeRate(formData: FormData) {
   if (!currency || !rateRaw || Number.isNaN(rate) || rate <= 0)
     redirect(`${detailPath}?error=${encodeURIComponent('Bitte Fremdwährung und einen gültigen Kurs (größer als 0) angeben.')}`)
 
-  const supabase = await createClient()
-  const { error } = await supabase.from('trip_exchange_rates').upsert({
+  const lumiCore = await createLumiCoreClient()
+  const { error } = await lumiCore.from('travel_trip_exchange_rates').upsert({
     trip_id: tripId, currency, rate, source: 'manual', updated_at: new Date().toISOString(),
   })
   if (error)

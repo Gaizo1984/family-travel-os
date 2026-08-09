@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { getFamily } from '@/lib/family'
 import { MAX_SAVED_HOTELS_PER_DESTINATION } from '@/lib/saved-hotels-shared'
 import type { HotelShortlistItem } from '@/lib/trip-idea-hotel-types'
@@ -29,6 +30,7 @@ export async function saveHotelOption(formData: FormData): Promise<void> {
 
   const { id: familyId } = await getFamily()
   const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
   const { data: cacheRow } = await supabase
     .from('hotel_search_cache')
@@ -42,31 +44,31 @@ export async function saveHotelOption(formData: FormData): Promise<void> {
   const option = options.find((o) => o.placeId === optionId)
   if (!option) redirect(appendError(returnTo, 'Dieses Hotel wurde in der Suche nicht mehr gefunden.'))
 
-  const { data: existingSame } = await supabase
-    .from('saved_hotel_options')
+  const { data: existingSame } = await lumiCore
+    .from('travel_saved_hotel_options')
     .select('id')
-    .eq('family_id', familyId)
+    .eq('household_id', familyId)
     .eq('search_key', searchKey)
     .eq('option_id', optionId)
     .maybeSingle()
 
   if (!existingSame) {
-    const { count } = await supabase
-      .from('saved_hotel_options')
+    const { count } = await lumiCore
+      .from('travel_saved_hotel_options')
       .select('id', { count: 'exact', head: true })
-      .eq('family_id', familyId)
+      .eq('household_id', familyId)
       .eq('search_key', searchKey)
     if ((count ?? 0) >= MAX_SAVED_HOTELS_PER_DESTINATION) {
       redirect(appendError(returnTo, `Für dieses Ziel sind bereits ${MAX_SAVED_HOTELS_PER_DESTINATION} Hotels gemerkt -- bitte zuerst eines löschen.`))
     }
   }
 
-  const { error } = await supabase.from('saved_hotel_options').upsert(
+  const { error } = await lumiCore.from('travel_saved_hotel_options').upsert(
     {
-      family_id: familyId, search_key: searchKey, destination: cacheRow.destination || destination,
+      household_id: familyId, search_key: searchKey, destination: cacheRow.destination || destination,
       option_id: optionId, hotel_option: option as unknown as Json,
     },
-    { onConflict: 'family_id,search_key,option_id' },
+    { onConflict: 'household_id,search_key,option_id' },
   )
   if (error) redirect(appendError(returnTo, 'Speichern fehlgeschlagen: ' + error.message))
 
@@ -77,9 +79,9 @@ export async function deleteSavedHotelOption(formData: FormData): Promise<void> 
   const id = String(formData.get('id') ?? '')
   const returnTo = String(formData.get('return_to') ?? '/hotels')
   const { id: familyId } = await getFamily()
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
-  if (id) await supabase.from('saved_hotel_options').delete().eq('id', id).eq('family_id', familyId)
+  if (id) await lumiCore.from('travel_saved_hotel_options').delete().eq('id', id).eq('household_id', familyId)
 
   redirect(returnTo)
 }
@@ -90,11 +92,11 @@ export async function assignTripToSavedHotelOption(formData: FormData): Promise<
   const tripId = String(formData.get('trip_id') ?? '')
   const returnTo = String(formData.get('return_to') ?? '/hotels')
   const { id: familyId } = await getFamily()
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
   if (id && tripId) {
-    const { data: trip } = await supabase.from('trips').select('id').eq('id', tripId).eq('family_id', familyId).maybeSingle()
-    if (trip) await supabase.from('saved_hotel_options').update({ trip_id: tripId }).eq('id', id).eq('family_id', familyId)
+    const { data: trip } = await lumiCore.from('travel_trips').select('id').eq('id', tripId).eq('household_id', familyId).maybeSingle()
+    if (trip) await lumiCore.from('travel_saved_hotel_options').update({ trip_id: tripId }).eq('id', id).eq('household_id', familyId)
   }
 
   redirect(returnTo)
@@ -105,10 +107,10 @@ export async function markSavedHotelOptionSelected(formData: FormData): Promise<
   const id = String(formData.get('id') ?? '')
   const returnTo = String(formData.get('return_to') ?? '/hotels')
   const { id: familyId } = await getFamily()
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
   if (id) {
-    await supabase.from('saved_hotel_options').update({ status: 'selected' }).eq('id', id).eq('family_id', familyId).not('trip_id', 'is', null)
+    await lumiCore.from('travel_saved_hotel_options').update({ status: 'selected' }).eq('id', id).eq('household_id', familyId).not('trip_id', 'is', null)
   }
 
   redirect(returnTo)
@@ -118,9 +120,9 @@ export async function unmarkSavedHotelOptionSelected(formData: FormData): Promis
   const id = String(formData.get('id') ?? '')
   const returnTo = String(formData.get('return_to') ?? '/hotels')
   const { id: familyId } = await getFamily()
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
-  if (id) await supabase.from('saved_hotel_options').update({ status: 'saved' }).eq('id', id).eq('family_id', familyId)
+  if (id) await lumiCore.from('travel_saved_hotel_options').update({ status: 'saved' }).eq('id', id).eq('household_id', familyId)
 
   redirect(returnTo)
 }

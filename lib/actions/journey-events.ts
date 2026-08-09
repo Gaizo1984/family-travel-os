@@ -1,12 +1,12 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { redirect } from 'next/navigation'
 import { combineIsoDate } from '@/lib/documents'
 import type { JourneyEventCategory, JourneyEventStatus } from '@/lib/journey-events'
 
 /** §"Teilnehmer auch bei Journey-Terminen auswählbar" (Nutzervorgabe, wörtlich): gleiche Dedupliziert-Lesung wie bookings.ts::readParticipantPersonIds, hier ungated (jede Kategorie, nicht nur 'activity'). */
-function readParticipantPersonIds(formData: FormData): string[] {
+function readParticipantHouseholdMemberIds(formData: FormData): string[] {
   const raw = formData.getAll('participant_person_ids').map(String).filter(Boolean)
   return [...new Set(raw)]
 }
@@ -47,10 +47,10 @@ export async function createJourneyEvent(formData: FormData) {
   if (!f.date)
     redirect(`${newPath}?error=${encodeURIComponent('Bitte ein Datum auswählen')}`)
 
-  const participantIds = readParticipantPersonIds(formData)
-  const supabase = await createClient()
+  const participantIds = readParticipantHouseholdMemberIds(formData)
+  const supabase = await createLumiCoreClient()
 
-  const { error } = await supabase.from('journey_events').insert({
+  const { error } = await supabase.from('travel_journey_events').insert({
     trip_id: f.tripId,
     stage_id: f.stageId || null,
     date: f.date,
@@ -60,7 +60,7 @@ export async function createJourneyEvent(formData: FormData) {
     location: f.location || null,
     notes: f.notes || null,
     status: f.status,
-    participant_person_ids: participantIds.length > 0 ? participantIds : null,
+    participant_household_member_ids: participantIds.length > 0 ? participantIds : null,
   })
 
   if (error)
@@ -86,10 +86,10 @@ export async function updateJourneyEvent(formData: FormData) {
   if (!f.date)
     redirect(`${editPath}?error=${encodeURIComponent('Bitte ein Datum auswählen')}`)
 
-  const participantIds = readParticipantPersonIds(formData)
-  const supabase = await createClient()
+  const participantIds = readParticipantHouseholdMemberIds(formData)
+  const supabase = await createLumiCoreClient()
 
-  const { error } = await supabase.from('journey_events').update({
+  const { error } = await supabase.from('travel_journey_events').update({
     stage_id: f.stageId || null,
     date: f.date,
     time: f.time || null,
@@ -98,7 +98,7 @@ export async function updateJourneyEvent(formData: FormData) {
     location: f.location || null,
     notes: f.notes || null,
     status: f.status,
-    participant_person_ids: participantIds.length > 0 ? participantIds : null,
+    participant_household_member_ids: participantIds.length > 0 ? participantIds : null,
   }).eq('id', eventId)
 
   if (error)
@@ -112,8 +112,8 @@ export async function deleteJourneyEvent(formData: FormData) {
   const slug     = String(formData.get('slug') ?? '')
   const returnTo = String(formData.get('return_to') ?? '').trim()
 
-  const supabase = await createClient()
-  const { error } = await supabase.from('journey_events').delete().eq('id', eventId)
+  const supabase = await createLumiCoreClient()
+  const { error } = await supabase.from('travel_journey_events').delete().eq('id', eventId)
 
   if (error)
     redirect(`/trips/${slug}/journey-events/${eventId}/edit?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)

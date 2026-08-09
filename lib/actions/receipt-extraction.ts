@@ -2,9 +2,11 @@
 
 import OpenAI from 'openai'
 import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { redirect } from 'next/navigation'
 import { ALLOWED_DOCUMENT_MIME_TYPES, MAX_DOCUMENT_FILE_SIZE } from '@/lib/documents'
 import { BUDGET_CATEGORY_ORDER } from '@/lib/budget'
+import { toTravelDocumentsPath } from '@/lib/lumi-core-storage/paths'
 
 /** Gleiches Modell wie die bestehende Pass-/ESTA-Auslesung — austauschbar über diese Konstante. */
 const OPENAI_MODEL = 'gpt-5.4'
@@ -86,9 +88,13 @@ export async function extractReceiptData(formData: FormData) {
     fail('Die Datei ist zu groß (maximal 10 MB).')
 
   const supabase = await createClient()
-  const storagePath = buildReceiptStoragePath(tripId, file.name)
+  const lumiCore = await createLumiCoreClient()
+  const rawPath = buildReceiptStoragePath(tripId, file.name)
+  const storagePath = await toTravelDocumentsPath(rawPath)
+  if (!storagePath)
+    fail('Upload fehlgeschlagen: Haushalt nicht gefunden')
 
-  const { error: uploadError } = await supabase.storage.from('documents').upload(storagePath, file, {
+  const { error: uploadError } = await lumiCore.storage.from('travel-documents').upload(storagePath, file, {
     contentType: file.type,
     cacheControl: '31536000',
   })
@@ -134,8 +140,8 @@ export async function extractReceiptData(formData: FormData) {
   // Etappe anhand Belegdatum im Etappen-Zeitraum, Buchung anhand grobem Textabgleich
   // zwischen erkanntem Händler und Buchungstitel/-anbieter.
   if (parsed.date) {
-    const { data: stages } = await supabase
-      .from('stages')
+    const { data: stages } = await lumiCore
+      .from('travel_stages')
       .select('id, start_date, end_date')
       .eq('trip_id', tripId)
     const match = (stages ?? []).find(
@@ -146,8 +152,8 @@ export async function extractReceiptData(formData: FormData) {
 
   if (parsed.merchant) {
     const merchantLower = parsed.merchant.toLowerCase()
-    const { data: bookings } = await supabase
-      .from('bookings')
+    const { data: bookings } = await lumiCore
+      .from('travel_bookings')
       .select('id, title, provider')
       .eq('trip_id', tripId)
     const match = (bookings ?? []).find((b) => {

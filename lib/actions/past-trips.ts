@@ -1,9 +1,11 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
+import { toTravelDocumentsPath } from '@/lib/lumi-core-storage/paths'
 import { redirect } from 'next/navigation'
 import { ALLOWED_DOCUMENT_MIME_TYPES, MAX_DOCUMENT_FILE_SIZE } from '@/lib/documents'
 import { suggestCountryCode } from '@/lib/geo-suggestions'
+import { setPastTripTravelers } from '@/lib/lumi-core-data/group2-history-memories-preferences'
 
 function buildPastTripPhotoPath(pastTripId: string, fileName: string): string {
   const ext = fileName.includes('.') ? fileName.split('.').pop()!.toLowerCase() : 'jpg'
@@ -34,11 +36,11 @@ export async function createPastTrip(formData: FormData) {
   if (!f.yearRaw || f.year === null || Number.isNaN(f.year) || f.year < 1950 || f.year > new Date().getFullYear() + 1)
     redirect(`${newPath}?error=${encodeURIComponent('Bitte ein gültiges Jahr angeben')}`)
 
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const countryCode = suggestCountryCode(`${f.countryOrRegion} ${f.places}`)
 
-  const { data: pastTrip, error } = await supabase.from('past_trips').insert({
-    family_id: familyId,
+  const { data: pastTrip, error } = await lumiCore.from('travel_past_trips').insert({
+    household_id: familyId,
     country_or_region: f.countryOrRegion,
     country_code: countryCode,
     year: f.year,
@@ -51,9 +53,7 @@ export async function createPastTrip(formData: FormData) {
     redirect(`${newPath}?error=${encodeURIComponent('Speicherfehler: ' + (error?.message ?? 'unbekannt'))}`)
 
   if (f.travelerIds.length > 0) {
-    await supabase.from('past_trip_travelers').insert(
-      f.travelerIds.map((personId) => ({ past_trip_id: pastTrip.id, person_id: personId })),
-    )
+    await setPastTripTravelers(pastTrip.id, f.travelerIds)
   }
 
   const file = formData.get('file')
@@ -64,10 +64,12 @@ export async function createPastTrip(formData: FormData) {
     if (file.size > MAX_DOCUMENT_FILE_SIZE) {
       redirect(`/family/history/${pastTrip.id}/edit?error=${encodeURIComponent('Die Datei ist zu groß (maximal 10 MB).')}`)
     }
-    const photoPath = buildPastTripPhotoPath(pastTrip.id, file.name)
-    const { error: uploadError } = await supabase.storage.from('documents').upload(photoPath, file, { contentType: file.type, cacheControl: '31536000' })
-    if (!uploadError) {
-      await supabase.from('past_trips').update({ photo_storage_path: photoPath }).eq('id', pastTrip.id)
+    const photoPath = await toTravelDocumentsPath(buildPastTripPhotoPath(pastTrip.id, file.name))
+    if (photoPath) {
+      const { error: uploadError } = await lumiCore.storage.from('travel-documents').upload(photoPath, file, { contentType: file.type, cacheControl: '31536000' })
+      if (!uploadError) {
+        await lumiCore.from('travel_past_trips').update({ photo_storage_path: photoPath }).eq('id', pastTrip.id)
+      }
     }
   }
 
@@ -84,10 +86,10 @@ export async function updatePastTrip(formData: FormData) {
   if (!f.yearRaw || f.year === null || Number.isNaN(f.year) || f.year < 1950 || f.year > new Date().getFullYear() + 1)
     redirect(`${editPath}?error=${encodeURIComponent('Bitte ein gültiges Jahr angeben')}`)
 
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const countryCode = suggestCountryCode(`${f.countryOrRegion} ${f.places}`)
 
-  const { error } = await supabase.from('past_trips').update({
+  const { error } = await lumiCore.from('travel_past_trips').update({
     country_or_region: f.countryOrRegion,
     country_code: countryCode,
     year: f.year,
@@ -99,12 +101,7 @@ export async function updatePastTrip(formData: FormData) {
   if (error)
     redirect(`${editPath}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
 
-  await supabase.from('past_trip_travelers').delete().eq('past_trip_id', pastTripId)
-  if (f.travelerIds.length > 0) {
-    await supabase.from('past_trip_travelers').insert(
-      f.travelerIds.map((personId) => ({ past_trip_id: pastTripId, person_id: personId })),
-    )
-  }
+  await setPastTripTravelers(pastTripId, f.travelerIds)
 
   const file = formData.get('file')
   if (file instanceof File && file.size > 0) {
@@ -113,16 +110,18 @@ export async function updatePastTrip(formData: FormData) {
     if (file.size > MAX_DOCUMENT_FILE_SIZE)
       redirect(`${editPath}?error=${encodeURIComponent('Die Datei ist zu groß (maximal 10 MB).')}`)
 
-    const { data: existing } = await supabase.from('past_trips').select('photo_storage_path').eq('id', pastTripId).maybeSingle()
-    const photoPath = buildPastTripPhotoPath(pastTripId, file.name)
-    const { error: uploadError } = await supabase.storage.from('documents').upload(photoPath, file, { contentType: file.type, cacheControl: '31536000' })
+    const { data: existing } = await lumiCore.from('travel_past_trips').select('photo_storage_path').eq('id', pastTripId).maybeSingle()
+    const photoPath = await toTravelDocumentsPath(buildPastTripPhotoPath(pastTripId, file.name))
+    if (!photoPath)
+      redirect(`${editPath}?error=${encodeURIComponent('Foto-Upload fehlgeschlagen: Household nicht gefunden.')}`)
+    const { error: uploadError } = await lumiCore.storage.from('travel-documents').upload(photoPath, file, { contentType: file.type, cacheControl: '31536000' })
     if (uploadError)
       redirect(`${editPath}?error=${encodeURIComponent('Foto-Upload fehlgeschlagen: ' + uploadError.message)}`)
 
     if (existing?.photo_storage_path) {
-      await supabase.storage.from('documents').remove([existing.photo_storage_path])
+      await lumiCore.storage.from('travel-documents').remove([existing.photo_storage_path])
     }
-    await supabase.from('past_trips').update({ photo_storage_path: photoPath }).eq('id', pastTripId)
+    await lumiCore.from('travel_past_trips').update({ photo_storage_path: photoPath }).eq('id', pastTripId)
   }
 
   redirect('/family/history')
@@ -132,17 +131,17 @@ export async function deletePastTrip(formData: FormData) {
   const pastTripId = String(formData.get('past_trip_id') ?? '')
   const photoStoragePath = String(formData.get('photo_storage_path') ?? '').trim()
 
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
   if (photoStoragePath) {
-    const { error: storageError } = await supabase.storage.from('documents').remove([photoStoragePath])
+    const { error: storageError } = await lumiCore.storage.from('travel-documents').remove([photoStoragePath])
     // Abbrechen statt trotzdem zu löschen — sonst bliebe das Foto als
     // nicht mehr referenzierter Storage-Orphan zurück.
     if (storageError)
       redirect(`/family/history/${pastTripId}/edit?error=${encodeURIComponent('Foto konnte nicht gelöscht werden: ' + storageError.message)}`)
   }
 
-  const { error } = await supabase.from('past_trips').delete().eq('id', pastTripId)
+  const { error } = await lumiCore.from('travel_past_trips').delete().eq('id', pastTripId)
   if (error)
     redirect(`/family/history/${pastTripId}/edit?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)
 

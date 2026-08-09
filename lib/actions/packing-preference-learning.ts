@@ -1,7 +1,7 @@
 'use server'
 
 import OpenAI from 'openai'
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { createPendingMemoryCandidate } from '@/lib/family-memories'
 import { PACKING_FEEDBACK_TYPE_LABELS, type PackingFeedbackType } from '@/lib/trip-debriefs'
 
@@ -65,16 +65,16 @@ Wenn die Notizen kein klares Muster zeigen, widersprüchlich sind oder nur eine 
 }
 
 async function loadRecentlyDeclinedThemes(familyId: string, personId: string | null): Promise<string[]> {
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const cutoff = new Date(Date.now() - DECLINED_PACKING_THEME_COOLDOWN_DAYS * 86400000).toISOString()
-  let query = supabase
-    .from('family_memories')
+  let query = lumiCore
+    .from('travel_memories')
     .select('structured_value')
-    .eq('family_id', familyId)
+    .eq('household_id', familyId)
     .eq('category', 'packing')
     .eq('status', 'declined')
     .gte('updated_at', cutoff)
-  query = personId ? query.eq('person_id', personId) : query.is('person_id', null)
+  query = personId ? query.eq('household_member_id', personId) : query.is('household_member_id', null)
   const { data } = await query
 
   return (data ?? [])
@@ -83,15 +83,15 @@ async function loadRecentlyDeclinedThemes(familyId: string, personId: string | n
 }
 
 async function hasExistingActiveTheme(familyId: string, personId: string | null, theme: string): Promise<boolean> {
-  const supabase = await createClient()
-  let query = supabase
-    .from('family_memories')
+  const lumiCore = await createLumiCoreClient()
+  let query = lumiCore
+    .from('travel_memories')
     .select('id')
-    .eq('family_id', familyId)
+    .eq('household_id', familyId)
     .eq('category', 'packing')
     .in('status', ['pending', 'confirmed'])
     .eq('structured_value->>theme', theme)
-  query = personId ? query.eq('person_id', personId) : query.is('person_id', null)
+  query = personId ? query.eq('household_member_id', personId) : query.is('household_member_id', null)
   const { data } = await query.limit(1)
   return (data?.length ?? 0) > 0
 }
@@ -109,15 +109,15 @@ type RawFeedbackRow = { trip_id: string | null; structured_value: Record<string,
 export async function maybeSuggestPackingPreference(familyId: string, personId: string | null): Promise<void> {
   if (!process.env.OPENAI_API_KEY) return
 
-  const supabase = await createClient()
-  let query = supabase
-    .from('family_memories')
+  const lumiCore = await createLumiCoreClient()
+  let query = lumiCore
+    .from('travel_memories')
     .select('trip_id, structured_value')
-    .eq('family_id', familyId)
+    .eq('household_id', familyId)
     .eq('category', 'packing')
     .eq('source', 'nachreise_dialog')
     .in('status', ['pending', 'confirmed'])
-  query = personId ? query.eq('person_id', personId) : query.is('person_id', null)
+  query = personId ? query.eq('household_member_id', personId) : query.is('household_member_id', null)
   const { data: rowsRaw } = await query
   const rows = (rowsRaw ?? []) as RawFeedbackRow[]
 

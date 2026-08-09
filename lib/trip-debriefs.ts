@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { createLumiCoreClient } from './supabase/lumi-core-server'
 
 /**
  * §"Nachreise-Dialog... schrittweise und nicht wie ein langes Formular"
@@ -83,35 +84,48 @@ export type TripDebrief = {
 }
 
 type DebriefRow = {
-  id: string; family_id: string; trip_id: string; status: string
+  id: string; household_id: string; trip_id: string; status: string
   current_step: string | null; answers: Record<string, unknown>
 }
 
 function mapRow(row: DebriefRow): TripDebrief {
   return {
-    id: row.id, familyId: row.family_id, tripId: row.trip_id, status: row.status as DebriefStatus,
+    id: row.id, familyId: row.household_id, tripId: row.trip_id, status: row.status as DebriefStatus,
     currentStep: (row.current_step as DebriefStep) ?? 'intro',
     answers: (row.answers ?? {}) as DebriefAnswers,
   }
 }
 
-/** Höchstens ein aktiver Dialog je Reise (Migration erzwingt das per partiellem Unique-Index) -- für die Anzeige reicht daher `maybeSingle`. */
+/**
+ * §FINALER CUTOVER: `trip_debriefs` ist jetzt Lumi Core (`travel_trip_debriefs`).
+ * Der `supabase`-Parameter bleibt aus Kompatibilitätsgründen bestehen (die
+ * Aufrufer -- app/(app)/trips/[id]/debrief/page.tsx,
+ * app/(app)/today/page.tsx -- liegen außerhalb dieser Umstellung), wird aber
+ * nicht mehr für diese Abfrage verwendet; stattdessen wird hier ein eigener
+ * Lumi-Core-Client erzeugt. Höchstens ein aktiver Dialog je Reise (Migration
+ * erzwingt das per partiellem Unique-Index) -- für die Anzeige reicht daher
+ * `maybeSingle`.
+ */
 export async function loadActiveDebrief(supabase: SupabaseClient, tripId: string): Promise<TripDebrief | null> {
-  const { data } = await supabase
-    .from('trip_debriefs')
-    .select('id, family_id, trip_id, status, current_step, answers')
+  void supabase
+  const lumiCore = await createLumiCoreClient()
+  const { data } = await lumiCore
+    .from('travel_trip_debriefs')
+    .select('id, household_id, trip_id, status, current_step, answers')
     .eq('trip_id', tripId)
     .eq('status', 'active')
     .maybeSingle()
   return data ? mapRow(data as DebriefRow) : null
 }
 
-/** Für einen Dashboard-Hinweis "ihr habt einen offenen Rückblick" -- über alle Reisen der Familie. */
+/** Für einen Dashboard-Hinweis "ihr habt einen offenen Rückblick" -- über alle Reisen der Familie. Siehe Hinweis zu `supabase` bei loadActiveDebrief. */
 export async function loadActiveDebriefsForFamily(supabase: SupabaseClient, familyId: string): Promise<TripDebrief[]> {
-  const { data } = await supabase
-    .from('trip_debriefs')
-    .select('id, family_id, trip_id, status, current_step, answers')
-    .eq('family_id', familyId)
+  void supabase
+  const lumiCore = await createLumiCoreClient()
+  const { data } = await lumiCore
+    .from('travel_trip_debriefs')
+    .select('id, household_id, trip_id, status, current_step, answers')
+    .eq('household_id', familyId)
     .eq('status', 'active')
   return ((data ?? []) as DebriefRow[]).map(mapRow)
 }

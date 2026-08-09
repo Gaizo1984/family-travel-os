@@ -1,6 +1,6 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { redirect } from 'next/navigation'
 import { BUDGET_CATEGORY_ORDER } from '@/lib/budget'
 import { resolveQuickCurrency } from '@/components/CurrencyQuickSelect'
@@ -38,14 +38,14 @@ export async function createBudgetItem(formData: FormData) {
   if (f.amountRaw && (f.amount === null || Number.isNaN(f.amount) || f.amount < 0))
     redirect(`${newPath}?error=${encodeURIComponent('Betrag: bitte eine gültige, nicht-negative Zahl angeben')}`)
 
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
   const details: Record<string, string> = {}
   if (f.merchant) details.merchant = f.merchant
   if (f.receiptNumber) details.receipt_number = f.receiptNumber
   if (f.existingStoragePath) details.source = 'receipt'
 
-  const { error } = await supabase.from('budget_items').insert({
+  const { error } = await lumiCore.from('travel_budget_items').insert({
     trip_id: f.tripId,
     stage_id: f.stageId || null,
     booking_id: f.bookingId || null,
@@ -53,7 +53,7 @@ export async function createBudgetItem(formData: FormData) {
     label: f.label,
     amount_actual: f.amount,
     currency: f.currency,
-    storage_bucket: f.existingStoragePath ? 'documents' : null,
+    storage_bucket: f.existingStoragePath ? 'travel-documents' : null,
     storage_path: f.existingStoragePath || null,
     details: Object.keys(details).length > 0 ? details : null,
   })
@@ -76,9 +76,9 @@ export async function updateBudgetItem(formData: FormData) {
   if (f.amountRaw && (f.amount === null || Number.isNaN(f.amount) || f.amount < 0))
     redirect(`${editPath}?error=${encodeURIComponent('Betrag: bitte eine gültige, nicht-negative Zahl angeben')}`)
 
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
-  const { error } = await supabase.from('budget_items').update({
+  const { error } = await lumiCore.from('travel_budget_items').update({
     stage_id: f.stageId || null,
     booking_id: f.bookingId || null,
     category: f.category,
@@ -100,15 +100,15 @@ export async function removeBudgetItemReceipt(formData: FormData) {
   const returnTo    = String(formData.get('return_to') ?? '').trim()
   const editPath    = returnTo || `/trips/${slug}/budget/${itemId}/edit`
 
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
   if (storagePath) {
-    const { error: storageError } = await supabase.storage.from('documents').remove([storagePath])
+    const { error: storageError } = await lumiCore.storage.from('travel-documents').remove([storagePath])
     if (storageError)
       redirect(`${editPath}?error=${encodeURIComponent('Beleg konnte nicht gelöscht werden: ' + storageError.message)}`)
   }
 
-  const { error } = await supabase.from('budget_items')
+  const { error } = await lumiCore.from('travel_budget_items')
     .update({ storage_bucket: null, storage_path: null })
     .eq('id', itemId)
 
@@ -124,17 +124,17 @@ export async function deleteBudgetItem(formData: FormData) {
   const storagePath = String(formData.get('storage_path') ?? '').trim()
   const returnTo    = String(formData.get('return_to') ?? '').trim()
 
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
   if (storagePath) {
-    const { error: storageError } = await supabase.storage.from('documents').remove([storagePath])
+    const { error: storageError } = await lumiCore.storage.from('travel-documents').remove([storagePath])
     // Abbrechen statt trotzdem zu löschen — sonst bliebe der Beleg als
     // nicht mehr referenzierter Storage-Orphan zurück.
     if (storageError)
       redirect(`/trips/${slug}/budget/${itemId}/edit?error=${encodeURIComponent('Beleg konnte nicht gelöscht werden: ' + storageError.message)}`)
   }
 
-  const { error } = await supabase.from('budget_items').delete().eq('id', itemId)
+  const { error } = await lumiCore.from('travel_budget_items').delete().eq('id', itemId)
 
   if (error)
     redirect(`/trips/${slug}/budget/${itemId}/edit?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)
@@ -153,8 +153,8 @@ export async function setTripBudget(formData: FormData) {
   if (amountRaw && (amount === null || Number.isNaN(amount) || amount < 0))
     redirect(`${budgetPath}?error=${encodeURIComponent('Budget: bitte eine gültige, nicht-negative Zahl angeben')}`)
 
-  const supabase = await createClient()
-  const { error } = await supabase.from('trips').update({
+  const lumiCore = await createLumiCoreClient()
+  const { error } = await lumiCore.from('travel_trips').update({
     budget_amount: amount,
     budget_currency: currency,
   }).eq('id', tripId)

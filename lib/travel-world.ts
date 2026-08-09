@@ -1,4 +1,5 @@
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
+import { resolveHouseholdMemberId } from '@/lib/lumi-core-storage/paths'
 import { isTripHistorical, isTripCurrentlyRunning } from '@/lib/trip-status'
 import { deriveTripDateRange, tripDurationDays } from '@/lib/trip-dates'
 
@@ -35,7 +36,7 @@ export type TravelWorld = {
 type TripJoin = {
   id: string; slug: string; title: string
   start_date: string | null; end_date: string | null; status: string
-  trip_members: { person_id: string }[]
+  trip_members: { household_member_id: string }[]
   stages: { country_code: string | null; is_transit: boolean; start_date: string | null; end_date: string | null }[]
   bookings: { type: string; status: string; start_datetime: string | null; end_datetime: string | null }[]
 }
@@ -52,27 +53,57 @@ type TravelWorldRawData = {
 
 /** Reine Datenbeschaffung (3 Supabase-Abfragen), keine Filterung/Aggregation -- siehe computeTravelWorld. */
 async function fetchTravelWorldRawData(familyId: string): Promise<TravelWorldRawData> {
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const [{ data: tripsRaw }, { data: pastTripsRaw }, { data: pastTravelersRaw }] = await Promise.all([
-    supabase.from('trips').select(`
-      id, slug, title, start_date, end_date, status,
-      trip_members ( person_id ),
-      stages ( country_code, is_transit, start_date, end_date ),
-      bookings ( type, status, start_datetime, end_datetime )
-    `).eq('family_id', familyId),
-    supabase.from('past_trips').select('id, country_or_region, country_code, year, places, duration_days').eq('family_id', familyId),
-    supabase.from('past_trip_travelers').select('past_trip_id, person_id'),
+    lumiCore.from('travel_trips').select('id, slug, title, start_date, end_date, status').eq('household_id', familyId),
+    lumiCore.from('travel_past_trips').select('id, country_or_region, country_code, year, places, duration_days').eq('household_id', familyId),
+    lumiCore.from('travel_past_trip_travelers').select('past_trip_id, household_member_id'),
   ])
+
+  const tripIds = (tripsRaw ?? []).map((t) => t.id)
+  const [{ data: tripMembersRaw }, { data: stagesRaw }, { data: bookingsRaw }] = tripIds.length
+    ? await Promise.all([
+      lumiCore.from('travel_trip_members').select('trip_id, household_member_id').in('trip_id', tripIds),
+      lumiCore.from('travel_stages').select('trip_id, country_code, is_transit, start_date, end_date').in('trip_id', tripIds),
+      lumiCore.from('travel_bookings').select('trip_id, type, status, start_datetime, end_datetime').in('trip_id', tripIds),
+    ])
+    : [{ data: [] }, { data: [] }, { data: [] }] as const
+
+  const membersByTrip = new Map<string, { household_member_id: string }[]>()
+  ;(tripMembersRaw ?? []).forEach((m) => {
+    const list = membersByTrip.get(m.trip_id) ?? []
+    list.push({ household_member_id: m.household_member_id })
+    membersByTrip.set(m.trip_id, list)
+  })
+  const stagesByTrip = new Map<string, TripJoin['stages']>()
+  ;(stagesRaw ?? []).forEach((s) => {
+    const list = stagesByTrip.get(s.trip_id) ?? []
+    list.push({ country_code: s.country_code, is_transit: s.is_transit, start_date: s.start_date, end_date: s.end_date })
+    stagesByTrip.set(s.trip_id, list)
+  })
+  const bookingsByTrip = new Map<string, TripJoin['bookings']>()
+  ;(bookingsRaw ?? []).forEach((b) => {
+    const list = bookingsByTrip.get(b.trip_id) ?? []
+    list.push({ type: b.type, status: b.status, start_datetime: b.start_datetime, end_datetime: b.end_datetime })
+    bookingsByTrip.set(b.trip_id, list)
+  })
+
+  const trips: TripJoin[] = (tripsRaw ?? []).map((t) => ({
+    id: t.id, slug: t.slug, title: t.title, start_date: t.start_date, end_date: t.end_date, status: t.status,
+    trip_members: membersByTrip.get(t.id) ?? [],
+    stages: stagesByTrip.get(t.id) ?? [],
+    bookings: bookingsByTrip.get(t.id) ?? [],
+  }))
 
   const travelersByPastTrip = new Map<string, string[]>()
   ;(pastTravelersRaw ?? []).forEach((t) => {
     const list = travelersByPastTrip.get(t.past_trip_id) ?? []
-    list.push(t.person_id)
+    list.push(t.household_member_id)
     travelersByPastTrip.set(t.past_trip_id, list)
   })
 
   return {
-    trips: (tripsRaw ?? []) as unknown as TripJoin[],
+    trips,
     pastTrips: (pastTripsRaw ?? []) as PastTripRow[],
     travelersByPastTrip,
   }
@@ -117,7 +148,7 @@ function computeTravelWorld(raw: TravelWorldRawData, options: { personId?: strin
 
   if (options.personId) {
     const personId = options.personId
-    trips = trips.filter((t) => t.trip_members.some((m) => m.person_id === personId))
+    trips = trips.filter((t) => t.trip_members.some((m) => m.household_member_id === personId))
     pastTrips = pastTrips.filter((p) => (raw.travelersByPastTrip.get(p.id) ?? []).includes(personId))
   }
 
@@ -138,7 +169,7 @@ function computeTravelWorld(raw: TravelWorldRawData, options: { personId?: strin
         year: range.startDate ? new Date(range.startDate).getFullYear() : null,
         title: t.title,
         subtitle: isTripCurrentlyRunning(tripStatusInput(t)) ? 'Aktuelle Reise' : isTripHistorical(tripStatusInput(t)) ? 'Erlebt' : 'In LUMI geplant',
-        travelerIds: t.trip_members.map((m) => m.person_id),
+        travelerIds: t.trip_members.map((m) => m.household_member_id),
         countryCodes: Array.from(new Set(t.stages.filter((s) => !s.is_transit).map((s) => s.country_code).filter((c): c is string => Boolean(c)))),
         isCurrent: isTripCurrentlyRunning(tripStatusInput(t)),
         editHref: null,
@@ -172,7 +203,11 @@ export async function buildTravelWorld(params: {
   statusFilter?: 'historical' | 'all'
 }): Promise<TravelWorld> {
   const raw = await fetchTravelWorldRawData(params.familyId)
-  return computeTravelWorld(raw, { personId: params.personId, statusFilter: params.statusFilter })
+  // FINALER CUTOVER: aufrufende Seiten (z.B. app/(app)/family/[personId]/page.tsx)
+  // liefern weiterhin Travels legacy person_id (Route-Parameter) -- travel_trip_members
+  // speichert jetzt household_member_id, daher hier übersetzen.
+  const householdMemberId = params.personId ? await resolveHouseholdMemberId(params.personId) : undefined
+  return computeTravelWorld(raw, { personId: householdMemberId ?? undefined, statusFilter: params.statusFilter })
 }
 
 /**
@@ -195,7 +230,13 @@ export async function buildTravelWorldForFamilyAndPersons(
 ): Promise<{ family: TravelWorld; byPersonId: Map<string, TravelWorld> }> {
   const raw = await fetchTravelWorldRawData(familyId)
   const family = computeTravelWorld(raw, { statusFilter })
-  const byPersonId = new Map(personIds.map((id) => [id, computeTravelWorld(raw, { personId: id, statusFilter })]))
+  // FINALER CUTOVER: personIds kommen weiterhin als Travels legacy person_id
+  // von den Aufrufern (siehe app/(app)/page.tsx) -- hier auf household_member_id
+  // übersetzen, da travel_trip_members darauf umgestellt ist.
+  const householdMemberIds = await Promise.all(personIds.map((id) => resolveHouseholdMemberId(id)))
+  const byPersonId = new Map(
+    personIds.map((legacyId, i) => [legacyId, computeTravelWorld(raw, { personId: householdMemberIds[i] ?? undefined, statusFilter })]),
+  )
   return { family, byPersonId }
 }
 
@@ -223,14 +264,14 @@ export async function buildTravelWorldForFamilyAndPersons(
 export async function syncTripDerivedCountryVisits(familyId: string): Promise<void> {
   const raw = await fetchTravelWorldRawData(familyId)
 
-  type Derived = { person_id: string; country_code: string; trip_id: string | null; first_visited_at: string | null }
+  type Derived = { household_member_id: string; country_code: string; trip_id: string | null; first_visited_at: string | null }
   const derivedByKey = new Map<string, Derived>()
 
-  const addDerived = (personId: string, countryCode: string, tripId: string | null, firstVisitedAt: string | null) => {
-    const key = `${personId}|${countryCode}`
+  const addDerived = (householdMemberId: string, countryCode: string, tripId: string | null, firstVisitedAt: string | null) => {
+    const key = `${householdMemberId}|${countryCode}`
     const existing = derivedByKey.get(key)
     if (!existing) {
-      derivedByKey.set(key, { person_id: personId, country_code: countryCode, trip_id: tripId, first_visited_at: firstVisitedAt })
+      derivedByKey.set(key, { household_member_id: householdMemberId, country_code: countryCode, trip_id: tripId, first_visited_at: firstVisitedAt })
       return
     }
     if (firstVisitedAt && (!existing.first_visited_at || firstVisitedAt < existing.first_visited_at)) existing.first_visited_at = firstVisitedAt
@@ -250,29 +291,29 @@ export async function syncTripDerivedCountryVisits(familyId: string): Promise<vo
       }
     }
     for (const m of t.trip_members) {
-      for (const [countryCode, firstDate] of earliestByCountry) addDerived(m.person_id, countryCode, t.id, firstDate)
+      for (const [countryCode, firstDate] of earliestByCountry) addDerived(m.household_member_id, countryCode, t.id, firstDate)
     }
   }
 
   for (const p of raw.pastTrips) {
     if (!p.country_code) continue
-    for (const personId of raw.travelersByPastTrip.get(p.id) ?? []) addDerived(personId, p.country_code, null, null)
+    for (const householdMemberId of raw.travelersByPastTrip.get(p.id) ?? []) addDerived(householdMemberId, p.country_code, null, null)
   }
 
   if (derivedByKey.size === 0) return
 
-  const supabase = await createClient()
-  const personIds = [...new Set([...derivedByKey.values()].map((d) => d.person_id))]
-  const { data: existingRows } = await supabase
-    .from('person_country_visits')
-    .select('person_id, country_code, first_visited_at')
-    .in('person_id', personIds)
-  const existingByKey = new Map((existingRows ?? []).map((r) => [`${r.person_id}|${r.country_code}`, r]))
+  const lumiCore = await createLumiCoreClient()
+  const householdMemberIds = [...new Set([...derivedByKey.values()].map((d) => d.household_member_id))]
+  const { data: existingRows } = await lumiCore
+    .from('travel_person_country_visits')
+    .select('household_member_id, country_code, first_visited_at')
+    .in('household_member_id', householdMemberIds)
+  const existingByKey = new Map((existingRows ?? []).map((r) => [`${r.household_member_id}|${r.country_code}`, r]))
 
   const payload = [...derivedByKey.values()].map((d) => {
-    const existing = existingByKey.get(`${d.person_id}|${d.country_code}`)
+    const existing = existingByKey.get(`${d.household_member_id}|${d.country_code}`)
     return {
-      person_id: d.person_id,
+      household_member_id: d.household_member_id,
       country_code: d.country_code,
       source: 'trip' as const,
       trip_id: d.trip_id,
@@ -280,6 +321,6 @@ export async function syncTripDerivedCountryVisits(familyId: string): Promise<vo
     }
   })
 
-  const { error } = await supabase.from('person_country_visits').upsert(payload, { onConflict: 'person_id,country_code' })
-  if (error) console.error('[person_country_visits] Sync fehlgeschlagen:', error.message)
+  const { error } = await lumiCore.from('travel_person_country_visits').upsert(payload, { onConflict: 'household_member_id,country_code' })
+  if (error) console.error('[travel_person_country_visits] Sync fehlgeschlagen:', error.message)
 }

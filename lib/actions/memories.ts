@@ -1,6 +1,8 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
+import { toTravelDocumentsPath } from '@/lib/lumi-core-storage/paths'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { after } from 'next/server'
@@ -14,6 +16,8 @@ import { readDateGroupFromFormData } from '@/lib/documents'
 import { deriveTripDateRange } from '@/lib/trip-dates'
 import { MAX_SELECTED_PHOTOS_PER_TRIP } from '@/lib/memory-limits'
 import type { SupabaseClient } from '@supabase/supabase-js'
+
+type LumiCoreClient = Awaited<ReturnType<typeof createLumiCoreClient>>
 
 /**
  * §Root-Cause-Fix "This page couldn't load" bei Mehrfach-Foto-Upload: siehe
@@ -60,7 +64,7 @@ function isValidWebpBuffer(buffer: Buffer): boolean {
  * Netzwerk-Roundtrip mehr nötig, da die eigentliche Ursache behoben ist.
  */
 async function uploadAndVerify(
-  supabase: SupabaseClient,
+  lumiCore: LumiCoreClient,
   storagePath: string,
   compressed: Buffer,
 ): Promise<boolean> {
@@ -70,7 +74,7 @@ async function uploadAndVerify(
   }
 
   const blob = new Blob([new Uint8Array(compressed)], { type: 'image/webp' })
-  const { error: uploadError } = await supabase.storage.from('documents')
+  const { error: uploadError } = await lumiCore.storage.from('travel-documents')
     .upload(storagePath, blob, { contentType: 'image/webp', cacheControl: '31536000' })
   if (uploadError) {
     console.error('[Memories][DIAGNOSTIC] Storage-Upload fehlgeschlagen', uploadError)
@@ -88,17 +92,25 @@ async function uploadAndVerify(
  * manuelles Datum, aber mit Buchungen/Etappen, ist damit trotzdem ein
  * gültiger Zuordnungs-Kandidat, keine zweite/abweichende Datumslogik.
  */
-async function suggestTripId(supabase: SupabaseClient, familyId: string, takenAt: string | null): Promise<string | null> {
+async function suggestTripId(lumiCore: LumiCoreClient, familyId: string, takenAt: string | null): Promise<string | null> {
   if (!takenAt) return null
-  const { data: trips } = await supabase
-    .from('trips')
-    .select(`
-      id, start_date, end_date,
-      stages ( start_date, end_date ),
-      bookings ( type, status, start_datetime, end_datetime )
-    `)
-    .eq('family_id', familyId)
-  const matches = (trips ?? []).filter((t) => {
+  const { data: tripsRaw } = await lumiCore.from('travel_trips').select('id, start_date, end_date').eq('household_id', familyId)
+  const tripIds = (tripsRaw ?? []).map((t) => t.id)
+  const [{ data: stagesRaw }, { data: bookingsRaw }] = tripIds.length
+    ? await Promise.all([
+      lumiCore.from('travel_stages').select('trip_id, start_date, end_date').in('trip_id', tripIds),
+      lumiCore.from('travel_bookings').select('trip_id, type, status, start_datetime, end_datetime').in('trip_id', tripIds),
+    ])
+    : [{ data: [] }, { data: [] }] as const
+  const stagesByTrip = new Map<string, { start_date: string | null; end_date: string | null }[]>()
+  ;(stagesRaw ?? []).forEach((s) => { const l = stagesByTrip.get(s.trip_id) ?? []; l.push(s); stagesByTrip.set(s.trip_id, l) })
+  const bookingsByTrip = new Map<string, { type: string; status: string; start_datetime: string | null; end_datetime: string | null }[]>()
+  ;(bookingsRaw ?? []).forEach((b) => { const l = bookingsByTrip.get(b.trip_id) ?? []; l.push(b); bookingsByTrip.set(b.trip_id, l) })
+  const trips = (tripsRaw ?? []).map((t) => ({
+    id: t.id, start_date: t.start_date, end_date: t.end_date,
+    stages: stagesByTrip.get(t.id) ?? [], bookings: bookingsByTrip.get(t.id) ?? [],
+  }))
+  const matches = trips.filter((t) => {
     const range = deriveTripDateRange(t, t.bookings, t.stages)
     return range.startDate && range.endDate && takenAt >= range.startDate && takenAt <= range.endDate
   })
@@ -140,7 +152,8 @@ export async function uploadMemoryPhotos(formData: FormData) {
     redirect(`${backPath}?error=${encodeURIComponent(`Maximal ${MAX_PHOTOS_PER_UPLOAD} Fotos pro Upload.`)}`)
 
   const supabase = await createClient()
-  const tripId = pastTripId ? null : (String(formData.get('trip_id') ?? '').trim() || await suggestTripId(supabase, familyId, takenAt))
+  const lumiCore = await createLumiCoreClient()
+  const tripId = pastTripId ? null : (String(formData.get('trip_id') ?? '').trim() || await suggestTripId(lumiCore, familyId, takenAt))
 
   // §"Kein Datum mehr abfragen -- automatisch Reisebeginn verwenden": der
   // Galerie-Upload fragt kein Aufnahmedatum mehr ab (taken_at kommt hier also
@@ -152,17 +165,13 @@ export async function uploadMemoryPhotos(formData: FormData) {
   // exakten Zeitraum (nur `year`), deshalb hier bewusst ausgenommen -- kein
   // erfundenes "1. Januar".
   if (!takenAt && tripId) {
-    const { data: tripForDate } = await supabase
-      .from('trips')
-      .select(`
-        start_date, end_date,
-        stages ( start_date, end_date ),
-        bookings ( type, status, start_datetime, end_datetime )
-      `)
-      .eq('id', tripId)
-      .maybeSingle()
+    const [{ data: tripForDate }, { data: stagesForDate }, { data: bookingsForDate }] = await Promise.all([
+      lumiCore.from('travel_trips').select('start_date, end_date').eq('id', tripId).maybeSingle(),
+      lumiCore.from('travel_stages').select('start_date, end_date').eq('trip_id', tripId),
+      lumiCore.from('travel_bookings').select('type, status, start_datetime, end_datetime').eq('trip_id', tripId),
+    ])
     if (tripForDate) {
-      const range = deriveTripDateRange(tripForDate, tripForDate.bookings, tripForDate.stages)
+      const range = deriveTripDateRange(tripForDate, bookingsForDate ?? [], stagesForDate ?? [])
       takenAt = range.startDate
     }
   }
@@ -185,23 +194,24 @@ export async function uploadMemoryPhotos(formData: FormData) {
       const compressed = await compressImageForStorage(staged.buffer)
       console.error('[Memories][DIAGNOSTIC] Komprimiert', { size: compressed.length, magicValid: isValidWebpBuffer(compressed) })
 
-      const storagePath = `memories/${familyId}/${crypto.randomUUID()}.webp`
-      const verified = await uploadAndVerify(supabase, storagePath, compressed)
+      const storagePath = await toTravelDocumentsPath(`memories/${familyId}/${crypto.randomUUID()}.webp`)
+      if (!storagePath) { failedCount++; continue }
+      const verified = await uploadAndVerify(lumiCore, storagePath, compressed)
       if (!verified) { failedCount++; continue }
 
-      const { data: inserted, error: insertError } = await supabase.from('memory_photos').insert({
-        family_id: familyId,
+      const { data: inserted, error: insertError } = await lumiCore.from('travel_memory_photos').insert({
+        household_id: familyId,
         trip_id: tripId,
         past_trip_id: pastTripId,
         stage_id: stageId,
-        uploaded_by_person_id: uploadedByPersonId,
+        uploaded_by_household_member_id: uploadedByPersonId,
         storage_path: storagePath,
         taken_at: takenAt,
         caption,
       }).select('id').single()
       if (insertError || !inserted) {
         console.error('[Memories][DIAGNOSTIC] DB-Insert fehlgeschlagen', insertError)
-        await supabase.storage.from('documents').remove([storagePath])
+        await lumiCore.storage.from('travel-documents').remove([storagePath])
         failedCount++
         continue
       }
@@ -218,7 +228,7 @@ export async function uploadMemoryPhotos(formData: FormData) {
   // dieselbe Spalte/Auflösung wie der bestehende "Titelbild"-Button
   // (trips.cover_photo_id), keine zweite Titelbild-Logik.
   if (markAsCover && tripId && firstSavedPhotoId) {
-    await supabase.from('trips').update({ cover_photo_id: firstSavedPhotoId }).eq('id', tripId)
+    await lumiCore.from('travel_trips').update({ cover_photo_id: firstSavedPhotoId }).eq('id', tripId)
   }
 
   // §Root-Cause-Fix "This page couldn't load" bei Mehrfach-Upload: die
@@ -233,7 +243,7 @@ export async function uploadMemoryPhotos(formData: FormData) {
   if (tripId && savedCount > 0) {
     after(async () => {
       try {
-        await analyzeTripMemoryPhotos(supabase, tripId)
+        await analyzeTripMemoryPhotos(lumiCore, tripId)
       } catch {
         // bewusst verschluckt — Fotos sind bereits gespeichert, Analyse kann später nachlaufen
       }
@@ -262,9 +272,9 @@ export async function uploadMemoryPhotos(formData: FormData) {
  * per KI erkannt, nur per Perceptual Hash. Läuft automatisch nach jedem
  * Upload mit Reise-Zuordnung.
  */
-async function analyzeTripMemoryPhotos(supabase: SupabaseClient, tripId: string): Promise<void> {
-  const { data: photosRaw } = await supabase
-    .from('memory_photos')
+async function analyzeTripMemoryPhotos(lumiCore: LumiCoreClient, tripId: string): Promise<void> {
+  const { data: photosRaw } = await lumiCore
+    .from('travel_memory_photos')
     .select('id, storage_path, phash, quality_score, analyzed_at, is_duplicate_of')
     .eq('trip_id', tripId)
   const photos = photosRaw ?? []
@@ -281,7 +291,7 @@ async function analyzeTripMemoryPhotos(supabase: SupabaseClient, tripId: string)
   const missingHashPhotos = photos.filter((p) => !p.phash)
   const computedHashes = await Promise.all(missingHashPhotos.map(async (p) => {
     try {
-      const { data: signed } = await supabase.storage.from('documents').createSignedUrl(p.storage_path, 60)
+      const { data: signed } = await lumiCore.storage.from('travel-documents').createSignedUrl(p.storage_path, 60)
       if (!signed?.signedUrl) return null
       const res = await fetch(signed.signedUrl)
       const buffer = Buffer.from(await res.arrayBuffer())
@@ -295,7 +305,7 @@ async function analyzeTripMemoryPhotos(supabase: SupabaseClient, tripId: string)
   await Promise.all(computedHashes.map((h) => {
     if (!h) return null
     hashById.set(h.id, h.phash)
-    return supabase.from('memory_photos').update({ phash: h.phash }).eq('id', h.id)
+    return lumiCore.from('travel_memory_photos').update({ phash: h.phash }).eq('id', h.id)
   }))
 
   // Nur gegen frühere Fotos in der Liste prüfen (Index-Vergleich), damit
@@ -317,12 +327,12 @@ async function analyzeTripMemoryPhotos(supabase: SupabaseClient, tripId: string)
     }
   }
   await Promise.all(duplicateUpdates.map(({ id, duplicateOfId }) =>
-    supabase.from('memory_photos').update({ is_duplicate_of: duplicateOfId, is_selected: false }).eq('id', id),
+    lumiCore.from('travel_memory_photos').update({ is_duplicate_of: duplicateOfId, is_selected: false }).eq('id', id),
   ))
 
   // Nicht-doppelte, noch nicht analysierte Fotos in Batches der KI-Qualitätsbewertung übergeben.
-  const { data: toAnalyzeRaw } = await supabase
-    .from('memory_photos')
+  const { data: toAnalyzeRaw } = await lumiCore
+    .from('travel_memory_photos')
     .select('id, storage_path')
     .eq('trip_id', tripId)
     .is('analyzed_at', null)
@@ -333,7 +343,7 @@ async function analyzeTripMemoryPhotos(supabase: SupabaseClient, tripId: string)
     const batch = toAnalyze.slice(i, i + MAX_PHOTOS_ANALYZED_PER_CALL)
     const batchPhotos = await Promise.all(batch.map(async (p) => {
       try {
-        const { data: signed } = await supabase.storage.from('documents').createSignedUrl(p.storage_path, 60)
+        const { data: signed } = await lumiCore.storage.from('travel-documents').createSignedUrl(p.storage_path, 60)
         if (!signed?.signedUrl) return null
         const res = await fetch(signed.signedUrl)
         return { buffer: Buffer.from(await res.arrayBuffer()), mimeType: 'image/webp' }
@@ -353,7 +363,7 @@ async function analyzeTripMemoryPhotos(supabase: SupabaseClient, tripId: string)
       const originalIdx = validIndices[a.photoIndex]
       const photo = batch[originalIdx]
       if (!photo) return Promise.resolve()
-      return supabase.from('memory_photos').update({
+      return lumiCore.from('travel_memory_photos').update({
         quality_score: a.qualityScore,
         analyzed_at: new Date().toISOString(),
       }).eq('id', photo.id)
@@ -361,8 +371,8 @@ async function analyzeTripMemoryPhotos(supabase: SupabaseClient, tripId: string)
   }
 
   // Top-30-Kappung: alle nicht-doppelten, analysierten Fotos dieser Reise nach Qualität sortieren.
-  const { data: rankedRaw } = await supabase
-    .from('memory_photos')
+  const { data: rankedRaw } = await lumiCore
+    .from('travel_memory_photos')
     .select('id, quality_score')
     .eq('trip_id', tripId)
     .is('is_duplicate_of', null)
@@ -374,8 +384,8 @@ async function analyzeTripMemoryPhotos(supabase: SupabaseClient, tripId: string)
     const selectedIds = ranked.slice(0, MAX_SELECTED_PHOTOS_PER_TRIP).map((p) => p.id)
     const overflowIds = ranked.slice(MAX_SELECTED_PHOTOS_PER_TRIP).map((p) => p.id)
     await Promise.all([
-      supabase.from('memory_photos').update({ is_selected: true }).in('id', selectedIds),
-      supabase.from('memory_photos').update({ is_selected: false }).in('id', overflowIds),
+      lumiCore.from('travel_memory_photos').update({ is_selected: true }).in('id', selectedIds),
+      lumiCore.from('travel_memory_photos').update({ is_selected: false }).in('id', overflowIds),
     ])
   }
 }
@@ -385,16 +395,16 @@ export async function deleteMemoryPhoto(formData: FormData) {
   const photoId = String(formData.get('photo_id') ?? '')
   const returnTo = String(formData.get('return_to') ?? '').trim() || '/memories'
 
-  const supabase = await createClient()
-  const { data: photo } = await supabase.from('memory_photos').select('storage_path').eq('id', photoId).maybeSingle()
+  const lumiCore = await createLumiCoreClient()
+  const { data: photo } = await lumiCore.from('travel_memory_photos').select('storage_path').eq('id', photoId).maybeSingle()
 
   if (photo?.storage_path) {
-    const { error: storageError } = await supabase.storage.from('documents').remove([photo.storage_path])
+    const { error: storageError } = await lumiCore.storage.from('travel-documents').remove([photo.storage_path])
     if (storageError)
       redirect(`${returnTo}?error=${encodeURIComponent('Datei konnte nicht gelöscht werden: ' + storageError.message)}`)
   }
 
-  const { error } = await supabase.from('memory_photos').delete().eq('id', photoId)
+  const { error } = await lumiCore.from('travel_memory_photos').delete().eq('id', photoId)
   if (error)
     redirect(`${returnTo}?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)
 
@@ -415,8 +425,8 @@ export async function setCoverPhoto(formData: FormData) {
 
   if (!photoId || !tripId) redirect(`${returnTo}?error=${encodeURIComponent('Titelbild konnte nicht gesetzt werden')}`)
 
-  const supabase = await createClient()
-  const { error } = await supabase.from('trips').update({ cover_photo_id: photoId }).eq('id', tripId)
+  const lumiCore = await createLumiCoreClient()
+  const { error } = await lumiCore.from('travel_trips').update({ cover_photo_id: photoId }).eq('id', tripId)
   if (error) redirect(`${returnTo}?error=${encodeURIComponent('Titelbild konnte nicht gesetzt werden: ' + error.message)}`)
 
   redirect(returnTo)
@@ -429,8 +439,8 @@ export async function updateMemoryPhoto(formData: FormData) {
   const stageId = String(formData.get('stage_id') ?? '').trim() || null
   const returnTo = String(formData.get('return_to') ?? '').trim() || '/memories'
 
-  const supabase = await createClient()
-  const { error } = await supabase.from('memory_photos').update({ caption, stage_id: stageId }).eq('id', photoId)
+  const lumiCore = await createLumiCoreClient()
+  const { error } = await lumiCore.from('travel_memory_photos').update({ caption, stage_id: stageId }).eq('id', photoId)
   if (error) redirect(`${returnTo}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
 
   redirect(returnTo)
@@ -451,8 +461,8 @@ export async function replaceMemoryPhoto(formData: FormData) {
   const stagedPaths = parseStagedPaths(formData.get('uploaded_paths'))
   if (stagedPaths.length === 0) redirect(`${returnTo}?error=${encodeURIComponent('Bitte ein Ersatzfoto auswählen.')}`)
 
-  const supabase = await createClient()
-  const { data: existing } = await supabase.from('memory_photos').select('storage_path').eq('id', photoId).maybeSingle()
+  const lumiCore = await createLumiCoreClient()
+  const { data: existing } = await lumiCore.from('travel_memory_photos').select('storage_path').eq('id', photoId).maybeSingle()
   if (!existing) redirect(`${returnTo}?error=${encodeURIComponent('Foto nicht gefunden.')}`)
 
   const staged = await downloadAndClearStagedUpload(stagedPaths[0])
@@ -460,19 +470,20 @@ export async function replaceMemoryPhoto(formData: FormData) {
     redirect(`${returnTo}?error=${encodeURIComponent('Foto-Upload fehlgeschlagen. Bitte erneut versuchen.')}`)
 
   const compressed = await compressImageForStorage(staged.buffer)
-  const newStoragePath = `memories/${familyId}/${crypto.randomUUID()}.webp`
-  const verified = await uploadAndVerify(supabase, newStoragePath, compressed)
+  const newStoragePath = await toTravelDocumentsPath(`memories/${familyId}/${crypto.randomUUID()}.webp`)
+  if (!newStoragePath) redirect(`${returnTo}?error=${encodeURIComponent('Foto-Upload fehlgeschlagen. Bitte erneut versuchen.')}`)
+  const verified = await uploadAndVerify(lumiCore, newStoragePath, compressed)
   if (!verified) redirect(`${returnTo}?error=${encodeURIComponent('Foto-Upload fehlgeschlagen. Bitte erneut versuchen.')}`)
 
-  const { error: updateError } = await supabase.from('memory_photos').update({
+  const { error: updateError } = await lumiCore.from('travel_memory_photos').update({
     storage_path: newStoragePath, phash: null, quality_score: null, analyzed_at: null, is_duplicate_of: null,
   }).eq('id', photoId)
   if (updateError) {
-    await supabase.storage.from('documents').remove([newStoragePath])
+    await lumiCore.storage.from('travel-documents').remove([newStoragePath])
     redirect(`${returnTo}?error=${encodeURIComponent('Speicherfehler: ' + updateError.message)}`)
   }
 
-  await supabase.storage.from('documents').remove([existing.storage_path])
+  await lumiCore.storage.from('travel-documents').remove([existing.storage_path])
 
   redirect(returnTo)
 }
@@ -491,9 +502,9 @@ export async function reorderMemoryPhoto(formData: FormData) {
   const direction = String(formData.get('direction') ?? '')
   const returnTo = String(formData.get('return_to') ?? '').trim() || '/memories'
 
-  const supabase = await createClient()
-  const { data: photosRaw } = await supabase
-    .from('memory_photos')
+  const lumiCore = await createLumiCoreClient()
+  const { data: photosRaw } = await lumiCore
+    .from('travel_memory_photos')
     .select('id, sort_order')
     .eq('trip_id', tripId)
     .eq('is_selected', true)
@@ -508,7 +519,7 @@ export async function reorderMemoryPhoto(formData: FormData) {
   const reordered = [...photos]
   ;[reordered[index], reordered[swapWith]] = [reordered[swapWith], reordered[index]]
 
-  await Promise.all(reordered.map((p, i) => supabase.from('memory_photos').update({ sort_order: i }).eq('id', p.id)))
+  await Promise.all(reordered.map((p, i) => lumiCore.from('travel_memory_photos').update({ sort_order: i }).eq('id', p.id)))
 
   redirect(returnTo)
 }
@@ -527,8 +538,8 @@ export async function assignMemoryPhotoToTrip(formData: FormData) {
 
   if (!photoId || !tripId) redirect(`${returnTo}?error=${encodeURIComponent('Zuordnung fehlgeschlagen')}`)
 
-  const supabase = await createClient()
-  const { error } = await supabase.from('memory_photos').update({ trip_id: tripId, past_trip_id: null }).eq('id', photoId)
+  const lumiCore = await createLumiCoreClient()
+  const { error } = await lumiCore.from('travel_memory_photos').update({ trip_id: tripId, past_trip_id: null }).eq('id', photoId)
   if (error) redirect(`${returnTo}?error=${encodeURIComponent('Zuordnung fehlgeschlagen: ' + error.message)}`)
 
   redirect(returnTo)
@@ -556,9 +567,9 @@ export async function assignMemoryPhotoToAnyTrip(formData: FormData) {
   if (!photoId || !targetId || (type !== 'trip' && type !== 'past_trip'))
     redirect(`${returnTo}?error=${encodeURIComponent('Zuordnung fehlgeschlagen')}`)
 
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const update = type === 'trip' ? { trip_id: targetId, past_trip_id: null } : { trip_id: null, past_trip_id: targetId }
-  const { error } = await supabase.from('memory_photos').update(update).eq('id', photoId)
+  const { error } = await lumiCore.from('travel_memory_photos').update(update).eq('id', photoId)
   if (error) redirect(`${returnTo}?error=${encodeURIComponent('Zuordnung fehlgeschlagen: ' + error.message)}`)
 
   redirect(returnTo)

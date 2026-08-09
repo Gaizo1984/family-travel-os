@@ -1,6 +1,8 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
+import { listHouseholdMembers } from '@/lib/household-members'
 import { sortStagesChronologically, buildJourneyTimeline } from '@/lib/journey'
 import type { StageInput, TimelineBooking, TimelineEvent, TimelineDay } from '@/lib/journey'
 import { sortBookingsChronologically, formatDateTimeDE } from '@/lib/bookings'
@@ -40,28 +42,35 @@ type JourneyEventRow = {
  */
 export async function fetchOfflineTripSnapshotData(tripId: string): Promise<OfflineTripSnapshot | null> {
   const supabase = await createClient()
-  const { data: trip } = await supabase
-    .from('trips')
-    .select(`
-      id, slug, title, subtitle, status, start_date, end_date,
-      stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code ),
-      bookings ( id, type, title, provider, status, start_datetime, end_datetime, stage_id, details, created_at, booking_reference ),
-      journey_events ( id, stage_id, date, time, category, title, location, status )
-    `)
+  const lumiCore = await createLumiCoreClient()
+
+  const { data: trip } = await lumiCore
+    .from('travel_trips')
+    .select('id, slug, title, subtitle, status, start_date, end_date')
     .eq('id', tripId)
     .maybeSingle()
 
   if (!trip) return null
 
-  const [packingItemsRaw, { data: memberRows }] = await Promise.all([
+  const [
+    { data: stagesRaw },
+    { data: bookingsRaw },
+    { data: journeyEventsRaw },
+    packingItemsRaw,
+    { data: tripMemberRows },
+    householdMembers,
+  ] = await Promise.all([
+    lumiCore.from('travel_stages').select('id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code').eq('trip_id', tripId),
+    lumiCore.from('travel_bookings').select('id, type, title, provider, status, start_datetime, end_datetime, stage_id, details, created_at, booking_reference').eq('trip_id', tripId),
+    lumiCore.from('travel_journey_events').select('id, stage_id, date, time, category, title, location, status').eq('trip_id', tripId),
     loadPackingItems(supabase, tripId),
-    supabase.from('trip_members').select('persons ( id, name )').eq('trip_id', tripId),
+    lumiCore.from('travel_trip_members').select('household_member_id').eq('trip_id', tripId),
+    listHouseholdMembers(),
   ])
+
+  const tripMemberIds = new Set((tripMemberRows ?? []).map((m) => m.household_member_id))
   const personNameById = new Map(
-    (memberRows ?? [])
-      .map((m) => m.persons as unknown as { id: string; name: string } | null)
-      .filter((p): p is { id: string; name: string } => Boolean(p))
-      .map((p) => [p.id, p.name]),
+    householdMembers.filter((m) => tripMemberIds.has(m.id)).map((m) => [m.id, m.name]),
   )
   const packingItems = packingItemsRaw
     .filter((i) => i.status !== 'nicht_benoetigt')
@@ -71,10 +80,10 @@ export async function fetchOfflineTripSnapshotData(tripId: string): Promise<Offl
       personLabel: i.personId ? (personNameById.get(i.personId) ?? 'Gemeinsam') : 'Gemeinsam',
     }))
 
-  const stages = sortStagesChronologically((trip.stages ?? []) as StageRow[]) as StageInput[]
-  const bookings = sortBookingsChronologically((trip.bookings ?? []) as BookingRow[]) as TimelineBooking[]
-  const events = (trip.journey_events ?? []) as unknown as TimelineEvent[]
-  const range = deriveTripDateRange(trip, trip.bookings as BookingRow[], trip.stages as StageRow[])
+  const stages = sortStagesChronologically((stagesRaw ?? []) as StageRow[]) as StageInput[]
+  const bookings = sortBookingsChronologically((bookingsRaw ?? []) as BookingRow[]) as TimelineBooking[]
+  const events = (journeyEventsRaw ?? []) as unknown as TimelineEvent[]
+  const range = deriveTripDateRange(trip, (bookingsRaw ?? []) as BookingRow[], (stagesRaw ?? []) as StageRow[])
   const duration = tripDurationDays(range)
 
   const timeline = buildJourneyTimeline({ start_date: range.startDate, end_date: range.endDate }, stages, bookings, events)
@@ -90,7 +99,7 @@ export async function fetchOfflineTripSnapshotData(tripId: string): Promise<Offl
     ],
   }))
 
-  const flightsAndHotels = (trip.bookings as BookingRow[])
+  const flightsAndHotels = ((bookingsRaw ?? []) as BookingRow[])
     .filter((b) => (b.type === 'flight' || b.type === 'accommodation') && b.status !== 'cancelled')
     .map((b) => ({
       id: b.id,
@@ -148,25 +157,29 @@ export type OfflineCacheableDocument = {
  */
 export async function fetchTripDocumentsForOfflineCache(tripId: string): Promise<OfflineCacheableDocument[]> {
   const supabase = await createClient()
-  const [{ data: booking }, { data: journeyEvent }] = await Promise.all([
-    supabase.from('bookings').select('id, start_datetime, end_datetime').eq('trip_id', tripId),
-    supabase.from('journey_events').select('id, date, time').eq('trip_id', tripId),
+  const lumiCore = await createLumiCoreClient()
+  const [{ data: booking }, { data: journeyEvent }, householdMembers] = await Promise.all([
+    lumiCore.from('travel_bookings').select('id, start_datetime, end_datetime').eq('trip_id', tripId),
+    lumiCore.from('travel_journey_events').select('id, date, time').eq('trip_id', tripId),
+    listHouseholdMembers(),
   ])
 
-  const { data: docsRaw } = await supabase
-    .from('documents')
-    .select('id, label, storage_path, doc_type, booking_id, journey_event_id, person_id, persons ( id, name )')
+  const { data: docsRaw } = await lumiCore
+    .from('travel_documents')
+    .select('id, label, storage_path, doc_type, booking_id, journey_event_id, household_member_id')
     .eq('trip_id', tripId)
     .in('doc_type', ['boarding_pass', 'baggage_tag', 'booking_document'])
 
   const bookingById = new Map((booking ?? []).map((b) => [b.id, b]))
   const journeyEventById = new Map((journeyEvent ?? []).map((e) => [e.id, e]))
+  const memberById = new Map(householdMembers.map((m) => [m.id, m]))
 
   const results = await Promise.all(
-    (docsRaw ?? []).map(async (d) => {
-      const url = await getCachedSignedUrl('documents', d.storage_path)
-      const isPdf = d.storage_path.toLowerCase().endsWith('.pdf')
-      const person = d.persons as unknown as { id: string; name: string } | null
+    (docsRaw ?? []).filter((d) => d.storage_path).map(async (d) => {
+      const storagePath = d.storage_path!
+      const url = await getCachedSignedUrl('travel-documents', storagePath)
+      const isPdf = storagePath.toLowerCase().endsWith('.pdf')
+      const person = d.household_member_id ? memberById.get(d.household_member_id) ?? null : null
       const relatedBooking = d.booking_id ? bookingById.get(d.booking_id) : null
       const relatedJourneyEvent = d.journey_event_id ? journeyEventById.get(d.journey_event_id) : null
       const referenceDateIso = relatedBooking?.end_datetime ?? relatedBooking?.start_datetime

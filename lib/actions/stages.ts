@@ -1,10 +1,11 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { redirect } from 'next/navigation'
 import { suggestCountryCode } from '@/lib/geo-suggestions'
 import { readDateGroupFromFormData } from '@/lib/documents'
-import type { SupabaseClient } from '@supabase/supabase-js'
+
+type LumiCore = Awaited<ReturnType<typeof createLumiCoreClient>>
 
 function computeNights(startDate: string | null, endDate: string | null): number | null {
   if (!startDate || !endDate) return null
@@ -22,7 +23,7 @@ function computeNights(startDate: string | null, endDate: string | null): number
  * Datenüberschreibung manuell gepflegter Buchungsdetails).
  */
 async function ensureAccommodationBooking(
-  supabase: SupabaseClient,
+  lumiCore: LumiCore,
   tripId: string,
   stageId: string,
   accommodation: string,
@@ -31,8 +32,8 @@ async function ensureAccommodationBooking(
 ): Promise<void> {
   if (!accommodation) return
 
-  const { data: existing } = await supabase
-    .from('bookings')
+  const { data: existing } = await lumiCore
+    .from('travel_bookings')
     .select('id')
     .eq('stage_id', stageId)
     .eq('type', 'accommodation')
@@ -41,7 +42,7 @@ async function ensureAccommodationBooking(
 
   if (existing) return
 
-  await supabase.from('bookings').insert({
+  await lumiCore.from('travel_bookings').insert({
     trip_id: tripId,
     stage_id: stageId,
     type: 'accommodation',
@@ -80,11 +81,11 @@ export async function createStage(formData: FormData) {
   if (startDate && endDate && new Date(endDate) < new Date(startDate))
     redirect(`${newPath}?error=${encodeURIComponent('Enddatum darf nicht vor dem Startdatum liegen')}`)
 
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
   const [{ data: last }, { data: trip }] = await Promise.all([
-    supabase.from('stages').select('sort_order').eq('trip_id', tripId).order('sort_order', { ascending: false }).limit(1).maybeSingle(),
-    supabase.from('trips').select('title, subtitle').eq('id', tripId).maybeSingle(),
+    lumiCore.from('travel_stages').select('sort_order').eq('trip_id', tripId).order('sort_order', { ascending: false }).limit(1).maybeSingle(),
+    lumiCore.from('travel_trips').select('title, subtitle').eq('id', tripId).maybeSingle(),
   ])
 
   // Deterministischer Länder-Vorschlag: zuerst die Etappe selbst (z. B. "Dubai"
@@ -105,8 +106,8 @@ export async function createStage(formData: FormData) {
     ?? suggestCountryCode(`${title} ${accommodation}`)
     ?? (isTransit ? null : suggestCountryCode(`${trip?.title ?? ''} ${trip?.subtitle ?? ''}`, { includeWeak: false }))
 
-  const { data: created, error } = await supabase
-    .from('stages')
+  const { data: created, error } = await lumiCore
+    .from('travel_stages')
     .insert({
       trip_id: tripId,
       title,
@@ -127,7 +128,7 @@ export async function createStage(formData: FormData) {
     redirect(`${newPath}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
 
   if (accommodation)
-    await ensureAccommodationBooking(supabase, tripId, created.id, accommodation, startDate, endDate)
+    await ensureAccommodationBooking(lumiCore, tripId, created.id, accommodation, startDate, endDate)
 
   redirect(`/trips/${slug}`)
 }
@@ -157,18 +158,18 @@ export async function updateStage(formData: FormData) {
   if (startDate && endDate && new Date(endDate) < new Date(startDate))
     redirect(`${editPath}?error=${encodeURIComponent('Enddatum darf nicht vor dem Startdatum liegen')}`)
 
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
-  const { data: stage } = await supabase.from('stages').select('trip_id').eq('id', stageId).maybeSingle()
+  const { data: stage } = await lumiCore.from('travel_stages').select('trip_id').eq('id', stageId).maybeSingle()
   const { data: trip } = stage
-    ? await supabase.from('trips').select('title, subtitle').eq('id', stage.trip_id).maybeSingle()
+    ? await lumiCore.from('travel_trips').select('title, subtitle').eq('id', stage.trip_id).maybeSingle()
     : { data: null }
   const countryCode = manualCountryCode
     ?? suggestCountryCode(`${title} ${accommodation}`)
     ?? (isTransit ? null : suggestCountryCode(`${trip?.title ?? ''} ${trip?.subtitle ?? ''}`, { includeWeak: false }))
 
-  const { error } = await supabase
-    .from('stages')
+  const { error } = await lumiCore
+    .from('travel_stages')
     .update({
       title,
       location: title,
@@ -186,7 +187,7 @@ export async function updateStage(formData: FormData) {
     redirect(`${editPath}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
 
   if (accommodation && stage)
-    await ensureAccommodationBooking(supabase, stage.trip_id, stageId, accommodation, startDate, endDate)
+    await ensureAccommodationBooking(lumiCore, stage.trip_id, stageId, accommodation, startDate, endDate)
 
   redirect(`/trips/${slug}`)
 }
@@ -196,17 +197,17 @@ export async function deleteStage(formData: FormData) {
   const tripId  = String(formData.get('trip_id') ?? '')
   const slug    = String(formData.get('slug') ?? '')
 
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
-  const { count } = await supabase
-    .from('stages')
+  const { count } = await lumiCore
+    .from('travel_stages')
     .select('id', { count: 'exact', head: true })
     .eq('trip_id', tripId)
 
   if ((count ?? 0) <= 1)
     redirect(`/trips/${slug}/stages/${stageId}/edit?error=${encodeURIComponent('Mindestens eine Etappe muss erhalten bleiben.')}`)
 
-  const { error } = await supabase.from('stages').delete().eq('id', stageId)
+  const { error } = await lumiCore.from('travel_stages').delete().eq('id', stageId)
 
   if (error)
     redirect(`/trips/${slug}/stages/${stageId}/edit?error=${encodeURIComponent('Löschfehler: ' + error.message)}`)
@@ -230,8 +231,8 @@ export async function setStageCoverPhoto(formData: FormData) {
   if (!stageId || !photoId)
     redirect(`${returnTo}?error=${encodeURIComponent('Titelbild konnte nicht gesetzt werden')}`)
 
-  const supabase = await createClient()
-  const { error } = await supabase.from('stages').update({ cover_photo_id: photoId }).eq('id', stageId)
+  const lumiCore = await createLumiCoreClient()
+  const { error } = await lumiCore.from('travel_stages').update({ cover_photo_id: photoId }).eq('id', stageId)
   if (error)
     redirect(`${returnTo}?error=${encodeURIComponent('Titelbild konnte nicht gesetzt werden: ' + error.message)}`)
 
@@ -243,8 +244,8 @@ export async function clearStageCoverPhoto(formData: FormData) {
   const slug = String(formData.get('slug') ?? '')
   const returnTo = `/trips/${slug}/stages/${stageId}/edit`
 
-  const supabase = await createClient()
-  await supabase.from('stages').update({ cover_photo_id: null }).eq('id', stageId)
+  const lumiCore = await createLumiCoreClient()
+  await lumiCore.from('travel_stages').update({ cover_photo_id: null }).eq('id', stageId)
 
   redirect(returnTo)
 }

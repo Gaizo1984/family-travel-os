@@ -1,4 +1,5 @@
-import { createClient } from './supabase/server'
+import { createLumiCoreClient } from './supabase/lumi-core-server'
+import { resolveLegacyTravelPersonId } from './household-members'
 import type { DocumentType } from './documents'
 import { detectFlightStopoverSuggestions, detectSingleFlightLayoverSuggestions } from './flight-stopovers'
 import { computeTripRequirements } from './travel-requirements'
@@ -74,11 +75,11 @@ function sortStages(stages: StageRow[]): StageRow[] {
  * abläuft, wird geprüft.
  */
 export async function computeTripReadiness(tripId: string): Promise<ReadinessResult> {
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const findings: ReadinessFinding[] = []
 
-  const { data: trip } = await supabase
-    .from('trips')
+  const { data: trip } = await lumiCore
+    .from('travel_trips')
     .select('id, slug, start_date, end_date')
     .eq('id', tripId)
     .maybeSingle()
@@ -93,16 +94,20 @@ export async function computeTripReadiness(tripId: string): Promise<ReadinessRes
   // §Performance: die folgenden Abfragen sind alle unabhängig voneinander
   // (keine hängt vom Ergebnis einer anderen ab, außer der Dokumente-Query, die
   // die Mitreisenden-IDs braucht) — parallel statt seriell laden.
-  const [{ data: assignedEntryDocsRaw }, { count: insuranceCount }, { data: stagesRaw }, { data: bookingsRaw }, flightGapSuggestions, singleFlightLayoverSuggestions, tripRequirements] =
+  const [{ data: documentTripLinks }, { count: insuranceCount }, { data: stagesRaw }, { data: bookingsRaw }, flightGapSuggestions, singleFlightLayoverSuggestions, tripRequirements] =
     await Promise.all([
-      supabase.from('document_trips').select('documents ( id, person_id, doc_type, expires_at, label )').eq('trip_id', tripId),
-      supabase.from('insurance_policy_trips').select('policy_id', { count: 'exact', head: true }).eq('trip_id', tripId),
-      supabase.from('stages').select('id, title, start_date, end_date, nights, accommodation, sort_order').eq('trip_id', tripId),
-      supabase.from('bookings').select('id, type, stage_id, status, start_datetime, end_datetime').eq('trip_id', tripId),
+      lumiCore.from('travel_document_trips').select('document_id').eq('trip_id', tripId),
+      lumiCore.from('travel_insurance_policy_trips').select('policy_id', { count: 'exact', head: true }).eq('trip_id', tripId),
+      lumiCore.from('travel_stages').select('id, title, start_date, end_date, nights, accommodation, sort_order').eq('trip_id', tripId),
+      lumiCore.from('travel_bookings').select('id, type, stage_id, status, start_datetime, end_datetime').eq('trip_id', tripId),
       detectFlightStopoverSuggestions(tripId),
       detectSingleFlightLayoverSuggestions(tripId),
       computeTripRequirements(tripId, `/trips/${slug}/ready-to-travel`),
     ])
+  const documentIds = (documentTripLinks ?? []).map((l) => l.document_id)
+  const { data: assignedEntryDocsRaw } = documentIds.length
+    ? await lumiCore.from('travel_documents').select('id, household_member_id, doc_type, expires_at, label').in('id', documentIds)
+    : { data: [] as { id: string; household_member_id: string | null; doc_type: string; expires_at: string | null; label: string | null }[] }
   // §"ein Termin, keine zwei unterschiedlichen Etappen": beide Zwischenstopp-
   // Quellen (Lücke zwischen zwei Flügen / Layover-Feld in einem einzelnen
   // Flug) münden im selben Bestätigungs-Hinweis unten -- keine Etappe ohne
@@ -127,15 +132,14 @@ export async function computeTripReadiness(tripId: string): Promise<ReadinessRes
   }
 
   // ── Einreise: dieser Reise zugeordnetes Visum/Sonstige-Einreisegenehmigung ──
-  for (const row of assignedEntryDocsRaw ?? []) {
-    const doc = row.documents as unknown as
-      { id: string; person_id: string; doc_type: DocumentType; expires_at: string | null; label: string } | null
-    if (!doc || !MANUALLY_ASSIGNED_ENTRY_TYPES.includes(doc.doc_type)) continue
+  for (const doc of assignedEntryDocsRaw ?? []) {
+    if (!MANUALLY_ASSIGNED_ENTRY_TYPES.includes(doc.doc_type as DocumentType)) continue
     if (doc.expires_at && doc.expires_at <= tripEnd) {
+      const legacyPersonId = doc.household_member_id ? await resolveLegacyTravelPersonId(doc.household_member_id) : null
       findings.push({
         severity: 'conflict', theme: 'entry',
         message: `${doc.label} läuft vor oder während des Reiseendes ab.`,
-        href: `/family/${doc.person_id}/documents/${doc.id}`,
+        href: legacyPersonId ? `/family/${legacyPersonId}/documents/${doc.id}` : '/family',
       })
     }
   }

@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 
 /** Kanonisches, app-seitig validiertes Vokabular für individuelle Reisebedürfnisse (persons.travel_needs). */
 export const TRAVEL_NEED_OPTIONS = [
@@ -68,19 +69,34 @@ export function ageAtDate(birthDate: string | null, atDate: string | Date): numb
  * zu einer zentralen Familien-Zusammenfassung — von allen KI-/Scoring-Flows
  * (Content-Ideen, Reiseideen, Discover) genutzt, statt dreifach dupliziert.
  */
-export async function buildFamilyDnaSummary(familyId: string): Promise<FamilyDnaSummary> {
+/**
+ * FINALER CUTOVER, wichtige Korrektur: `familyId` ist die Lumi-Core
+ * household_id (so wie überall sonst im Cutover), NICHT mehr Travels
+ * eigene families.id. `exceptional_hotel_criteria`/`persons.interest_tags`/
+ * `travel_needs` haben in Lumi Core kein Gegenstück (Schema-Lücke, siehe
+ * lib/actions/persons.ts) -- für genau diese beiden Travel-Reste wird die
+ * legacy Travel family_id über die bestehende Phase-3A-Brücke
+ * (families.lumi_core_household_id) aufgelöst, statt householdId
+ * fälschlich direkt als Travel-ID zu verwenden (das war zuvor ein
+ * Übertragungsfehler -- beide IDs sind unterschiedliche UUID-Räume).
+ */
+export async function buildFamilyDnaSummary(householdId: string): Promise<FamilyDnaSummary> {
   const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
 
-  const [{ data: preferences }, { data: family }, { data: persons }] = await Promise.all([
-    supabase.from('family_preference_categories').select('category_key, weight, note').eq('family_id', familyId),
-    supabase.from('families').select('exceptional_hotel_criteria').eq('id', familyId).maybeSingle(),
-    supabase.from('persons').select('id, name, birth_date, is_minor, interest_tags, travel_needs').eq('family_id', familyId),
+  const [{ data: preferences }, { data: legacyFamily }] = await Promise.all([
+    lumiCore.from('travel_preference_categories').select('category_key, weight, note').eq('household_id', householdId),
+    supabase.from('families').select('id, exceptional_hotel_criteria').eq('lumi_core_household_id', householdId).maybeSingle(),
   ])
 
+  const { data: persons } = legacyFamily?.id
+    ? await supabase.from('persons').select('id, name, birth_date, is_minor, interest_tags, travel_needs').eq('family_id', legacyFamily.id)
+    : { data: [] as FamilyDnaSummary['persons'] }
+
   return {
-    familyId,
+    familyId: householdId,
     preferences: preferences ?? [],
-    hotelCriteria: family?.exceptional_hotel_criteria ?? [],
+    hotelCriteria: legacyFamily?.exceptional_hotel_criteria ?? [],
     persons: persons ?? [],
   }
 }
