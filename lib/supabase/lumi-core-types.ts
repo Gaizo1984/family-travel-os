@@ -54,6 +54,57 @@ export interface LumiCoreDatabase {
         { id: string; travel_person_id: string; household_member_id: string; travel_person_name: string; created_at: string },
         { id?: string; travel_person_id: string; household_member_id: string; travel_person_name: string; created_at?: string }
       >
+      // Phase 3 (Fachdaten-Cutover-Vorbereitung, erste Gruppe): exakte
+      // Spaltenform wie in 02_copy_engine.js (bereits real migriert, 1:1
+      // Uebernahme der Ziel-Spalten).
+      travel_trips: TableDef<
+        {
+          id: string; household_id: string; slug: string; title: string; subtitle: string | null; status: string
+          start_date: string | null; end_date: string | null; cover_emoji: string | null
+          gradient_from: string | null; gradient_via: string | null; gradient_to: string | null
+          budget_amount: number | null; budget_currency: string | null; cover_photo_id: string | null
+          created_at: string; updated_at: string
+        },
+        {
+          id?: string; household_id: string; slug: string; title: string; subtitle?: string | null; status?: string
+          start_date?: string | null; end_date?: string | null; cover_emoji?: string | null
+          gradient_from?: string | null; gradient_via?: string | null; gradient_to?: string | null
+          budget_amount?: number | null; budget_currency?: string | null; cover_photo_id?: string | null
+          created_at?: string; updated_at?: string
+        }
+      >
+      travel_stages: TableDef<
+        {
+          id: string; trip_id: string; title: string; location: string | null; start_date: string | null; end_date: string | null
+          nights: number | null; accommodation: string | null; notes: string | null; sort_order: number
+          country_code: string | null; cover_photo_id: string | null; is_transit: boolean; created_at: string
+        },
+        {
+          id?: string; trip_id: string; title: string; location?: string | null; start_date?: string | null; end_date?: string | null
+          nights?: number | null; accommodation?: string | null; notes?: string | null; sort_order?: number
+          country_code?: string | null; cover_photo_id?: string | null; is_transit?: boolean; created_at?: string
+        }
+      >
+      travel_trip_members: TableDef<
+        { trip_id: string; household_member_id: string; role: string | null },
+        { trip_id: string; household_member_id: string; role?: string | null }
+      >
+      travel_bookings: TableDef<
+        {
+          id: string; trip_id: string; stage_id: string | null; type: string; title: string; provider: string | null
+          booking_reference: string | null; status: string; payment_status: string | null; amount: number | null
+          currency: string | null; start_datetime: string | null; end_datetime: string | null
+          details: unknown; notes: string | null; participant_household_member_ids: string[] | null
+          created_at: string; updated_at: string
+        },
+        {
+          id?: string; trip_id: string; stage_id?: string | null; type: string; title: string; provider?: string | null
+          booking_reference?: string | null; status?: string; payment_status?: string | null; amount?: number | null
+          currency?: string | null; start_datetime?: string | null; end_datetime?: string | null
+          details?: unknown; notes?: string | null; participant_household_member_ids?: string[] | null
+          created_at?: string; updated_at?: string
+        }
+      >
     }
     Views: Record<string, never>
     Functions: Record<string, never>
