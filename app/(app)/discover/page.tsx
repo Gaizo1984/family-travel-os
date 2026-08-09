@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Sparkles, Heart } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { getFamily } from "@/lib/family";
 import { buildFamilyDnaSummary } from "@/lib/family-dna";
 import { scoreDestinations } from "@/lib/discover-scoring";
@@ -58,15 +58,18 @@ function CuratedHotelCard({ hotel }: { hotel: CuratedHotel }) {
 }
 
 export default async function DiscoverPage() {
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
   const { id: familyId } = await getFamily();
 
-  const [dna, { data: pastTrips }, { data: trips }, destinationsOrNull, { data: family }] = await Promise.all([
+  // §Schema-Lücken-Schliessung: `exceptional_hotel_criteria` liegt nicht mehr
+  // auf `families`, sondern im generischen `app_preferences.settings`
+  // (Schlüssel `travel_exceptional_hotel_criteria`), siehe lib/family-dna.ts.
+  const [dna, { data: pastTrips }, { data: trips }, destinationsOrNull, { data: appPrefs }] = await Promise.all([
     buildFamilyDnaSummary(familyId),
-    supabase.from("past_trips").select("country_or_region").eq("family_id", familyId),
-    supabase.from("trips").select("title").eq("family_id", familyId).in("status", ["completed", "active"]),
+    lumiCore.from("travel_past_trips").select("country_or_region").eq("household_id", familyId),
+    lumiCore.from("travel_trips").select("title").eq("household_id", familyId).in("status", ["completed", "active"]),
     searchDestinations(),
-    supabase.from("families").select("exceptional_hotel_criteria").eq("id", familyId).maybeSingle(),
+    lumiCore.from("app_preferences").select("settings").eq("household_id", familyId).maybeSingle(),
   ]);
   const avoidNames = [...(pastTrips ?? []).map((p) => p.country_or_region), ...(trips ?? []).map((t) => t.title)];
   const destinations = destinationsOrNull ?? [];
@@ -75,7 +78,8 @@ export default async function DiscoverPage() {
   // keine Sekundärvorschläge/Saison-/Stimmungs-Kacheln mehr auf dieser Seite.
   const [top] = scoreDestinations(destinations, dna, { avoidNames }).slice(0, 1);
 
-  const criteria = new Set(family?.exceptional_hotel_criteria ?? []);
+  const settings = (appPrefs?.settings ?? {}) as { travel_exceptional_hotel_criteria?: string[] };
+  const criteria = new Set(settings.travel_exceptional_hotel_criteria ?? []);
   const curatedHotels = sortHotelsByFamilyCriteria(HOTELS, criteria).slice(0, 3);
 
   return (

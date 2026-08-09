@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { getFamily } from "@/lib/family";
 import { saveFamilyCompass } from "@/lib/actions/family-preferences";
 import { COMPASS_CATEGORY_ORDER, COMPASS_CATEGORY_LABELS, HOTEL_CRITERIA_OPTIONS } from "@/lib/family-dna";
 import { Banner } from "@/components/Banner";
@@ -26,15 +27,16 @@ export default async function EditFamilyCompassPage({
 }) {
   const { error } = await searchParams;
 
-  const supabase = await createClient();
-  const { data: family } = await supabase.from("families").select("id, exceptional_hotel_criteria").limit(1).single();
-  const { data: preferences } = await supabase
-    .from("family_preference_categories")
-    .select("category_key, weight, note")
-    .eq("family_id", family?.id ?? "");
+  const lumiCore = await createLumiCoreClient();
+  const { id: familyId } = await getFamily();
+  const [{ data: preferences }, { data: appPreferences }] = await Promise.all([
+    lumiCore.from("travel_preference_categories").select("category_key, weight, note").eq("household_id", familyId),
+    lumiCore.from("app_preferences").select("settings").eq("household_id", familyId).maybeSingle(),
+  ]);
 
   const prefByKey = new Map((preferences ?? []).map((p) => [p.category_key, p]));
-  const hotelCriteria = new Set(family?.exceptional_hotel_criteria ?? []);
+  const hotelCriteriaList = (appPreferences?.settings as { travel_exceptional_hotel_criteria?: string[] } | null)?.travel_exceptional_hotel_criteria ?? [];
+  const hotelCriteria = new Set(hotelCriteriaList);
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -57,7 +59,7 @@ export default async function EditFamilyCompassPage({
         </h1>
 
         <form action={saveFamilyCompass}>
-          <input type="hidden" name="family_id" value={family?.id ?? ""} />
+          <input type="hidden" name="family_id" value={familyId} />
 
           <div className="rounded-xl p-8 mb-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
             {error && (

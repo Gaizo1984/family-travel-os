@@ -62,6 +62,11 @@ export async function resolveLegacyTravelPersonId(householdMemberId: string): Pr
   return data?.travel_person_id ?? null
 }
 
+/** `HouseholdMemberSummary` hat -- anders als die frühere Travel-`persons`-Tabelle -- kein `initials`-Feld: aus dem Namen ableiten (Großbuchstaben der ersten bis zu zwei Wörter). */
+export function deriveInitials(name: string): string {
+  return name.trim().split(/\s+/).slice(0, 2).map((word) => word[0]?.toUpperCase() ?? '').join('')
+}
+
 export async function getHouseholdMemberById(householdMemberId: string): Promise<HouseholdMemberSummary | null> {
   const lumiCore = await createLumiCoreClient()
   const { data, error } = await lumiCore

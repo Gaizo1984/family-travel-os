@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft, FileText, Trash2, Check, Ticket, Luggage } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
 import { BOOKING_TYPE_CONFIG, BOOKING_STATUS_LABELS, PAYMENT_STATUS_LABELS, formatDateTimeDE } from "@/lib/bookings";
 import { uploadBookingDocument, deleteBookingDocument, uploadBoardingPass, uploadBaggageTag } from "@/lib/actions/documents";
 import { toggleBookingCancelled } from "@/lib/actions/bookings";
@@ -12,6 +13,7 @@ import { FileInputButton } from "@/components/FileInputButton";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
 import { formatCurrencyDE } from "@/lib/demo-data";
 import { getCachedSignedUrl } from "@/lib/signed-storage-url";
+import { listHouseholdMembers, deriveInitials } from "@/lib/household-members";
 
 type BookingDetail = {
   id: string;
@@ -53,48 +55,59 @@ export default async function BookingDetailPage({
   const { id, bookingId } = await params;
   const { error } = await searchParams;
 
-  const supabase = await createClient();
-  const { data: trip } = await supabase
-    .from("trips")
-    .select("id, slug, title, trip_members ( persons ( id, name, initials ) )")
+  const lumiCore = await createLumiCoreClient();
+  const { data: trip } = await lumiCore
+    .from("travel_trips")
+    .select("id, slug, title")
     .eq("slug", id)
     .maybeSingle();
 
   if (!trip) notFound();
 
-  const { data: booking } = await supabase
-    .from("bookings")
-    .select(`
-      id, trip_id, stage_id, type, title, provider, booking_reference, status,
-      payment_status, amount, currency, start_datetime, end_datetime, notes, details,
-      stages ( id, title )
-    `)
+  const { data: booking } = await lumiCore
+    .from("travel_bookings")
+    .select("id, trip_id, stage_id, type, title, provider, booking_reference, status, payment_status, amount, currency, start_datetime, end_datetime, notes, details")
     .eq("id", bookingId)
     .eq("trip_id", trip.id)
     .maybeSingle();
 
   if (!booking) notFound();
-  const b = booking as unknown as BookingDetail;
+
+  // §Lumi-Core-Cutover: keine PostgREST-Embeddings -- Etappe separat
+  // nachgeladen statt verschachtelt mitgeliefert.
+  const { data: stageRow } = booking.stage_id
+    ? await lumiCore.from("travel_stages").select("id, title").eq("id", booking.stage_id).maybeSingle()
+    : { data: null };
+
+  const b = { ...booking, stages: stageRow ?? null } as unknown as BookingDetail;
   const config = BOOKING_TYPE_CONFIG[b.type];
   const Icon = config.icon;
 
-  const { data: docsRaw } = await supabase
-    .from("documents")
-    .select("id, label, storage_path, doc_type, person_id, details")
+  const { data: docsRaw } = await lumiCore
+    .from("travel_documents")
+    .select("id, label, storage_path, doc_type, household_member_id, details")
     .eq("booking_id", b.id);
 
-  const withSignedUrl = async (d: { id: string; label: string | null; storage_path: string; person_id: string | null; details: unknown }) => {
-    const url = await getCachedSignedUrl("documents", d.storage_path);
-    return { id: d.id, label: d.label ?? "Dokument", storage_path: d.storage_path, person_id: d.person_id, details: d.details as Record<string, string> | null, url };
+  const withSignedUrl = async (d: { id: string; label: string | null; storage_path: string | null; doc_type: string; household_member_id: string | null; details: unknown }) => {
+    const url = await getCachedSignedUrl(LUMI_CORE_DOCUMENTS_BUCKET, d.storage_path ?? "");
+    return { id: d.id, label: d.label ?? "Dokument", storage_path: d.storage_path ?? "", person_id: d.household_member_id, details: d.details as Record<string, string> | null, url };
   };
 
   const documents = await Promise.all((docsRaw ?? []).filter((d) => d.doc_type === "booking_document").map(withSignedUrl));
   const boardingPassDocs = await Promise.all((docsRaw ?? []).filter((d) => d.doc_type === "boarding_pass").map(withSignedUrl));
   const baggageTagDocs = await Promise.all((docsRaw ?? []).filter((d) => d.doc_type === "baggage_tag").map(withSignedUrl));
 
+  // §Lumi-Core-Cutover: `trip_members`/`persons` gibt es in Lumi Core nicht
+  // mehr -- flache travel_trip_members-Abfrage + listHouseholdMembers(),
+  // Initialen werden abgeleitet (household_members hat kein initials-Feld).
+  const { data: tripMemberRows } = await lumiCore.from("travel_trip_members").select("household_member_id").eq("trip_id", trip.id);
+  const allHouseholdMembers = await listHouseholdMembers();
+  const householdMemberById = new Map(allHouseholdMembers.map((m) => [m.id, m]));
   const members = sortForBoardingPassViewer(
-    (trip.trip_members as unknown as Array<{ persons: { id: string; name: string; initials: string } | null }>)
-      .flatMap((tm) => (tm.persons ? [tm.persons] : []))
+    (tripMemberRows ?? [])
+      .map((tm) => householdMemberById.get(tm.household_member_id))
+      .filter((m): m is NonNullable<typeof m> => Boolean(m))
+      .map((m) => ({ id: m.id, name: m.name, initials: deriveInitials(m.name) }))
   );
 
   // §"2 Boardingpässe pro Person bei Zwischenstopp... klar nach Flug

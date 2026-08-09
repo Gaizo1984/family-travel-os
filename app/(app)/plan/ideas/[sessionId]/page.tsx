@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { chooseTripIdea } from "@/lib/actions/trip-ideas";
 
 export default async function TripIdeaSessionPage({
@@ -11,17 +11,17 @@ export default async function TripIdeaSessionPage({
 }) {
   const { sessionId } = await params;
 
-  const supabase = await createClient();
-  const { data: session } = await supabase
-    .from("trip_idea_sessions")
+  const lumiCore = await createLumiCoreClient();
+  const { data: session } = await lumiCore
+    .from("travel_trip_idea_sessions")
     .select("id, input_text, status")
     .eq("id", sessionId)
     .maybeSingle();
 
   if (!session) notFound();
 
-  const { data: ideas } = await supabase
-    .from("trip_ideas")
+  const { data: ideas } = await lumiCore
+    .from("travel_trip_ideas")
     .select("id, destination, route_summary, best_season, duration_days_min, duration_days_max, reasoning, budget_range_min, budget_range_max, budget_currency, includes_flights")
     .eq("session_id", sessionId)
     .order("created_at");

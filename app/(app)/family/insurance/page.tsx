@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { Shield } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { getFamily } from "@/lib/family";
+import { getHouseholdMemberById, deriveInitials } from "@/lib/household-members";
 
 type PersonRow = { id: string; name: string; initials: string };
 type PolicyRow = {
@@ -8,17 +10,44 @@ type PolicyRow = {
   label: string;
   provider: string | null;
   policy_type: string | null;
-  insurance_policy_persons: Array<{ persons: PersonRow | null }>;
+  persons: PersonRow[];
 };
 
 export default async function InsuranceListPage() {
-  const supabase = await createClient();
-  const { data } = await supabase
-    .from("insurance_policies")
-    .select("id, label, provider, policy_type, insurance_policy_persons ( persons ( id, name, initials ) )")
+  const lumiCore = await createLumiCoreClient();
+  const { id: familyId } = await getFamily();
+
+  // §Lumi-Core-Cutover: keine PostgREST-Embeddings zwischen travel_*-Tabellen --
+  // flache Abfragen (travel_insurance_policies -> travel_insurance_policy_persons
+  // -> household_members) statt verschachteltem Select.
+  const { data: policiesRaw } = await lumiCore
+    .from("travel_insurance_policies")
+    .select("id, label, provider, policy_type")
+    .eq("household_id", familyId)
     .order("created_at", { ascending: true });
 
-  const policies = (data ?? []) as unknown as PolicyRow[];
+  const policyIds = (policiesRaw ?? []).map((p) => p.id);
+  const { data: policyPersonLinks } = policyIds.length > 0
+    ? await lumiCore.from("travel_insurance_policy_persons").select("policy_id, household_member_id").in("policy_id", policyIds)
+    : { data: [] as { policy_id: string; household_member_id: string }[] };
+
+  const memberIdsByPolicy = new Map<string, string[]>();
+  (policyPersonLinks ?? []).forEach((link) => {
+    const list = memberIdsByPolicy.get(link.policy_id) ?? [];
+    list.push(link.household_member_id);
+    memberIdsByPolicy.set(link.policy_id, list);
+  });
+  const uniqueMemberIds = [...new Set((policyPersonLinks ?? []).map((l) => l.household_member_id))];
+  const members = await Promise.all(uniqueMemberIds.map((id) => getHouseholdMemberById(id)));
+  const memberById = new Map(members.filter((m) => m !== null).map((m) => [m!.id, m!]));
+
+  const policies: PolicyRow[] = (policiesRaw ?? []).map((p) => ({
+    id: p.id, label: p.label, provider: p.provider, policy_type: p.policy_type,
+    persons: (memberIdsByPolicy.get(p.id) ?? []).flatMap((id) => {
+      const m = memberById.get(id);
+      return m ? [{ id: m.id, name: m.name, initials: deriveInitials(m.name) }] : [];
+    }),
+  }));
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -48,7 +77,7 @@ export default async function InsuranceListPage() {
         {policies.length > 0 ? (
           <div className="space-y-2">
             {policies.map((policy) => {
-              const persons = policy.insurance_policy_persons.flatMap((p) => (p.persons ? [p.persons] : []));
+              const persons = policy.persons;
               return (
                 <Link
                   key={policy.id}

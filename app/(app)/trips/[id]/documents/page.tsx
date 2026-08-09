@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft, BadgeCheck } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { DOCUMENT_TYPE_CONFIG } from "@/lib/documents";
 import type { DocumentType } from "@/lib/documents";
 import { unassignPolicyFromTrip } from "@/lib/actions/insurance";
 import { computeTripRequirements } from "@/lib/travel-requirements";
 import { BOOKING_TYPE_CONFIG } from "@/lib/bookings";
 import type { BookingType } from "@/lib/supabase/types";
+import { listHouseholdMembers, deriveInitials } from "@/lib/household-members";
 
 type PersonRow = { id: string; name: string; initials: string; color: string };
 type EntryDoc = { id: string; doc_type: DocumentType; label: string; person_id: string };
@@ -22,20 +23,25 @@ export default async function TripDocumentsPage({
 }) {
   const { id } = await params;
 
-  const supabase = await createClient();
-  const { data: trip } = await supabase
-    .from("trips")
-    .select(`
-      id, slug, title,
-      trip_members ( persons ( id, name, initials, color ) )
-    `)
+  const lumiCore = await createLumiCoreClient();
+  const { data: trip } = await lumiCore
+    .from("travel_trips")
+    .select("id, slug, title")
     .eq("slug", id)
     .maybeSingle();
 
   if (!trip) notFound();
 
-  const members = (trip.trip_members as unknown as Array<{ persons: PersonRow | null }>)
-    .flatMap((tm) => (tm.persons ? [tm.persons] : []));
+  // §Lumi-Core-Cutover: `trip_members`/`persons` gibt es in Lumi Core nicht
+  // mehr -- flache travel_trip_members-Abfrage + listHouseholdMembers(),
+  // Initialen werden abgeleitet (household_members hat kein initials-Feld).
+  const { data: tripMemberRows } = await lumiCore.from("travel_trip_members").select("household_member_id").eq("trip_id", trip.id);
+  const allHouseholdMembers = await listHouseholdMembers();
+  const householdMemberById = new Map(allHouseholdMembers.map((m) => [m.id, m]));
+  const members: PersonRow[] = (tripMemberRows ?? [])
+    .map((tm) => householdMemberById.get(tm.household_member_id))
+    .filter((m): m is NonNullable<typeof m> => Boolean(m))
+    .map((m) => ({ id: m.id, name: m.name, initials: deriveInitials(m.name), color: m.color }));
 
   const memberIds = members.map((m) => m.id);
   const returnTo = `/trips/${trip.slug}/documents`;
@@ -46,10 +52,14 @@ export default async function TripDocumentsPage({
   // document_trips (weiter unten) muss NACH computeTripRequirements laufen,
   // da dessen Auto-Verknüpfung (Upsert) hier gelesen wird — bleibt deshalb
   // bewusst außerhalb dieses Promise.all.
-  const [{ data: passports }, , { data: policyRows }, { data: bookingDocRows }] = await Promise.all([
+  // §Lumi-Core-Cutover: keine PostgREST-Embeddings -- insurance_policy_trips
+  // und die booking_document-Abfrage liefern nur noch IDs, die zugehörigen
+  // Versicherungen/Buchungen/Journal-Termine werden weiter unten flach
+  // nachgeladen und per Map reassembliert.
+  const [{ data: passportsRaw }, , { data: policyTripRows }, { data: bookingDocRowsRaw }] = await Promise.all([
     memberIds.length > 0
-      ? supabase.from("documents").select("id, person_id").eq("doc_type", "passport").in("person_id", memberIds)
-      : Promise.resolve({ data: [] as { id: string; person_id: string | null }[] }),
+      ? lumiCore.from("travel_documents").select("id, household_member_id").eq("doc_type", "passport").in("household_member_id", memberIds)
+      : Promise.resolve({ data: [] as { id: string; household_member_id: string | null }[] }),
     // §Travel Requirements Engine (lib/travel-requirements.ts): verknüpft
     // automatisch bereits vorhandene, gültige ESTA/eTA-Dokumente mit dieser
     // Reise (idempotent), bevor unten die zugeordneten Dokumente geladen
@@ -57,48 +67,67 @@ export default async function TripDocumentsPage({
     // Code-Pfad für "was ist zugeordnet/gültig".
     computeTripRequirements(trip.id),
     // Zentrale Versicherungen, die dieser Reise zugeordnet sind.
-    supabase.from("insurance_policy_trips").select("insurance_policies ( id, label, provider )").eq("trip_id", trip.id),
+    lumiCore.from("travel_insurance_policy_trips").select("policy_id").eq("trip_id", trip.id),
     // Buchungsunterlagen (§11 Dokumenten-Hub): dieselbe Datei, die auf der
     // jeweiligen Buchungs- ODER Journal-Termin-Seite hochgeladen wurde — hier
     // nur referenziert, kein zweiter Upload. `doc_type='booking_document'`
     // deckt beide Quellen ab (siehe uploadBookingDocument/
     // uploadJourneyEventDocument, lib/actions/documents.ts).
-    supabase.from("documents")
-      .select("id, label, booking_id, journey_event_id, bookings ( id, title, type ), journey_events ( id, title, category )")
+    lumiCore.from("travel_documents")
+      .select("id, label, booking_id, journey_event_id")
       .eq("trip_id", trip.id).eq("doc_type", "booking_document"),
   ]);
 
   const passportByPerson = new Map<string, string>();
-  for (const p of passports ?? []) {
-    if (p.person_id && !passportByPerson.has(p.person_id)) passportByPerson.set(p.person_id, p.id);
+  for (const p of passportsRaw ?? []) {
+    if (p.household_member_id && !passportByPerson.has(p.household_member_id)) passportByPerson.set(p.household_member_id, p.id);
   }
+
+  // Versicherungen aus den policy_id-Verknüpfungen flach nachladen.
+  const policyIds = Array.from(new Set((policyTripRows ?? []).map((r) => r.policy_id)));
+  const { data: policyRows } = policyIds.length > 0
+    ? await lumiCore.from("travel_insurance_policies").select("id, label, provider").in("id", policyIds)
+    : { data: [] as { id: string; label: string; provider: string | null }[] };
+  const assignedPolicies: Policy[] = policyRows ?? [];
 
   // Visa/ESTA/eTA, die dieser Reise über document_trips zugeordnet sind.
-  const { data: entryDocRows } = await supabase
-    .from("document_trips")
-    .select("documents ( id, doc_type, label, person_id )")
-    .eq("trip_id", trip.id);
+  const { data: documentTripRows } = await lumiCore.from("travel_document_trips").select("document_id").eq("trip_id", trip.id);
+  const entryDocumentIds = (documentTripRows ?? []).map((r) => r.document_id);
+  const { data: entryDocsRaw } = entryDocumentIds.length > 0
+    ? await lumiCore.from("travel_documents").select("id, doc_type, label, household_member_id").in("id", entryDocumentIds)
+    : { data: [] as { id: string; doc_type: string; label: string | null; household_member_id: string | null }[] };
 
   const entryDocsByPerson = new Map<string, EntryDoc[]>();
-  for (const row of entryDocRows ?? []) {
-    const doc = row.documents as unknown as EntryDoc | null;
-    if (!doc || !ENTRY_DOC_TYPES.includes(doc.doc_type)) continue;
-    const list = entryDocsByPerson.get(doc.person_id) ?? [];
-    list.push(doc);
-    entryDocsByPerson.set(doc.person_id, list);
+  for (const doc of entryDocsRaw ?? []) {
+    if (!ENTRY_DOC_TYPES.includes(doc.doc_type as DocumentType) || !doc.household_member_id) continue;
+    const entry: EntryDoc = { id: doc.id, doc_type: doc.doc_type as DocumentType, label: doc.label ?? "Dokument", person_id: doc.household_member_id };
+    const list = entryDocsByPerson.get(entry.person_id) ?? [];
+    list.push(entry);
+    entryDocsByPerson.set(entry.person_id, list);
   }
-
-  const assignedPolicies = (policyRows ?? [])
-    .map((r) => r.insurance_policies as unknown as Policy | null)
-    .filter((p): p is Policy => p !== null);
 
   type TripDocumentRow =
     | { id: string; label: string; kind: "booking"; href: string; bookingType: BookingType; subtitle: string }
     | { id: string; label: string; kind: "journey_event"; href: string; subtitle: string };
 
-  const bookingDocuments: TripDocumentRow[] = (bookingDocRows ?? [])
+  const bookingDocRows = bookingDocRowsRaw ?? [];
+  const bookingIds = Array.from(new Set(bookingDocRows.map((r) => r.booking_id).filter((v): v is string => Boolean(v))));
+  const journeyEventIds = Array.from(new Set(bookingDocRows.map((r) => r.journey_event_id).filter((v): v is string => Boolean(v))));
+
+  const [{ data: bookingsForDocsRaw }, { data: journeyEventsForDocsRaw }] = await Promise.all([
+    bookingIds.length > 0
+      ? lumiCore.from("travel_bookings").select("id, title, type").in("id", bookingIds)
+      : Promise.resolve({ data: [] as { id: string; title: string; type: string }[] }),
+    journeyEventIds.length > 0
+      ? lumiCore.from("travel_journey_events").select("id, title, category").in("id", journeyEventIds)
+      : Promise.resolve({ data: [] as { id: string; title: string; category: string }[] }),
+  ]);
+  const bookingForDocsById = new Map((bookingsForDocsRaw ?? []).map((b) => [b.id, b]));
+  const journeyEventForDocsById = new Map((journeyEventsForDocsRaw ?? []).map((e) => [e.id, e]));
+
+  const bookingDocuments: TripDocumentRow[] = bookingDocRows
     .map((row): TripDocumentRow | null => {
-      const booking = row.bookings as unknown as { id: string; title: string; type: string } | null;
+      const booking = row.booking_id ? bookingForDocsById.get(row.booking_id) ?? null : null;
       if (booking) {
         const config = BOOKING_TYPE_CONFIG[booking.type as BookingType];
         return {
@@ -107,7 +136,7 @@ export default async function TripDocumentsPage({
           bookingType: booking.type as BookingType, subtitle: `${config?.label ?? booking.type} · ${booking.title}`,
         };
       }
-      const journeyEvent = row.journey_events as unknown as { id: string; title: string; category: string } | null;
+      const journeyEvent = row.journey_event_id ? journeyEventForDocsById.get(row.journey_event_id) ?? null : null;
       if (journeyEvent) {
         return {
           id: row.id, label: row.label ?? "Dokument", kind: "journey_event",

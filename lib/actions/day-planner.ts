@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { after } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { createJob, completeJob, failJob } from '@/lib/ai-generation-jobs'
 import { computeRoute, type ComputeRouteResult } from '@/lib/providers/routes-provider'
 import { ProviderConfigError } from '@/lib/providers/provider-errors'
@@ -390,11 +390,11 @@ export async function generateDayPlanPreview(familyId: string, tripId: string, d
 
 /** Zuletzt für diesen Tag erzeugter Plan -- Vorschau bleibt bei Navigation bestehen, bis eine neue Ermittlung sie überschreibt (gleiches Muster wie v1). */
 export async function getLatestDayPlan(familyId: string, tripId: string, dateIso: string): Promise<DayPlan | null> {
-  const supabase = await createClient()
-  const { data } = await supabase
-    .from('day_plan_cache')
+  const lumiCore = await createLumiCoreClient()
+  const { data } = await lumiCore
+    .from('travel_day_plan_cache')
     .select('plan')
-    .eq('family_id', familyId).eq('trip_id', tripId).eq('date', dateIso)
+    .eq('household_id', familyId).eq('trip_id', tripId).eq('date', dateIso)
     .maybeSingle()
 
   if (!data) return null
@@ -424,14 +424,14 @@ export async function generateDayPlan(formData: FormData) {
         return
       }
 
-      const supabase = await createClient()
-      const { error } = await supabase.from('day_plan_cache').upsert(
-        { family_id: familyId, trip_id: tripId, date, mode: 'tagesplan', plan: result.plan, updated_at: new Date().toISOString() },
-        { onConflict: 'family_id,trip_id,date' },
+      const lumiCore = await createLumiCoreClient()
+      const { error } = await lumiCore.from('travel_day_plan_cache').upsert(
+        { household_id: familyId, trip_id: tripId, date, mode: 'tagesplan', plan: result.plan, updated_at: new Date().toISOString() },
+        { onConflict: 'household_id,trip_id,date' },
       )
       if (error) console.error('[day-planner] cache upsert failed', { date, error: error.message })
 
-      await completeJob(jobId, `${returnTo}?${redirectParams.toString()}`, supabase)
+      await completeJob(jobId, `${returnTo}?${redirectParams.toString()}`, lumiCore)
     } catch (e) {
       console.error('[day-planner] generateDayPlan fehlgeschlagen:', e instanceof Error ? e.message : e)
       await failJob(jobId, 'Der Tagesplan ist gerade nicht verfügbar. Bitte später erneut versuchen.')

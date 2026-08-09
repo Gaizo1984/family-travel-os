@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { LumiCoreDatabase } from "@/lib/supabase/lumi-core-types";
 import { getPhotoDisplayUrl } from "@/lib/photo-thumbnails";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
 
 /**
  * Etappen-/Ziel-Bilder über das echte ISO-Länderkürzel (stages.country_code)
@@ -27,7 +29,7 @@ type StageForImage = { id: string; country_code?: string | null; cover_photo_id?
  * Heute-Seite, damit eine Etappe überall dasselbe Bild zeigt.
  */
 export async function resolveStageImages(
-  supabase: SupabaseClient,
+  lumiCore: SupabaseClient<LumiCoreDatabase>,
   stages: StageForImage[],
 ): Promise<Map<string, ResolvedStageImage>> {
   const result = new Map<string, ResolvedStageImage>()
@@ -35,7 +37,7 @@ export async function resolveStageImages(
   const coverPhotoIds = stages.flatMap((s) => (s.cover_photo_id ? [s.cover_photo_id] : []))
   const storagePathByPhotoId = new Map<string, string>()
   if (coverPhotoIds.length > 0) {
-    const { data } = await supabase.from("memory_photos").select("id, storage_path").in("id", coverPhotoIds)
+    const { data } = await lumiCore.from("travel_memory_photos").select("id, storage_path").in("id", coverPhotoIds)
     for (const p of data ?? []) storagePathByPhotoId.set(p.id, p.storage_path)
   }
 
@@ -44,7 +46,7 @@ export async function resolveStageImages(
       const storagePath = storagePathByPhotoId.get(s.cover_photo_id)
       if (storagePath) {
         // §"Egress-Analyse 2026-07-16": Karten-Vorschau statt volles Original + gecachte Signed URL.
-        const resolved = await getPhotoDisplayUrl("documents", storagePath, "thumb800")
+        const resolved = await getPhotoDisplayUrl(LUMI_CORE_DOCUMENTS_BUCKET, storagePath, "thumb800")
         if (resolved) {
           result.set(s.id, { url: resolved.url, storagePath: resolved.resolvedPath })
           return

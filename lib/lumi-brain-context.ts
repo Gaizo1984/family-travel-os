@@ -1,4 +1,3 @@
-import { createClient } from './supabase/server'
 import { createLumiCoreClient } from './supabase/lumi-core-server'
 import { buildLumiContext, lumiContextErrorMessage, type LumiContext } from './lumi-context'
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt } from './family-dna'
@@ -61,11 +60,11 @@ function normalizeDestinationKey(text: string): string {
 
 /** Bestmögliche, rein lesende Zuordnung einer Reise zu einem bereits vorhandenen Hotelsuchlauf -- vergleicht den Reisetitel/die Etappenorte gegen bereits gespeicherte `hotel_search_cache.destination`-Werte derselben Familie. Kein neuer API-Aufruf, keine Fuzzy-Logik über simple Teilstring-Treffer hinaus. */
 async function findMatchingHotelOptions(familyId: string, tripTitle: string, stageLocations: string[]): Promise<HotelShortlistItem[] | null> {
-  const supabase = await createClient()
-  const { data } = await supabase
-    .from('hotel_search_cache')
+  const lumiCore = await createLumiCoreClient()
+  const { data } = await lumiCore
+    .from('travel_hotel_search_cache')
     .select('destination, results')
-    .eq('family_id', familyId)
+    .eq('household_id', familyId)
 
   const candidates = [tripTitle, ...stageLocations].map(normalizeDestinationKey).filter(Boolean)
   const match = (data ?? []).find((row) => {
@@ -79,11 +78,11 @@ async function findMatchingHotelOptions(familyId: string, tripTitle: string, sta
 /** Analog zu `findMatchingHotelOptions`, aber für `flight_search_cache` -- Zuordnung über `destination_code`/`origin_codes` ist hier nicht sinnvoll ohne Flughafen-Kontext, deshalb bewusst nur über ein bereits vorhandenes `search_key`-Präfix-Muster (Zielort-Text steckt nicht im Flug-Cache-Key) -- siehe Kommentar in der Funktion. */
 async function findMatchingFlightOptions(familyId: string, destinationCode: string | null): Promise<FlightSearchOption[] | null> {
   if (!destinationCode) return null
-  const supabase = await createClient()
-  const { data } = await supabase
-    .from('flight_search_cache')
+  const lumiCore = await createLumiCoreClient()
+  const { data } = await lumiCore
+    .from('travel_flight_search_cache')
     .select('results, updated_at')
-    .eq('family_id', familyId)
+    .eq('household_id', familyId)
     .eq('destination_code', destinationCode)
     .order('updated_at', { ascending: false })
     .limit(1)

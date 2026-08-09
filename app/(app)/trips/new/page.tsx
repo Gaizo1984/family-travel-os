@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/server";
+import { listHouseholdMembers } from "@/lib/household-members";
 import { createTrip, createTripCoverUploadSlots } from "@/lib/actions/trips";
 import { Banner } from "@/components/Banner";
 import { DateSelectFields } from "@/components/DateSelectFields";
@@ -29,11 +29,7 @@ export default async function NewTripPage({
 }) {
   const { error } = await searchParams;
 
-  const supabase = await createClient();
-  const { data: persons } = await supabase
-    .from("persons")
-    .select("id, name, initials, color")
-    .order("name");
+  const persons = await listHouseholdMembers();
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft, Plane, BedDouble, Car, Compass, UtensilsCrossed, FileText, Shield, Receipt } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { computeTripBudget, BUDGET_CATEGORY_ORDER, BUDGET_CATEGORY_LABELS } from "@/lib/budget";
 import { formatDateDE, formatCurrencyDE } from "@/lib/demo-data";
 import type { BudgetCategory } from "@/lib/budget";
@@ -44,37 +44,42 @@ export default async function BudgetPage({
   const { id } = await params;
   const { error } = await searchParams;
 
-  const supabase = await createClient();
-  const { data: trip } = await supabase
-    .from("trips")
+  const lumiCore = await createLumiCoreClient();
+  const { data: trip } = await lumiCore
+    .from("travel_trips")
     .select("id, slug, title, subtitle, budget_amount, budget_currency")
     .eq("slug", id)
     .maybeSingle();
 
   if (!trip) notFound();
 
+  // §Lumi-Core-Cutover: travel_trips.budget_currency ist nullable (Travels
+  // Original war NOT NULL mit Default 'EUR') -- gleicher Fallback wie der
+  // bisherige DB-Default, nirgends sonst im Verhalten geändert.
+  const budgetCurrency = trip.budget_currency ?? "EUR";
+
   const budget = await computeTripBudget(trip.id);
   const returnTo = `/trips/${trip.slug}/budget`;
 
-  const { data: rateRows } = await supabase
-    .from("trip_exchange_rates")
+  const { data: rateRows } = await lumiCore
+    .from("travel_trip_exchange_rates")
     .select("currency, rate, source, updated_at")
     .eq("trip_id", trip.id)
     .order("currency");
 
-  const { data: stagesForCurrency } = await supabase
-    .from("stages")
+  const { data: stagesForCurrency } = await lumiCore
+    .from("travel_stages")
     .select("title, location")
     .eq("trip_id", trip.id);
 
   const tripCurrencyOptions = Array.from(new Set([
-    trip.budget_currency, "EUR", "USD", "CHF", "GBP",
+    budgetCurrency, "EUR", "USD", "CHF", "GBP",
     ...suggestTripCurrencies(trip, stagesForCurrency ?? []),
   ]));
   const foreignCurrencySuggestions = Array.from(new Set([
-    ...suggestTripCurrencies(trip, stagesForCurrency ?? [], trip.budget_currency),
+    ...suggestTripCurrencies(trip, stagesForCurrency ?? [], budgetCurrency),
     "USD", "CHF", "GBP",
-  ])).filter((c) => c !== trip.budget_currency);
+  ])).filter((c) => c !== budgetCurrency);
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -170,7 +175,7 @@ export default async function BudgetPage({
                   name="budget_currency"
                   label="Reisewährung"
                   suggestions={tripCurrencyOptions}
-                  defaultValue={trip.budget_currency}
+                  defaultValue={budgetCurrency}
                 />
               </div>
               <button
@@ -190,13 +195,13 @@ export default async function BudgetPage({
         {/* ── Wechselkurse ── */}
         <div className="rounded-xl p-6 mb-8" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
           <div style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: "12px" }}>
-            Wechselkurse → {trip.budget_currency}
+            Wechselkurse → {budgetCurrency}
           </div>
           {(rateRows ?? []).length > 0 && (
             <div className="space-y-1.5 mb-4">
               {(rateRows ?? []).map((r) => (
                 <div key={r.currency} className="flex items-center justify-between" style={{ fontSize: "0.78rem" }}>
-                  <span style={{ color: "var(--foreground)" }}>1 {r.currency} = {r.rate} {trip.budget_currency}</span>
+                  <span style={{ color: "var(--foreground)" }}>1 {r.currency} = {r.rate} {budgetCurrency}</span>
                   <span style={{ color: "var(--muted)", fontSize: "0.65rem" }}>
                     {r.source === "eodhd" ? "automatisch" : "manuell"} · {formatDateDE(r.updated_at)}
                   </span>
@@ -244,7 +249,7 @@ export default async function BudgetPage({
                   />
                 </div>
                 <div>
-                  <label htmlFor="manual-rate" style={LABEL_STYLE}>Kurs (1 Fremdwährung = ? {trip.budget_currency})</label>
+                  <label htmlFor="manual-rate" style={LABEL_STYLE}>Kurs (1 Fremdwährung = ? {budgetCurrency})</label>
                   <input id="manual-rate" name="rate" type="text" inputMode="decimal" placeholder="z. B. 0.92" style={{ ...FIELD_STYLE, width: "140px" }} />
                 </div>
                 <button

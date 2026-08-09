@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
+import type { LumiCoreDatabase } from '@/lib/supabase/lumi-core-types'
 import { formatDateDE } from '@/lib/demo-data'
 
 /**
@@ -8,21 +9,14 @@ import { formatDateDE } from '@/lib/demo-data'
  * (z. B. Content-Ideen), damit nie über die Reise hinaus erfundene Fakten
  * in einen Prompt gelangen.
  *
- * FINALER CUTOVER, bekannte Lücke: alle vier Abfragen laufen jetzt gegen
- * Lumi Core (`createLumiCoreClient()`, cookie-basiert). `supabaseOverride`
- * existierte, damit ein sitzungsloser Cron-Aufrufer (z. B. der Urlaubsbeitrag-
- * Kurations-Cron in trip-debrief-generation.ts) einen Service-Role-Client
- * übergeben konnte -- das griff bisher für die Travel-Abfragen. Es gibt noch
- * KEINEN Lumi-Core-Service-Role-Client, daher hat `supabaseOverride` fuer
- * diese Funktion aktuell KEINE Wirkung mehr: ein Cron-Aufruf bekommt über den
- * cookie-losen `lumiCore`-Client leere Ergebnisse. Bewusst nicht selbst
- * gelöst (gleiche Kategorie wie lib/hint-generation.ts) -- Parameter bleibt
- * aus Kompatibilitätsgründen erhalten, bis ein Lumi-Core-Service-Role-Client
- * eingeführt wird.
+ * FINALER CUTOVER: `supabaseOverride` ist jetzt wieder wirksam -- ein
+ * sitzungsloser Cron-Aufrufer (z. B. lib/trip-debrief-generation.ts) übergibt
+ * den neuen Lumi-Core-Service-Role-Client (lib/supabase/lumi-core-service.ts),
+ * ein normaler Seitenaufruf lässt den Parameter weg und bekommt den
+ * cookie-basierten `createLumiCoreClient()`.
  */
-export async function buildTripDigest(tripId: string, supabaseOverride?: SupabaseClient): Promise<string> {
-  void supabaseOverride
-  const lumiCore = await createLumiCoreClient()
+export async function buildTripDigest(tripId: string, lumiCoreOverride?: SupabaseClient<LumiCoreDatabase>): Promise<string> {
+  const lumiCore = lumiCoreOverride ?? await createLumiCoreClient()
 
   const [{ data: trip }, { data: stages }, { data: bookings }, { data: events }] = await Promise.all([
     lumiCore.from('travel_trips').select('title, subtitle, start_date, end_date').eq('id', tripId).maybeSingle(),

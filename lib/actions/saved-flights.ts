@@ -1,7 +1,6 @@
 'use server'
 
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { getFamily } from '@/lib/family'
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt } from '@/lib/family-dna'
@@ -34,13 +33,12 @@ export async function saveFlightOption(formData: FormData): Promise<void> {
   if (!searchKey || !optionId) redirect(appendError(returnTo, 'Diese Verbindung konnte nicht gemerkt werden.'))
 
   const { id: familyId } = await getFamily()
-  const supabase = await createClient()
   const lumiCore = await createLumiCoreClient()
 
-  const { data: cacheRow } = await supabase
-    .from('flight_search_cache')
+  const { data: cacheRow } = await lumiCore
+    .from('travel_flight_search_cache')
     .select('origin_codes, destination_code, departure_date, return_date, results, adults, children, infants')
-    .eq('family_id', familyId)
+    .eq('household_id', familyId)
     .eq('search_key', searchKey)
     .maybeSingle()
   if (!cacheRow) redirect(appendError(returnTo, 'Diese Suche ist nicht mehr verfügbar -- bitte erneut suchen.'))

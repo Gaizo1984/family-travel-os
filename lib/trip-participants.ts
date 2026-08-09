@@ -1,12 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
-import { listHouseholdMembers } from '@/lib/household-members'
+import { listHouseholdMembers, deriveInitials } from '@/lib/household-members'
 import type { BookingParticipantOption } from '@/app/(app)/trips/[id]/bookings/BookingForm'
-
-/** `HouseholdMemberSummary` (lib/household-members.ts) hat -- anders als die frühere Travel-`persons`-Tabelle -- kein `initials`-Feld: aus dem Namen ableiten (Großbuchstaben der ersten bis zu zwei Wörter), damit die BookingParticipantOption-Form für ihre unveränderten Konsumenten identisch bleibt. */
-function deriveInitials(name: string): string {
-  return name.trim().split(/\s+/).slice(0, 2).map((word) => word[0]?.toUpperCase() ?? '').join('')
-}
 
 /**
  * §"Teilnehmerauswahl nur bei Aktivitätsbuchungen" (Nutzervorgabe): Quelle

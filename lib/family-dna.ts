@@ -1,4 +1,3 @@
-import { createClient } from '@/lib/supabase/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 
 /** Kanonisches, app-seitig validiertes Vokabular für individuelle Reisebedürfnisse (persons.travel_needs). */
@@ -70,34 +69,41 @@ export function ageAtDate(birthDate: string | null, atDate: string | Date): numb
  * (Content-Ideen, Reiseideen, Discover) genutzt, statt dreifach dupliziert.
  */
 /**
- * FINALER CUTOVER, wichtige Korrektur: `familyId` ist die Lumi-Core
- * household_id (so wie überall sonst im Cutover), NICHT mehr Travels
- * eigene families.id. `exceptional_hotel_criteria`/`persons.interest_tags`/
- * `travel_needs` haben in Lumi Core kein Gegenstück (Schema-Lücke, siehe
- * lib/actions/persons.ts) -- für genau diese beiden Travel-Reste wird die
- * legacy Travel family_id über die bestehende Phase-3A-Brücke
- * (families.lumi_core_household_id) aufgelöst, statt householdId
- * fälschlich direkt als Travel-ID zu verwenden (das war zuvor ein
- * Übertragungsfehler -- beide IDs sind unterschiedliche UUID-Räume).
+ * FINALER CUTOVER, Schema-Luecken-Schliessung: vollständig auf Lumi Core
+ * umgestellt, keine Travel-Bridge mehr nötig. `exceptional_hotel_criteria`
+ * liegt jetzt im generischen, App-übergreifenden Einstellungs-Container
+ * `app_preferences.settings` (Schlüssel `travel_exceptional_hotel_criteria`,
+ * siehe lib/actions/family-preferences.ts), `persons` kommt aus
+ * `household_members` + der neuen Zusatztabelle
+ * `travel_household_member_profiles` (role_label/description/interest_tags/
+ * travel_needs, siehe lib/actions/persons.ts) -- `persons[].id` ist jetzt
+ * die household_member_id (nicht mehr Travels legacy person_id), konsistent
+ * mit allen anderen Reisenden-Auswahlformularen im Rest der App.
  */
 export async function buildFamilyDnaSummary(householdId: string): Promise<FamilyDnaSummary> {
-  const supabase = await createClient()
   const lumiCore = await createLumiCoreClient()
 
-  const [{ data: preferences }, { data: legacyFamily }] = await Promise.all([
+  const [{ data: preferences }, { data: appPrefs }, { data: members }, { data: profiles }] = await Promise.all([
     lumiCore.from('travel_preference_categories').select('category_key, weight, note').eq('household_id', householdId),
-    supabase.from('families').select('id, exceptional_hotel_criteria').eq('lumi_core_household_id', householdId).maybeSingle(),
+    lumiCore.from('app_preferences').select('settings').eq('household_id', householdId).maybeSingle(),
+    lumiCore.from('household_members').select('id, name, birth_date, is_minor').eq('household_id', householdId).is('deleted_at', null),
+    lumiCore.from('travel_household_member_profiles').select('household_member_id, interest_tags, travel_needs').eq('household_id', householdId),
   ])
 
-  const { data: persons } = legacyFamily?.id
-    ? await supabase.from('persons').select('id, name, birth_date, is_minor, interest_tags, travel_needs').eq('family_id', legacyFamily.id)
-    : { data: [] as FamilyDnaSummary['persons'] }
+  const profileByMemberId = new Map((profiles ?? []).map((p) => [p.household_member_id, p]))
+  const persons: FamilyDnaSummary['persons'] = (members ?? []).map((m) => ({
+    id: m.id, name: m.name, birth_date: m.birth_date, is_minor: m.is_minor,
+    interest_tags: profileByMemberId.get(m.id)?.interest_tags ?? [],
+    travel_needs: profileByMemberId.get(m.id)?.travel_needs ?? [],
+  }))
+
+  const settings = (appPrefs?.settings ?? {}) as { travel_exceptional_hotel_criteria?: string[] }
 
   return {
     familyId: householdId,
     preferences: preferences ?? [],
-    hotelCriteria: legacyFamily?.exceptional_hotel_criteria ?? [],
-    persons: persons ?? [],
+    hotelCriteria: settings.travel_exceptional_hotel_criteria ?? [],
+    persons,
   }
 }
 

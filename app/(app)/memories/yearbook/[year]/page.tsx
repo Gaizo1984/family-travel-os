@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
 import { getFamily } from "@/lib/family";
 import { buildTravelWorld } from "@/lib/travel-world";
 import { getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
@@ -15,7 +16,7 @@ export default async function YearbookPage({
   const { year: yearParam } = await params;
   const year = Number(yearParam);
 
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
   const { id: familyId } = await getFamily();
 
   // §"Egress-Analyse 2026-07-16": lud bisher ALLE Fotos der Familie (inkl.
@@ -25,10 +26,10 @@ export default async function YearbookPage({
   // Zeilen.
   const [worldStats, { data: photoMetaRaw }] = await Promise.all([
     buildTravelWorld({ familyId }),
-    supabase
-      .from("memory_photos")
+    lumiCore
+      .from("travel_memory_photos")
       .select("id, taken_at, created_at")
-      .eq("family_id", familyId),
+      .eq("household_id", familyId),
   ]);
 
   const photoIdsOfYear = (photoMetaRaw ?? [])
@@ -36,8 +37,8 @@ export default async function YearbookPage({
     .map((p) => p.id);
 
   const { data: photosRaw } = photoIdsOfYear.length > 0
-    ? await supabase
-      .from("memory_photos")
+    ? await lumiCore
+      .from("travel_memory_photos")
       .select("id, storage_path, caption, taken_at, created_at")
       .in("id", photoIdsOfYear)
     : { data: [] };
@@ -45,7 +46,7 @@ export default async function YearbookPage({
   const photosOfYear = photosRaw ?? [];
   // §"Karten-/Grid-Ansicht bekommt nur noch ein Vorschaubild statt des vollen
   // Originals" -- Lightbox lädt weiterhin das Original separat beim Öffnen.
-  const displayByPath = await getPhotoDisplayUrls("documents", photosOfYear.map((p) => p.storage_path), "thumb400");
+  const displayByPath = await getPhotoDisplayUrls(LUMI_CORE_DOCUMENTS_BUCKET, photosOfYear.map((p) => p.storage_path), "thumb400");
   const photosWithUrls = photosOfYear.map((p) => {
     const resolved = displayByPath.get(p.storage_path) ?? null;
     return { ...p, url: resolved?.url ?? null, resolvedPath: resolved?.resolvedPath ?? p.storage_path };

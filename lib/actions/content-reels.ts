@@ -1,7 +1,6 @@
 'use server'
 
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { getFamily } from '@/lib/family'
 import { REEL_STYLE_OPTIONS } from '@/lib/ai-style-guidelines'
@@ -36,7 +35,6 @@ export async function startReelProject(formData: FormData) {
     redirect(`${newPath}?error=${encodeURIComponent('Bitte eine Dauer auswählen (15, 30 oder 60 Sekunden).')}`)
   }
 
-  const supabase = await createClient()
   const lumiCore = await createLumiCoreClient()
   const { id: familyId } = await getFamily()
   const { data: trip } = await lumiCore.from('travel_trips').select('title').eq('id', tripId).maybeSingle()
@@ -74,7 +72,6 @@ export async function deleteReelProject(formData: FormData) {
   const projectId = String(formData.get('project_id') ?? '')
   const returnTo = String(formData.get('return_to') ?? '/content-studio').trim() || '/content-studio'
 
-  const supabase = await createClient()
   const lumiCore = await createLumiCoreClient()
   const { id: familyId } = await getFamily()
 
@@ -104,11 +101,11 @@ export async function deleteReelProject(formData: FormData) {
     renderOutputPaths = (renders ?? []).map((r) => r.output_storage_path).filter((p): p is string => Boolean(p))
   }
 
-  // §"content-reels"-Bucket existiert in Lumi Core (noch) nicht -- bleibt
-  // bewusst bei Travels eigenem Bucket (siehe Migrations-Kontext). Eigene
-  // Musikdateien (content_drafts.structure.music_storage_path) sind bereits
-  // migrierte travel_content_drafts-Daten, daher travel-documents.
-  if (renderOutputPaths.length > 0) await supabase.storage.from('content-reels').remove(renderOutputPaths)
+  // FINALER CUTOVER: Render-Ausgaben liegen seit Schliessung der
+  // content_reel_renders-Schema-Lücke im travel-documents-Bucket unter
+  // einem "reels/"-Pfad-Präfix (siehe lib/actions/reel-render.ts), nicht
+  // mehr in Travels altem "content-reels"-Bucket.
+  if (renderOutputPaths.length > 0) await lumiCore.storage.from('travel-documents').remove(renderOutputPaths)
   if (customMusicPaths.length > 0) await lumiCore.storage.from('travel-documents').remove(customMusicPaths)
 
   await lumiCore.from('travel_content_projects').delete().eq('id', projectId)

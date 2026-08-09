@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { getFamily } from "@/lib/family";
+import { listHouseholdMembers } from "@/lib/household-members";
 import { createTrip } from "@/lib/actions/trips";
 import { generateTripIdeas } from "@/lib/actions/trip-idea-generation";
 import { COMPASS_CATEGORY_LABELS } from "@/lib/family-dna";
@@ -135,7 +136,7 @@ export default async function PlanPage({
 }) {
   const { error, from_idea, job: jobId } = await searchParams;
 
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
 
   // §"KI-Aufrufe hintergrundfest machen": solange die Reiseideen-Generierung
   // im Hintergrund läuft, zeigt diese Seite ausschließlich den Wartezustand.
@@ -153,21 +154,19 @@ export default async function PlanPage({
       </div>
     );
   }
-  const { data: persons } = await supabase
-    .from("persons")
-    .select("id, name, initials, color, birth_date, is_minor")
-    .order("name");
-
   const { id: familyId } = await getFamily();
-  const { data: preferences } = await supabase
-    .from("family_preference_categories")
+  const householdMembers = await listHouseholdMembers();
+  const persons = householdMembers.map((m) => ({ id: m.id, name: m.name, birth_date: m.birthDate, is_minor: m.isMinor }));
+
+  const { data: preferences } = await lumiCore
+    .from("travel_preference_categories")
     .select("category_key, weight, note")
-    .eq("family_id", familyId)
+    .eq("household_id", familyId)
     .order("weight", { ascending: false });
 
   let fromIdea: { destination: string; route_summary: string | null } | null = null;
   if (from_idea) {
-    const { data: idea } = await supabase.from("trip_ideas").select("destination, route_summary").eq("id", from_idea).maybeSingle();
+    const { data: idea } = await lumiCore.from("travel_trip_ideas").select("destination, route_summary").eq("id", from_idea).maybeSingle();
     fromIdea = idea ?? null;
   }
 

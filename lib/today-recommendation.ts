@@ -1,4 +1,4 @@
-import { createClient } from './supabase/server'
+import { createLumiCoreClient } from './supabase/lumi-core-server'
 import { generateTodayRecommendation } from './today-ai'
 import type { TodayRecommendation, TodayRecommendationPart } from './today-ai'
 
@@ -11,7 +11,7 @@ export type CachedTodayRecommendation = TodayRecommendation & {
 /**
  * §"Die KI erzeugt den Tagesplan nur einmal pro Kalendertag. Ergebnis
  * speichern und bis Mitternacht wiederverwenden.": reiner Lesezugriff, kein
- * KI-Aufruf. `for_date` + UNIQUE(family_id, trip_id, for_date) sorgen dafür,
+ * KI-Aufruf. `for_date` + UNIQUE(household_id, trip_id, for_date) sorgen dafür,
  * dass ab dem nächsten Kalendertag automatisch neu generiert wird.
  */
 export async function getCachedTodayRecommendation(
@@ -19,11 +19,11 @@ export async function getCachedTodayRecommendation(
   tripId: string,
   forDate: string,
 ): Promise<CachedTodayRecommendation | null> {
-  const supabase = await createClient()
-  const { data } = await supabase
-    .from('today_recommendations')
+  const lumiCore = await createLumiCoreClient()
+  const { data } = await lumiCore
+    .from('travel_today_recommendations')
     .select('day_summary, recommendation, alternative, day_style, highlight_title, created_at')
-    .eq('family_id', familyId)
+    .eq('household_id', familyId)
     .eq('trip_id', tripId)
     .eq('for_date', forDate)
     .maybeSingle()
@@ -62,10 +62,10 @@ export async function generateAndCacheTodayRecommendation(
   const result = await generateTodayRecommendation({ ...context, highlightTitle, dayStyle })
   if (!result) return null
 
-  const supabase = await createClient()
-  const { data } = await supabase.from('today_recommendations').upsert(
+  const lumiCore = await createLumiCoreClient()
+  const { data } = await lumiCore.from('travel_today_recommendations').upsert(
     {
-      family_id: familyId,
+      household_id: familyId,
       trip_id: tripId,
       for_date: forDate,
       day_style: dayStyle,
@@ -74,7 +74,7 @@ export async function generateAndCacheTodayRecommendation(
       recommendation: result.recommendation,
       alternative: result.alternative,
     },
-    { onConflict: 'family_id,trip_id,for_date' },
+    { onConflict: 'household_id,trip_id,for_date' },
   ).select('created_at').single()
 
   return { ...result, dayStyle, highlightTitle, createdAt: data?.created_at ?? new Date().toISOString() }

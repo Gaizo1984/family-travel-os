@@ -4,7 +4,6 @@ import path from 'node:path'
 import os from 'node:os'
 import { existsSync, readFileSync, unlinkSync } from 'node:fs'
 import { deployFunction, getOrCreateBucket, deploySiteFromBundle, renderMediaOnLambda, getRenderProgress, downloadMedia, deleteRender } from '@remotion/lambda'
-import { createClient } from '@/lib/supabase/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { getFamily } from '@/lib/family'
 import { getRemotionLambdaEnv } from '@/lib/server-env'
@@ -28,7 +27,11 @@ import type { ReelCompositionScene } from '@/remotion/ReelTimelineComposition'
 
 const RENDER_URL_TTL_SECONDS = 3600 // §"ausschließlich kurzlebige Signed URLs" (Nutzervorgabe): lang genug für einen kompletten Lambda-Render, trotzdem befristet.
 const SOURCE_BUCKET = 'travel-documents'
-const OUTPUT_BUCKET = 'content-reels'
+// FINALER CUTOVER, Schema-Luecken-Schliessung: kein eigener dritter Lumi-Core-
+// Bucket ("bestehendes Core-Konzept bevorzugen") -- Render-Ausgaben landen im
+// bereits vorhandenen travel-documents-Bucket unter einem eigenen Pfad-Präfix.
+const OUTPUT_BUCKET = 'travel-documents'
+const OUTPUT_PATH_PREFIX = 'reels'
 const BUNDLE_DIR = path.join(process.cwd(), 'remotion', '.output')
 const MAX_ERROR_MESSAGE_LENGTH = 500
 
@@ -50,16 +53,6 @@ type PollResult = { ok: boolean; render?: ReelRenderStatus; error?: string }
 
 async function loadOwnedRenderContext(projectId: string) {
   const { id: familyId } = await getFamily()
-  // §content_projects/content_drafts sind jetzt Lumi Core (travel_*).
-  // content_reel_renders bleibt bewusst bei Travel: lib/supabase/lumi-core-types.ts
-  // travel_content_reel_renders fehlen aktuell aws_bucket_name/aws_function_name/
-  // cost_estimate_usd/output_size_bytes/render_duration_seconds (von diesem
-  // Remotion-Lambda-Pfad zwingend benötigt) -- eine Umstellung würde die
-  // Render-Status-/Kosten-Verfolgung brechen, bis dieser Typ-/Schema-Stand
-  // ergänzt ist. Die Storage-Buckets 'documents' (memory_photos/memory_videos-
-  // Quellmedien) und 'content-reels' (Render-Ausgabe, in Lumi Core noch nicht
-  // angelegt) bleiben ebenfalls bewusst bei Travels eigenem Storage.
-  const supabase = await createClient()
   const lumiCore = await createLumiCoreClient()
   const { data: project } = await lumiCore
     .from('travel_content_projects')
@@ -75,7 +68,7 @@ async function loadOwnedRenderContext(projectId: string) {
     .order('created_at', { ascending: false }).limit(1).maybeSingle()
   if (!draft) return null
 
-  return { supabase, lumiCore, familyId, project, draftId: draft.id, structure: draft.structure as unknown as ReelStoryboardStructure }
+  return { lumiCore, familyId, project, draftId: draft.id, structure: draft.structure as unknown as ReelStoryboardStructure }
 }
 
 /**
@@ -134,7 +127,7 @@ async function resolveScenesForRender(
 }
 
 async function toRenderStatus(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  lumiCore: Awaited<ReturnType<typeof createLumiCoreClient>>,
   row: {
     id: string; quality: string; status: string; progress_percent: number | null; error_message: string | null
     output_storage_path: string | null; cost_estimate_usd: number | null; output_size_bytes: number | null
@@ -143,7 +136,7 @@ async function toRenderStatus(
 ): Promise<ReelRenderStatus> {
   let downloadUrl: string | null = null
   if (row.status === 'completed' && row.output_storage_path) {
-    const { data: signed } = await supabase.storage.from(OUTPUT_BUCKET).createSignedUrl(row.output_storage_path, RENDER_URL_TTL_SECONDS)
+    const { data: signed } = await lumiCore.storage.from(OUTPUT_BUCKET).createSignedUrl(row.output_storage_path, RENDER_URL_TTL_SECONDS)
     downloadUrl = signed?.signedUrl ?? null
   }
   return {
@@ -194,7 +187,7 @@ export async function startReelRender(projectId: string, quality: 'preview_lowre
       return { ok: false, error: `Die Gesamtdauer der Timeline (${total.toFixed(1)}s) weicht von ${target}s ab. Bitte zuerst in der Timeline ausgleichen.` }
 
     if (quality === 'final') {
-      const { count: previewCount } = await ctx.supabase.from('content_reel_renders')
+      const { count: previewCount } = await ctx.lumiCore.from('travel_content_reel_renders')
         .select('id', { count: 'exact', head: true }).eq('draft_id', ctx.draftId).eq('quality', 'preview_lowres').eq('status', 'completed')
       if (!previewCount) return { ok: false, error: 'Bitte zuerst eine Vorschau erfolgreich rendern.' }
     }
@@ -205,7 +198,7 @@ export async function startReelRender(projectId: string, quality: 'preview_lowre
     const resolved = await resolveScenesForRender(ctx.lumiCore, ctx.structure, quality === 'final' ? 'original' : 'thumb800')
     if (!resolved) return { ok: false, error: 'Mindestens ein Medium konnte nicht geladen werden. Bitte gleich noch einmal versuchen.' }
 
-    const { data: renderRow, error: insertError } = await ctx.supabase.from('content_reel_renders').insert({
+    const { data: renderRow, error: insertError } = await ctx.lumiCore.from('travel_content_reel_renders').insert({
       draft_id: ctx.draftId, quality, status: 'queued', provider: 'remotion_lambda', attempt_count: 1, max_attempts: 2,
     }).select('id').single()
     if (insertError || !renderRow) return { ok: false, error: 'Speicherfehler.' }
@@ -215,7 +208,7 @@ export async function startReelRender(projectId: string, quality: 'preview_lowre
     await incrementReelRenderUsage(ctx.familyId)
 
     if (!existsSync(BUNDLE_DIR)) {
-      await ctx.supabase.from('content_reel_renders').update({ status: 'failed', error_message: 'Render-Bundle nicht gefunden.' }).eq('id', renderRow.id)
+      await ctx.lumiCore.from('travel_content_reel_renders').update({ status: 'failed', error_message: 'Render-Bundle nicht gefunden.' }).eq('id', renderRow.id)
       return { ok: false, error: 'Rendering ist aktuell nicht verfügbar.' }
     }
 
@@ -236,13 +229,13 @@ export async function startReelRender(projectId: string, quality: 'preview_lowre
         scale: isPreview ? 0.5 : 1, jpegQuality: isPreview ? 60 : 90,
       })
 
-      await ctx.supabase.from('content_reel_renders').update({
+      await ctx.lumiCore.from('travel_content_reel_renders').update({
         status: 'rendering', provider_job_id: renderResult.renderId, aws_bucket_name: bucketName, aws_function_name: functionName,
       }).eq('id', renderRow.id)
 
       return { ok: true, renderRowId: renderRow.id }
     } catch {
-      await ctx.supabase.from('content_reel_renders').update({ status: 'failed', error_message: 'Render konnte nicht gestartet werden.' }).eq('id', renderRow.id)
+      await ctx.lumiCore.from('travel_content_reel_renders').update({ status: 'failed', error_message: 'Render konnte nicht gestartet werden.' }).eq('id', renderRow.id)
       return { ok: false, error: 'Render konnte nicht gestartet werden. Bitte gleich noch einmal versuchen.' }
     }
   } catch (e) {
@@ -255,8 +248,8 @@ export async function startReelRender(projectId: string, quality: 'preview_lowre
 export async function listReelRenders(projectId: string): Promise<ReelRenderStatus[]> {
   const ctx = await loadOwnedRenderContext(projectId)
   if (!ctx) return []
-  const { data: rows } = await ctx.supabase.from('content_reel_renders').select('*').eq('draft_id', ctx.draftId).order('requested_at', { ascending: false })
-  return Promise.all((rows ?? []).map((row) => toRenderStatus(ctx.supabase, row)))
+  const { data: rows } = await ctx.lumiCore.from('travel_content_reel_renders').select('*').eq('draft_id', ctx.draftId).order('requested_at', { ascending: false })
+  return Promise.all((rows ?? []).map((row) => toRenderStatus(ctx.lumiCore, row)))
 }
 
 /**
@@ -279,17 +272,17 @@ export async function deleteReelRender(projectId: string, renderRowId: string): 
   const ctx = await loadOwnedRenderContext(projectId)
   if (!ctx) return { ok: false, error: 'Projekt/Storyboard nicht gefunden.' }
 
-  const { data: row } = await ctx.supabase.from('content_reel_renders').select('id, status, output_storage_path').eq('id', renderRowId).eq('draft_id', ctx.draftId).maybeSingle()
+  const { data: row } = await ctx.lumiCore.from('travel_content_reel_renders').select('id, status, output_storage_path').eq('id', renderRowId).eq('draft_id', ctx.draftId).maybeSingle()
   if (!row) return { ok: false, error: 'Render nicht gefunden.' }
   if (row.status !== 'completed' && row.status !== 'failed')
     return { ok: false, error: 'Ein laufender Render kann nicht gelöscht werden.' }
 
   if (row.output_storage_path) {
-    const { error: removeError } = await ctx.supabase.storage.from(OUTPUT_BUCKET).remove([row.output_storage_path])
+    const { error: removeError } = await ctx.lumiCore.storage.from(OUTPUT_BUCKET).remove([row.output_storage_path])
     if (removeError) return { ok: false, error: 'Storage-Datei konnte nicht gelöscht werden.' }
   }
 
-  const { error: deleteError } = await ctx.supabase.from('content_reel_renders').delete().eq('id', renderRowId)
+  const { error: deleteError } = await ctx.lumiCore.from('travel_content_reel_renders').delete().eq('id', renderRowId)
   if (deleteError) return { ok: false, error: 'Speicherfehler beim Löschen.' }
 
   return { ok: true }
@@ -313,11 +306,11 @@ export async function pollReelRenderStatus(projectId: string, renderRowId: strin
     const ctx = await loadOwnedRenderContext(projectId)
     if (!ctx) return { ok: false, error: 'Projekt/Storyboard nicht gefunden.' }
 
-    const { data: row } = await ctx.supabase.from('content_reel_renders').select('*').eq('id', renderRowId).eq('draft_id', ctx.draftId).maybeSingle()
+    const { data: row } = await ctx.lumiCore.from('travel_content_reel_renders').select('*').eq('id', renderRowId).eq('draft_id', ctx.draftId).maybeSingle()
     if (!row) return { ok: false, error: 'Render nicht gefunden.' }
 
     if (row.status === 'completed' || row.status === 'failed' || !row.provider_job_id || !row.aws_bucket_name || !row.aws_function_name) {
-      return { ok: true, render: await toRenderStatus(ctx.supabase, row) }
+      return { ok: true, render: await toRenderStatus(ctx.lumiCore, row) }
     }
 
     let progress
@@ -327,32 +320,32 @@ export async function pollReelRenderStatus(projectId: string, renderRowId: strin
       })
     } catch {
       // §Transienter Netzwerk-/AWS-Fehler beim Abfragen selbst -- kein Status-Wechsel, der nächste Poll-Tick versucht es erneut.
-      return { ok: true, render: await toRenderStatus(ctx.supabase, row) }
+      return { ok: true, render: await toRenderStatus(ctx.lumiCore, row) }
     }
 
     if (progress.fatalErrorEncountered) {
       const message = (progress.errors ?? []).map((e) => e.message).filter(Boolean).join('; ').slice(0, MAX_ERROR_MESSAGE_LENGTH) || 'Unbekannter Renderfehler.'
-      await ctx.supabase.from('content_reel_renders').update({ status: 'failed', error_message: message, completed_at: new Date().toISOString() }).eq('id', renderRowId)
-      return { ok: true, render: await toRenderStatus(ctx.supabase, { ...row, status: 'failed', error_message: message }) }
+      await ctx.lumiCore.from('travel_content_reel_renders').update({ status: 'failed', error_message: message, completed_at: new Date().toISOString() }).eq('id', renderRowId)
+      return { ok: true, render: await toRenderStatus(ctx.lumiCore, { ...row, status: 'failed', error_message: message }) }
     }
 
     if (!progress.done) {
       const percent = Math.round((progress.overallProgress ?? 0) * 100)
-      await ctx.supabase.from('content_reel_renders').update({ progress_percent: percent }).eq('id', renderRowId)
-      return { ok: true, render: await toRenderStatus(ctx.supabase, { ...row, progress_percent: percent }) }
+      await ctx.lumiCore.from('travel_content_reel_renders').update({ progress_percent: percent }).eq('id', renderRowId)
+      return { ok: true, render: await toRenderStatus(ctx.lumiCore, { ...row, progress_percent: percent }) }
     }
 
     const tmpPath = path.join(os.tmpdir(), `reel-render-${renderRowId}.mp4`)
     try {
       await downloadMedia({ region: REMOTION_LAMBDA_REGION, bucketName: row.aws_bucket_name, renderId: row.provider_job_id, outPath: tmpPath })
       const fileBuffer = readFileSync(tmpPath)
-      const outputPath = `${ctx.familyId}/${projectId}/${ctx.draftId}/${row.quality}-${renderRowId}.mp4`
-      const { error: uploadError } = await ctx.supabase.storage.from(OUTPUT_BUCKET).upload(outputPath, fileBuffer, { contentType: 'video/mp4', upsert: true })
+      const outputPath = `${ctx.familyId}/${OUTPUT_PATH_PREFIX}/${projectId}/${ctx.draftId}/${row.quality}-${renderRowId}.mp4`
+      const { error: uploadError } = await ctx.lumiCore.storage.from(OUTPUT_BUCKET).upload(outputPath, fileBuffer, { contentType: 'video/mp4', upsert: true })
 
       if (uploadError) {
         const message = 'Übernahme nach Supabase Storage fehlgeschlagen.'
-        await ctx.supabase.from('content_reel_renders').update({ status: 'failed', error_message: message }).eq('id', renderRowId)
-        return { ok: true, render: await toRenderStatus(ctx.supabase, { ...row, status: 'failed', error_message: message }) }
+        await ctx.lumiCore.from('travel_content_reel_renders').update({ status: 'failed', error_message: message }).eq('id', renderRowId)
+        return { ok: true, render: await toRenderStatus(ctx.lumiCore, { ...row, status: 'failed', error_message: message }) }
       }
 
       // §Löschung NUR nach erfolgreicher Übernahme, Fehler dabei sind nicht fatal (deleteAfter-Lifecycle-Regel bleibt als Sicherheitsnetz).
@@ -367,12 +360,12 @@ export async function pollReelRenderStatus(projectId: string, renderRowId: strin
         cost_estimate_usd: progress.costs?.accruedSoFar ?? null, output_size_bytes: progress.outputSizeInBytes ?? null,
         render_duration_seconds: renderDurationSeconds, completed_at: new Date().toISOString(),
       }
-      await ctx.supabase.from('content_reel_renders').update(updatePayload).eq('id', renderRowId)
-      return { ok: true, render: await toRenderStatus(ctx.supabase, { ...row, ...updatePayload }) }
+      await ctx.lumiCore.from('travel_content_reel_renders').update(updatePayload).eq('id', renderRowId)
+      return { ok: true, render: await toRenderStatus(ctx.lumiCore, { ...row, ...updatePayload }) }
     } catch {
       const message = 'Übernahme des Renders fehlgeschlagen.'
-      await ctx.supabase.from('content_reel_renders').update({ status: 'failed', error_message: message }).eq('id', renderRowId)
-      return { ok: true, render: await toRenderStatus(ctx.supabase, { ...row, status: 'failed', error_message: message }) }
+      await ctx.lumiCore.from('travel_content_reel_renders').update({ status: 'failed', error_message: message }).eq('id', renderRowId)
+      return { ok: true, render: await toRenderStatus(ctx.lumiCore, { ...row, status: 'failed', error_message: message }) }
     } finally {
       if (existsSync(tmpPath)) unlinkSync(tmpPath)
     }

@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { after } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { createJob, completeJob, failJob } from '@/lib/ai-generation-jobs'
 import { searchPlaces, distanceKm, isPlainBeach, isLodging, type PlaceResult } from '@/lib/providers/places-provider'
 import { computeRouteMatrix, type RouteMatrixElement } from '@/lib/providers/routes-provider'
@@ -17,11 +17,11 @@ import {
 } from '@/lib/category-places-shared'
 
 export async function getCategoryPlaces(familyId: string, tripId: string, category: string, originKey: string): Promise<CategoryPlacesResult | null> {
-  const supabase = await createClient()
-  const { data } = await supabase
-    .from('category_places_cache')
+  const lumiCore = await createLumiCoreClient()
+  const { data } = await lumiCore
+    .from('travel_category_places_cache')
     .select('origin_label, results, updated_at')
-    .eq('family_id', familyId).eq('trip_id', tripId).eq('category', category).eq('origin_key', originKey)
+    .eq('household_id', familyId).eq('trip_id', tripId).eq('category', category).eq('origin_key', originKey)
     .maybeSingle()
 
   if (!data) return null
@@ -119,11 +119,11 @@ export async function searchCategoryCandidates(origin: LumiContext['origin'], co
 export async function writeCategoryPlacesCache(
   familyId: string, tripId: string, category: string, originKey: string, originLabel: string, originSource: 'hotel' | 'location', items: CategoryPlaceItem[],
 ): Promise<void> {
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const result: Pick<CategoryPlacesResult, 'originSource' | 'items'> = { originSource, items }
-  const { error } = await supabase.from('category_places_cache').upsert(
-    { family_id: familyId, trip_id: tripId, category, origin_key: originKey, origin_label: originLabel, results: result, updated_at: new Date().toISOString() },
-    { onConflict: 'family_id,trip_id,category,origin_key' },
+  const { error } = await lumiCore.from('travel_category_places_cache').upsert(
+    { household_id: familyId, trip_id: tripId, category, origin_key: originKey, origin_label: originLabel, results: result, updated_at: new Date().toISOString() },
+    { onConflict: 'household_id,trip_id,category,origin_key' },
   )
   if (error) console.error('[category-places] cache upsert failed', { category, error: error.message })
 }

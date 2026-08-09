@@ -416,9 +416,9 @@ export async function analyzeContentSession(formData: FormData) {
   // (isolierter try/catch um checkContentFit, damit dessen catch{} nicht
   // versehentlich den redirect()-Throw verschluckt) -- hier wird gar nicht
   // mehr redirect() aufgerufen, sondern explizit completeJob/failJob, das
-  // Problem kann strukturell nicht mehr auftreten. ai_generation_jobs bleibt
-  // Travel, daher weiterhin der `supabase`-Override.
-  const jobId = await createJob(project.household_id, 'content_session_analyze', supabase)
+  // Problem kann strukturell nicht mehr auftreten. ai_generation_jobs ist
+  // jetzt travel_ai_generation_jobs (Lumi Core), daher der `lumiCore`-Override.
+  const jobId = await createJob(project.household_id, 'content_session_analyze', lumiCore)
 
   after(async () => {
     try {
@@ -443,7 +443,7 @@ export async function analyzeContentSession(formData: FormData) {
       // trotzdem hart auf das aktuelle Limit gekappt.
       const rows = (photoRowsRaw ?? []).slice(0, maxPhotos)
       if (rows.length === 0) {
-        await failJob(jobId, 'Keine Fotos für diese Session gefunden.', supabase)
+        await failJob(jobId, 'Keine Fotos für diese Session gefunden.', lumiCore)
         return
       }
 
@@ -463,7 +463,7 @@ export async function analyzeContentSession(formData: FormData) {
       }))
       const photos: SessionPhoto[] = loaded.filter((p): p is SessionPhoto => p !== null)
       if (photos.length === 0) {
-        await failJob(jobId, 'Fotos konnten nicht geladen werden.', supabase)
+        await failJob(jobId, 'Fotos konnten nicht geladen werden.', lumiCore)
         return
       }
 
@@ -509,7 +509,7 @@ export async function analyzeContentSession(formData: FormData) {
       }
 
       if (assessments.length === 0) {
-        await failJob(jobId, 'Die Bildanalyse ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.', supabase)
+        await failJob(jobId, 'Die Bildanalyse ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.', lumiCore)
         return
       }
 
@@ -537,7 +537,7 @@ export async function analyzeContentSession(formData: FormData) {
           await completeJob(
             jobId,
             `${returnPath}?fit=weak&reason=${encodeURIComponent(fit.reason)}&missing=${encodeURIComponent(fit.missingMotifs.join('; '))}&altfocus=${encodeURIComponent(fit.suggestedFocus)}`,
-            supabase,
+            lumiCore,
           )
           return
         }
@@ -571,12 +571,12 @@ export async function analyzeContentSession(formData: FormData) {
         }
 
         if (createdCount === 0) {
-          await failJob(jobId, 'Das Content-Paket konnte nicht erstellt werden. Bitte gleich noch einmal versuchen.', supabase)
+          await failJob(jobId, 'Das Content-Paket konnte nicht erstellt werden. Bitte gleich noch einmal versuchen.', lumiCore)
           return
         }
 
         await lumiCore.from('travel_content_projects').update({ status: 'draft_created' }).eq('id', projectId)
-        await completeJob(jobId, `${returnPath}?package=${createdCount}`, supabase)
+        await completeJob(jobId, `${returnPath}?package=${createdCount}`, lumiCore)
         return
       }
 
@@ -592,7 +592,7 @@ export async function analyzeContentSession(formData: FormData) {
       try {
         contentResult = await generateFormatContent(openai, outputFormat, tripDigest, manifestText, tonality, language, guidedContext, extraInstruction)
       } catch {
-        await failJob(jobId, 'Die Inhalte-Generierung ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.', supabase)
+        await failJob(jobId, 'Die Inhalte-Generierung ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.', lumiCore)
         return
       }
 
@@ -605,15 +605,15 @@ export async function analyzeContentSession(formData: FormData) {
       }).select('id').single()
 
       if (draftError || !draft) {
-        await failJob(jobId, 'Speicherfehler: ' + (draftError?.message ?? 'unbekannt'), supabase)
+        await failJob(jobId, 'Speicherfehler: ' + (draftError?.message ?? 'unbekannt'), lumiCore)
         return
       }
 
       await lumiCore.from('travel_content_projects').update({ status: 'draft_created' }).eq('id', projectId)
-      await completeJob(jobId, `/content-studio/drafts/${draft.id}`, supabase)
+      await completeJob(jobId, `/content-studio/drafts/${draft.id}`, lumiCore)
     } catch (e) {
       console.error('[content-sessions] analyzeContentSession fehlgeschlagen:', e instanceof Error ? e.message : e)
-      await failJob(jobId, 'Die Content-Erstellung ist gerade nicht verfügbar. Bitte später erneut versuchen.', supabase)
+      await failJob(jobId, 'Die Content-Erstellung ist gerade nicht verfügbar. Bitte später erneut versuchen.', lumiCore)
     }
   })
 
@@ -722,7 +722,7 @@ export async function createContentSessionFromVacationPostSelection(formData: Fo
   const { data: trip } = await lumiCore.from('travel_trips').select('title').eq('id', tripId).maybeSingle()
   if (!trip) redirect('/content-studio')
 
-  const jobId = await createJob(familyId, 'vacation_post_content_session', supabase)
+  const jobId = await createJob(familyId, 'vacation_post_content_session', lumiCore)
 
   after(async () => {
     try {
@@ -741,7 +741,7 @@ export async function createContentSessionFromVacationPostSelection(formData: Fo
 
       const selected = selectedRaw ?? []
       if (selected.length === 0) {
-        await failJob(jobId, 'Es ist noch keine kuratierte Auswahl vorhanden.', supabase)
+        await failJob(jobId, 'Es ist noch keine kuratierte Auswahl vorhanden.', lumiCore)
         return
       }
 
@@ -750,7 +750,7 @@ export async function createContentSessionFromVacationPostSelection(formData: Fo
         status: 'ready_for_analysis', project_type: 'session', output_format: 'carousel',
       }).select('id').single()
       if (sessionError || !newSession) {
-        await failJob(jobId, 'Speicherfehler: ' + (sessionError?.message ?? 'unbekannt'), supabase)
+        await failJob(jobId, 'Speicherfehler: ' + (sessionError?.message ?? 'unbekannt'), lumiCore)
         return
       }
 
@@ -775,7 +775,7 @@ export async function createContentSessionFromVacationPostSelection(formData: Fo
       try {
         contentResult = await generateFormatContent(openai, 'carousel', tripDigest, manifestText, null, 'de', guidedContext, extraInstruction)
       } catch {
-        await failJob(jobId, 'Die Beitragserstellung ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.', supabase)
+        await failJob(jobId, 'Die Beitragserstellung ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.', lumiCore)
         return
       }
 
@@ -784,15 +784,15 @@ export async function createContentSessionFromVacationPostSelection(formData: Fo
         project_id: newSession.id, draft_type: 'carousel_plan', structure,
       }).select('id').single()
       if (draftError || !draft) {
-        await failJob(jobId, 'Speicherfehler: ' + (draftError?.message ?? 'unbekannt'), supabase)
+        await failJob(jobId, 'Speicherfehler: ' + (draftError?.message ?? 'unbekannt'), lumiCore)
         return
       }
 
       await lumiCore.from('travel_content_projects').update({ status: 'draft_created' }).eq('id', newSession.id)
-      await completeJob(jobId, `/content-studio/drafts/${draft.id}`, supabase)
+      await completeJob(jobId, `/content-studio/drafts/${draft.id}`, lumiCore)
     } catch (e) {
       console.error('[content-sessions] createContentSessionFromVacationPostSelection fehlgeschlagen:', e instanceof Error ? e.message : e)
-      await failJob(jobId, 'Die Beitragserstellung ist gerade nicht verfügbar. Bitte später erneut versuchen.', supabase)
+      await failJob(jobId, 'Die Beitragserstellung ist gerade nicht verfügbar. Bitte später erneut versuchen.', lumiCore)
     }
   })
 

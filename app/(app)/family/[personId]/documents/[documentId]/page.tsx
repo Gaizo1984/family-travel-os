@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { resolveHouseholdMemberId, LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
+import { getHouseholdMemberById } from "@/lib/household-members";
+import { getFamily } from "@/lib/family";
 import {
   DOCUMENT_TYPE_CONFIG, DOCUMENT_VALIDITY_LABELS, DOCUMENT_VALIDITY_COLORS,
   getDocumentValidity, formatExpiresAt,
@@ -43,29 +46,28 @@ export default async function DocumentDetailPage({
   const { personId, documentId } = await params;
   const { error } = await searchParams;
 
-  const supabase = await createClient();
-  const { data: person } = await supabase
-    .from("persons")
-    .select("id, name, family_id")
-    .eq("id", personId)
-    .maybeSingle();
+  const lumiCore = await createLumiCoreClient();
+  const householdMemberId = await resolveHouseholdMemberId(personId);
+  if (!householdMemberId) notFound();
 
-  if (!person) notFound();
+  const member = await getHouseholdMemberById(householdMemberId);
+  if (!member) notFound();
+  const person = { id: personId, name: member.name };
 
-  const { data: document } = await supabase
-    .from("documents")
+  const { data: document } = await lumiCore
+    .from("travel_documents")
     .select("id, doc_type, label, expires_at, notes, details, storage_path")
     .eq("id", documentId)
-    .eq("person_id", person.id)
+    .eq("household_member_id", householdMemberId)
     .maybeSingle();
 
-  if (!document) notFound();
+  if (!document || !document.storage_path) notFound();
   const doc = document as unknown as DocumentDetail;
   const config = DOCUMENT_TYPE_CONFIG[doc.doc_type];
   const Icon = config.icon;
   const details = doc.details ?? {};
 
-  const signedDocUrl = await getCachedSignedUrl("documents", doc.storage_path);
+  const signedDocUrl = await getCachedSignedUrl(LUMI_CORE_DOCUMENTS_BUCKET, doc.storage_path);
 
   const isImage = /\.(jpe?g|png|webp)$/i.test(doc.storage_path);
   const isPdf = doc.storage_path.toLowerCase().endsWith(".pdf");
@@ -76,24 +78,25 @@ export default async function DocumentDetailPage({
 
   const isInsurance = doc.doc_type === "insurance";
 
-  const { data: assignedTripsRaw } = isInsurance
-    ? { data: [] }
-    : await supabase
-        .from("document_trips")
-        .select("trip_id, trips ( id, slug, title )")
-        .eq("document_id", doc.id);
+  // §Lumi-Core-Cutover: keine PostgREST-Embeddings zwischen travel_*-Tabellen --
+  // flache Parallelabfrage (travel_document_trips -> travel_trips) statt
+  // verschachtelter Selects, exakt wie lib/travel-world.ts::fetchTravelWorldRawData.
+  const { id: familyId } = await getFamily();
+  const [{ data: assignedTripLinks }, { data: allTripsRaw }] = isInsurance
+    ? [{ data: [] }, { data: [] }]
+    : await Promise.all([
+        lumiCore.from("travel_document_trips").select("trip_id").eq("document_id", doc.id),
+        lumiCore.from("travel_trips").select("id, slug, title").eq("household_id", familyId).order("start_date", { ascending: false }),
+      ]);
 
-  const assignedTrips = (assignedTripsRaw ?? [])
-    .map((r) => r.trips as unknown as { id: string; slug: string; title: string } | null)
+  const allTripsById = new Map((allTripsRaw ?? []).map((t) => [t.id, t]));
+  const assignedTrips = (assignedTripLinks ?? [])
+    .map((r) => allTripsById.get(r.trip_id) ?? null)
     .filter((t): t is { id: string; slug: string; title: string } => t !== null);
 
   const assignedTripIds = new Set(assignedTrips.map((t) => t.id));
 
-  const { data: allTrips } = isInsurance
-    ? { data: [] }
-    : await supabase.from("trips").select("id, title").order("start_date", { ascending: false });
-
-  const availableTrips = (allTrips ?? []).filter((t) => !assignedTripIds.has(t.id));
+  const availableTrips = (allTripsRaw ?? []).filter((t) => !assignedTripIds.has(t.id));
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>

@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 
 /**
  * Security Foundation 1A: einziger Einstiegspunkt für Supabase-Auth-E-Mail-
@@ -7,6 +7,11 @@ import { createClient } from '@/lib/supabase/server'
  * in lib/actions/auth.ts). Tauscht token_hash gegen eine echte Session
  * (verifyOtp) und leitet danach auf die Zielseite weiter -- bewusst als
  * eigener Auth-Callback von proxy.ts als öffentlich ausgenommen.
+ *
+ * FINALER CUTOVER: läuft jetzt gegen Lumi Core (der Reset-Link aus
+ * requestPasswordReset zeigt auf ein Lumi-Core-Recovery-Token) --
+ * verifyOtp muss zwingend gegen dasselbe Projekt laufen, das den Link
+ * ausgestellt hat.
  */
 
 /** Nur relative interne Pfade zulassen -- verhindert Open-Redirect über
@@ -27,8 +32,8 @@ export async function GET(request: NextRequest) {
   // zur Laufzeit geprüft (nicht nur per TS-Cast angenommen). Jeder andere
   // oder manipulierte "type"-Wert läuft in den bestehenden Fehlerpfad.
   if (tokenHash && type === 'recovery') {
-    const supabase = await createClient()
-    const { error } = await supabase.auth.verifyOtp({ type: 'recovery', token_hash: tokenHash })
+    const lumiCore = await createLumiCoreClient()
+    const { error } = await lumiCore.auth.verifyOtp({ type: 'recovery', token_hash: tokenHash })
     if (!error) {
       return NextResponse.redirect(new URL(safeNext, request.url))
     }

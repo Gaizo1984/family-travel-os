@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft, RefreshCw, Sparkles } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { getFamily } from "@/lib/family";
+import { listHouseholdMembers } from "@/lib/household-members";
 import { isTripCurrentlyRunning, isTripHistorical } from "@/lib/trip-status";
 import { deriveTripDateRange } from "@/lib/trip-dates";
 import { todayIsoInFamilyTimezone } from "@/lib/time";
@@ -81,23 +82,62 @@ export default async function TodayCategoryPage({
       </div>
     );
   }
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
   const { id: familyId } = await getFamily();
   const todayIso = todayIsoInFamilyTimezone();
 
-  const { data: trips } = await supabase
-    .from("trips")
-    .select(`
-      id, slug, title, subtitle, status, start_date, end_date,
-      trip_members ( persons ( id, name ) ),
-      stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code, is_transit ),
-      bookings ( id, type, title, provider, status, start_datetime, end_datetime, stage_id, details, created_at )
-    `)
-    .eq("family_id", familyId);
+  // §Lumi-Core-Cutover: keine PostgREST-Embeddings zwischen travel_*-Tabellen
+  // -- flache Parallelabfragen + manuelles Map-Reassembly statt eines
+  // verschachtelten `trips`-Selects (siehe app/(app)/today/page.tsx::fetchTripsForToday
+  // für dasselbe Muster).
+  const [{ data: tripsRaw }, householdMembers] = await Promise.all([
+    lumiCore.from("travel_trips").select("id, slug, title, subtitle, status, start_date, end_date").eq("household_id", familyId),
+    listHouseholdMembers(),
+  ]);
+  const nameById = new Map(householdMembers.map((m) => [m.id, m.name]));
+  const tripIds = (tripsRaw ?? []).map((t) => t.id);
+
+  const [{ data: membersRaw }, { data: stagesRaw }, { data: bookingsRaw }] = tripIds.length
+    ? await Promise.all([
+        lumiCore.from("travel_trip_members").select("trip_id, household_member_id").in("trip_id", tripIds),
+        lumiCore
+          .from("travel_stages")
+          .select("trip_id, id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code, is_transit")
+          .in("trip_id", tripIds),
+        lumiCore
+          .from("travel_bookings")
+          .select("trip_id, id, type, title, provider, status, start_datetime, end_datetime, stage_id, details, created_at")
+          .in("trip_id", tripIds),
+      ])
+    : [{ data: [] }, { data: [] }, { data: [] }] as const;
+
+  const membersByTrip = new Map<string, TripRow["trip_members"]>();
+  (membersRaw ?? []).forEach((m) => {
+    const list = membersByTrip.get(m.trip_id) ?? [];
+    list.push({ persons: nameById.has(m.household_member_id) ? { id: m.household_member_id, name: nameById.get(m.household_member_id)! } : null });
+    membersByTrip.set(m.trip_id, list);
+  });
+  const stagesByTrip = new Map<string, StageInput[]>();
+  (stagesRaw ?? []).forEach((s) => {
+    const { trip_id, ...stage } = s;
+    stagesByTrip.set(trip_id, [...(stagesByTrip.get(trip_id) ?? []), stage as StageInput]);
+  });
+  const bookingsByTrip = new Map<string, TimelineBooking[]>();
+  (bookingsRaw ?? []).forEach((b) => {
+    const { trip_id, ...booking } = b;
+    bookingsByTrip.set(trip_id, [...(bookingsByTrip.get(trip_id) ?? []), booking as unknown as TimelineBooking]);
+  });
+
+  const trips: TripRow[] = (tripsRaw ?? []).map((t) => ({
+    ...t,
+    trip_members: membersByTrip.get(t.id) ?? [],
+    stages: stagesByTrip.get(t.id) ?? [],
+    bookings: bookingsByTrip.get(t.id) ?? [],
+  }));
 
   // §"Reisezeitraum automatisch ableiten": ohne manuelles Datum, aber mit
   // Buchungen/Etappen, gilt die Reise trotzdem korrekt als laufend (lib/trip-dates.ts).
-  const allTrips = ((trips ?? []) as unknown as TripRow[]).map((t) => {
+  const allTrips = trips.map((t) => {
     const range = deriveTripDateRange(t, t.bookings, t.stages);
     return { ...t, start_date: range.startDate, end_date: range.endDate };
   });

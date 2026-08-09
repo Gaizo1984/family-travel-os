@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { ChevronLeft, Check } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { getFamily } from "@/lib/family";
+import { listHouseholdMembers, deriveInitials } from "@/lib/household-members";
 import { syncTripDerivedCountryVisits } from "@/lib/travel-world";
 import { addManualCountryVisit, removeManualCountryVisit } from "@/lib/actions/country-visits";
 import { WORLD_COUNTRIES, WORLD_CONTINENTS, type WorldContinent } from "@/lib/data/world-countries";
@@ -24,31 +25,30 @@ export default async function CountryVisitsPage({
 }) {
   const { q, continent } = await searchParams;
 
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
   const { id: familyId } = await getFamily();
 
   await syncTripDerivedCountryVisits(familyId);
 
-  const { data: personsRaw } = await supabase
-    .from("persons")
-    .select("id, name, initials, color")
-    .eq("family_id", familyId)
-    .order("name");
-  const persons = (personsRaw ?? []) as PersonOption[];
+  const householdMembers = await listHouseholdMembers();
+  const persons: PersonOption[] = householdMembers.map((m) => ({ id: m.id, name: m.name, initials: deriveInitials(m.name), color: m.color }));
   const personIds = persons.map((p) => p.id);
 
+  // §ID-Space: travel_person_country_visits.household_member_id ist die echte
+  // Lumi-Core-ID -- persons kommt hier direkt aus listHouseholdMembers(), keine
+  // Legacy-Auflösung nötig (anders als bei buildTravelWorld in family/world, family/history).
   const { data: visitsRaw } = personIds.length > 0
-    ? await supabase.from("person_country_visits").select("person_id, country_code, source").in("person_id", personIds)
-    : { data: [] as { person_id: string; country_code: string; source: string }[] };
+    ? await lumiCore.from("travel_person_country_visits").select("household_member_id, country_code, source").in("household_member_id", personIds)
+    : { data: [] as { household_member_id: string; country_code: string; source: string | null }[] };
 
   // person_id -> country_code -> source
   const visitsByPerson = new Map<string, Map<string, string>>();
   const countByPerson = new Map<string, number>();
   const familyCountryCodes = new Set<string>();
   for (const v of visitsRaw ?? []) {
-    if (!visitsByPerson.has(v.person_id)) visitsByPerson.set(v.person_id, new Map());
-    visitsByPerson.get(v.person_id)!.set(v.country_code, v.source);
-    countByPerson.set(v.person_id, (countByPerson.get(v.person_id) ?? 0) + 1);
+    if (!visitsByPerson.has(v.household_member_id)) visitsByPerson.set(v.household_member_id, new Map());
+    visitsByPerson.get(v.household_member_id)!.set(v.country_code, v.source ?? "manual");
+    countByPerson.set(v.household_member_id, (countByPerson.get(v.household_member_id) ?? 0) + 1);
     familyCountryCodes.add(v.country_code);
   }
 

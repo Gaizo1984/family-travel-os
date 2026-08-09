@@ -1,22 +1,20 @@
-import { cache } from 'react'
-import { createClient } from '@/lib/supabase/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
+import { getFamily } from '@/lib/family'
 
 export const LUMI_CORE_DOCUMENTS_BUCKET = 'travel-documents'
 export const LUMI_CORE_PROFILE_PHOTOS_BUCKET = 'profile-photos'
 
 /**
- * Liest die household_id ausschließlich über die bereits bestehende,
- * additive Bridge-Spalte `families.lumi_core_household_id` (Phase 3A) --
- * reiner Read auf Travels eigener, unveränderter `families`-Tabelle.
- * Request-scoped gecacht wie `lib/family.ts`/`lib/current-person.ts`.
+ * FINALER CUTOVER: Lumi Core ist jetzt der primäre Login, `getFamily()`
+ * liefert die household_id bereits direkt aus der aktuellen Session --
+ * die frühere Phase-3A-Bridge-Spalte (`families.lumi_core_household_id`,
+ * ein Travel-DB-Read) wird dafür nicht mehr gebraucht. `getFamily()` ist
+ * selbst schon request-scoped gecacht (React `cache()`).
  */
-export const getLumiCoreHouseholdId = cache(async (): Promise<string | null> => {
-  const supabase = await createClient()
-  const { data, error } = await supabase.from('families').select('lumi_core_household_id').maybeSingle()
-  if (error || !data?.lumi_core_household_id) return null
-  return data.lumi_core_household_id
-})
+export async function getLumiCoreHouseholdId(): Promise<string | null> {
+  const { id } = await getFamily()
+  return id || null
+}
 
 /**
  * `travel-documents`-Konvention (siehe 04_storage_migration.js /

@@ -1,5 +1,4 @@
-import { createServiceRoleClient } from '@/lib/supabase/service-role'
-import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
+import { createLumiCoreServiceClient } from '@/lib/supabase/lumi-core-service'
 import { addDaysIso } from '@/lib/date-utils'
 import { todayIsoInFamilyTimezone } from '@/lib/time'
 
@@ -10,7 +9,7 @@ const DELETE_AFTER_TRIP_END_DAYS = 2
 /**
  * §"Buchungsbestätigungen (u. a. Aktivitäts-Tickets) sollen sich 2 Tage nach
  * Reiseende automatisch löschen" (Nutzervorgabe, wörtlich, Vorschlag des
- * Nutzers übernommen): löscht ALLE `documents`-Zeilen mit
+ * Nutzers übernommen): löscht ALLE `travel_documents`-Zeilen mit
  * `doc_type = 'booking_document'` einer Reise, deren `end_date` (nur das
  * manuell gepflegte Feld -- bewusst nicht über deriveTripDateRange
  * hergeleitet, siehe Kommentar in lib/trip-dates.ts) mindestens
@@ -19,22 +18,18 @@ const DELETE_AFTER_TRIP_END_DAYS = 2
  * ...) werden NIE angefasst. Gehärtetes Löschmuster wie
  * lib/content-session-cleanup.ts: Storage-Datei zuerst, DB-Zeile nur bei
  * Erfolg, ein Fehlschlag bricht den Batch nicht ab.
+ *
+ * FINALER CUTOVER: läuft jetzt vollständig über den Lumi-Core-Service-Role-
+ * Client (lib/supabase/lumi-core-service.ts) -- der frühere cookie-basierte
+ * createLumiCoreClient() lieferte in diesem sitzungslosen Cron-Kontext mangels
+ * Session durch RLS lautlos 0 Zeilen.
  */
 export async function cleanupExpiredBookingDocuments(): Promise<BookingDocumentCleanupResult> {
-  const supabase = createServiceRoleClient()
-  // Hinweis: es existiert (noch) kein Service-Role-Äquivalent für Lumi Core --
-  // createLumiCoreClient() ist cookie-/session-basiert (siehe
-  // lib/supabase/lumi-core-server.ts) und liefert in diesem sitzungslosen
-  // Cron-Kontext keine authentifizierte Lumi-Core-Session, wodurch RLS jede
-  // Abfrage still auf 0 Zeilen filtert (gleiches Muster wie beim Fehlen des
-  // Service-Role-Keys, siehe Kommentar in lib/supabase/service-role.ts).
-  // Ohne einen künftigen Lumi-Core-Service-Role-Client bleibt dieser Cleanup
-  // für travel_documents wirkungslos.
-  const lumiCore = await createLumiCoreClient()
+  const lumiCore = createLumiCoreServiceClient()
   const cutoff = addDaysIso(todayIsoInFamilyTimezone(), -DELETE_AFTER_TRIP_END_DAYS)
 
-  const { data: expiredTripsRaw } = await supabase
-    .from('trips')
+  const { data: expiredTripsRaw } = await lumiCore
+    .from('travel_trips')
     .select('id')
     .not('end_date', 'is', null)
     .lte('end_date', cutoff)

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft, Check, X as XIcon, Trash2 } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { updateTripIdeaNotes, deleteTripIdea } from "@/lib/actions/trip-ideas";
 import { generateHotelShortlist, estimateTripIdeaBudget, generateTripVariants } from "@/lib/actions/trip-idea-advisor";
 import { BUDGET_CATEGORY_ORDER, BUDGET_CATEGORY_LABELS, type BudgetCategory } from "@/lib/budget";
@@ -171,9 +171,9 @@ export default async function TripIdeaDetailPage({
   const { sessionId, ideaId } = await params;
   const { error, job: jobId } = await searchParams;
 
-  const supabase = await createClient();
-  const { data: idea } = await supabase
-    .from("trip_ideas")
+  const lumiCore = await createLumiCoreClient();
+  const { data: idea } = await lumiCore
+    .from("travel_trip_ideas")
     .select("*")
     .eq("id", ideaId)
     .maybeSingle();
@@ -204,9 +204,9 @@ export default async function TripIdeaDetailPage({
   const variants = (idea.variants as StoredTripVariant[] | null) ?? null;
 
   const { data: session } = idea.session_id
-    ? await supabase
-      .from("trip_idea_sessions")
-      .select("departure_city, travel_date_mode, travel_start_date, travel_end_date, traveler_ids")
+    ? await lumiCore
+      .from("travel_trip_idea_sessions")
+      .select("departure_city, travel_date_mode, travel_start_date, travel_end_date, traveler_household_member_ids")
       .eq("id", idea.session_id)
       .maybeSingle()
     : { data: null };
@@ -221,7 +221,7 @@ export default async function TripIdeaDetailPage({
     flightsParams.set("departure_date", session.travel_start_date);
     flightsParams.set("return_date", session.travel_end_date);
   }
-  if (session?.traveler_ids && session.traveler_ids.length > 0) flightsParams.set("traveler_ids", session.traveler_ids.join(","));
+  if (session?.traveler_household_member_ids && session.traveler_household_member_ids.length > 0) flightsParams.set("traveler_ids", session.traveler_household_member_ids.join(","));
   flightsParams.set("idea_id", idea.id);
   if (idea.flight_search_key) flightsParams.set("search_key", idea.flight_search_key);
   const flightsDeepLink = `/discover/flights?${flightsParams.toString()}`;

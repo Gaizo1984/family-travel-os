@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/server";
+import { listHouseholdMembers } from "@/lib/household-members";
 import { createInsurancePolicy } from "@/lib/actions/insurance";
 import { DateSelectFields } from "@/components/DateSelectFields";
 import { getDateFieldRange } from "@/lib/documents";
@@ -22,8 +22,7 @@ export default async function NewInsurancePolicyPage({
 }) {
   const { error, assign_trip, return_to } = await searchParams;
 
-  const supabase = await createClient();
-  const { data: persons } = await supabase.from("persons").select("id, name").order("name");
+  const persons = await listHouseholdMembers();
 
   const cancelHref = return_to || "/family/insurance";
 

@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft, Star, Archive, ArchiveRestore, Trash2, Sparkles } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
 import {
   createContentDraftFromIdea, toggleFavoriteContentIdea, archiveContentIdea,
   unarchiveContentIdea, deleteContentIdea,
@@ -32,22 +33,26 @@ export default async function ContentIdeaDetailPage({
   const { ideaId } = await params;
   const { error } = await searchParams;
 
-  const supabase = await createClient();
-  const { data: idea } = await supabase
-    .from("content_ideas")
-    .select("id, project_id, suggestions, content_goal, chosen_index, source_input_text, trip_id, status, is_favorite, reasoning, trips(title)")
+  const lumiCore = await createLumiCoreClient();
+  const { data: idea } = await lumiCore
+    .from("travel_content_ideas")
+    .select("id, project_id, suggestions, content_goal, chosen_index, source_input_text, trip_id, status, is_favorite, reasoning")
     .eq("id", ideaId)
     .maybeSingle();
 
   if (!idea) notFound();
 
   const suggestions = idea.suggestions as unknown as Suggestion[];
-  const tripTitle = (idea.trips as unknown as { title: string } | null)?.title;
+  // §Lumi-Core-Cutover: keine PostgREST-Embeddings -- Reisetitel per eigener Abfrage.
+  const { data: tripForTitle } = idea.trip_id
+    ? await lumiCore.from("travel_trips").select("title").eq("id", idea.trip_id).maybeSingle()
+    : { data: null };
+  const tripTitle = tripForTitle?.title;
   const returnTo = `/content-studio/ideas/${idea.id}`;
 
   const { data: selectedPhotosRaw } = idea.project_id
-    ? await supabase
-        .from("content_project_photos")
+    ? await lumiCore
+        .from("travel_content_project_photos")
         .select("id, storage_path, quality_score")
         .eq("project_id", idea.project_id)
         .eq("is_selected", true)
@@ -57,15 +62,15 @@ export default async function ContentIdeaDetailPage({
   // §"Dublettenerkennung sichtbar machen": läuft bereits (is_duplicate_of),
   // wurde bisher aber nirgends kommuniziert — analog zu app/memories/page.tsx.
   const { count: duplicateCount } = idea.project_id
-    ? await supabase
-        .from("content_project_photos")
+    ? await lumiCore
+        .from("travel_content_project_photos")
         .select("id", { count: "exact", head: true })
         .eq("project_id", idea.project_id)
         .not("is_duplicate_of", "is", null)
     : { count: 0 };
 
   // §"Egress-Analyse 2026-07-16": 96×96-Vorschau -- Thumbnail statt Original.
-  const displayByPath = await getPhotoDisplayUrls("documents", (selectedPhotosRaw ?? []).map((p) => p.storage_path), "thumb400");
+  const displayByPath = await getPhotoDisplayUrls(LUMI_CORE_DOCUMENTS_BUCKET, (selectedPhotosRaw ?? []).map((p) => p.storage_path), "thumb400");
   const selectedPhotos = (selectedPhotosRaw ?? []).map((p) => {
     const resolved = displayByPath.get(p.storage_path) ?? null;
     return { id: p.id, url: resolved?.url ?? null, storagePath: resolved?.resolvedPath ?? p.storage_path, qualityScore: p.quality_score };

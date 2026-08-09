@@ -86,7 +86,7 @@ export async function generatePackingList(formData: FormData) {
   // KI-Aufruf, Schreiben) läuft danach über after() weiter, exakt das
   // in lib/actions/memories.ts etablierte Prinzip, verallgemeinert auf
   // ai_generation_jobs.
-  const jobId = await createJob(familyId, 'packing_list_generate', supabase)
+  const jobId = await createJob(familyId, 'packing_list_generate', lumiCore)
 
   after(async () => {
     try {
@@ -169,7 +169,7 @@ export async function generatePackingList(formData: FormData) {
       }))
 
       if (parsedItems.length === 0) {
-        await failJob(jobId, 'Es konnten keine Vorschläge erzeugt werden. Bitte erneut versuchen.', supabase)
+        await failJob(jobId, 'Es konnten keine Vorschläge erzeugt werden. Bitte erneut versuchen.', lumiCore)
         return
       }
 
@@ -203,10 +203,10 @@ export async function generatePackingList(formData: FormData) {
         const { error: insertError } = await lumiCore.from('travel_packing_items').insert(rows)
         if (insertError) {
           console.error('[packing-list-generation] Insert fehlgeschlagen:', insertError.message)
-          await failJob(jobId, 'Die Packliste konnte nicht gespeichert werden. Bitte erneut versuchen.', supabase)
+          await failJob(jobId, 'Die Packliste konnte nicht gespeichert werden. Bitte erneut versuchen.', lumiCore)
           return
         }
-        await completeJob(jobId, packingPath(slug), supabase)
+        await completeJob(jobId, packingPath(slug), lumiCore)
         return
       }
 
@@ -217,13 +217,13 @@ export async function generatePackingList(formData: FormData) {
       )
       if (draftError) {
         console.error('[packing-list-generation] Entwurf-Upsert fehlgeschlagen:', draftError.message)
-        await failJob(jobId, 'Die aktualisierte Packliste konnte nicht gespeichert werden. Bitte erneut versuchen.', supabase)
+        await failJob(jobId, 'Die aktualisierte Packliste konnte nicht gespeichert werden. Bitte erneut versuchen.', lumiCore)
         return
       }
-      await completeJob(jobId, `${packingPath(slug)}/diff`, supabase)
+      await completeJob(jobId, `${packingPath(slug)}/diff`, lumiCore)
     } catch (e) {
       console.error('[packing-list-generation] KI-Aufruf fehlgeschlagen:', e instanceof Error ? e.message : e)
-      await failJob(jobId, 'Die Packlisten-Erstellung ist gerade nicht verfügbar. Bitte später erneut versuchen.', supabase)
+      await failJob(jobId, 'Die Packlisten-Erstellung ist gerade nicht verfügbar. Bitte später erneut versuchen.', lumiCore)
     }
   })
 

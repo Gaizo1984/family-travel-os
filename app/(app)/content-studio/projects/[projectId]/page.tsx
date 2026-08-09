@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 
 const DRAFT_TYPE_LABELS: Record<string, string> = {
   reel_plan: "Reel-Plan", carousel_plan: "Carousel-Plan", caption: "Caption", journal_review: "Reisejournal",
@@ -14,18 +14,18 @@ export default async function ContentProjectPage({
 }) {
   const { projectId } = await params;
 
-  const supabase = await createClient();
-  const { data: project } = await supabase
-    .from("content_projects")
-    .select("id, title, status, trip_id, trips(title)")
+  const lumiCore = await createLumiCoreClient();
+  const { data: project } = await lumiCore
+    .from("travel_content_projects")
+    .select("id, title, status, trip_id")
     .eq("id", projectId)
     .maybeSingle();
 
   if (!project) notFound();
 
   const [{ data: ideas }, { data: drafts }] = await Promise.all([
-    supabase.from("content_ideas").select("id, content_goal, status, created_at").eq("project_id", projectId).order("created_at", { ascending: false }),
-    supabase.from("content_drafts").select("id, draft_type, visibility, scheduled_at, notes").eq("project_id", projectId).order("created_at", { ascending: false }),
+    lumiCore.from("travel_content_ideas").select("id, content_goal, status, created_at").eq("project_id", projectId).order("created_at", { ascending: false }),
+    lumiCore.from("travel_content_drafts").select("id, draft_type, visibility, scheduled_at, notes").eq("project_id", projectId).order("created_at", { ascending: false }),
   ]);
 
   return (

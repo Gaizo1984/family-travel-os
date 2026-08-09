@@ -14,7 +14,7 @@ export type HintBookingRow = {
   end_datetime: string | null
   stage_id: string | null
   details: Record<string, string> | null
-  participant_person_ids: string[] | null
+  participant_household_member_ids: string[] | null
 }
 
 export type HintDocumentRow = {
@@ -30,7 +30,7 @@ export type HintJourneyEventRow = {
   category: string
   title: string
   status: string
-  participant_person_ids: string[] | null
+  participant_household_member_ids: string[] | null
 }
 
 /**

@@ -1,4 +1,6 @@
-import { createServiceRoleClient } from '@/lib/supabase/service-role'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
+import type { LumiCoreDatabase } from '@/lib/supabase/lumi-core-types'
 
 export type ContentSessionCleanupResult = { deleted: number; failed: number }
 
@@ -12,14 +14,19 @@ export type ContentSessionCleanupResult = { deleted: number; failed: number }
  * übrigen nicht ab. Content-Entwürfe (content_drafts) werden nie angefasst
  * -- sie referenzieren Fotos nur lose über Foto-ID im JSON, kein
  * Foreign-Key-Zwang, bleiben also unabhängig von dieser Löschung bestehen.
- * Aufgerufen sowohl vom Vercel-Cron (app/api/cron/cleanup-content-sessions)
- * als auch als Best-Effort-Fallback beim Öffnen von /content-studio.
+ * Aufgerufen sowohl vom Vercel-Cron (app/api/cron/cleanup-content-sessions,
+ * sitzungslos -- übergibt explizit den Lumi-Core-Service-Role-Client, siehe
+ * lib/supabase/lumi-core-service.ts) als auch als Best-Effort-Fallback beim
+ * Öffnen von /content-studio (dort läuft es unter der normalen, echten
+ * Nutzer-Session -- bewusst OHNE Service-Role, RLS greift wie sonst auch).
+ *
+ * FINALER CUTOVER: läuft jetzt gegen Lumi Core statt Travel.
  */
-export async function cleanupExpiredContentSessionPhotos(): Promise<ContentSessionCleanupResult> {
-  const supabase = createServiceRoleClient()
+export async function cleanupExpiredContentSessionPhotos(lumiCoreOverride?: SupabaseClient<LumiCoreDatabase>): Promise<ContentSessionCleanupResult> {
+  const lumiCore = lumiCoreOverride ?? await createLumiCoreClient()
 
-  const { data: expiredRaw } = await supabase
-    .from('content_project_photos')
+  const { data: expiredRaw } = await lumiCore
+    .from('travel_content_project_photos')
     .select('id, project_id, storage_path')
     .eq('temporary', true)
     .eq('retained_as_memory', false)
@@ -31,14 +38,14 @@ export async function cleanupExpiredContentSessionPhotos(): Promise<ContentSessi
   const touchedProjectIds = new Set<string>()
 
   for (const photo of expired) {
-    const { error: storageError } = await supabase.storage.from('documents').remove([photo.storage_path])
+    const { error: storageError } = await lumiCore.storage.from('travel-documents').remove([photo.storage_path])
     if (storageError) {
       // Nur Foto-/Projekt-ID und Fehlercode loggen -- keine Bild-URLs/Base64/personenbezogenen Inhalte.
       console.error('[content-session-cleanup] storage delete failed', { photoId: photo.id, projectId: photo.project_id })
       failed++
       continue
     }
-    const { error: dbError } = await supabase.from('content_project_photos').delete().eq('id', photo.id)
+    const { error: dbError } = await lumiCore.from('travel_content_project_photos').delete().eq('id', photo.id)
     if (dbError) {
       console.error('[content-session-cleanup] db delete failed', { photoId: photo.id, projectId: photo.project_id })
       failed++
@@ -50,11 +57,11 @@ export async function cleanupExpiredContentSessionPhotos(): Promise<ContentSessi
 
   // Sessions, deren temporäre Fotos jetzt vollständig weg sind, als 'images_deleted' markieren.
   for (const projectId of touchedProjectIds) {
-    const { count } = await supabase
-      .from('content_project_photos').select('id', { count: 'exact', head: true })
+    const { count } = await lumiCore
+      .from('travel_content_project_photos').select('id', { count: 'exact', head: true })
       .eq('project_id', projectId).eq('temporary', true)
     if ((count ?? 0) === 0) {
-      await supabase.from('content_projects').update({ status: 'images_deleted' }).eq('id', projectId)
+      await lumiCore.from('travel_content_projects').update({ status: 'images_deleted' }).eq('id', projectId)
     }
   }
 

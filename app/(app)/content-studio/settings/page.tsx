@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { getFamily } from "@/lib/family";
 import { updateContentStylePreference } from "@/lib/actions/family-content-style";
 import { Banner } from "@/components/Banner";
 
@@ -26,9 +27,10 @@ export default async function ContentStudioSettingsPage({
 }) {
   const { error } = await searchParams;
 
-  const supabase = await createClient();
-  const { data: family } = await supabase.from("families").select("id, content_style_preference").limit(1).single();
-  const style = (family?.content_style_preference ?? {}) as ContentStylePreference;
+  const { id: householdId } = await getFamily();
+  const lumiCore = await createLumiCoreClient();
+  const { data: preferences } = await lumiCore.from("app_preferences").select("settings").eq("household_id", householdId).maybeSingle();
+  const style = ((preferences?.settings as { travel_content_style_preference?: ContentStylePreference } | undefined)?.travel_content_style_preference ?? {}) as ContentStylePreference;
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -51,7 +53,7 @@ export default async function ContentStudioSettingsPage({
         </h1>
 
         <form action={updateContentStylePreference}>
-          <input type="hidden" name="family_id" value={family?.id ?? ""} />
+          <input type="hidden" name="family_id" value={householdId} />
           <div className="rounded-xl p-8" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
             {error && (
               <Banner variant="error">

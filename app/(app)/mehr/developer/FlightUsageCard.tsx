@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { getFamily } from '@/lib/family'
 import { getFlightProviderName, isFlightProviderSandbox } from '@/lib/providers/flights-provider'
 
@@ -13,12 +13,12 @@ const DEFAULT_MONTHLY_LIMIT = 50
  */
 export async function FlightUsageCard() {
   const { id: familyId } = await getFamily()
-  const supabase = await createClient()
+  const lumiCore = await createLumiCoreClient()
   const monthKey = new Date().toISOString().slice(0, 7)
-  const { data: usage } = await supabase
-    .from('flight_search_usage')
+  const { data: usage } = await lumiCore
+    .from('travel_flight_search_usage')
     .select('search_count')
-    .eq('family_id', familyId)
+    .eq('household_id', familyId)
     .eq('month_key', monthKey)
     .maybeSingle()
 

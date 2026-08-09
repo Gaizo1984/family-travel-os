@@ -23,8 +23,34 @@ export interface LumiCoreDatabase {
         { id: string; display_name?: string | null; avatar_emoji?: string | null; created_at?: string }
       >
       households: TableDef<
-        { id: string; name: string; created_by_profile_id: string | null; created_at: string },
-        { id?: string; name: string; created_by_profile_id?: string | null; created_at?: string }
+        { id: string; name: string; created_by_profile_id: string | null; created_at: string; last_lumi_trip_id: string | null },
+        { id?: string; name: string; created_by_profile_id?: string | null; created_at?: string; last_lumi_trip_id?: string | null }
+      >
+      // Generischer, App-uebergreifender Einstellungs-Container pro Household
+      // (bereits Teil des Lumi-Core-Kernschemas) -- Travel nutzt settings fuer
+      // 'travel_content_style_preference' (lib/actions/family-content-style.ts)
+      // und 'travel_exceptional_hotel_criteria' (lib/actions/family-preferences.ts),
+      // statt eigene Spalten/Tabellen anzulegen (siehe lib/family-dna.ts).
+      app_preferences: TableDef<
+        { id: string; household_id: string; settings: Record<string, unknown>; created_at: string; updated_at: string },
+        { id?: string; household_id: string; settings?: Record<string, unknown>; created_at?: string; updated_at?: string }
+      >
+      // Schema-Luecken-Schliessung (FINALER CUTOVER, Nachtrag): Travel-
+      // spezifische Personen-Profilfelder ohne Lumi-Core-Aequivalent, siehe
+      // Migration lumi_core_schema_gap_closure.sql.
+      travel_household_member_profiles: TableDef<
+        {
+          id: string; household_id: string; household_member_id: string
+          role_label: string | null; description: string | null
+          interest_tags: string[]; travel_needs: string[]
+          created_at: string; updated_at: string
+        },
+        {
+          id?: string; household_id: string; household_member_id: string
+          role_label?: string | null; description?: string | null
+          interest_tags?: string[]; travel_needs?: string[]
+          created_at?: string; updated_at?: string
+        }
       >
       household_members: TableDef<
         {
@@ -292,11 +318,13 @@ export interface LumiCoreDatabase {
           id: string; household_id: string; trip_id: string | null; uploaded_by_household_member_id: string | null
           storage_path: string; thumbnail_storage_path: string | null; duration_seconds: number | null
           taken_at: string | null; caption: string | null; is_highlight: boolean; created_at: string
+          temporary: boolean; expires_at: string | null; retained_as_memory: boolean
         },
         {
           id?: string; household_id: string; trip_id?: string | null; uploaded_by_household_member_id?: string | null
           storage_path: string; thumbnail_storage_path?: string | null; duration_seconds?: number | null
           taken_at?: string | null; caption?: string | null; is_highlight?: boolean; created_at?: string
+          temporary?: boolean; expires_at?: string | null; retained_as_memory?: boolean
         }
       >
 
@@ -381,16 +409,20 @@ export interface LumiCoreDatabase {
       >
       travel_content_reel_renders: TableDef<
         {
-          id: string; draft_id: string; quality: string | null; status: string; provider: string | null
+          id: string; draft_id: string; quality: string; status: string; provider: string | null
           provider_job_id: string | null; progress_percent: number | null; attempt_count: number; max_attempts: number
           output_storage_path: string | null; output_duration_seconds: number | null; error_message: string | null
-          requested_at: string | null; completed_at: string | null
+          requested_at: string; completed_at: string | null
+          aws_bucket_name: string | null; aws_function_name: string | null; cost_estimate_usd: number | null
+          output_size_bytes: number | null; render_duration_seconds: number | null
         },
         {
-          id?: string; draft_id: string; quality?: string | null; status?: string; provider?: string | null
+          id?: string; draft_id: string; quality: string; status?: string; provider?: string | null
           provider_job_id?: string | null; progress_percent?: number | null; attempt_count?: number; max_attempts?: number
           output_storage_path?: string | null; output_duration_seconds?: number | null; error_message?: string | null
-          requested_at?: string | null; completed_at?: string | null
+          requested_at?: string; completed_at?: string | null
+          aws_bucket_name?: string | null; aws_function_name?: string | null; cost_estimate_usd?: number | null
+          output_size_bytes?: number | null; render_duration_seconds?: number | null
         }
       >
       travel_content_strategies: TableDef<
@@ -485,6 +517,109 @@ export interface LumiCoreDatabase {
           id?: string; household_id: string; trip_id?: string | null; for_date?: string | null; question_key?: string | null
           question_text?: string | null; answer_title?: string | null; answer_body?: string | null; actions?: unknown
           context_fingerprint?: string | null; created_at?: string
+        }
+      >
+
+      // ── 12 Cache-/Usage-Tabellen (FINALER CUTOVER, Nachtrag) ──
+      // Leer neu angelegt in Lumi Core (siehe lumi_core_travel_cache_tables.sql),
+      // keine Altdaten aus Travel uebernommen -- alle regenerieren sich
+      // selbst beim naechsten Aufruf des jeweiligen Providers/der Analyse.
+      travel_flight_search_cache: TableDef<
+        {
+          id: string; household_id: string; search_key: string; origin_codes: string[]; destination_code: string
+          departure_date: string; return_date: string | null; adults: number; children: number; infants: number
+          is_sandbox_data: boolean; results: unknown; search_started_at: string | null; created_at: string; updated_at: string
+        },
+        {
+          id?: string; household_id: string; search_key: string; origin_codes: string[]; destination_code: string
+          departure_date: string; return_date?: string | null; adults: number; children?: number; infants?: number
+          is_sandbox_data?: boolean; results?: unknown; search_started_at?: string | null; created_at?: string; updated_at?: string
+        }
+      >
+      travel_flight_search_usage: TableDef<
+        { id: string; household_id: string; month_key: string; search_count: number; updated_at: string },
+        { id?: string; household_id: string; month_key: string; search_count?: number; updated_at?: string }
+      >
+      travel_hotel_search_cache: TableDef<
+        {
+          id: string; household_id: string; search_key: string; destination: string; is_below_standard: boolean
+          results: unknown; created_at: string; updated_at: string
+        },
+        {
+          id?: string; household_id: string; search_key: string; destination: string; is_below_standard?: boolean
+          results?: unknown; created_at?: string; updated_at?: string
+        }
+      >
+      travel_day_plan_cache: TableDef<
+        { id: string; household_id: string; trip_id: string; date: string | null; mode: string; plan: unknown; updated_at: string },
+        { id?: string; household_id: string; trip_id: string; date?: string | null; mode: string; plan: unknown; updated_at?: string }
+      >
+      travel_category_places_cache: TableDef<
+        {
+          id: string; household_id: string; trip_id: string; category: string; origin_key: string
+          origin_label: string; results: unknown; updated_at: string
+        },
+        {
+          id?: string; household_id: string; trip_id: string; category: string; origin_key: string
+          origin_label: string; results: unknown; updated_at?: string
+        }
+      >
+      travel_today_recommendations: TableDef<
+        {
+          id: string; household_id: string; trip_id: string | null; for_date: string; day_style: string | null
+          highlight_title: string | null; day_summary: string; recommendation: unknown; alternative: unknown
+          created_at: string
+        },
+        {
+          id?: string; household_id: string; trip_id?: string | null; for_date: string; day_style?: string | null
+          highlight_title?: string | null; day_summary: string; recommendation: unknown; alternative?: unknown
+          created_at?: string
+        }
+      >
+      travel_trip_hints: TableDef<
+        {
+          id: string; household_id: string; trip_id: string; booking_id: string | null; document_id: string | null
+          journey_event_id: string | null; hint_type: string; priority: string; title: string; reasoning: string
+          relevant_at: string | null; action_label: string; action_href: string; status: string
+          content_hash: string; dedupe_key: string; created_at: string; updated_at: string; dismissed_at: string | null
+        },
+        {
+          id?: string; household_id: string; trip_id: string; booking_id?: string | null; document_id?: string | null
+          journey_event_id?: string | null; hint_type: string; priority: string; title: string; reasoning: string
+          relevant_at?: string | null; action_label: string; action_href: string; status?: string
+          content_hash: string; dedupe_key: string; created_at?: string; updated_at?: string; dismissed_at?: string | null
+        }
+      >
+      travel_concierge_category_suggestions: TableDef<
+        {
+          id: string; household_id: string; trip_id: string; category: string; question_text: string
+          title: string; body: string; event_title: string; updated_at: string; created_at: string
+        },
+        {
+          id?: string; household_id: string; trip_id: string; category: string; question_text: string
+          title: string; body: string; event_title: string; updated_at?: string; created_at?: string
+        }
+      >
+      travel_trip_idea_comparisons: TableDef<
+        { id: string; household_id: string; idea_ids: string[]; comparison_key: string; scores: unknown; created_at: string },
+        { id?: string; household_id: string; idea_ids: string[]; comparison_key: string; scores: unknown; created_at?: string }
+      >
+      travel_lumi_brain_usage: TableDef<
+        { id: string; household_id: string; month_key: string; question_count: number; updated_at: string },
+        { id?: string; household_id: string; month_key: string; question_count?: number; updated_at?: string }
+      >
+      travel_reel_render_usage: TableDef<
+        { id: string; household_id: string; month_key: string; render_count: number; updated_at: string },
+        { id?: string; household_id: string; month_key: string; render_count?: number; updated_at?: string }
+      >
+      travel_ai_generation_jobs: TableDef<
+        {
+          id: string; household_id: string; kind: string; status: string; error_message: string | null
+          redirect_path: string | null; created_at: string; updated_at: string
+        },
+        {
+          id?: string; household_id: string; kind: string; status?: string; error_message?: string | null
+          redirect_path?: string | null; created_at?: string; updated_at?: string
         }
       >
     }

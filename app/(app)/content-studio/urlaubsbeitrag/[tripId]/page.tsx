@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft, Pin, ArrowUp, ArrowDown, X, Plus, Sparkles } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
 import {
   toggleVacationPostSelection, toggleVacationPostPinned, reorderVacationPostSelection,
   recurateVacationPostSelectionNow, deleteVacationPostSelection,
@@ -47,8 +48,8 @@ export default async function VacationPostPage({
   const { tripId } = await params;
   const { error, job: jobId } = await searchParams;
 
-  const supabase = await createClient();
-  const { data: trip } = await supabase.from("trips").select("id, title, end_date").eq("id", tripId).maybeSingle();
+  const lumiCore = await createLumiCoreClient();
+  const { data: trip } = await lumiCore.from("travel_trips").select("id, title, end_date").eq("id", tripId).maybeSingle();
   if (!trip) notFound();
 
   // §"KI-Aufrufe hintergrundfest machen": beide Formulare dieser Seite
@@ -68,13 +69,13 @@ export default async function VacationPostPage({
     );
   }
 
-  const { data: projectRows } = await supabase
-    .from("content_projects").select("id").eq("trip_id", tripId).eq("project_type", "image_check");
+  const { data: projectRows } = await lumiCore
+    .from("travel_content_projects").select("id").eq("trip_id", tripId).eq("project_type", "image_check");
   const projectIds = (projectRows ?? []).map((p) => p.id);
 
   const { data: photosRaw } = projectIds.length > 0
-    ? await supabase
-      .from("content_project_photos")
+    ? await lumiCore
+      .from("travel_content_project_photos")
       .select("id, storage_path, vacation_post_score, vacation_post_reasoning, vacation_post_rank, vacation_post_pinned")
       .in("project_id", projectIds)
       .not("vacation_post_marked_at", "is", null)
@@ -84,7 +85,7 @@ export default async function VacationPostPage({
     id: p.id, storagePath: p.storage_path, score: p.vacation_post_score, reasoning: p.vacation_post_reasoning,
     rank: p.vacation_post_rank, pinned: p.vacation_post_pinned,
   }));
-  const urlByPath = await getPhotoDisplayUrls("documents", rows.map((r) => r.storagePath), "thumb400");
+  const urlByPath = await getPhotoDisplayUrls(LUMI_CORE_DOCUMENTS_BUCKET, rows.map((r) => r.storagePath), "thumb400");
 
   const selected = rows.filter((r) => r.rank !== null).sort((a, b) => a.rank! - b.rank!);
   const pool = rows.filter((r) => r.rank === null);

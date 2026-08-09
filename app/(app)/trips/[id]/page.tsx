@@ -3,8 +3,9 @@ import { notFound } from "next/navigation";
 import { Plane, BedDouble, Compass, FileText, MoreHorizontal, ChevronLeft, ChevronRight, Wallet, Route, Pencil, Images, Luggage } from "lucide-react";
 import { formatDateDE } from "@/lib/demo-data";
 import { deriveTripDateRange, tripDurationDays, formatTripDateRangeLabel } from "@/lib/trip-dates";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { getFamily } from "@/lib/family";
+import { listHouseholdMembers, deriveInitials } from "@/lib/household-members";
 import { sortBookingsChronologically, BOOKING_CATEGORIES, BOOKING_CATEGORY_ORDER } from "@/lib/bookings";
 import type { BookingType, BookingStatus } from "@/lib/supabase/types";
 import {
@@ -320,25 +321,51 @@ function ReadinessStepItem({ finding, isLast }: { finding: DisplayFinding; isLas
 export default async function TripDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const supabase = await createClient();
-  const [{ id: familyId }, { data }] = await Promise.all([
+  const lumiCore = await createLumiCoreClient();
+  const [{ id: familyId }, { data: tripRaw }, householdMembers] = await Promise.all([
     getFamily(),
-    supabase
-      .from("trips")
-      .select(`
-        id, slug, title, subtitle, status, start_date, end_date, gradient_from, gradient_to,
-        trip_members ( persons ( id, name, initials, color ) ),
-        stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code, cover_photo_id ),
-        bookings ( id, type, title, provider, status, amount, currency, start_datetime, end_datetime, stage_id, details, created_at ),
-        journey_events ( id, stage_id, date, time, category, title, location, status )
-      `)
+    lumiCore
+      .from("travel_trips")
+      .select("id, slug, title, subtitle, status, start_date, end_date, gradient_from, gradient_to")
       .eq("slug", id)
       .maybeSingle(),
+    listHouseholdMembers(),
   ]);
 
-  if (!data) notFound();
+  if (!tripRaw) notFound();
 
-  const trip = data as unknown as TripDetail;
+  // §Lumi-Core-Cutover: Lumi Core hat keine PostgREST-Embeddings zwischen
+  // travel_*-Tabellen -- ersetzt die frühere verschachtelte `trips`-Abfrage
+  // (trip_members/persons, stages, bookings, journey_events) durch vier
+  // flache Parallelabfragen + manuelles Map-Reassembly, analog
+  // app/(app)/today/page.tsx::fetchTripsForToday.
+  const [{ data: membersRaw }, { data: stagesRaw }, { data: bookingsRaw }, { data: eventsRaw }] = await Promise.all([
+    lumiCore.from("travel_trip_members").select("household_member_id").eq("trip_id", tripRaw.id),
+    lumiCore
+      .from("travel_stages")
+      .select("id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code, cover_photo_id")
+      .eq("trip_id", tripRaw.id),
+    lumiCore
+      .from("travel_bookings")
+      .select("id, type, title, provider, status, amount, currency, start_datetime, end_datetime, stage_id, details, created_at")
+      .eq("trip_id", tripRaw.id),
+    lumiCore
+      .from("travel_journey_events")
+      .select("id, stage_id, date, time, category, title, location, status")
+      .eq("trip_id", tripRaw.id),
+  ]);
+
+  const personById = new Map(householdMembers.map((m) => [m.id, { id: m.id, name: m.name, initials: deriveInitials(m.name), color: m.color }]));
+
+  const trip: TripDetail = {
+    id: tripRaw.id, slug: tripRaw.slug, title: tripRaw.title, subtitle: tripRaw.subtitle, status: tripRaw.status,
+    start_date: tripRaw.start_date, end_date: tripRaw.end_date,
+    gradient_from: tripRaw.gradient_from, gradient_to: tripRaw.gradient_to,
+    trip_members: (membersRaw ?? []).map((m) => ({ persons: personById.get(m.household_member_id) ?? null })),
+    stages: stagesRaw ?? [],
+    bookings: (bookingsRaw ?? []) as unknown as BookingRow[],
+    journey_events: (eventsRaw ?? []) as unknown as JourneyEventRow[],
+  };
   const members   = trip.trip_members.flatMap(tm => tm.persons ? [tm.persons] : []);
   const stages    = sortStagesChronologically(trip.stages);
   const bookings  = sortBookingsChronologically(trip.bookings);
@@ -420,8 +447,8 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
   ];
 
   const [stageImages, highlightPhotoByTripId, readiness, heroWeather] = await Promise.all([
-    resolveStageImages(supabase, stages),
-    getHighlightPhotoByTripId(supabase, familyId, [trip.id]),
+    resolveStageImages(lumiCore, stages),
+    getHighlightPhotoByTripId(lumiCore, familyId, [trip.id]),
     historical ? Promise.resolve(null) : computeTripReadiness(trip.id),
     getWeatherForLocation(weatherCandidates),
   ]);

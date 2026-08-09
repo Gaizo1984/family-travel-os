@@ -1,6 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { LumiCoreDatabase } from "@/lib/supabase/lumi-core-types";
 import { DESTINATIONS } from "@/lib/data/destination-knowledge";
 import { getPhotoDisplayUrl } from "@/lib/photo-thumbnails";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
 
 /**
  * Einzige Quelle der Wahrheit für kuratierte Reisebilder. War zuvor
@@ -51,12 +53,12 @@ export function resolveTripImage(trip: TripImageInput, highlight: HighlightPhoto
  * 2) sonst das erste als Highlight markierte Foto (bisheriges Verhalten).
  */
 export async function getHighlightPhotoByTripId(
-  supabase: SupabaseClient,
+  lumiCore: SupabaseClient<LumiCoreDatabase>,
   familyId: string,
   tripIds?: string[],
 ): Promise<Map<string, HighlightPhoto>> {
   // 1) Explizite Titelbild-Wahl hat Vorrang vor jeder automatischen Auswahl.
-  let tripsQuery = supabase.from("trips").select("id, cover_photo_id").eq("family_id", familyId).not("cover_photo_id", "is", null);
+  let tripsQuery = lumiCore.from("travel_trips").select("id, cover_photo_id").eq("household_id", familyId).not("cover_photo_id", "is", null);
   if (tripIds) tripsQuery = tripsQuery.in("id", tripIds);
   const { data: tripsWithCover } = await tripsQuery;
 
@@ -68,15 +70,15 @@ export async function getHighlightPhotoByTripId(
   const coverPhotoIds = Array.from(coverPhotoIdByTripId.values());
   const coverStoragePathByPhotoId = new Map<string, string>();
   if (coverPhotoIds.length > 0) {
-    const { data: coverPhotosRaw } = await supabase.from("memory_photos").select("id, storage_path").in("id", coverPhotoIds);
+    const { data: coverPhotosRaw } = await lumiCore.from("travel_memory_photos").select("id, storage_path").in("id", coverPhotoIds);
     for (const p of coverPhotosRaw ?? []) coverStoragePathByPhotoId.set(p.id, p.storage_path);
   }
 
   // 2) Für Reisen ohne explizites Titelbild: erstes Highlight-Foto (bisheriges Verhalten).
-  let highlightQuery = supabase
-    .from("memory_photos")
+  let highlightQuery = lumiCore
+    .from("travel_memory_photos")
     .select("trip_id, storage_path")
-    .eq("family_id", familyId)
+    .eq("household_id", familyId)
     .eq("is_highlight", true)
     .not("trip_id", "is", null);
   if (tripIds) highlightQuery = highlightQuery.in("trip_id", tripIds.filter((id) => !coverPhotoIdByTripId.has(id)));
@@ -99,11 +101,11 @@ export async function getHighlightPhotoByTripId(
     ...Array.from(coverPhotoIdByTripId.entries()).map(async ([tripId, photoId]) => {
       const storagePath = coverStoragePathByPhotoId.get(photoId);
       if (!storagePath) return;
-      const resolved = await getPhotoDisplayUrl("documents", storagePath, "thumb800");
+      const resolved = await getPhotoDisplayUrl(LUMI_CORE_DOCUMENTS_BUCKET, storagePath, "thumb800");
       if (resolved) highlightPhotoByTripId.set(tripId, { url: resolved.url, storagePath: resolved.resolvedPath });
     }),
     ...Array.from(firstHighlightByTripId.entries()).map(async ([tripId, storagePath]) => {
-      const resolved = await getPhotoDisplayUrl("documents", storagePath, "thumb800");
+      const resolved = await getPhotoDisplayUrl(LUMI_CORE_DOCUMENTS_BUCKET, storagePath, "thumb800");
       if (resolved) highlightPhotoByTripId.set(tripId, { url: resolved.url, storagePath: resolved.resolvedPath });
     }),
   ]);

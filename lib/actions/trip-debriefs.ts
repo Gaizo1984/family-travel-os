@@ -1,7 +1,6 @@
 'use server'
 
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { tripDebriefs } from '@/lib/lumi-core-data/group1-documents-insurance-journey-packing'
 import { createPendingMemoryCandidate, hasDeclinedSimilarMemory } from '@/lib/family-memories'
@@ -70,8 +69,8 @@ export async function saveDebriefStep(formData: FormData) {
     // (packing_feedback_<typ>_text). Die Person wird bei ausgewählten Items
     // automatisch aus dem Item selbst übernommen (nicht redundant erneut
     // abgefragt) -- nur Freitext-Ergänzungen bleiben ohne Personenbezug.
-    const supabase = await createClient()
-    const packingItems = existing?.trip_id ? await loadPackingItems(supabase, existing.trip_id) : []
+    const lumiCore = await createLumiCoreClient()
+    const packingItems = existing?.trip_id ? await loadPackingItems(lumiCore, existing.trip_id) : []
     const itemById = new Map(packingItems.map((i) => [i.id, i]))
     const entries: PackingFeedbackEntry[] = []
 
@@ -139,8 +138,8 @@ async function proposeDebriefMemories(
   familyId: string, tripId: string, tripTitle: string, answers: DebriefAnswers,
   participants: Array<{ id: string; name: string }>,
 ): Promise<void> {
-  const supabase = await createClient()
-  const packingItems = await loadPackingItems(supabase, tripId)
+  const lumiCore = await createLumiCoreClient()
+  const packingItems = await loadPackingItems(lumiCore, tripId)
   const candidates = buildDebriefMemoryCandidates(tripTitle, answers, participants, packingItems)
 
   for (const candidate of candidates) {

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
+import { listHouseholdMembers, resolveLegacyTravelPersonId } from "@/lib/household-members";
 import { buildTravelWorld } from "@/lib/travel-world";
 
 export default async function FamilyHistoryPage({
@@ -11,17 +11,25 @@ export default async function FamilyHistoryPage({
 }) {
   const { person: personFilter } = await searchParams;
 
-  const supabase = await createClient();
   const { id: familyId } = await getFamily();
 
-  const [{ data: persons }, travelWorld] = await Promise.all([
-    supabase.from("persons").select("id, name").eq("family_id", familyId).order("name"),
+  const [householdMembers, travelWorld] = await Promise.all([
+    listHouseholdMembers(),
+    // §ID-Space: buildTravelWorld erwartet weiterhin Travels legacy person_id
+    // (siehe lib/travel-world.ts) -- personFilter kommt unten konsistent aus
+    // resolveLegacyTravelPersonId, nicht aus household_member_id.
     buildTravelWorld({ familyId, personId: personFilter || undefined }),
   ]);
+  // §Rückrichtung (lib/household-members.ts::resolveLegacyTravelPersonId):
+  // die Personenfilter-Chips müssen weiterhin auf Travels legacy person_id
+  // verlinken, damit buildTravelWorld() oben dieselbe ID korrekt auflösen kann.
+  const persons = await Promise.all(
+    householdMembers.map(async (m) => ({ id: (await resolveLegacyTravelPersonId(m.id)) ?? m.id, name: m.name })),
+  );
 
   const entries = travelWorld.timeline;
   const filteredCountryCount = travelWorld.countryCodes.size;
-  const selectedPersonName = (persons ?? []).find((p) => p.id === personFilter)?.name;
+  const selectedPersonName = persons.find((p) => p.id === personFilter)?.name;
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>

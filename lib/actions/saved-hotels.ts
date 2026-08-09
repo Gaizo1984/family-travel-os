@@ -1,7 +1,6 @@
 'use server'
 
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { getFamily } from '@/lib/family'
 import { MAX_SAVED_HOTELS_PER_DESTINATION } from '@/lib/saved-hotels-shared'
@@ -29,13 +28,12 @@ export async function saveHotelOption(formData: FormData): Promise<void> {
   if (!searchKey || !optionId) redirect(appendError(returnTo, 'Dieses Hotel konnte nicht gemerkt werden.'))
 
   const { id: familyId } = await getFamily()
-  const supabase = await createClient()
   const lumiCore = await createLumiCoreClient()
 
-  const { data: cacheRow } = await supabase
-    .from('hotel_search_cache')
+  const { data: cacheRow } = await lumiCore
+    .from('travel_hotel_search_cache')
     .select('destination, results')
-    .eq('family_id', familyId)
+    .eq('household_id', familyId)
     .eq('search_key', searchKey)
     .maybeSingle()
   if (!cacheRow) redirect(appendError(returnTo, 'Diese Suche ist nicht mehr verfügbar -- bitte erneut suchen.'))

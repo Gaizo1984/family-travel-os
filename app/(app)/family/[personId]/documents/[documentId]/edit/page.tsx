@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { resolveHouseholdMemberId } from "@/lib/lumi-core-storage/paths";
+import { getHouseholdMemberById } from "@/lib/household-members";
 import { updateDocument } from "@/lib/actions/documents";
 import { extractDocumentData } from "@/lib/actions/document-extraction";
 import type { DocumentType, DocumentDetails } from "@/lib/documents";
@@ -28,20 +30,19 @@ export default async function EditDocumentPage({
     try { draft = JSON.parse(draftRaw) as DraftFields; } catch { draft = null; }
   }
 
-  const supabase = await createClient();
-  const { data: person } = await supabase
-    .from("persons")
-    .select("id, name")
-    .eq("id", personId)
-    .maybeSingle();
+  const lumiCore = await createLumiCoreClient();
+  const householdMemberId = await resolveHouseholdMemberId(personId);
+  if (!householdMemberId) notFound();
 
-  if (!person) notFound();
+  const member = await getHouseholdMemberById(householdMemberId);
+  if (!member) notFound();
+  const person = { id: personId, name: member.name };
 
-  const { data: document } = await supabase
-    .from("documents")
+  const { data: document } = await lumiCore
+    .from("travel_documents")
     .select("id, doc_type, label, expires_at, notes, details")
     .eq("id", documentId)
-    .eq("person_id", person.id)
+    .eq("household_member_id", householdMemberId)
     .maybeSingle();
 
   if (!document) notFound();
@@ -81,7 +82,18 @@ export default async function EditDocumentPage({
         <DocumentForm
           action={updateDocument}
           extractAction={extractDocumentData}
-          hiddenFields={{ document_id: document.id, person_id: person.id, mode: "edit" }}
+          hiddenFields={{
+            document_id: document.id,
+            // §ID-Space-Fix: `updateDocument` (lib/actions/documents.ts) schreibt
+            // dieses Feld direkt in travel_documents.household_member_id -- muss
+            // die aufgelöste Lumi-Core-ID sein, nicht Travels legacy personId
+            // (der Routen-Parameter). `return_to` unten stellt sicher, dass der
+            // interne Redirect-Fallback der Action (der sonst dieselbe ID fälschlich
+            // als /family/[personId]-Segment verwenden würde) nie greift.
+            person_id: householdMemberId,
+            mode: "edit",
+            return_to: `/family/${person.id}/documents/${document.id}`,
+          }}
           defaultType={document.doc_type as DocumentType}
           fileRequired={false}
           existingStoragePath={storage_path}

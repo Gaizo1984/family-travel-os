@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
 import { getFamily } from "@/lib/family";
 import { assignMemoryPhotoToTrip, assignMemoryPhotoToAnyTrip } from "@/lib/actions/memories";
 import { deriveTripDateRange, type TripDateRange } from "@/lib/trip-dates";
@@ -61,39 +62,52 @@ export default async function UnassignedMemoriesPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const { error } = await searchParams;
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
   const { id: familyId } = await getFamily();
   const returnTo = "/memories/unzugeordnet";
 
   const [{ data: photosRaw }, { data: tripsRaw }, { data: pastTripsRaw }] = await Promise.all([
-    supabase
-      .from("memory_photos")
+    lumiCore
+      .from("travel_memory_photos")
       .select("id, storage_path, caption, taken_at, created_at")
-      .eq("family_id", familyId)
+      .eq("household_id", familyId)
       .is("trip_id", null)
       .is("past_trip_id", null)
       .order("taken_at", { ascending: false, nullsFirst: false }),
-    supabase
-      .from("trips")
-      .select(`
-        id, title, start_date, end_date,
-        stages ( start_date, end_date ),
-        bookings ( type, status, start_datetime, end_datetime )
-      `)
-      .eq("family_id", familyId),
-    supabase.from("past_trips").select("id, country_or_region, year").eq("family_id", familyId),
+    lumiCore
+      .from("travel_trips")
+      .select("id, title, start_date, end_date")
+      .eq("household_id", familyId),
+    lumiCore.from("travel_past_trips").select("id, country_or_region, year").eq("household_id", familyId),
   ]);
+
+  // §Lumi-Core-Cutover: keine PostgREST-Embeddings zwischen travel_*-Tabellen
+  // -- Etappen/Buchungen je Reise flach nachgeladen und per Map wieder
+  // zugeordnet, statt eines verschachtelten `trips`-Selects (siehe
+  // app/(app)/today/page.tsx::fetchTripsForToday für dasselbe Muster).
+  const tripIds = (tripsRaw ?? []).map((t) => t.id);
+  const [{ data: stagesRaw }, { data: bookingsRaw }] = tripIds.length
+    ? await Promise.all([
+        lumiCore.from("travel_stages").select("trip_id, start_date, end_date").in("trip_id", tripIds),
+        lumiCore.from("travel_bookings").select("trip_id, type, status, start_datetime, end_datetime").in("trip_id", tripIds),
+      ])
+    : [{ data: [] }, { data: [] }] as const;
+  const stagesByTrip = new Map<string, { start_date: string | null; end_date: string | null }[]>();
+  (stagesRaw ?? []).forEach((s) => stagesByTrip.set(s.trip_id, [...(stagesByTrip.get(s.trip_id) ?? []), { start_date: s.start_date, end_date: s.end_date }]));
+  const bookingsByTrip = new Map<string, { type: string; status: string; start_datetime: string | null; end_datetime: string | null }[]>();
+  (bookingsRaw ?? []).forEach((b) => bookingsByTrip.set(b.trip_id, [...(bookingsByTrip.get(b.trip_id) ?? []), { type: b.type, status: b.status, start_datetime: b.start_datetime, end_datetime: b.end_datetime }]));
 
   const photos = (photosRaw ?? []) as PhotoRow[];
   const trips: TripCandidate[] = (tripsRaw ?? []).map((t) => ({
-    id: t.id, title: t.title, range: deriveTripDateRange(t, t.bookings, t.stages),
+    id: t.id, title: t.title,
+    range: deriveTripDateRange(t, bookingsByTrip.get(t.id) ?? [], stagesByTrip.get(t.id) ?? []),
   }));
-  const pastTrips: PastTripCandidate[] = (pastTripsRaw ?? []).map((pt) => ({
-    id: pt.id, label: `${pt.country_or_region} ${pt.year}`, year: pt.year,
-  }));
+  const pastTrips: PastTripCandidate[] = (pastTripsRaw ?? [])
+    .filter((pt): pt is typeof pt & { year: number } => pt.year != null)
+    .map((pt) => ({ id: pt.id, label: `${pt.country_or_region} ${pt.year}`, year: pt.year }));
 
   // §"Egress-Analyse 2026-07-16": 72×72-Kachel -- Thumbnail statt Original.
-  const displayByPath = await getPhotoDisplayUrls("documents", photos.map((p) => p.storage_path), "thumb400");
+  const displayByPath = await getPhotoDisplayUrls(LUMI_CORE_DOCUMENTS_BUCKET, photos.map((p) => p.storage_path), "thumb400");
   const photosWithUrls = photos.map((p) => {
     const resolved = displayByPath.get(p.storage_path);
     const tripSuggestion = suggestTrip(p.taken_at, trips);

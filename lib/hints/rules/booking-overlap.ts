@@ -29,7 +29,7 @@ export const bookingOverlapRule: HintRule = {
         href: `/trips/${ctx.tripSlug}/bookings/${booking.id}`,
         start: booking.start_datetime,
         end,
-        participantIds: booking.participant_person_ids,
+        participantIds: booking.participant_household_member_ids,
       })
     }
 
@@ -43,7 +43,7 @@ export const bookingOverlapRule: HintRule = {
         href: `/trips/${ctx.tripSlug}/journey-events/${event.id}/edit`,
         start: iso,
         end: iso,
-        participantIds: event.participant_person_ids,
+        participantIds: event.participant_household_member_ids,
       })
     }
 

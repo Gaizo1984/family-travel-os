@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { createBudgetItem } from "@/lib/actions/budget-items";
 import { extractReceiptData } from "@/lib/actions/receipt-extraction";
 import { BUDGET_CATEGORY_ORDER, BUDGET_CATEGORY_LABELS } from "@/lib/budget";
@@ -49,30 +49,35 @@ export default async function NewBudgetItemPage({
     try { draft = JSON.parse(draftRaw) as ReceiptDraft; } catch { draft = null; }
   }
 
-  const supabase = await createClient();
-  const { data: trip } = await supabase
-    .from("trips")
+  const lumiCore = await createLumiCoreClient();
+  const { data: trip } = await lumiCore
+    .from("travel_trips")
     .select("id, slug, title, subtitle, budget_currency")
     .eq("slug", id)
     .maybeSingle();
 
   if (!trip) notFound();
 
-  const { data: stages } = await supabase
-    .from("stages")
+  // §Lumi-Core-Cutover: travel_trips.budget_currency ist nullable (Travels
+  // Original war NOT NULL mit Default 'EUR') -- gleicher Fallback wie der
+  // bisherige DB-Default, nirgends sonst im Verhalten geändert.
+  const budgetCurrency = trip.budget_currency ?? "EUR";
+
+  const { data: stages } = await lumiCore
+    .from("travel_stages")
     .select("id, title, location")
     .eq("trip_id", trip.id)
     .order("sort_order");
 
-  const { data: bookings } = await supabase
-    .from("bookings")
+  const { data: bookings } = await lumiCore
+    .from("travel_bookings")
     .select("id, title, provider")
     .eq("trip_id", trip.id)
     .order("start_datetime");
 
   const currencySuggestions = Array.from(new Set([
-    trip.budget_currency,
-    ...suggestTripCurrencies(trip, stages ?? [], trip.budget_currency),
+    budgetCurrency,
+    ...suggestTripCurrencies(trip, stages ?? [], budgetCurrency),
     "USD", "CHF", "GBP",
   ]));
 
@@ -142,7 +147,7 @@ export default async function NewBudgetItemPage({
                 name="currency"
                 label="Währung · bitte prüfen"
                 suggestions={currencySuggestions}
-                defaultValue={draft?.currency ?? trip.budget_currency}
+                defaultValue={draft?.currency ?? budgetCurrency}
               />
             </div>
 

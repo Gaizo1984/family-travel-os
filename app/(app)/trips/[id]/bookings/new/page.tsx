@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { getFamily } from "@/lib/family";
 import { createBooking } from "@/lib/actions/bookings";
 import { extractBookingData } from "@/lib/actions/booking-extraction";
@@ -43,25 +43,31 @@ export default async function NewBookingPage({
     try { draft = JSON.parse(draftRaw) as BookingDraft; } catch { draft = null; }
   }
 
-  const supabase = await createClient();
-  const { data: trip } = await supabase
-    .from("trips")
-    .select(`
-      id, slug, title, start_date, end_date,
-      stages ( id, title, location, start_date, end_date, sort_order ),
-      bookings ( type, status, start_datetime, end_datetime )
-    `)
+  const lumiCore = await createLumiCoreClient();
+  const { data: trip } = await lumiCore
+    .from("travel_trips")
+    .select("id, slug, title, start_date, end_date")
     .eq("slug", id)
     .maybeSingle();
 
   if (!trip) notFound();
+
+  // §Lumi-Core-Cutover: Lumi Core hat keine PostgREST-Embeddings zwischen
+  // travel_*-Tabellen -- ersetzt die frühere verschachtelte `trips`-Abfrage
+  // (stages/bookings) durch zwei flache Parallelabfragen.
+  const [{ data: stagesRaw }, { data: bookingsRaw }] = await Promise.all([
+    lumiCore.from("travel_stages").select("id, title, location, start_date, end_date, sort_order").eq("trip_id", trip.id),
+    lumiCore.from("travel_bookings").select("type, status, start_datetime, end_datetime").eq("trip_id", trip.id),
+  ]);
+  const stages = stagesRaw ?? [];
+  const bookings = bookingsRaw ?? [];
 
   // §"Mietwagen-Datum auf den Reisezeitraum begrenzen" (Nutzervorgabe,
   // wörtlich) -- gilt über BookingDateFields für ALLE Buchungsarten
   // gleichermaßen (gemeinsame Komponente, kein mietwagen-spezifischer Code).
   // Bei noch offenem Zeitraum (keine Reisedaten/Etappen/Buchungen ableitbar)
   // bleiben die Felder wie bisher unbegrenzt.
-  const tripDateRange = deriveTripDateRange(trip, trip.bookings, trip.stages);
+  const tripDateRange = deriveTripDateRange(trip, bookings, stages);
 
   const categoryConfig = category ? BOOKING_CATEGORIES[category as BookingCategory] : undefined;
   const config = type ? BOOKING_TYPE_CONFIG[type as BookingType] : undefined;
@@ -125,7 +131,7 @@ export default async function NewBookingPage({
   let participants: Awaited<ReturnType<typeof loadTripParticipantOptions>> = [];
   if (config.showParticipants) {
     const { id: familyId } = await getFamily();
-    participants = await loadTripParticipantOptions(supabase, trip.id, familyId);
+    participants = await loadTripParticipantOptions(lumiCore, trip.id, familyId);
   }
 
   return (
@@ -177,7 +183,7 @@ export default async function NewBookingPage({
           selectedParticipantIds={participants.map((p) => p.id)}
           tripMinIso={tripDateRange.startDate}
           tripMaxIso={tripDateRange.endDate}
-          stages={trip.stages}
+          stages={stages}
         />
       </div>
     </div>

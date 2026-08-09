@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
 import { getFamily } from "@/lib/family";
 import {
   loadActiveDebrief, buildDebriefMemoryCandidates, DEBRIEF_STEPS, DEBRIEF_STEP_LABELS,
@@ -76,16 +77,16 @@ function StepNav({ debriefId, slug, step }: { debriefId: string; slug: string; s
 export default async function TripDebriefPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const family = await getFamily();
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
 
-  const { data: trip } = await supabase
-    .from("trips")
-    .select("id, slug, title, family_id")
+  const { data: trip } = await lumiCore
+    .from("travel_trips")
+    .select("id, slug, title")
     .eq("slug", id)
     .maybeSingle();
   if (!trip) notFound();
 
-  const debrief = await loadActiveDebrief(supabase, trip.id);
+  const debrief = await loadActiveDebrief(trip.id);
 
   if (!debrief) {
     return (
@@ -104,22 +105,22 @@ export default async function TripDebriefPage({ params }: { params: Promise<{ id
     );
   }
 
-  const participants = await loadTripParticipantOptions(supabase, trip.id, family.id);
+  const participants = await loadTripParticipantOptions(lumiCore, trip.id, family.id);
   const step = debrief.currentStep;
   const stepIndex = DEBRIEF_STEPS.indexOf(step);
 
   let photos: Array<{ id: string; url: string | null; isHighlight: boolean }> = [];
   if (step === "highlight_photos" || step === "summary") {
-    const { data: photosRaw } = await supabase
-      .from("memory_photos")
+    const { data: photosRaw } = await lumiCore
+      .from("travel_memory_photos")
       .select("id, storage_path, is_highlight")
       .eq("trip_id", trip.id)
       .is("is_duplicate_of", null);
-    const urlByPath = await getPhotoDisplayUrls("documents", (photosRaw ?? []).map((p) => p.storage_path), "thumb400");
+    const urlByPath = await getPhotoDisplayUrls(LUMI_CORE_DOCUMENTS_BUCKET, (photosRaw ?? []).map((p) => p.storage_path), "thumb400");
     photos = (photosRaw ?? []).map((p) => ({ id: p.id, isHighlight: p.is_highlight, url: urlByPath.get(p.storage_path)?.url ?? null }));
   }
 
-  const packingItems = step === "packing_feedback" || step === "summary" ? await loadPackingItems(supabase, trip.id) : [];
+  const packingItems = step === "packing_feedback" || step === "summary" ? await loadPackingItems(lumiCore, trip.id) : [];
   const selectedByType = new Map<string, Set<string>>(
     PACKING_FEEDBACK_TYPES.map((t) => [
       t,
@@ -373,7 +374,7 @@ export default async function TripDebriefPage({ params }: { params: Promise<{ id
               <form id={STEP_FORM_ID} action={confirmDebrief}>
                 <input type="hidden" name="debrief_id" value={debrief.id} />
                 <input type="hidden" name="trip_id" value={trip.id} />
-                <input type="hidden" name="family_id" value={trip.family_id} />
+                <input type="hidden" name="family_id" value={family.id} />
                 <input type="hidden" name="trip_title" value={trip.title} />
                 <input type="hidden" name="slug" value={trip.slug} />
                 <input type="hidden" name="participants_json" value={JSON.stringify(participants.map((p) => ({ id: p.id, name: p.name })))} />

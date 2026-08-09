@@ -1,6 +1,6 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { redirect } from 'next/navigation'
 import { after } from 'next/server'
 import { generateConciergeAnswer } from '@/lib/concierge-ai'
@@ -23,11 +23,11 @@ export type CachedCategorySuggestion = {
  * bis die Familie ausdrücklich "Aktualisieren" klickt.
  */
 export async function getCategorySuggestion(familyId: string, tripId: string, category: string): Promise<CachedCategorySuggestion | null> {
-  const supabase = await createClient()
-  const { data } = await supabase
-    .from('concierge_category_suggestions')
+  const lumiCore = await createLumiCoreClient()
+  const { data } = await lumiCore
+    .from('travel_concierge_category_suggestions')
     .select('category, question_text, title, body, event_title, updated_at')
-    .eq('family_id', familyId).eq('trip_id', tripId).eq('category', category)
+    .eq('household_id', familyId).eq('trip_id', tripId).eq('category', category)
     .maybeSingle()
 
   if (!data) return null
@@ -90,22 +90,22 @@ export async function generateCategorySuggestion(formData: FormData) {
         return
       }
 
-      const supabase = await createClient()
-      const { error } = await supabase.from('concierge_category_suggestions').upsert(
+      const lumiCore = await createLumiCoreClient()
+      const { error } = await lumiCore.from('travel_concierge_category_suggestions').upsert(
         {
-          family_id: familyId, trip_id: tripId, category, question_text: questionText,
+          household_id: familyId, trip_id: tripId, category, question_text: questionText,
           title: result.title, body: result.body, event_title: result.eventTitle,
           updated_at: new Date().toISOString(),
         },
-        { onConflict: 'family_id,trip_id,category' },
+        { onConflict: 'household_id,trip_id,category' },
       )
 
       if (error) {
-        await failJob(jobId, 'Speicherfehler: ' + error.message, supabase)
+        await failJob(jobId, 'Speicherfehler: ' + error.message, lumiCore)
         return
       }
 
-      await completeJob(jobId, returnTo, supabase)
+      await completeJob(jobId, returnTo, lumiCore)
     } catch (e) {
       console.error('[category-suggestions] generateCategorySuggestion fehlgeschlagen:', e instanceof Error ? e.message : e)
       await failJob(jobId, 'Die KI ist gerade nicht verfügbar. Bitte später erneut versuchen.')

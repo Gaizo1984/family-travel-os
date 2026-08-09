@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { BOOKING_CATEGORIES, sortBookingsChronologically } from "@/lib/bookings";
 import type { BookingCategory } from "@/lib/bookings";
 import type { BookingType, BookingStatus } from "@/lib/supabase/types";
@@ -30,22 +30,38 @@ export default async function BookingCategoryPage({
   const categoryConfig = BOOKING_CATEGORIES[category as BookingCategory];
   if (!categoryConfig) notFound();
 
-  const supabase = await createClient();
-  const { data: trip } = await supabase
-    .from("trips")
+  const lumiCore = await createLumiCoreClient();
+  const { data: trip } = await lumiCore
+    .from("travel_trips")
     .select("id, slug, title")
     .eq("slug", id)
     .maybeSingle();
 
   if (!trip) notFound();
 
-  const { data } = await supabase
-    .from("bookings")
-    .select("id, type, title, provider, status, amount, currency, start_datetime, created_at, stages ( title )")
+  // §Lumi-Core-Cutover: kein PostgREST-Embedding für stages(title) verfügbar
+  // -- flache Buchungsabfrage + separate Etappen-Abfrage, per Map(stage_id ->
+  // title) reassembliert, statt der früheren verschachtelten Selektion.
+  const { data: bookingsRaw } = await lumiCore
+    .from("travel_bookings")
+    .select("id, type, title, provider, status, amount, currency, start_datetime, created_at, stage_id")
     .eq("trip_id", trip.id)
     .in("type", categoryConfig.types);
 
-  const bookings = sortBookingsChronologically((data ?? []) as unknown as BookingWithStage[]);
+  const stageIds = Array.from(new Set((bookingsRaw ?? []).map((b) => b.stage_id).filter((v): v is string => Boolean(v))));
+  const { data: stagesRaw } = stageIds.length > 0
+    ? await lumiCore.from("travel_stages").select("id, title").in("id", stageIds)
+    : { data: [] as { id: string; title: string }[] };
+  const stageTitleById = new Map((stagesRaw ?? []).map((s) => [s.id, s.title]));
+
+  const data: BookingWithStage[] = (bookingsRaw ?? []).map((b) => ({
+    id: b.id, type: b.type as BookingWithStage["type"], title: b.title, provider: b.provider,
+    status: b.status as BookingWithStage["status"], amount: b.amount, currency: b.currency ?? "EUR",
+    start_datetime: b.start_datetime, created_at: b.created_at,
+    stages: b.stage_id && stageTitleById.has(b.stage_id) ? { title: stageTitleById.get(b.stage_id)! } : null,
+  }));
+
+  const bookings = sortBookingsChronologically(data);
 
   // §"Journal-Einträge zusätzlich in der Aktivitäten-Liste zeigen, klar
   // markiert -- Flüge/Unterkünfte/Etappen bleiben davon unberührt"
@@ -54,8 +70,8 @@ export default async function BookingCategoryPage({
   // kennt (dieselben String-Werte wie BOOKING_CATEGORIES.activity.types).
   let journeyEvents: JourneyEventRowData[] = [];
   if (categoryConfig.value === "activity") {
-    const { data: journeyEventsRaw } = await supabase
-      .from("journey_events")
+    const { data: journeyEventsRaw } = await lumiCore
+      .from("travel_journey_events")
       .select("id, date, time, category, title, location, status")
       .eq("trip_id", trip.id)
       .in("category", categoryConfig.types);

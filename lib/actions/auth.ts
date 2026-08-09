@@ -2,17 +2,20 @@
 
 import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'
-import { createClient } from '@/lib/supabase/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 
 /**
- * FINALER CUTOVER: normales E-Mail/Passwort-Login läuft jetzt primär über
+ * FINALER CUTOVER: normales E-Mail/Passwort-Login läuft primär über
  * Lumi Core (nicht mehr Travel) -- Marcel und Sarah haben beide bereits
  * echte, funktionierende Lumi-Core-Konten (siehe Phase 1). Passkey bleibt
  * unverändert Travel-basiert, siehe PasskeyLoginButton.tsx +
- * app/(auth)/connect-lumi-core (eigener Zwischenschritt für diesen Fall).
- * Passwort-Reset bleibt bewusst auf Travel (siehe Kommentar dort) --
- * betrifft nur den heute nicht mehr primären Pfad, kein Cutover-Blocker.
+ * app/(auth)/connect-lumi-core (eigener Zwischenschritt für diesen Fall) --
+ * das ist die einzige noch erlaubte Travel-Auth-Abhängigkeit. Passwort-Reset
+ * lief bisher noch gegen Travels eigene Auth (vestigial aus der Zeit vor dem
+ * Login-Umzug) -- das war falsch, seit Lumi Core primär ist: ein zurück-
+ * gesetztes Travel-Passwort hätte gar nicht das tatsächlich genutzte Konto
+ * betroffen. Jetzt konsequent auf Lumi Core umgestellt (identische
+ * Supabase-Auth-API, nur anderes Projekt).
  */
 
 /** Muss mit der in Supabase Auth konfigurierten Mindestpasswortlänge übereinstimmen. */
@@ -58,8 +61,8 @@ export async function requestPasswordReset(formData: FormData) {
   const protocol = process.env.NODE_ENV === 'development' ? 'http' : 'https'
   const origin = headersList.get('origin') ?? (host ? `${protocol}://${host}` : '')
 
-  const supabase = await createClient()
-  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+  const lumiCore = await createLumiCoreClient()
+  const { error } = await lumiCore.auth.resetPasswordForEmail(email, {
     redirectTo: `${origin}/auth/confirm?type=recovery&next=/reset-password`,
   })
 
@@ -83,8 +86,8 @@ export async function updatePassword(formData: FormData) {
     redirect(`${resetPath}?error=${encodeURIComponent('Die Passwörter stimmen nicht überein.')}`)
   }
 
-  const supabase = await createClient()
-  const { error } = await supabase.auth.updateUser({ password })
+  const lumiCore = await createLumiCoreClient()
+  const { error } = await lumiCore.auth.updateUser({ password })
 
   if (error) {
     redirect(`${resetPath}?error=${encodeURIComponent('Das Passwort konnte nicht geändert werden. Bitte fordere einen neuen Link an.')}`)
@@ -93,7 +96,7 @@ export async function updatePassword(formData: FormData) {
   // §Nur die aktuelle Recovery-Session beenden (scope: 'local') -- ein
   // globales signOut() würde unnötig auch andere, bereits bestehende
   // Sitzungen desselben Nutzers auf anderen Geräten mit beenden.
-  const { error: signOutError } = await supabase.auth.signOut({ scope: 'local' })
+  const { error: signOutError } = await lumiCore.auth.signOut({ scope: 'local' })
   if (signOutError) {
     console.error('[Auth][DIAGNOSTIC] signOut nach Passwort-Reset fehlgeschlagen', signOutError)
   }

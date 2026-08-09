@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 
 /**
  * §"Als erledigt markieren"/"Ausblenden" (Nutzervorgabe): reine Status-
@@ -14,8 +14,8 @@ export async function dismissTripHint(formData: FormData) {
   const hintId = String(formData.get('hint_id') ?? '')
   const returnTo = String(formData.get('return_to') ?? '/today')
 
-  const supabase = await createClient()
-  await supabase.from('trip_hints').update({ status: 'dismissed', dismissed_at: new Date().toISOString() }).eq('id', hintId)
+  const lumiCore = await createLumiCoreClient()
+  await lumiCore.from('travel_trip_hints').update({ status: 'dismissed', dismissed_at: new Date().toISOString() }).eq('id', hintId)
 
   revalidatePath(returnTo)
 }
@@ -24,8 +24,8 @@ export async function completeTripHint(formData: FormData) {
   const hintId = String(formData.get('hint_id') ?? '')
   const returnTo = String(formData.get('return_to') ?? '/today')
 
-  const supabase = await createClient()
-  await supabase.from('trip_hints').update({ status: 'completed' }).eq('id', hintId)
+  const lumiCore = await createLumiCoreClient()
+  await lumiCore.from('travel_trip_hints').update({ status: 'completed' }).eq('id', hintId)
 
   revalidatePath(returnTo)
 }

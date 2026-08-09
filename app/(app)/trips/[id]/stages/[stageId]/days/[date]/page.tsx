@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { formatDateDE } from "@/lib/demo-data";
 import type { TimelineBooking, TimelineEvent, TimelineDay } from "@/lib/journey";
 import { DayRow } from "../../../../JourneyDayRow";
@@ -25,17 +25,17 @@ export default async function DayPlanPage({
 }) {
   const { id, stageId, date } = await params;
 
-  const supabase = await createClient();
-  const { data: trip } = await supabase
-    .from("trips")
+  const lumiCore = await createLumiCoreClient();
+  const { data: trip } = await lumiCore
+    .from("travel_trips")
     .select("id, slug, title")
     .eq("slug", id)
     .maybeSingle();
 
   if (!trip) notFound();
 
-  const { data: stage } = await supabase
-    .from("stages")
+  const { data: stage } = await lumiCore
+    .from("travel_stages")
     .select("id, title, location, start_date, end_date, nights, accommodation, sort_order")
     .eq("id", stageId)
     .eq("trip_id", trip.id)
@@ -44,15 +44,15 @@ export default async function DayPlanPage({
   if (!stage) notFound();
   if (stage.start_date && (date < stage.start_date || (stage.end_date && date > stage.end_date))) notFound();
 
-  const { data: bookingsRaw } = await supabase
-    .from("bookings")
+  const { data: bookingsRaw } = await lumiCore
+    .from("travel_bookings")
     .select("id, type, title, provider, status, start_datetime, end_datetime")
     .eq("stage_id", stage.id)
     .gte("start_datetime", `${date}T00:00:00`)
     .lt("start_datetime", `${addDays(date, 1)}T00:00:00`);
 
-  const { data: eventsRaw } = await supabase
-    .from("journey_events")
+  const { data: eventsRaw } = await lumiCore
+    .from("travel_journey_events")
     .select("id, date, time, category, title, location, status")
     .eq("stage_id", stage.id)
     .eq("date", date);

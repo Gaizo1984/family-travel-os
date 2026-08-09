@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { listHouseholdMembers } from "@/lib/household-members";
 import { loadPackingItems, packingCategoryLabel } from "@/lib/packing-list";
 import { computeRegenerationDiff, type GeneratedPackingItem, type PackingDiffEntry } from "@/lib/packing-list-generation";
 import { applyPackingListDiff, discardPackingListDraft } from "@/lib/actions/packing-list-generation";
@@ -46,11 +47,11 @@ function DiffGroup({ title, entries, defaultChecked }: { title: string; entries:
 export default async function PackingListDiffPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const supabase = await createClient();
-  const { data: trip } = await supabase.from("trips").select("id, slug, title").eq("slug", id).maybeSingle();
+  const lumiCore = await createLumiCoreClient();
+  const { data: trip } = await lumiCore.from("travel_trips").select("id, slug, title").eq("slug", id).maybeSingle();
   if (!trip) notFound();
 
-  const { data: draft } = await supabase.from("packing_list_drafts").select("items").eq("trip_id", trip.id).maybeSingle();
+  const { data: draft } = await lumiCore.from("travel_packing_list_drafts").select("items").eq("trip_id", trip.id).maybeSingle();
 
   if (!draft) {
     return (
@@ -67,12 +68,19 @@ export default async function PackingListDiffPage({ params }: { params: Promise<
     );
   }
 
-  const { data: memberRows } = await supabase.from("trip_members").select("persons ( id, name )").eq("trip_id", trip.id);
+  // §Lumi-Core-Cutover: keine PostgREST-Embeddings zwischen travel_*-Tabellen
+  // und household_members -- flache Abfrage von travel_trip_members plus
+  // Map-Lookup über listHouseholdMembers() statt eines verschachtelten Selects
+  // (gleiches Muster wie lib/trip-participants.ts::loadTripParticipantOptions).
+  const { data: memberRows } = await lumiCore.from("travel_trip_members").select("household_member_id").eq("trip_id", trip.id);
+  const allMembers = await listHouseholdMembers();
+  const membersById = new Map(allMembers.map((m) => [m.id, m]));
   const participants = (memberRows ?? [])
-    .map((m) => m.persons as unknown as { id: string; name: string } | null)
-    .filter((p): p is { id: string; name: string } => Boolean(p));
+    .map((m) => membersById.get(m.household_member_id))
+    .filter((p): p is NonNullable<typeof p> => Boolean(p))
+    .map((p) => ({ id: p.id, name: p.name }));
 
-  const existingItems = await loadPackingItems(supabase, trip.id);
+  const existingItems = await loadPackingItems(lumiCore, trip.id);
   const generated = draft.items as GeneratedPackingItem[];
   const diff = computeRegenerationDiff(existingItems, generated, participants);
 

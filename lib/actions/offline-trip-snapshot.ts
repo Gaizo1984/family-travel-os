@@ -1,6 +1,5 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { listHouseholdMembers } from '@/lib/household-members'
 import { sortStagesChronologically, buildJourneyTimeline } from '@/lib/journey'
@@ -41,7 +40,6 @@ type JourneyEventRow = {
  * ist dadurch keinerlei Neuberechnung nötig.
  */
 export async function fetchOfflineTripSnapshotData(tripId: string): Promise<OfflineTripSnapshot | null> {
-  const supabase = await createClient()
   const lumiCore = await createLumiCoreClient()
 
   const { data: trip } = await lumiCore
@@ -63,7 +61,7 @@ export async function fetchOfflineTripSnapshotData(tripId: string): Promise<Offl
     lumiCore.from('travel_stages').select('id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code').eq('trip_id', tripId),
     lumiCore.from('travel_bookings').select('id, type, title, provider, status, start_datetime, end_datetime, stage_id, details, created_at, booking_reference').eq('trip_id', tripId),
     lumiCore.from('travel_journey_events').select('id, stage_id, date, time, category, title, location, status').eq('trip_id', tripId),
-    loadPackingItems(supabase, tripId),
+    loadPackingItems(lumiCore, tripId),
     lumiCore.from('travel_trip_members').select('household_member_id').eq('trip_id', tripId),
     listHouseholdMembers(),
   ])
@@ -156,7 +154,6 @@ export type OfflineCacheableDocument = {
  * Journal-Eintrag gehängtes Ticket) -- sonst dasselbe "jetzt"-Problem.
  */
 export async function fetchTripDocumentsForOfflineCache(tripId: string): Promise<OfflineCacheableDocument[]> {
-  const supabase = await createClient()
   const lumiCore = await createLumiCoreClient()
   const [{ data: booking }, { data: journeyEvent }, householdMembers] = await Promise.all([
     lumiCore.from('travel_bookings').select('id, start_datetime, end_datetime').eq('trip_id', tripId),

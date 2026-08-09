@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { deleteTripPermanently } from "@/lib/actions/trips";
 import { DeleteTripSubmitButton } from "@/components/DeleteTripSubmitButton";
 
@@ -12,9 +12,9 @@ export default async function DeleteTripPage({
 }) {
   const { id } = await params;
 
-  const supabase = await createClient();
-  const { data: trip } = await supabase
-    .from("trips")
+  const lumiCore = await createLumiCoreClient();
+  const { data: trip } = await lumiCore
+    .from("travel_trips")
     .select("id, slug, title, status")
     .eq("slug", id)
     .maybeSingle();

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { listHouseholdMembers } from "@/lib/household-members";
 import { updateInsurancePolicy } from "@/lib/actions/insurance";
 import { DateSelectFields } from "@/components/DateSelectFields";
 import { getDateFieldRange } from "@/lib/documents";
@@ -26,18 +27,20 @@ export default async function EditInsurancePolicyPage({
   const { policyId } = await params;
   const { error } = await searchParams;
 
-  const supabase = await createClient();
-  const { data: policy } = await supabase
-    .from("insurance_policies")
+  const lumiCore = await createLumiCoreClient();
+  const { data: policy } = await lumiCore
+    .from("travel_insurance_policies")
     .select("id, label, provider, policy_type, reference_number, valid_from, valid_to, emergency_contact, notes")
     .eq("id", policyId)
     .maybeSingle();
 
   if (!policy) notFound();
 
-  const { data: persons } = await supabase.from("persons").select("id, name").order("name");
-  const { data: assigned } = await supabase.from("insurance_policy_persons").select("person_id").eq("policy_id", policy.id);
-  const assignedIds = new Set((assigned ?? []).map((a) => a.person_id));
+  const [persons, { data: assigned }] = await Promise.all([
+    listHouseholdMembers(),
+    lumiCore.from("travel_insurance_policy_persons").select("household_member_id").eq("policy_id", policy.id),
+  ]);
+  const assignedIds = new Set((assigned ?? []).map((a) => a.household_member_id));
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import type { LumiCoreDatabase } from '@/lib/supabase/lumi-core-types'
 import { buildHintContext } from './context'
 import type { HintDraft, HintRule } from './types'
 import { missingReferenceOrDocumentRule } from './rules/missing-reference-or-document'
@@ -24,7 +25,7 @@ const REGISTERED_HINT_RULES: HintRule[] = [
   rentalCarVsFlightRule,
 ]
 
-export async function generateHintsForTrip(supabase: SupabaseClient, tripId: string, familyId: string, tripSlug: string): Promise<HintDraft[]> {
-  const ctx = await buildHintContext(supabase, tripId, familyId, tripSlug)
+export async function generateHintsForTrip(lumiCore: SupabaseClient<LumiCoreDatabase>, tripId: string, familyId: string, tripSlug: string): Promise<HintDraft[]> {
+  const ctx = await buildHintContext(lumiCore, tripId, familyId, tripSlug)
   return REGISTERED_HINT_RULES.flatMap((rule) => rule.evaluate(ctx))
 }

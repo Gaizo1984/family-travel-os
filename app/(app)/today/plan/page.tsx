@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { getFamily } from "@/lib/family";
 import { isTripCurrentlyRunning, isTripHistorical } from "@/lib/trip-status";
 import { deriveTripDateRange } from "@/lib/trip-dates";
@@ -45,7 +45,7 @@ export default async function DayPlanPage({
 }) {
   const { error, date: dateParam, stopover, job: jobId } = await searchParams;
   const preferStopover = stopover === "1";
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
   const { id: familyId } = await getFamily();
   const todayIso = todayIsoInFamilyTimezone();
 
@@ -70,17 +70,49 @@ export default async function DayPlanPage({
     );
   }
 
-  const { data: trips } = await supabase
-    .from("trips")
-    .select(`
-      id, slug, title, subtitle, status, start_date, end_date,
-      stages ( id, title, location, start_date, end_date, nights, accommodation, sort_order, country_code, is_transit ),
-      bookings ( id, type, title, provider, status, start_datetime, end_datetime, stage_id )
-    `)
-    .eq("family_id", familyId);
+  // §Lumi-Core-Cutover: keine PostgREST-Embeddings zwischen travel_*-Tabellen
+  // -- flache Parallelabfragen + manuelles Map-Reassembly statt eines
+  // verschachtelten `trips`-Selects (siehe app/(app)/today/page.tsx::fetchTripsForToday
+  // für dasselbe Muster).
+  const { data: tripsRaw } = await lumiCore
+    .from("travel_trips")
+    .select("id, slug, title, subtitle, status, start_date, end_date")
+    .eq("household_id", familyId);
+  const tripIds = (tripsRaw ?? []).map((t) => t.id);
+
+  const [{ data: stagesRaw }, { data: bookingsRaw }] = tripIds.length
+    ? await Promise.all([
+        lumiCore
+          .from("travel_stages")
+          .select("trip_id, id, title, location, start_date, end_date, nights, accommodation, sort_order, country_code, is_transit")
+          .in("trip_id", tripIds),
+        lumiCore
+          .from("travel_bookings")
+          .select("trip_id, id, type, title, provider, status, start_datetime, end_datetime, stage_id")
+          .in("trip_id", tripIds),
+      ])
+    : [{ data: [] }, { data: [] }] as const;
+
+  const stagesByTrip = new Map<string, StageInput[]>();
+  (stagesRaw ?? []).forEach((s) => {
+    const { trip_id, ...stage } = s;
+    stagesByTrip.set(trip_id, [...(stagesByTrip.get(trip_id) ?? []), stage as StageInput]);
+  });
+  const bookingsByTrip = new Map<string, TimelineBooking[]>();
+  (bookingsRaw ?? []).forEach((b) => {
+    const { trip_id, ...booking } = b;
+    bookingsByTrip.set(trip_id, [...(bookingsByTrip.get(trip_id) ?? []), booking as unknown as TimelineBooking]);
+  });
+
+  const trips: TripRow[] = (tripsRaw ?? []).map((t) => ({
+    ...t,
+    stages: stagesByTrip.get(t.id) ?? [],
+    bookings: bookingsByTrip.get(t.id) ?? [],
+  }));
+
   // §"Reisezeitraum automatisch ableiten": ohne manuelles Datum, aber mit
   // Buchungen/Etappen, gilt die Reise trotzdem korrekt als laufend (lib/trip-dates.ts).
-  const allTrips = ((trips ?? []) as unknown as TripRow[]).map((t) => {
+  const allTrips = trips.map((t) => {
     const range = deriveTripDateRange(t, t.bookings, t.stages);
     return { ...t, start_date: range.startDate, end_date: range.endDate };
   });

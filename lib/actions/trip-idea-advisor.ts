@@ -83,7 +83,7 @@ export async function generateHotelShortlist(formData: FormData) {
   if (!ctx) redirect(returnTo)
   const { supabase, lumiCore, idea, dnaSummary, selectedPersons, effectiveDate } = ctx
 
-  const jobId = await createJob(idea.household_id, 'trip_idea_hotel_shortlist', supabase)
+  const jobId = await createJob(idea.household_id, 'trip_idea_hotel_shortlist', lumiCore)
 
   after(async () => {
     try {
@@ -94,11 +94,11 @@ export async function generateHotelShortlist(formData: FormData) {
         const message = e instanceof ProviderConfigError
           ? 'Die Hotelsuche ist aktuell nicht konfiguriert -- bitte Support informieren.'
           : 'Die Hotelsuche ist gerade fehlgeschlagen -- bitte in Kürze erneut versuchen.'
-        await failJob(jobId, message, supabase)
+        await failJob(jobId, message, lumiCore)
         return
       }
       if (!destGeo) {
-        await failJob(jobId, 'Zielort konnte nicht gefunden werden.', supabase)
+        await failJob(jobId, 'Zielort konnte nicht gefunden werden.', lumiCore)
         return
       }
 
@@ -106,11 +106,11 @@ export async function generateHotelShortlist(formData: FormData) {
       try {
         candidates = await searchLodging({ locationName: idea.destination, lat: destGeo.lat, lng: destGeo.lng, radiusMeters: computeLodgingRadiusMeters(destGeo), viewport: destGeo.viewport })
       } catch {
-        await failJob(jobId, 'Die Hotelsuche ist gerade fehlgeschlagen -- bitte in Kürze erneut versuchen.', supabase)
+        await failJob(jobId, 'Die Hotelsuche ist gerade fehlgeschlagen -- bitte in Kürze erneut versuchen.', lumiCore)
         return
       }
       if (!candidates || candidates.length === 0) {
-        await failJob(jobId, 'Keine Hotels für dieses Ziel gefunden -- bitte später erneut versuchen.', supabase)
+        await failJob(jobId, 'Keine Hotels für dieses Ziel gefunden -- bitte später erneut versuchen.', lumiCore)
         return
       }
 
@@ -183,7 +183,7 @@ export async function generateHotelShortlist(formData: FormData) {
       const picks = await selectHotelShortlist({ destination: idea.destination, familyDnaText: dnaText, candidates: candidateFacts, belowStandardMode })
 
       if (!picks || picks.length === 0) {
-        await failJob(jobId, 'Die Hotelauswahl ist gerade nicht verfügbar -- bitte in Kürze erneut versuchen.', supabase)
+        await failJob(jobId, 'Die Hotelauswahl ist gerade nicht verfügbar -- bitte in Kürze erneut versuchen.', lumiCore)
         return
       }
 
@@ -235,7 +235,7 @@ export async function generateHotelShortlist(formData: FormData) {
         })
 
       if (shortlist.length === 0) {
-        await failJob(jobId, 'Die Hotelauswahl konnte nicht mit echten Treffern abgeglichen werden -- bitte erneut versuchen.', supabase)
+        await failJob(jobId, 'Die Hotelauswahl konnte nicht mit echten Treffern abgeglichen werden -- bitte erneut versuchen.', lumiCore)
         return
       }
 
@@ -248,14 +248,14 @@ export async function generateHotelShortlist(formData: FormData) {
         .eq('id', ideaId)
 
       if (updateError) {
-        await failJob(jobId, 'Speicherfehler: ' + updateError.message, supabase)
+        await failJob(jobId, 'Speicherfehler: ' + updateError.message, lumiCore)
         return
       }
 
-      await completeJob(jobId, returnTo, supabase)
+      await completeJob(jobId, returnTo, lumiCore)
     } catch (e) {
       console.error('[trip-idea-advisor] generateHotelShortlist fehlgeschlagen:', e instanceof Error ? e.message : e)
-      await failJob(jobId, 'Die Hotelsuche ist gerade fehlgeschlagen -- bitte in Kürze erneut versuchen.', supabase)
+      await failJob(jobId, 'Die Hotelsuche ist gerade fehlgeschlagen -- bitte in Kürze erneut versuchen.', lumiCore)
     }
   })
 
@@ -276,7 +276,7 @@ export async function estimateTripIdeaBudget(formData: FormData) {
   if (!ctx) redirect(returnTo)
   const { supabase, lumiCore, idea, dnaSummary, selectedPersons, effectiveDate } = ctx
 
-  const jobId = await createJob(idea.household_id, 'trip_idea_budget_estimate', supabase)
+  const jobId = await createJob(idea.household_id, 'trip_idea_budget_estimate', lumiCore)
 
   after(async () => {
     try {
@@ -296,7 +296,7 @@ export async function estimateTripIdeaBudget(formData: FormData) {
       })
 
       if (!estimate) {
-        await failJob(jobId, 'Die Budget-Schätzung ist gerade nicht verfügbar -- bitte in Kürze erneut versuchen.', supabase)
+        await failJob(jobId, 'Die Budget-Schätzung ist gerade nicht verfügbar -- bitte in Kürze erneut versuchen.', lumiCore)
         return
       }
 
@@ -306,14 +306,14 @@ export async function estimateTripIdeaBudget(formData: FormData) {
         .eq('id', ideaId)
 
       if (updateError) {
-        await failJob(jobId, 'Speicherfehler: ' + updateError.message, supabase)
+        await failJob(jobId, 'Speicherfehler: ' + updateError.message, lumiCore)
         return
       }
 
-      await completeJob(jobId, returnTo, supabase)
+      await completeJob(jobId, returnTo, lumiCore)
     } catch (e) {
       console.error('[trip-idea-advisor] estimateTripIdeaBudget fehlgeschlagen:', e instanceof Error ? e.message : e)
-      await failJob(jobId, 'Die Budget-Schätzung ist gerade nicht verfügbar -- bitte in Kürze erneut versuchen.', supabase)
+      await failJob(jobId, 'Die Budget-Schätzung ist gerade nicht verfügbar -- bitte in Kürze erneut versuchen.', lumiCore)
     }
   })
 
@@ -336,7 +336,7 @@ export async function generateTripVariants(formData: FormData) {
   if (!ctx) redirect(returnTo)
   const { supabase, lumiCore, idea, dnaSummary, selectedPersons, effectiveDate, climatePreference, tripTypePreference, stopoverPreference, maxStopovers } = ctx
 
-  const jobId = await createJob(idea.household_id, 'trip_idea_variants_generate', supabase)
+  const jobId = await createJob(idea.household_id, 'trip_idea_variants_generate', lumiCore)
 
   after(async () => {
     try {
@@ -372,7 +372,7 @@ export async function generateTripVariants(formData: FormData) {
       })
 
       if (!variants || variants.length === 0) {
-        await failJob(jobId, 'Die Varianten-Entwicklung ist gerade nicht verfügbar -- bitte in Kürze erneut versuchen.', supabase)
+        await failJob(jobId, 'Die Varianten-Entwicklung ist gerade nicht verfügbar -- bitte in Kürze erneut versuchen.', lumiCore)
         return
       }
 
@@ -406,14 +406,14 @@ export async function generateTripVariants(formData: FormData) {
         .eq('id', ideaId)
 
       if (updateError) {
-        await failJob(jobId, 'Speicherfehler: ' + updateError.message, supabase)
+        await failJob(jobId, 'Speicherfehler: ' + updateError.message, lumiCore)
         return
       }
 
-      await completeJob(jobId, returnTo, supabase)
+      await completeJob(jobId, returnTo, lumiCore)
     } catch (e) {
       console.error('[trip-idea-advisor] generateTripVariants fehlgeschlagen:', e instanceof Error ? e.message : e)
-      await failJob(jobId, 'Die Varianten-Entwicklung ist gerade nicht verfügbar -- bitte in Kürze erneut versuchen.', supabase)
+      await failJob(jobId, 'Die Varianten-Entwicklung ist gerade nicht verfügbar -- bitte in Kürze erneut versuchen.', lumiCore)
     }
   })
 

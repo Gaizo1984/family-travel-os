@@ -1,4 +1,6 @@
-import { createServiceRoleClient } from '@/lib/supabase/service-role'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
+import type { LumiCoreDatabase } from '@/lib/supabase/lumi-core-types'
 
 export type ReelVideoCleanupResult = { deleted: number; skippedInUse: number; failed: number }
 
@@ -16,12 +18,19 @@ export type ReelVideoCleanupResult = { deleted: number; skippedInUse: number; fa
  * Projekt entfernt wurde. `retained_as_memory` (analog zu memory_photos)
  * bleibt als Reserve für eine spätere "dauerhaft behalten"-Aktion, wird
  * aktuell aber von keinem Aufrufer gesetzt.
+ *
+ * FINALER CUTOVER: läuft jetzt gegen Lumi Core (`travel_memory_videos`/
+ * `travel_content_reel_media_items`). Aufgerufen sowohl vom sitzungslosen
+ * Vercel-Cron (übergibt explizit den Service-Role-Client, siehe
+ * lib/supabase/lumi-core-service.ts) als auch als Best-Effort-Fallback beim
+ * Öffnen von /content-studio (normale Nutzer-Session, bewusst OHNE
+ * Service-Role).
  */
-export async function cleanupExpiredReelVideos(): Promise<ReelVideoCleanupResult> {
-  const supabase = createServiceRoleClient()
+export async function cleanupExpiredReelVideos(lumiCoreOverride?: SupabaseClient<LumiCoreDatabase>): Promise<ReelVideoCleanupResult> {
+  const lumiCore = lumiCoreOverride ?? await createLumiCoreClient()
 
-  const { data: expiredRaw } = await supabase
-    .from('memory_videos')
+  const { data: expiredRaw } = await lumiCore
+    .from('travel_memory_videos')
     .select('id, storage_path, thumbnail_storage_path')
     .eq('temporary', true)
     .eq('retained_as_memory', false)
@@ -33,8 +42,8 @@ export async function cleanupExpiredReelVideos(): Promise<ReelVideoCleanupResult
   let failed = 0
 
   for (const video of expired) {
-    const { count } = await supabase
-      .from('content_reel_media_items')
+    const { count } = await lumiCore
+      .from('travel_content_reel_media_items')
       .select('id', { count: 'exact', head: true })
       .eq('source_type', 'video')
       .eq('source_id', video.id)
@@ -44,13 +53,13 @@ export async function cleanupExpiredReelVideos(): Promise<ReelVideoCleanupResult
     }
 
     const pathsToRemove = [video.storage_path, video.thumbnail_storage_path].filter((p): p is string => Boolean(p))
-    const { error: storageError } = await supabase.storage.from('documents').remove(pathsToRemove)
+    const { error: storageError } = await lumiCore.storage.from('travel-documents').remove(pathsToRemove)
     if (storageError) {
       console.error('[reel-video-cleanup] storage delete failed', { videoId: video.id })
       failed++
       continue
     }
-    const { error: dbError } = await supabase.from('memory_videos').delete().eq('id', video.id)
+    const { error: dbError } = await lumiCore.from('travel_memory_videos').delete().eq('id', video.id)
     if (dbError) {
       console.error('[reel-video-cleanup] db delete failed', { videoId: video.id })
       failed++

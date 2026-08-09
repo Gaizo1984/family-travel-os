@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
 import { updateContentDraft, deleteContentDraft } from "@/lib/actions/content-ideas";
 import {
   saveContentSessionDraftText, moveContentSessionDraftItem, removeContentSessionDraftItem,
@@ -90,19 +91,25 @@ export default async function ContentDraftPage({
   const { draftId } = await params;
   const { error } = await searchParams;
 
-  const supabase = await createClient();
-  const { data: draft } = await supabase
-    .from("content_drafts")
-    .select("id, project_id, draft_type, structure, visibility, scheduled_at, notes, instagram_ready, content_projects(project_type)")
+  const lumiCore = await createLumiCoreClient();
+  const { data: draft } = await lumiCore
+    .from("travel_content_drafts")
+    .select("id, project_id, draft_type, structure, visibility, scheduled_at, notes, instagram_ready")
     .eq("id", draftId)
     .maybeSingle();
 
   if (!draft) notFound();
 
+  // §Lumi-Core-Cutover: keine PostgREST-Embeddings -- project_type per
+  // eigener Abfrage statt verschachteltem `content_projects(project_type)`-Select.
+  const { data: draftProject } = draft.project_id
+    ? await lumiCore.from("travel_content_projects").select("project_type").eq("id", draft.project_id).maybeSingle()
+    : { data: null };
+
   // §Content-Session-Entwürfe führen zurück auf die reichhaltigere
   // Session-Seite (Fotos/Ablauf/Als-Erinnerung-behalten) statt auf die
   // generische Projekt-Übersicht der älteren Ideen-/Analyse-Flows.
-  const isSessionDraft = (draft.content_projects as unknown as { project_type: string } | null)?.project_type === "session";
+  const isSessionDraft = draftProject?.project_type === "session";
   const backHref = isSessionDraft ? `/content-studio/session/${draft.project_id}` : `/content-studio/projects/${draft.project_id}`;
 
   const itemsKey = draft.draft_type === "reel_plan" ? "scenes" : (draft.draft_type === "carousel_plan" || draft.draft_type === "story_plan") ? "slides" : null;
@@ -200,7 +207,7 @@ export default async function ContentDraftPage({
                   </div>
                   <div>
                     <label htmlFor="draft-visibility" style={LABEL_STYLE}>Sichtbarkeit</label>
-                    <select id="draft-visibility" name="visibility" defaultValue={draft.visibility} style={FIELD_STYLE}>
+                    <select id="draft-visibility" name="visibility" defaultValue={draft.visibility ?? "private"} style={FIELD_STYLE}>
                       <option value="private">Privat</option>
                       <option value="family">Familie</option>
                       <option value="public">Öffentlich</option>
@@ -260,17 +267,17 @@ export default async function ContentDraftPage({
   const structure = draft.structure as CarouselStructure & StoryStructure & ReelStructure;
   const items: DraftItem[] = (itemsKey === "scenes" ? structure.scenes : structure.slides) ?? [];
 
-  const { data: projectPhotosRaw } = await supabase
-    .from("content_project_photos")
+  const { data: projectPhotosRaw } = await lumiCore
+    .from("travel_content_project_photos")
     .select("id, storage_path")
-    .eq("project_id", draft.project_id)
+    .eq("project_id", draft.project_id ?? "")
     .is("is_duplicate_of", null)
     .order("created_at", { ascending: true });
   const projectPhotos = projectPhotosRaw ?? [];
 
   // §"Egress-Analyse 2026-07-16": alle Vorschauen hier sind kleine Kacheln
   // (1/1-Grid oder max. 280px Titelbild) -- Thumbnail statt Original.
-  const displayByPath = await getPhotoDisplayUrls("documents", projectPhotos.map((p) => p.storage_path), "thumb400");
+  const displayByPath = await getPhotoDisplayUrls(LUMI_CORE_DOCUMENTS_BUCKET, projectPhotos.map((p) => p.storage_path), "thumb400");
   const urlById = new Map<string, string>();
   const resolvedPathById = new Map<string, string>();
   for (const p of projectPhotos) {
@@ -483,7 +490,7 @@ export default async function ContentDraftPage({
 
         <form action={deleteContentSessionDraft} className="flex justify-end">
           <input type="hidden" name="draft_id" value={draft.id} />
-          <input type="hidden" name="project_id" value={draft.project_id} />
+          <input type="hidden" name="project_id" value={draft.project_id ?? ""} />
           <button type="submit" style={{ ...GHOST_BUTTON_STYLE, color: "#B5624A" }}>Entwurf löschen</button>
         </form>
       </div>

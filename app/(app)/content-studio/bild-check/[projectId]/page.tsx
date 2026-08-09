@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
 import {
   createImageCheckUploadSlots, uploadImageCheckPhotos, runImageCheckAnalysis,
   adoptImageCheckPhotoToSession, adoptImageCheckPhotoToReel, markImageCheckPhotoForVacationPost,
@@ -41,29 +42,35 @@ export default async function ImageCheckProjectPage({
   const { projectId } = await params;
   const { error, uploaded } = await searchParams;
 
-  const supabase = await createClient();
-  const { data: project } = await supabase
-    .from("content_projects")
-    .select("id, title, trip_id, status, trips(title)")
+  const lumiCore = await createLumiCoreClient();
+  const { data: project } = await lumiCore
+    .from("travel_content_projects")
+    .select("id, title, trip_id, status")
     .eq("id", projectId)
     .eq("project_type", "image_check")
     .maybeSingle();
 
   if (!project) notFound();
 
-  const { data: photosRaw } = await supabase
-    .from("content_project_photos")
+  // §Lumi-Core-Cutover: kein PostgREST-Embedding für `trips(title)` --
+  // flache Zusatzabfrage statt verschachteltem Select.
+  const { data: tripForTitle } = project.trip_id
+    ? await lumiCore.from("travel_trips").select("title").eq("id", project.trip_id).maybeSingle()
+    : { data: null };
+
+  const { data: photosRaw } = await lumiCore
+    .from("travel_content_project_photos")
     .select("id, storage_path")
     .eq("project_id", projectId)
     .order("created_at", { ascending: true });
 
   const photos = photosRaw ?? [];
-  const displayByPath = await getPhotoDisplayUrls("documents", photos.map((p) => p.storage_path), "thumb400");
+  const displayByPath = await getPhotoDisplayUrls(LUMI_CORE_DOCUMENTS_BUCKET, photos.map((p) => p.storage_path), "thumb400");
   const photosWithUrls = photos
     .map((p) => ({ id: p.id, url: displayByPath.get(p.storage_path)?.url ?? null }))
     .filter((p): p is { id: string; url: string } => p.url !== null);
 
-  const tripTitle = (project.trips as unknown as { title: string } | null)?.title ?? project.title;
+  const tripTitle = tripForTitle?.title ?? project.title;
   const hasPhotos = photos.length > 0;
 
   // §"Alle vorgemerkten Bilder werden reisebezogen gesammelt" (Nutzervorgabe):
@@ -72,11 +79,11 @@ export default async function ImageCheckProjectPage({
   let markedCount = 0;
   let alreadyMarkedPhotoIds = new Set<string>();
   if (project.trip_id) {
-    const { data: sisterProjectRows } = await supabase
-      .from("content_projects").select("id").eq("trip_id", project.trip_id).eq("project_type", "image_check");
+    const { data: sisterProjectRows } = await lumiCore
+      .from("travel_content_projects").select("id").eq("trip_id", project.trip_id).eq("project_type", "image_check");
     const projectIds = (sisterProjectRows ?? []).map((p) => p.id);
     const { data: markedRows } = projectIds.length > 0
-      ? await supabase.from("content_project_photos").select("id, project_id").in("project_id", projectIds).not("vacation_post_marked_at", "is", null)
+      ? await lumiCore.from("travel_content_project_photos").select("id, project_id").in("project_id", projectIds).not("vacation_post_marked_at", "is", null)
       : { data: [] };
     markedCount = markedRows?.length ?? 0;
     alreadyMarkedPhotoIds = new Set((markedRows ?? []).filter((r) => r.project_id === projectId).map((r) => r.id));

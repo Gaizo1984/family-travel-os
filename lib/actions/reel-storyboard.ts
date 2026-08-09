@@ -113,7 +113,7 @@ export async function generateReelStoryboard(formData: FormData) {
 
   const supabase = await createClient()
   const lumiCore = await createLumiCoreClient()
-  const jobId = await createJob(familyId, 'reel_storyboard_generate', supabase)
+  const jobId = await createJob(familyId, 'reel_storyboard_generate', lumiCore)
 
   after(async () => {
     try {
@@ -128,7 +128,7 @@ export async function generateReelStoryboard(formData: FormData) {
         .order('sort_order', { ascending: true })
       const items = itemsRaw ?? []
       if (items.length < limit.min) {
-        await failJob(jobId, `Bitte zuerst mindestens ${limit.min} Medien auswählen.`, supabase)
+        await failJob(jobId, `Bitte zuerst mindestens ${limit.min} Medien auswählen.`, lumiCore)
         return
       }
 
@@ -148,7 +148,7 @@ export async function generateReelStoryboard(formData: FormData) {
 
       const missingPosterframe = videoRows.some((v) => !v.thumbnail_storage_path)
       if (missingPosterframe) {
-        await failJob(jobId, 'Für mindestens ein Video fehlt noch das Standbild. Bitte erneut versuchen.', supabase)
+        await failJob(jobId, 'Für mindestens ein Video fehlt noch das Standbild. Bitte erneut versuchen.', lumiCore)
         return
       }
 
@@ -180,7 +180,7 @@ export async function generateReelStoryboard(formData: FormData) {
       }))
       const candidates = loaded.filter((c): c is Candidate => c !== null)
       if (candidates.length < 2) {
-        await failJob(jobId, 'Die Medien konnten nicht geladen werden. Bitte gleich noch einmal versuchen.', supabase)
+        await failJob(jobId, 'Die Medien konnten nicht geladen werden. Bitte gleich noch einmal versuchen.', lumiCore)
         return
       }
 
@@ -195,7 +195,7 @@ export async function generateReelStoryboard(formData: FormData) {
         `Bewerte diese Fotos/Video-Standbilder einer Familienreise für ein ${durationSeconds}-Sekunden-Reise-Reel im Stil "${reelStyleLabel}".`,
       )
       if (!assessments) {
-        await failJob(jobId, 'Die Bildanalyse ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.', supabase)
+        await failJob(jobId, 'Die Bildanalyse ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.', lumiCore)
         return
       }
 
@@ -254,7 +254,7 @@ export async function generateReelStoryboard(formData: FormData) {
         })
         result = JSON.parse(response.output_text)
       } catch {
-        await failJob(jobId, 'Das Storyboard konnte gerade nicht erstellt werden. Bitte gleich noch einmal versuchen.', supabase)
+        await failJob(jobId, 'Das Storyboard konnte gerade nicht erstellt werden. Bitte gleich noch einmal versuchen.', lumiCore)
         return
       }
 
@@ -262,7 +262,7 @@ export async function generateReelStoryboard(formData: FormData) {
       const candidateKeys = new Set(candidates.map((c) => `${c.sourceType}:${c.sourceId}`))
       const validScenes = result.scenes.filter((s) => candidateKeys.has(`${s.source_type}:${s.source_id}`))
       if (validScenes.length < 2) {
-        await failJob(jobId, 'Das Storyboard konnte gerade nicht erstellt werden. Bitte gleich noch einmal versuchen.', supabase)
+        await failJob(jobId, 'Das Storyboard konnte gerade nicht erstellt werden. Bitte gleich noch einmal versuchen.', lumiCore)
         return
       }
 
@@ -287,15 +287,15 @@ export async function generateReelStoryboard(formData: FormData) {
         project_id: projectId, draft_type: 'video_reel', structure,
       })
       if (draftError) {
-        await failJob(jobId, 'Speicherfehler: ' + draftError.message, supabase)
+        await failJob(jobId, 'Speicherfehler: ' + draftError.message, lumiCore)
         return
       }
 
       await lumiCore.from('travel_content_projects').update({ status: 'draft_created' }).eq('id', projectId)
-      await completeJob(jobId, `${returnTo}?storyboard=1`, supabase)
+      await completeJob(jobId, `${returnTo}?storyboard=1`, lumiCore)
     } catch (e) {
       console.error('[reel-storyboard] generateReelStoryboard fehlgeschlagen:', e instanceof Error ? e.message : e)
-      await failJob(jobId, 'Das Storyboard konnte gerade nicht erstellt werden. Bitte später erneut versuchen.', supabase)
+      await failJob(jobId, 'Das Storyboard konnte gerade nicht erstellt werden. Bitte später erneut versuchen.', lumiCore)
     }
   })
 

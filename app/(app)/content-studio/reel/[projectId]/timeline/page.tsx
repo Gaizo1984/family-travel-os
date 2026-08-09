@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
 import { getFamily } from "@/lib/family";
 import { getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
 import { REEL_STYLE_LABELS } from "@/lib/ai-style-guidelines";
@@ -14,7 +15,7 @@ import {
   createReelMusicUploadSlot, uploadReelMusic, removeReelMusic,
 } from "@/lib/actions/reel-timeline";
 
-const STORAGE_BUCKET = "documents";
+const STORAGE_BUCKET = LUMI_CORE_DOCUMENTS_BUCKET;
 const VIDEO_SIGNED_URL_TTL_SECONDS = 600; // §"ausschließlich kurzlebige Signed URLs" (Nutzervorgabe) -- reicht für eine Bearbeitungssitzung, kein dauerhaft gültiger Link.
 
 /**
@@ -26,18 +27,18 @@ const VIDEO_SIGNED_URL_TTL_SECONDS = 600; // §"ausschließlich kurzlebige Signe
  */
 export default async function ReelTimelinePage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
   const { id: familyId } = await getFamily();
 
-  const { data: project } = await supabase
-    .from("content_projects")
+  const { data: project } = await lumiCore
+    .from("travel_content_projects")
     .select("id, trip_id, reel_style, reel_duration_seconds")
-    .eq("id", projectId).eq("family_id", familyId).eq("project_type", "reel")
+    .eq("id", projectId).eq("household_id", familyId).eq("project_type", "reel")
     .maybeSingle();
   if (!project) notFound();
 
-  const { data: draft } = await supabase
-    .from("content_drafts")
+  const { data: draft } = await lumiCore
+    .from("travel_content_drafts")
     .select("id, structure")
     .eq("project_id", projectId).eq("draft_type", "video_reel")
     .order("created_at", { ascending: false }).limit(1).maybeSingle();
@@ -52,10 +53,10 @@ export default async function ReelTimelinePage({ params }: { params: Promise<{ p
 
   const [{ data: photoRowsRaw }, { data: videoRowsRaw }] = await Promise.all([
     photoIds.length > 0
-      ? supabase.from("memory_photos").select("id, storage_path").in("id", photoIds)
+      ? lumiCore.from("travel_memory_photos").select("id, storage_path").in("id", photoIds)
       : Promise.resolve({ data: [] as { id: string; storage_path: string }[] }),
     videoIds.length > 0
-      ? supabase.from("memory_videos").select("id, storage_path, thumbnail_storage_path").in("id", videoIds)
+      ? lumiCore.from("travel_memory_videos").select("id, storage_path, thumbnail_storage_path").in("id", videoIds)
       : Promise.resolve({ data: [] as { id: string; storage_path: string; thumbnail_storage_path: string | null }[] }),
   ]);
   const photoRows = photoRowsRaw ?? [];
@@ -68,9 +69,9 @@ export default async function ReelTimelinePage({ params }: { params: Promise<{ p
 
   const videoEntries = await Promise.all(videoRows.map(async (v) => {
     const [playback, poster] = await Promise.all([
-      supabase.storage.from(STORAGE_BUCKET).createSignedUrl(v.storage_path, VIDEO_SIGNED_URL_TTL_SECONDS),
+      lumiCore.storage.from(STORAGE_BUCKET).createSignedUrl(v.storage_path, VIDEO_SIGNED_URL_TTL_SECONDS),
       v.thumbnail_storage_path
-        ? supabase.storage.from(STORAGE_BUCKET).createSignedUrl(v.thumbnail_storage_path, VIDEO_SIGNED_URL_TTL_SECONDS)
+        ? lumiCore.storage.from(STORAGE_BUCKET).createSignedUrl(v.thumbnail_storage_path, VIDEO_SIGNED_URL_TTL_SECONDS)
         : Promise.resolve({ data: null }),
     ]);
     return { id: v.id, playbackUrl: playback.data?.signedUrl ?? "", displayUrl: poster.data?.signedUrl ?? null };
@@ -91,7 +92,7 @@ export default async function ReelTimelinePage({ params }: { params: Promise<{ p
 
   let initialMusicPreviewUrl: string | null = null;
   if (structure.music_source === "custom" && structure.music_storage_path) {
-    const { data: signed } = await supabase.storage.from(STORAGE_BUCKET).createSignedUrl(structure.music_storage_path, VIDEO_SIGNED_URL_TTL_SECONDS);
+    const { data: signed } = await lumiCore.storage.from(STORAGE_BUCKET).createSignedUrl(structure.music_storage_path, VIDEO_SIGNED_URL_TTL_SECONDS);
     initialMusicPreviewUrl = signed?.signedUrl ?? null;
   }
 

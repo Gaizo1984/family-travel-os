@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { getFamily } from "@/lib/family";
+import { deriveInitials } from "@/lib/household-members";
+import { LUMI_CORE_PROFILE_PHOTOS_BUCKET } from "@/lib/lumi-core-storage/paths";
 import { COMPASS_CATEGORY_ORDER, COMPASS_CATEGORY_LABELS, ageAtDate } from "@/lib/family-dna";
 import { getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
 import { todayIsoInFamilyTimezone } from "@/lib/time";
@@ -53,25 +55,30 @@ function PersonCard({ person, photoUrl }: { person: PersonRow; photoUrl: string 
   );
 }
 
-export default async function FamilyPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ lumiCoreError?: string; lumiCoreConnected?: string }>;
-}) {
-  const { lumiCoreError, lumiCoreConnected } = await searchParams;
-  const supabase = await createClient();
+export default async function FamilyPage() {
+  const lumiCore = await createLumiCoreClient();
   const { id: familyId } = await getFamily();
 
-  const [{ data: personsRaw }, { data: preferences }] = await Promise.all([
-    supabase.from("persons").select("id, name, initials, is_minor, role_label, description, interest_tags, travel_needs, photo_storage_path, birth_date").eq("family_id", familyId).order("is_minor"),
-    supabase.from("family_preference_categories").select("category_key, weight, note").eq("family_id", familyId),
+  const [{ data: membersRaw }, { data: profiles }, { data: preferences }] = await Promise.all([
+    lumiCore.from("household_members").select("id, name, is_minor, avatar_storage_path, birth_date").eq("household_id", familyId).is("deleted_at", null).order("is_minor"),
+    lumiCore.from("travel_household_member_profiles").select("household_member_id, role_label, description, interest_tags, travel_needs").eq("household_id", familyId),
+    lumiCore.from("travel_preference_categories").select("category_key, weight, note").eq("household_id", familyId),
   ]);
 
-  const persons = (personsRaw ?? []) as PersonRow[];
+  const profileByMemberId = new Map((profiles ?? []).map((p) => [p.household_member_id, p]));
+  const persons: PersonRow[] = (membersRaw ?? []).map((m) => {
+    const profile = profileByMemberId.get(m.id);
+    return {
+      id: m.id, name: m.name, initials: deriveInitials(m.name), is_minor: m.is_minor,
+      role_label: profile?.role_label ?? null, description: profile?.description ?? null,
+      interest_tags: profile?.interest_tags ?? [], travel_needs: profile?.travel_needs ?? [],
+      photo_storage_path: m.avatar_storage_path, birth_date: m.birth_date,
+    };
+  });
 
   // §"Egress-Analyse 2026-07-16": 175px-Profilkarte -- Thumbnail statt Original, gecachte Signed URL.
   const personsWithPhoto = persons.filter((p): p is PersonRow & { photo_storage_path: string } => !!p.photo_storage_path);
-  const personDisplayByPath = await getPhotoDisplayUrls("documents", personsWithPhoto.map((p) => p.photo_storage_path), "thumb400");
+  const personDisplayByPath = await getPhotoDisplayUrls(LUMI_CORE_PROFILE_PHOTOS_BUCKET, personsWithPhoto.map((p) => p.photo_storage_path), "thumb400");
   const photoUrlByPersonId = new Map<string, string>();
   for (const p of personsWithPhoto) {
     const resolved = personDisplayByPath.get(p.photo_storage_path);
@@ -102,7 +109,7 @@ export default async function FamilyPage({
           </Link>
         </header>
 
-        <LumiCoreConnectionCard error={lumiCoreError} connected={lumiCoreConnected === "1"} />
+        <LumiCoreConnectionCard />
 
         {/* ── 1. Unsere Familie ── */}
         <section className="mb-14">

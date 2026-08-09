@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { getFamily } from "@/lib/family";
 import { loadJob } from "@/lib/ai-generation-jobs";
 import { PendingGenerationView } from "@/components/PendingGenerationView";
@@ -211,11 +211,11 @@ export default async function PackingListPage({
   const { id } = await params;
   const { person: personFilter, category: categoryFilter, quick: quickFilter, job: jobId } = await searchParams;
 
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
   const { id: familyId } = await getFamily();
 
-  const { data: trip } = await supabase
-    .from("trips")
+  const { data: trip } = await lumiCore
+    .from("travel_trips")
     .select("id, slug, title, start_date, end_date")
     .eq("slug", id)
     .maybeSingle();
@@ -241,9 +241,9 @@ export default async function PackingListPage({
   }
 
   const [participants, items, luggage] = await Promise.all([
-    loadTripParticipantOptions(supabase, trip.id, familyId),
-    loadPackingItems(supabase, trip.id),
-    loadPackingLuggage(supabase, trip.id),
+    loadTripParticipantOptions(lumiCore, trip.id, familyId),
+    loadPackingItems(lumiCore, trip.id),
+    loadPackingLuggage(lumiCore, trip.id),
   ]);
 
   const todayIso = todayIsoInFamilyTimezone();

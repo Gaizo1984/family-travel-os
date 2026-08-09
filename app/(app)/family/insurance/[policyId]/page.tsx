@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
+import { getFamily } from "@/lib/family";
+import { getHouseholdMemberById, deriveInitials } from "@/lib/household-members";
 import { assignPolicyToTrip, unassignPolicyFromTrip } from "@/lib/actions/insurance";
 import { formatExpiresAt } from "@/lib/documents";
 import { getCachedSignedUrl } from "@/lib/signed-storage-url";
@@ -23,37 +26,40 @@ export default async function InsurancePolicyDetailPage({
 }) {
   const { policyId } = await params;
 
-  const supabase = await createClient();
-  const { data: policy } = await supabase
-    .from("insurance_policies")
-    .select(`
-      id, label, provider, policy_type, reference_number, valid_from, valid_to,
-      emergency_contact, notes, storage_bucket, storage_path,
-      insurance_policy_persons ( persons ( id, name, initials ) )
-    `)
+  const lumiCore = await createLumiCoreClient();
+  const { id: familyId } = await getFamily();
+  const { data: policy } = await lumiCore
+    .from("travel_insurance_policies")
+    .select("id, label, provider, policy_type, reference_number, valid_from, valid_to, emergency_contact, notes, storage_bucket, storage_path")
     .eq("id", policyId)
     .maybeSingle();
 
   if (!policy) notFound();
 
-  const persons = (policy.insurance_policy_persons as unknown as Array<{ persons: { id: string; name: string; initials: string } | null }>)
-    .flatMap((p) => (p.persons ? [p.persons] : []));
+  // §Lumi-Core-Cutover: keine PostgREST-Embeddings zwischen travel_*-Tabellen --
+  // flache Parallelabfragen statt verschachtelter Selects, exakt wie
+  // lib/travel-world.ts::fetchTravelWorldRawData.
+  const [{ data: personLinks }, { data: tripLinks }, { data: allTripsRaw }] = await Promise.all([
+    lumiCore.from("travel_insurance_policy_persons").select("household_member_id").eq("policy_id", policy.id),
+    lumiCore.from("travel_insurance_policy_trips").select("trip_id").eq("policy_id", policy.id),
+    lumiCore.from("travel_trips").select("id, slug, title").eq("household_id", familyId).order("start_date", { ascending: false }),
+  ]);
 
-  const signedUrl = policy.storage_path ? await getCachedSignedUrl("documents", policy.storage_path) : null;
+  const memberIds = (personLinks ?? []).map((l) => l.household_member_id);
+  const members = await Promise.all(memberIds.map((id) => getHouseholdMemberById(id)));
+  const persons = members.filter((m): m is NonNullable<typeof m> => m !== null)
+    .map((m) => ({ id: m.id, name: m.name, initials: deriveInitials(m.name) }));
+
+  const signedUrl = policy.storage_path ? await getCachedSignedUrl(LUMI_CORE_DOCUMENTS_BUCKET, policy.storage_path) : null;
   const isImage = policy.storage_path ? /\.(jpe?g|png|webp)$/i.test(policy.storage_path) : false;
 
-  const { data: assignedTripsRaw } = await supabase
-    .from("insurance_policy_trips")
-    .select("trip_id, trips ( id, slug, title )")
-    .eq("policy_id", policy.id);
-
-  const assignedTrips = (assignedTripsRaw ?? [])
-    .map((r) => r.trips as unknown as { id: string; slug: string; title: string } | null)
+  const allTripsById = new Map((allTripsRaw ?? []).map((t) => [t.id, t]));
+  const assignedTrips = (tripLinks ?? [])
+    .map((r) => allTripsById.get(r.trip_id) ?? null)
     .filter((t): t is { id: string; slug: string; title: string } => t !== null);
   const assignedTripIds = new Set(assignedTrips.map((t) => t.id));
 
-  const { data: allTrips } = await supabase.from("trips").select("id, title").order("start_date", { ascending: false });
-  const availableTrips = (allTrips ?? []).filter((t) => !assignedTripIds.has(t.id));
+  const availableTrips = (allTripsRaw ?? []).filter((t) => !assignedTripIds.has(t.id));
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>

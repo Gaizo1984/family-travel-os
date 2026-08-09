@@ -2,7 +2,6 @@
 
 import { redirect } from 'next/navigation'
 import { after } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { getFamily } from '@/lib/family'
 import { createJob, completeJob } from '@/lib/ai-generation-jobs'
@@ -104,7 +103,7 @@ export async function getOrSearchFlightOptions(params: {
   stopoverPreference: string | null
   forceRefresh?: boolean
 }): Promise<FlightSearchOutcome> {
-  const supabase = await createClient()
+  const supabase = await createLumiCoreClient()
   const { adults, children, infants } = bucketPassengerAges(params.passengerAges)
   const searchKey = buildSearchKey({
     originCodes: params.originCodes, destinationCode: params.destinationCode,
@@ -112,9 +111,9 @@ export async function getOrSearchFlightOptions(params: {
   })
 
   const { data: existing } = await supabase
-    .from('flight_search_cache')
+    .from('travel_flight_search_cache')
     .select('results, is_sandbox_data, updated_at, search_started_at')
-    .eq('family_id', params.familyId)
+    .eq('household_id', params.familyId)
     .eq('search_key', searchKey)
     .maybeSingle()
 
@@ -135,23 +134,23 @@ export async function getOrSearchFlightOptions(params: {
   const monthKey = new Date().toISOString().slice(0, 7) // 'YYYY-MM'
   const monthlyLimit = Number(process.env.FLIGHT_SEARCH_MONTHLY_LIMIT ?? String(DEFAULT_MONTHLY_LIMIT))
   const { data: usage } = await supabase
-    .from('flight_search_usage')
+    .from('travel_flight_search_usage')
     .select('search_count')
-    .eq('family_id', params.familyId)
+    .eq('household_id', params.familyId)
     .eq('month_key', monthKey)
     .maybeSingle()
   if ((usage?.search_count ?? 0) >= monthlyLimit) return { status: 'limit_reached' }
 
   // Claim setzen, BEVOR der Provider aufgerufen wird -- lässt evtl. vorhandene `results` unangetastet.
-  const { error: claimError } = await supabase.from('flight_search_cache').upsert(
+  const { error: claimError } = await supabase.from('travel_flight_search_cache').upsert(
     {
-      family_id: params.familyId, search_key: searchKey,
+      household_id: params.familyId, search_key: searchKey,
       origin_codes: params.originCodes, destination_code: params.destinationCode,
       departure_date: params.departureDate, return_date: params.returnDate,
       adults, children, infants,
       search_started_at: new Date().toISOString(),
     },
-    { onConflict: 'family_id,search_key' },
+    { onConflict: 'household_id,search_key' },
   )
   if (claimError) console.error('[flight_search_cache] Claim-Fehler:', claimError.message)
 
@@ -166,12 +165,12 @@ export async function getOrSearchFlightOptions(params: {
       maxStops: params.maxStops,
     })
   } catch (e) {
-    await supabase.from('flight_search_cache').update({ search_started_at: null }).eq('family_id', params.familyId).eq('search_key', searchKey)
+    await supabase.from('travel_flight_search_cache').update({ search_started_at: null }).eq('household_id', params.familyId).eq('search_key', searchKey)
     throw e
   }
 
   if (rawOptions.length === 0) {
-    await supabase.from('flight_search_cache').update({ search_started_at: null }).eq('family_id', params.familyId).eq('search_key', searchKey)
+    await supabase.from('travel_flight_search_cache').update({ search_started_at: null }).eq('household_id', params.familyId).eq('search_key', searchKey)
     return { status: 'no_results' }
   }
 
@@ -201,9 +200,9 @@ export async function getOrSearchFlightOptions(params: {
   const isSandboxData = isFlightProviderSandbox()
   const searchedAt = new Date().toISOString()
 
-  const { error: upsertError } = await supabase.from('flight_search_cache').upsert(
+  const { error: upsertError } = await supabase.from('travel_flight_search_cache').upsert(
     {
-      family_id: params.familyId,
+      household_id: params.familyId,
       search_key: searchKey,
       origin_codes: params.originCodes,
       destination_code: params.destinationCode,
@@ -215,7 +214,7 @@ export async function getOrSearchFlightOptions(params: {
       search_started_at: null,
       updated_at: searchedAt,
     },
-    { onConflict: 'family_id,search_key' },
+    { onConflict: 'household_id,search_key' },
   )
   // §"Nie stillschweigend 'ok' zurückgeben, wenn nichts gespeichert wurde":
   // ein bloß geloggter, aber ignorierter Speicherfehler hätte zuvor zu einem
@@ -226,9 +225,9 @@ export async function getOrSearchFlightOptions(params: {
     throw new Error(`Suchergebnisse konnten nicht gespeichert werden: ${upsertError.message}`)
   }
 
-  const { error: usageError } = await supabase.from('flight_search_usage').upsert(
-    { family_id: params.familyId, month_key: monthKey, search_count: (usage?.search_count ?? 0) + 1, updated_at: new Date().toISOString() },
-    { onConflict: 'family_id,month_key' },
+  const { error: usageError } = await supabase.from('travel_flight_search_usage').upsert(
+    { household_id: params.familyId, month_key: monthKey, search_count: (usage?.search_count ?? 0) + 1, updated_at: new Date().toISOString() },
+    { onConflict: 'household_id,month_key' },
   )
   if (usageError) console.error('[flight_search_usage] Speicherfehler:', usageError.message)
 

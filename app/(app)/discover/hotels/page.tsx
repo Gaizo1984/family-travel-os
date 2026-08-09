@@ -1,13 +1,19 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { getFamily } from "@/lib/family";
 import { HOTELS, sortHotelsByFamilyCriteria } from "@/lib/data/hotel-knowledge";
 import { HOTEL_CRITERIA_OPTIONS } from "@/lib/family-dna";
 
 export default async function DiscoverHotelsPage() {
-  const supabase = await createClient();
-  const { data: family } = await supabase.from("families").select("id, exceptional_hotel_criteria").limit(1).single();
-  const criteria = new Set(family?.exceptional_hotel_criteria ?? []);
+  const lumiCore = await createLumiCoreClient();
+  const { id: familyId } = await getFamily();
+  // §Schema-Lücken-Schliessung: `exceptional_hotel_criteria` liegt nicht mehr
+  // auf `families`, sondern im generischen `app_preferences.settings`
+  // (Schlüssel `travel_exceptional_hotel_criteria`), siehe lib/family-dna.ts.
+  const { data: appPrefs } = await lumiCore.from("app_preferences").select("settings").eq("household_id", familyId).maybeSingle();
+  const settings = (appPrefs?.settings ?? {}) as { travel_exceptional_hotel_criteria?: string[] };
+  const criteria = new Set(settings.travel_exceptional_hotel_criteria ?? []);
 
   const sorted = sortHotelsByFamilyCriteria(HOTELS, criteria);
 

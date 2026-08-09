@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js'
+import type { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import type { HintPriority } from '@/lib/hints/types'
 
 export type TripHint = {
@@ -28,11 +28,15 @@ export const TRIP_HINT_PRIORITY_LABELS: Record<HintPriority, string> = {
  * "Empfehlung" auch reiseübergreifend gelten sollen (z. B. eine bevorstehende
  * Reise, während gerade eine andere läuft).
  */
-export async function loadTopTripHints(supabase: SupabaseClient, familyId: string, limit = 3): Promise<TripHint[]> {
-  const { data } = await supabase
-    .from('trip_hints')
+export async function loadTopTripHints(
+  lumiCore: Awaited<ReturnType<typeof createLumiCoreClient>>,
+  familyId: string,
+  limit = 3,
+): Promise<TripHint[]> {
+  const { data } = await lumiCore
+    .from('travel_trip_hints')
     .select('id, hint_type, priority, title, reasoning, relevant_at, action_label, action_href')
-    .eq('family_id', familyId)
+    .eq('household_id', familyId)
     .eq('status', 'active')
     .order('relevant_at', { ascending: true, nullsFirst: false })
     .limit(20)

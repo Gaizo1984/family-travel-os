@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { resolveHouseholdMemberId } from "@/lib/lumi-core-storage/paths";
+import { getHouseholdMemberById } from "@/lib/household-members";
 import { createDocument } from "@/lib/actions/documents";
 import { extractDocumentData } from "@/lib/actions/document-extraction";
 import { DOCUMENT_TYPE_ORDER, DOCUMENT_TYPE_CONFIG } from "@/lib/documents";
@@ -31,14 +32,12 @@ export default async function NewDocumentPage({
     try { draft = JSON.parse(draftRaw) as DraftFields; } catch { draft = null; }
   }
 
-  const supabase = await createClient();
-  const { data: person } = await supabase
-    .from("persons")
-    .select("id, name")
-    .eq("id", personId)
-    .maybeSingle();
+  const householdMemberId = await resolveHouseholdMemberId(personId);
+  if (!householdMemberId) notFound();
 
-  if (!person) notFound();
+  const member = await getHouseholdMemberById(householdMemberId);
+  if (!member) notFound();
+  const person = { id: personId, name: member.name };
 
   const cancelHref = return_to || `/family/${person.id}`;
   const config = type ? DOCUMENT_TYPE_CONFIG[type as DocumentType] : undefined;
@@ -119,9 +118,16 @@ export default async function NewDocumentPage({
           action={createDocument}
           extractAction={extractDocumentData}
           hiddenFields={{
-            person_id: person.id,
+            // §ID-Space-Fix: `createDocument` (lib/actions/documents.ts) schreibt
+            // dieses Feld direkt in travel_documents.household_member_id -- muss
+            // die aufgelöste Lumi-Core-ID sein, nicht Travels legacy personId
+            // (der Routen-Parameter). `return_to` erzwingt denselben Redirect-Ziel
+            // wie bisher (cancelHref), damit der interne Fallback der Action
+            // (der sonst household_member_id fälschlich als /family/[personId]-
+            // Segment verwenden würde) nie greift.
+            person_id: householdMemberId,
             mode: "create",
-            ...(return_to ? { return_to } : {}),
+            return_to: cancelHref,
             ...(assign_trip ? { assign_trip } : {}),
           }}
           defaultType={config.value}

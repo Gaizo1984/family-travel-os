@@ -1,4 +1,4 @@
-import { createServiceRoleClient } from '@/lib/supabase/service-role'
+import { createLumiCoreServiceClient } from '@/lib/supabase/lumi-core-service'
 import { todayIsoInFamilyTimezone } from '@/lib/time'
 import { addDaysIso } from '@/lib/date-utils'
 import { buildTripDigest } from '@/lib/trip-digest'
@@ -14,17 +14,12 @@ import {
  * seinem späteren Status (aktiv/abgeschlossen/übersprungen/geschlossen) --
  * ein bereits übersprungener Dialog wird nie erneut erzeugt.
  *
- * §Root-Cause-Fix "Nachreisefeedback wird nie ausgelöst" (Nutzer-Feedback,
- * konkreter Fall: eine gerade beendete Reise ohne manuell gesetztes
- * trips.end_date): nutzte bisher wie lib/booking-document-cleanup.ts
- * bewusst nur das rohe `trips.end_date`-Feld -- dort ist das richtig
- * (destruktives Löschen, kein Wiederholungsschutz), hier aber nicht: die
- * "Einmalig"-Prüfung unten via bestehendem trip_debriefs-Datensatz macht
- * ein später schwankendes abgeleitetes Datum ungefährlich, ein Rückblick
- * kann so nie doppelt angelegt werden. Nutzt jetzt dieselbe zentrale
- * Ableitungslogik wie der Rest der App (lib/trip-dates.ts), damit auch
- * Reisen ohne manuelles Enddatum (deren reales Ende aus Etappen/Buchungen
- * hervorgeht) erkannt werden.
+ * FINALER CUTOVER: läuft jetzt über den Lumi-Core-Service-Role-Client gegen
+ * `travel_trips`/`travel_trip_debriefs`. Die frühere eingebettete
+ * `trips.select('..., stages(...), bookings(...)')`-Abfrage funktioniert
+ * gegen Lumi Core nicht mehr (kein konfiguriertes FK-Embedding) -- ersetzt
+ * durch flache Parallelabfragen + manuelle Zuordnung, gleiches Muster wie
+ * lib/travel-world.ts.
  */
 const TRIGGER_WINDOW_START_DAYS_AFTER_END = 1
 const TRIGGER_WINDOW_END_DAYS_AFTER_END = 3
@@ -32,39 +27,56 @@ const TRIGGER_WINDOW_END_DAYS_AFTER_END = 3
 export type TripDebriefTriggerResult = { tripsChecked: number; created: number }
 
 export async function triggerDueTripDebriefs(): Promise<TripDebriefTriggerResult> {
-  const supabase = createServiceRoleClient()
+  const lumiCore = createLumiCoreServiceClient()
   const today = todayIsoInFamilyTimezone()
   const windowStart = addDaysIso(today, -TRIGGER_WINDOW_END_DAYS_AFTER_END)
   const windowEnd = addDaysIso(today, -TRIGGER_WINDOW_START_DAYS_AFTER_END)
 
-  const { data: candidateTripsRaw } = await supabase
-    .from('trips')
-    .select(`
-      id, family_id, start_date, end_date,
-      stages ( start_date, end_date ),
-      bookings ( type, status, start_datetime, end_datetime )
-    `)
+  const { data: tripsRaw } = await lumiCore
+    .from('travel_trips')
+    .select('id, household_id, start_date, end_date')
     .neq('status', 'archived')
 
-  const candidateTrips = (candidateTripsRaw ?? []) as Array<{
-    id: string; family_id: string; start_date: string | null; end_date: string | null
-    stages: Array<{ start_date: string | null; end_date: string | null }>
-    bookings: Array<{ type: string; status: string; start_datetime: string | null; end_datetime: string | null }>
-  }>
+  const trips = tripsRaw ?? []
+  const tripIds = trips.map((t) => t.id)
 
-  const dueTrips = candidateTrips.filter((trip) => {
-    const range = deriveTripDateRange({ start_date: trip.start_date, end_date: trip.end_date }, trip.bookings, trip.stages)
+  const [{ data: stagesRaw }, { data: bookingsRaw }] = tripIds.length > 0
+    ? await Promise.all([
+        lumiCore.from('travel_stages').select('trip_id, start_date, end_date').in('trip_id', tripIds),
+        lumiCore.from('travel_bookings').select('trip_id, type, status, start_datetime, end_datetime').in('trip_id', tripIds),
+      ])
+    : [{ data: [] as { trip_id: string; start_date: string | null; end_date: string | null }[] }, { data: [] as { trip_id: string; type: string; status: string; start_datetime: string | null; end_datetime: string | null }[] }]
+
+  const stagesByTrip = new Map<string, { start_date: string | null; end_date: string | null }[]>()
+  for (const s of stagesRaw ?? []) {
+    const list = stagesByTrip.get(s.trip_id) ?? []
+    list.push({ start_date: s.start_date, end_date: s.end_date })
+    stagesByTrip.set(s.trip_id, list)
+  }
+  const bookingsByTrip = new Map<string, { type: string; status: string; start_datetime: string | null; end_datetime: string | null }[]>()
+  for (const b of bookingsRaw ?? []) {
+    const list = bookingsByTrip.get(b.trip_id) ?? []
+    list.push({ type: b.type, status: b.status, start_datetime: b.start_datetime, end_datetime: b.end_datetime })
+    bookingsByTrip.set(b.trip_id, list)
+  }
+
+  const dueTrips = trips.filter((trip) => {
+    const range = deriveTripDateRange(
+      { start_date: trip.start_date, end_date: trip.end_date },
+      bookingsByTrip.get(trip.id) ?? [],
+      stagesByTrip.get(trip.id) ?? [],
+    )
     return range.endDate !== null && range.endDate >= windowStart && range.endDate <= windowEnd
   })
 
   let created = 0
 
   for (const trip of dueTrips) {
-    const { data: existing } = await supabase.from('trip_debriefs').select('id').eq('trip_id', trip.id).limit(1)
+    const { data: existing } = await lumiCore.from('travel_trip_debriefs').select('id').eq('trip_id', trip.id).limit(1)
     if ((existing?.length ?? 0) > 0) continue
 
-    const { error } = await supabase.from('trip_debriefs').insert({
-      family_id: trip.family_id, trip_id: trip.id, status: 'active', current_step: 'intro', answers: {},
+    const { error } = await lumiCore.from('travel_trip_debriefs').insert({
+      household_id: trip.household_id, trip_id: trip.id, status: 'active', current_step: 'intro', answers: {},
     })
     if (!error) created++
   }
@@ -89,13 +101,13 @@ export async function triggerDueTripDebriefs(): Promise<TripDebriefTriggerResult
 export type VacationPostCurationTriggerResult = { tripsChecked: number; curated: number }
 
 export async function triggerDueVacationPostCuration(): Promise<VacationPostCurationTriggerResult> {
-  const supabase = createServiceRoleClient()
+  const lumiCore = createLumiCoreServiceClient()
   const today = todayIsoInFamilyTimezone()
   const windowStart = addDaysIso(today, -TRIGGER_WINDOW_END_DAYS_AFTER_END)
   const windowEnd = addDaysIso(today, -TRIGGER_WINDOW_START_DAYS_AFTER_END)
 
-  const { data: dueTripsRaw } = await supabase
-    .from('trips')
+  const { data: dueTripsRaw } = await lumiCore
+    .from('travel_trips')
     .select('id, end_date')
     .not('end_date', 'is', null)
     .gte('end_date', windowStart)
@@ -106,13 +118,13 @@ export async function triggerDueVacationPostCuration(): Promise<VacationPostCura
   let curated = 0
 
   for (const trip of dueTrips) {
-    const { data: projectRows } = await supabase
-      .from('content_projects').select('id').eq('trip_id', trip.id).eq('project_type', 'image_check')
+    const { data: projectRows } = await lumiCore
+      .from('travel_content_projects').select('id').eq('trip_id', trip.id).eq('project_type', 'image_check')
     const projectIds = (projectRows ?? []).map((p) => p.id)
     if (projectIds.length === 0) continue
 
-    const { data: candidateRows } = await supabase
-      .from('content_project_photos')
+    const { data: candidateRows } = await lumiCore
+      .from('travel_content_project_photos')
       .select('id, vacation_post_score, vacation_post_reasoning, vacation_post_rank, vacation_post_pinned')
       .in('project_id', projectIds)
       .not('vacation_post_marked_at', 'is', null)
@@ -121,7 +133,7 @@ export async function triggerDueVacationPostCuration(): Promise<VacationPostCura
     if (candidates.length === 0) continue
     if (candidates.some((c) => c.vacation_post_rank !== null)) continue // bereits kuratiert
 
-    const tripDigest = await buildTripDigest(trip.id, supabase)
+    const tripDigest = await buildTripDigest(trip.id, lumiCore)
     const vacationPostCandidates: VacationPostCandidate[] = candidates.map((c) => ({
       photoId: c.id, score: c.vacation_post_score, reasoning: c.vacation_post_reasoning,
       pinned: c.vacation_post_pinned, existingRank: c.vacation_post_rank,
@@ -133,7 +145,7 @@ export async function triggerDueVacationPostCuration(): Promise<VacationPostCura
     const expiresAt = computeVacationPostExpiresAt(trip.end_date)
 
     await Promise.all(candidates.map((c) =>
-      supabase.from('content_project_photos').update({
+      lumiCore.from('travel_content_project_photos').update({
         vacation_post_rank: rankByPhotoId.get(c.id) ?? null,
         expires_at: expiresAt,
       }).eq('id', c.id),

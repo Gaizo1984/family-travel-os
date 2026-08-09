@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { getFamily } from "@/lib/family";
 import { startReelProject } from "@/lib/actions/content-reels";
 import { isTripCurrentlyRunning, isTripPastEnd } from "@/lib/trip-status";
@@ -35,23 +35,42 @@ export default async function NewReelProjectPage({
 }) {
   const { error } = await searchParams;
 
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
   const { id: familyId } = await getFamily();
-  const { data: tripsRaw } = await supabase
-    .from("trips")
-    .select(`
-      id, title, start_date, end_date,
-      stages ( start_date, end_date ),
-      bookings ( type, status, start_datetime, end_datetime )
-    `)
-    .eq("family_id", familyId)
+  const { data: tripsRaw } = await lumiCore
+    .from("travel_trips")
+    .select("id, title, start_date, end_date")
+    .eq("household_id", familyId)
     .in("status", ["planned", "active", "completed"])
     .order("start_date", { ascending: false });
 
   const trips = tripsRaw ?? [];
+  const tripIds = trips.map((t) => t.id);
+
+  // §Lumi-Core-Cutover: keine PostgREST-Embeddings -- Etappen/Buchungen für
+  // die Zeitraum-Ableitung als flache Parallelabfragen statt verschachteltem Select.
+  const [{ data: stagesRaw }, { data: bookingsRaw }] = tripIds.length > 0
+    ? await Promise.all([
+        lumiCore.from("travel_stages").select("trip_id, start_date, end_date").in("trip_id", tripIds),
+        lumiCore.from("travel_bookings").select("trip_id, type, status, start_datetime, end_datetime").in("trip_id", tripIds),
+      ])
+    : ([{ data: [] }, { data: [] }] as const);
+  const stagesByTrip = new Map<string, { start_date: string | null; end_date: string | null }[]>();
+  (stagesRaw ?? []).forEach((s) => {
+    const list = stagesByTrip.get(s.trip_id) ?? [];
+    list.push({ start_date: s.start_date, end_date: s.end_date });
+    stagesByTrip.set(s.trip_id, list);
+  });
+  const bookingsByTrip = new Map<string, { type: string; status: string; start_datetime: string | null; end_datetime: string | null }[]>();
+  (bookingsRaw ?? []).forEach((b) => {
+    const list = bookingsByTrip.get(b.trip_id) ?? [];
+    list.push({ type: b.type, status: b.status, start_datetime: b.start_datetime, end_datetime: b.end_datetime });
+    bookingsByTrip.set(b.trip_id, list);
+  });
+
   const todayIso = new Date().toISOString().slice(0, 10);
   const tripsWithRange = trips.map((t) => {
-    const range = deriveTripDateRange(t, t.bookings, t.stages);
+    const range = deriveTripDateRange(t, bookingsByTrip.get(t.id) ?? [], stagesByTrip.get(t.id) ?? []);
     return { id: t.id, start_date: range.startDate, end_date: range.endDate };
   });
   const defaultTrip =

@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { X } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
 import { sortForBoardingPassViewer, detectFlightLegOptions, legLabelFor } from "@/lib/boarding-passes";
 import { BoardingPassCarousel, type BoardingPassCarouselItem } from "@/components/BoardingPassCarousel";
 import { getCachedSignedUrl } from "@/lib/signed-storage-url";
+import { listHouseholdMembers } from "@/lib/household-members";
 
 export default async function BoardingPassViewerPage({
   params,
@@ -13,17 +15,17 @@ export default async function BoardingPassViewerPage({
 }) {
   const { id, bookingId } = await params;
 
-  const supabase = await createClient();
-  const { data: trip } = await supabase
-    .from("trips")
+  const lumiCore = await createLumiCoreClient();
+  const { data: trip } = await lumiCore
+    .from("travel_trips")
     .select("id, slug, title")
     .eq("slug", id)
     .maybeSingle();
 
   if (!trip) notFound();
 
-  const { data: booking } = await supabase
-    .from("bookings")
+  const { data: booking } = await lumiCore
+    .from("travel_bookings")
     .select("id, title, type, start_datetime, end_datetime, details")
     .eq("id", bookingId)
     .eq("trip_id", trip.id)
@@ -34,21 +36,28 @@ export default async function BoardingPassViewerPage({
   const flightLegOptions = detectFlightLegOptions(booking.details as Record<string, string> | null);
   const legOrder = new Map(flightLegOptions.map((opt, i) => [opt.value, i]));
 
-  const { data: docsRaw } = await supabase
-    .from("documents")
-    .select("id, storage_path, person_id, details, persons ( id, name )")
+  // §Lumi-Core-Cutover: keine PostgREST-Embeddings -- Dokumente flach
+  // abfragen, Personen-Name per listHouseholdMembers()-Map nachschlagen.
+  const { data: docsRaw } = await lumiCore
+    .from("travel_documents")
+    .select("id, storage_path, household_member_id, details")
     .eq("booking_id", bookingId)
     .eq("doc_type", "boarding_pass");
 
+  const allHouseholdMembers = await listHouseholdMembers();
+  const householdMemberById = new Map(allHouseholdMembers.map((m) => [m.id, m]));
+
   type RawPass = { id: string; storage_path: string; leg: string | null; person: { id: string; name: string } };
-  const rawPasses: RawPass[] = (docsRaw ?? [])
-    .map((d) => ({
+  const rawPasses: RawPass[] = (docsRaw ?? []).flatMap((d) => {
+    const person = d.household_member_id ? householdMemberById.get(d.household_member_id) : undefined;
+    if (!person) return [];
+    return [{
       id: d.id,
-      storage_path: d.storage_path,
+      storage_path: d.storage_path ?? "",
       leg: (d.details as Record<string, string> | null)?.leg ?? null,
-      person: d.persons as unknown as { id: string; name: string } | null,
-    }))
-    .filter((d): d is RawPass => d.person !== null);
+      person: { id: person.id, name: person.name },
+    }];
+  });
 
   // §"klar nach Flug trennen" (Nutzervorgabe): Personen-Reihenfolge bleibt
   // sortForBoardingPassViewer, innerhalb einer Person zusätzlich nach
@@ -66,7 +75,7 @@ export default async function BoardingPassViewerPage({
 
   const withUrl: BoardingPassCarouselItem[] = await Promise.all(
     passes.map(async (p) => {
-      const url = await getCachedSignedUrl("documents", p.storage_path);
+      const url = await getCachedSignedUrl(LUMI_CORE_DOCUMENTS_BUCKET, p.storage_path);
       const isPdf = p.storage_path.toLowerCase().endsWith(".pdf");
       const legLabel = legLabelFor(p.leg, flightLegOptions);
       const label = legLabel ? `${p.name} · ${legLabel}` : p.name;

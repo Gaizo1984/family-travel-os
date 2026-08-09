@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
 import { getFamily } from "@/lib/family";
+import { listHouseholdMembers } from "@/lib/household-members";
 import { createPastTrip } from "@/lib/actions/past-trips";
 import { Banner } from "@/components/Banner";
 
@@ -22,9 +22,8 @@ export default async function NewPastTripPage({
 }) {
   const { error } = await searchParams;
 
-  const supabase = await createClient();
   const { id: familyId } = await getFamily();
-  const { data: persons } = await supabase.from("persons").select("id, name").eq("family_id", familyId).order("name");
+  const persons = await listHouseholdMembers();
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { deleteInsurancePolicy } from "@/lib/actions/insurance";
 
 export default async function DeleteInsurancePolicyPage({
@@ -10,9 +10,9 @@ export default async function DeleteInsurancePolicyPage({
 }) {
   const { policyId } = await params;
 
-  const supabase = await createClient();
-  const { data: policy } = await supabase
-    .from("insurance_policies")
+  const lumiCore = await createLumiCoreClient();
+  const { data: policy } = await lumiCore
+    .from("travel_insurance_policies")
     .select("id, label, storage_path")
     .eq("id", policyId)
     .maybeSingle();

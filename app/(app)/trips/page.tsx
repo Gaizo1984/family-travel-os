@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { Map as MapIcon, Globe, CalendarDays } from "lucide-react";
 import { formatDateDE } from "@/lib/demo-data";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
 import { getFamily } from "@/lib/family";
+import { listHouseholdMembers, deriveInitials } from "@/lib/household-members";
 import { restoreTrip } from "@/lib/actions/trips";
 import { tripCountdownDisplay } from "@/lib/trip-status";
 import { resolveTripImage, getHighlightPhotoByTripId, type ResolvedTripImage } from "@/lib/trip-images";
@@ -401,6 +403,66 @@ function LegacyPastCard({ entry, url, resolvedPath, members }: { entry: LegacyPa
   );
 }
 
+/**
+ * §Lumi-Core-Cutover: Lumi Core hat keine PostgREST-Embeddings zwischen
+ * travel_*-Tabellen -- ersetzt die frühere verschachtelte `trips`-Abfrage
+ * (trip_members/persons, stages, bookings) durch drei flache
+ * Parallelabfragen + manuelles Map-Reassembly, analog
+ * app/(app)/today/page.tsx::fetchTripsForToday.
+ */
+async function fetchAllTripsForTripsPage(
+  lumiCore: Awaited<ReturnType<typeof createLumiCoreClient>>,
+  familyId: string,
+  personById: Map<string, PersonRow>,
+): Promise<TripRow[]> {
+  const { data: tripsRaw } = await lumiCore
+    .from("travel_trips")
+    .select("id, slug, title, subtitle, status, start_date, end_date, cover_emoji, gradient_from, gradient_via, gradient_to")
+    .eq("household_id", familyId)
+    .order("start_date", { ascending: true, nullsFirst: false });
+
+  const trips = tripsRaw ?? [];
+  const tripIds = trips.map((t) => t.id);
+
+  const [{ data: membersRaw }, { data: stagesRaw }, { data: bookingsRaw }] = tripIds.length
+    ? await Promise.all([
+        lumiCore.from("travel_trip_members").select("trip_id, household_member_id").in("trip_id", tripIds),
+        lumiCore.from("travel_stages").select("trip_id, id, start_date, end_date").in("trip_id", tripIds),
+        lumiCore.from("travel_bookings").select("trip_id, type, status, start_datetime, end_datetime").in("trip_id", tripIds),
+      ])
+    : ([{ data: [] }, { data: [] }, { data: [] }] as const);
+
+  const membersByTrip = new Map<string, TripRow["trip_members"]>();
+  (membersRaw ?? []).forEach((m) => {
+    const list = membersByTrip.get(m.trip_id) ?? [];
+    list.push({ persons: personById.get(m.household_member_id) ?? null });
+    membersByTrip.set(m.trip_id, list);
+  });
+
+  const stagesByTrip = new Map<string, TripRow["stages"]>();
+  (stagesRaw ?? []).forEach((s) => {
+    const list = stagesByTrip.get(s.trip_id) ?? [];
+    list.push({ id: s.id, start_date: s.start_date, end_date: s.end_date });
+    stagesByTrip.set(s.trip_id, list);
+  });
+
+  const bookingsByTrip = new Map<string, TripRow["bookings"]>();
+  (bookingsRaw ?? []).forEach((b) => {
+    const list = bookingsByTrip.get(b.trip_id) ?? [];
+    list.push({ type: b.type, status: b.status, start_datetime: b.start_datetime, end_datetime: b.end_datetime });
+    bookingsByTrip.set(b.trip_id, list);
+  });
+
+  return trips.map((t) => ({
+    id: t.id, slug: t.slug, title: t.title, subtitle: t.subtitle, status: t.status,
+    start_date: t.start_date, end_date: t.end_date, cover_emoji: t.cover_emoji,
+    gradient_from: t.gradient_from, gradient_via: t.gradient_via, gradient_to: t.gradient_to,
+    trip_members: membersByTrip.get(t.id) ?? [],
+    stages: stagesByTrip.get(t.id) ?? [],
+    bookings: bookingsByTrip.get(t.id) ?? [],
+  }));
+}
+
 export default async function TripsPage({
   searchParams,
 }: {
@@ -408,34 +470,26 @@ export default async function TripsPage({
 }) {
   const { f = "alle" } = await searchParams;
 
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
   const { id: familyId } = await getFamily();
 
-  const [{ data }, highlightPhotoByTripId, worldStats, { data: pastTripsRaw }, { data: pastTravelersRaw }] = await Promise.all([
-    supabase
-      .from("trips")
-      .select(`
-        id, slug, title, subtitle, status,
-        start_date, end_date, cover_emoji,
-        gradient_from, gradient_via, gradient_to,
-        trip_members ( persons ( id, name, initials, color ) ),
-        stages ( id, start_date, end_date ),
-        bookings ( type, status, start_datetime, end_datetime )
-      `)
-      .order("start_date", { ascending: true, nullsFirst: false }),
-    getHighlightPhotoByTripId(supabase, familyId),
+  const [householdMembers, highlightPhotoByTripId, worldStats, { data: pastTripsRaw }, { data: pastTravelersRaw }] = await Promise.all([
+    listHouseholdMembers(),
+    getHighlightPhotoByTripId(lumiCore, familyId),
     // §Punkt 6: dieselbe Reisebilanz-Quelle wie "Unsere Welt" (/family/world)
     // statt einer eigenen, hier abweichenden Berechnung.
     buildTravelWorld({ familyId }),
-    supabase
-      .from("past_trips")
+    lumiCore
+      .from("travel_past_trips")
       .select("id, country_or_region, year, places, duration_days, photo_storage_path")
-      .eq("family_id", familyId)
+      .eq("household_id", familyId)
       .order("year", { ascending: false }),
-    supabase.from("past_trip_travelers").select("past_trip_id, persons ( id, name, initials, color )"),
+    lumiCore.from("travel_past_trip_travelers").select("past_trip_id, household_member_id"),
   ]);
 
-  const trips = (data ?? []) as unknown as TripRow[];
+  const persons: PersonRow[] = householdMembers.map((m) => ({ id: m.id, name: m.name, initials: deriveInitials(m.name), color: m.color }));
+  const personById = new Map(persons.map((p) => [p.id, p]));
+  const trips = await fetchAllTripsForTripsPage(lumiCore, familyId, personById);
   const tripImageById = new Map(trips.map((t) => [t.id, resolveTripImage(t, highlightPhotoByTripId.get(t.id) ?? null)]));
   const { planned, past: pastAllYears } = applyFilter(trips, f);
 
@@ -450,7 +504,7 @@ export default async function TripsPage({
 
   const travelersByPastTrip = new Map<string, PersonRow[]>();
   (pastTravelersRaw ?? []).forEach((row) => {
-    const person = row.persons as unknown as PersonRow | null;
+    const person = personById.get(row.household_member_id);
     if (!person) return;
     const list = travelersByPastTrip.get(row.past_trip_id) ?? [];
     list.push(person);
@@ -458,7 +512,7 @@ export default async function TripsPage({
   });
   // §"Egress-Analyse 2026-07-16": 320px-Hero-Kachel -- Thumbnail statt Original, gecachte Signed URL.
   const legacyWithPhoto = legacyForDisplay.filter((p): p is typeof p & { photo_storage_path: string } => !!p.photo_storage_path);
-  const legacyDisplayByPath = await getPhotoDisplayUrls("documents", legacyWithPhoto.map((p) => p.photo_storage_path), "thumb800");
+  const legacyDisplayByPath = await getPhotoDisplayUrls(LUMI_CORE_DOCUMENTS_BUCKET, legacyWithPhoto.map((p) => p.photo_storage_path), "thumb800");
   const pastTripPhotoUrlById = new Map<string, string>();
   const pastTripResolvedPathById = new Map<string, string>();
   for (const p of legacyWithPhoto) {

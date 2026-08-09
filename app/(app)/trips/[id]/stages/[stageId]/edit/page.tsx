@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft, ImageIcon } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { updateStage, deleteStage, setStageCoverPhoto, clearStageCoverPhoto } from "@/lib/actions/stages";
 import { COUNTRY_OPTIONS } from "@/lib/geo-suggestions";
 import { StageDateFields } from "../../StageDateFields";
 import { Banner } from "@/components/Banner";
 import { SignedPhoto } from "@/components/SignedPhoto";
 import { getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
 
 type StageRow = {
   id: string
@@ -33,18 +34,18 @@ export default async function EditStagePage({
   const { id, stageId } = await params;
   const { error } = await searchParams;
 
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
 
-  const { data: trip } = await supabase
-    .from("trips")
+  const { data: trip } = await lumiCore
+    .from("travel_trips")
     .select("id, slug, title")
     .eq("slug", id)
     .maybeSingle();
 
   if (!trip) notFound();
 
-  const { data: stage } = await supabase
-    .from("stages")
+  const { data: stage } = await lumiCore
+    .from("travel_stages")
     .select("id, title, location, start_date, end_date, nights, accommodation, notes, cover_photo_id, is_transit, country_code")
     .eq("id", stageId)
     .eq("trip_id", trip.id)
@@ -54,9 +55,9 @@ export default async function EditStagePage({
   const s = stage as StageRow;
 
   const [{ count: stageCount }, { data: photosRaw }] = await Promise.all([
-    supabase.from("stages").select("id", { count: "exact", head: true }).eq("trip_id", trip.id),
-    supabase
-      .from("memory_photos")
+    lumiCore.from("travel_stages").select("id", { count: "exact", head: true }).eq("trip_id", trip.id),
+    lumiCore
+      .from("travel_memory_photos")
       .select("id, storage_path, caption")
       .eq("trip_id", trip.id)
       .eq("is_selected", true)
@@ -67,7 +68,7 @@ export default async function EditStagePage({
   const canDelete = (stageCount ?? 0) > 1;
 
   // §"Egress-Analyse 2026-07-16": 1/1-Auswahlraster für Titelbild -- Thumbnail statt Original.
-  const galleryDisplayByPath = await getPhotoDisplayUrls("documents", (photosRaw ?? []).map((p) => p.storage_path), "thumb400");
+  const galleryDisplayByPath = await getPhotoDisplayUrls(LUMI_CORE_DOCUMENTS_BUCKET, (photosRaw ?? []).map((p) => p.storage_path), "thumb400");
   const galleryPhotos = (photosRaw ?? []).map((p) => {
     const resolved = galleryDisplayByPath.get(p.storage_path);
     return { id: p.id, storagePath: resolved?.resolvedPath ?? p.storage_path, caption: p.caption, url: resolved?.url ?? null };

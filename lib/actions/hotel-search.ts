@@ -1,7 +1,7 @@
 'use server'
 
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { getFamily } from '@/lib/family'
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt } from '@/lib/family-dna'
 import { geocodeLocation, searchLodging, computeLodgingRadiusMeters, type LodgingResult } from '@/lib/providers/places-provider'
@@ -54,13 +54,13 @@ export async function getOrSearchHotelOptions(params: {
   familyDnaText: string
   forceRefresh?: boolean
 }): Promise<HotelSearchOutcome> {
-  const supabase = await createClient()
+  const supabase = await createLumiCoreClient()
   const searchKey = buildHotelSearchKey(params.destination)
 
   const { data: existing } = await supabase
-    .from('hotel_search_cache')
+    .from('travel_hotel_search_cache')
     .select('results, is_below_standard, updated_at')
-    .eq('family_id', params.familyId)
+    .eq('household_id', params.familyId)
     .eq('search_key', searchKey)
     .maybeSingle()
 
@@ -199,12 +199,12 @@ export async function getOrSearchHotelOptions(params: {
     return { status: 'error', message: 'Die Hotelauswahl konnte nicht mit echten Treffern abgeglichen werden -- bitte erneut versuchen.' }
 
   const searchedAt = new Date().toISOString()
-  const { error: upsertError } = await supabase.from('hotel_search_cache').upsert(
+  const { error: upsertError } = await supabase.from('travel_hotel_search_cache').upsert(
     {
-      family_id: params.familyId, search_key: searchKey, destination: params.destination,
+      household_id: params.familyId, search_key: searchKey, destination: params.destination,
       is_below_standard: belowStandardMode, results: items as unknown as Json, updated_at: searchedAt,
     },
-    { onConflict: 'family_id,search_key' },
+    { onConflict: 'household_id,search_key' },
   )
   // §Bugfix "Suche zeigt Ergebnis, aber hotel_search_cache bleibt beim alten
   // Stand" (Malediven-Livetest, 2026-08-02): ein Speicherfehler wurde bisher

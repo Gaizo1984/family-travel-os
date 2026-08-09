@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { Shield } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { getFamily } from "@/lib/family";
+import { listHouseholdMembers, resolveLegacyTravelPersonId, deriveInitials } from "@/lib/household-members";
 import {
   DOCUMENT_TYPE_CONFIG, DOCUMENT_VALIDITY_LABELS, DOCUMENT_VALIDITY_COLORS,
   getDocumentValidity,
@@ -20,7 +22,7 @@ type PolicyRow = {
   id: string;
   label: string;
   provider: string | null;
-  insurance_policy_persons: Array<{ persons: PersonRow | null }>;
+  persons: PersonRow[];
 };
 
 const IDENTITY_TYPES: DocumentType[] = ["passport", "id_card"];
@@ -39,10 +41,13 @@ function DocGroup({
   title,
   docsByPerson,
   persons,
+  legacyIdByMemberId,
 }: {
   title: string;
   docsByPerson: Map<string, DocumentRow[]>;
   persons: PersonRow[];
+  /** §Rückrichtung (lib/household-members.ts::resolveLegacyTravelPersonId): docsByPerson/persons sind mit der echten household_member_id verschlüsselt (passend zu travel_documents), der Link muss aber weiterhin auf Travels legacy /family/[personId] zeigen. */
+  legacyIdByMemberId: Map<string, string>;
 }) {
   const relevantPersons = persons.filter((p) => (docsByPerson.get(p.id) ?? []).length > 0);
   if (relevantPersons.length === 0) return null;
@@ -68,10 +73,11 @@ function DocGroup({
               {(docsByPerson.get(person.id) ?? []).map((doc) => {
                 const config = DOCUMENT_TYPE_CONFIG[doc.doc_type];
                 const validity = getDocumentValidity(doc);
+                const legacyPersonId = legacyIdByMemberId.get(person.id);
                 return (
                   <Link
                     key={doc.id}
-                    href={`/family/${person.id}/documents/${doc.id}`}
+                    href={legacyPersonId ? `/family/${legacyPersonId}/documents/${doc.id}` : "/family"}
                     className="flex items-center justify-between gap-3"
                     style={{ textDecoration: "none" }}
                   >
@@ -91,16 +97,30 @@ function DocGroup({
 }
 
 export default async function TravelVaultPage() {
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
+  const { id: familyId } = await getFamily();
 
   // §Performance-Audit: drei voneinander unabhängige Abfragen liefen bisher seriell.
-  const [{ data: persons }, { data: documents }, { data: policiesRaw }] = await Promise.all([
-    supabase.from("persons").select("id, name, initials").order("name"),
-    supabase.from("documents").select("id, person_id, doc_type, label, expires_at, details").not("person_id", "is", null).order("created_at", { ascending: true }),
-    supabase.from("insurance_policies").select("id, label, provider, insurance_policy_persons ( persons ( id, name, initials ) )").order("created_at", { ascending: true }),
+  // §Lumi-Core-Cutover: keine PostgREST-Embeddings zwischen travel_*-Tabellen --
+  // insurance_policy_persons wird unten flach nachgeladen statt verschachtelt.
+  const householdMembers = await listHouseholdMembers();
+  const [{ data: documents }, { data: policiesRaw }, { data: policyPersonLinks }] = await Promise.all([
+    lumiCore.from("travel_documents").select("id, household_member_id, doc_type, label, expires_at, details").eq("household_id", familyId).not("household_member_id", "is", null).order("created_at", { ascending: true }),
+    lumiCore.from("travel_insurance_policies").select("id, label, provider").eq("household_id", familyId).order("created_at", { ascending: true }),
+    lumiCore.from("travel_insurance_policy_persons").select("policy_id, household_member_id"),
   ]);
-  const personList = (persons ?? []) as PersonRow[];
-  const docs = (documents ?? []) as unknown as DocumentRow[];
+  const personList: PersonRow[] = householdMembers.map((m) => ({ id: m.id, name: m.name, initials: deriveInitials(m.name) }));
+  const personById = new Map(personList.map((p) => [p.id, p]));
+  const docs: DocumentRow[] = (documents ?? []).map((d) => ({
+    id: d.id, person_id: d.household_member_id!, doc_type: d.doc_type as DocumentType,
+    label: d.label ?? "", expires_at: d.expires_at, details: d.details as DocumentDetails | null,
+  }));
+
+  // §Rückrichtung (lib/household-members.ts::resolveLegacyTravelPersonId): DocGroup
+  // verlinkt weiterhin auf Travels legacy /family/[personId]-Route.
+  const legacyIdByMemberId = new Map(
+    await Promise.all(personList.map(async (p): Promise<[string, string]> => [p.id, (await resolveLegacyTravelPersonId(p.id)) ?? p.id])),
+  );
 
   const identityByPerson = new Map<string, DocumentRow[]>();
   const entryByPerson = new Map<string, DocumentRow[]>();
@@ -116,7 +136,17 @@ export default async function TravelVaultPage() {
     }
   }
 
-  const policies = (policiesRaw ?? []) as unknown as PolicyRow[];
+  const policyPersonsByPolicy = new Map<string, PersonRow[]>();
+  (policyPersonLinks ?? []).forEach((link) => {
+    const p = personById.get(link.household_member_id);
+    if (!p) return;
+    const list = policyPersonsByPolicy.get(link.policy_id) ?? [];
+    list.push(p);
+    policyPersonsByPolicy.set(link.policy_id, list);
+  });
+  const policies: PolicyRow[] = (policiesRaw ?? []).map((p) => ({
+    id: p.id, label: p.label, provider: p.provider, persons: policyPersonsByPolicy.get(p.id) ?? [],
+  }));
 
   const hasAnyData = docs.length > 0 || policies.length > 0;
 
@@ -140,8 +170,8 @@ export default async function TravelVaultPage() {
 
         {hasAnyData ? (
           <>
-            <DocGroup title="Reisepässe & Ausweise" docsByPerson={identityByPerson} persons={personList} />
-            <DocGroup title="Visa & Einreise" docsByPerson={entryByPerson} persons={personList} />
+            <DocGroup title="Reisepässe & Ausweise" docsByPerson={identityByPerson} persons={personList} legacyIdByMemberId={legacyIdByMemberId} />
+            <DocGroup title="Visa & Einreise" docsByPerson={entryByPerson} persons={personList} legacyIdByMemberId={legacyIdByMemberId} />
 
             {policies.length > 0 && (
               <section>
@@ -150,7 +180,7 @@ export default async function TravelVaultPage() {
                 </div>
                 <div className="space-y-2">
                   {policies.map((policy) => {
-                    const insuredPersons = policy.insurance_policy_persons.flatMap((p) => (p.persons ? [p.persons] : []));
+                    const insuredPersons = policy.persons;
                     return (
                       <Link
                         key={policy.id}

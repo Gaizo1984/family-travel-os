@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { ChevronLeft, Trash2, Users, Image as ImageIcon } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
 import { getFamily } from "@/lib/family";
+import { listHouseholdMembers } from "@/lib/household-members";
 import { deleteMemoryPhoto, setCoverPhoto } from "@/lib/actions/memories";
 import { deriveTripDateRange } from "@/lib/trip-dates";
 import { getPhotoDisplayUrls, getPhotoDisplayUrl } from "@/lib/photo-thumbnails";
@@ -10,7 +12,7 @@ import { SignedPhoto } from "@/components/SignedPhoto";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
 
 type PhotoRow = {
-  id: string; trip_id: string | null; past_trip_id: string | null; uploaded_by_person_id: string | null
+  id: string; trip_id: string | null; past_trip_id: string | null; uploaded_by_household_member_id: string | null
   storage_path: string; taken_at: string | null; caption: string | null
   created_at: string; sort_order: number
   is_selected: boolean; is_duplicate_of: string | null; quality_score: number | null
@@ -121,7 +123,7 @@ export default async function MemoriesPage({
   searchParams: Promise<{ error?: string; year?: string }>;
 }) {
   const { error, year: yearParam } = await searchParams;
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
   const { id: familyId } = await getFamily();
   const returnTo = "/memories";
 
@@ -131,39 +133,50 @@ export default async function MemoriesPage({
   // um zu bestimmen, welchem Jahr jedes Foto zugeordnet ist -- signiert/lädt
   // aber NUR das ausgewählte Jahr wirklich. Andere Jahre werden nur noch als
   // kompakte Links gezeigt (Drilldown über die bestehende Yearbook-Seite).
-  const [{ data: photoMetaRaw }, { data: personsRaw }, { data: tripsRaw }, { data: pastTripsRaw }] = await Promise.all([
-    supabase
-      .from("memory_photos")
+  const [{ data: photoMetaRaw }, householdMembers, { data: tripsRaw }, { data: pastTripsRaw }] = await Promise.all([
+    lumiCore
+      .from("travel_memory_photos")
       .select("id, trip_id, past_trip_id, taken_at, created_at, is_selected")
-      .eq("family_id", familyId),
-    supabase.from("persons").select("id, name").eq("family_id", familyId),
-    supabase
-      .from("trips")
-      .select(`
-        id, title, cover_photo_id, start_date, end_date,
-        stages ( start_date, end_date ),
-        bookings ( type, status, start_datetime, end_datetime )
-      `)
-      .eq("family_id", familyId),
+      .eq("household_id", familyId),
+    listHouseholdMembers(),
+    lumiCore
+      .from("travel_trips")
+      .select("id, title, cover_photo_id, start_date, end_date")
+      .eq("household_id", familyId),
     // §Bugfix "Fotos aus Travel Memory sind past_trips nicht zuordenbar":
     // ALLE past_trips der Familie werden geladen (nicht mehr nur die mit
     // eigenem photo_storage_path) -- auch eine Reise ohne eigenes Titelbild
     // kann jetzt über memory_photos.past_trip_id zugeordnete Galeriefotos haben.
-    supabase.from("past_trips").select("id, country_or_region, year, places, photo_storage_path").eq("family_id", familyId),
+    lumiCore.from("travel_past_trips").select("id, country_or_region, year, places, photo_storage_path").eq("household_id", familyId),
   ]);
 
   const trips = tripsRaw ?? [];
   const tripById = new Map(trips.map((t) => [t.id, t]));
-  const tripRangeById = new Map(trips.map((t) => [t.id, deriveTripDateRange(t, t.bookings, t.stages)]));
   const coverPhotoIds = new Set(trips.flatMap((t) => (t.cover_photo_id ? [t.cover_photo_id] : [])));
   const pastTrips = pastTripsRaw ?? [];
   const pastTripById = new Map(pastTrips.map((pt) => [pt.id, pt]));
 
+  // §Lumi-Core-Cutover: keine PostgREST-Embeddings zwischen travel_*-Tabellen
+  // -- Etappen/Buchungen je Reise flach nachgeladen und per Map wieder
+  // zugeordnet, statt eines verschachtelten `trips`-Selects (siehe
+  // app/(app)/today/page.tsx::fetchTripsForToday für dasselbe Muster).
+  const tripIds = trips.map((t) => t.id);
+  const [{ data: stagesRaw }, { data: bookingsRaw }] = tripIds.length
+    ? await Promise.all([
+        lumiCore.from("travel_stages").select("trip_id, start_date, end_date").in("trip_id", tripIds),
+        lumiCore.from("travel_bookings").select("trip_id, type, status, start_datetime, end_datetime").in("trip_id", tripIds),
+      ])
+    : [{ data: [] }, { data: [] }] as const;
+  const stagesByTrip = new Map<string, { start_date: string | null; end_date: string | null }[]>();
+  (stagesRaw ?? []).forEach((s) => stagesByTrip.set(s.trip_id, [...(stagesByTrip.get(s.trip_id) ?? []), { start_date: s.start_date, end_date: s.end_date }]));
+  const bookingsByTrip = new Map<string, { type: string; status: string; start_datetime: string | null; end_datetime: string | null }[]>();
+  (bookingsRaw ?? []).forEach((b) => bookingsByTrip.set(b.trip_id, [...(bookingsByTrip.get(b.trip_id) ?? []), { type: b.type, status: b.status, start_datetime: b.start_datetime, end_datetime: b.end_datetime }]));
+  const tripRangeById = new Map(trips.map((t) => [t.id, deriveTripDateRange(t, bookingsByTrip.get(t.id) ?? [], stagesByTrip.get(t.id) ?? [])]));
+
   const allPhotoMeta = photoMetaRaw ?? [];
   const selectedPhotoMeta = allPhotoMeta.filter((p) => p.is_selected);
   const hiddenCount = allPhotoMeta.length - selectedPhotoMeta.length;
-  const persons = personsRaw ?? [];
-  const personNameById = new Map(persons.map((p) => [p.id, p.name]));
+  const personNameById = new Map(householdMembers.map((p) => [p.id, p.name]));
 
   function yearOfPhoto(p: { trip_id: string | null; past_trip_id: string | null; taken_at: string | null; created_at: string }): number {
     const fallbackDate = (p.taken_at ?? p.created_at).slice(0, 10);
@@ -182,7 +195,7 @@ export default async function MemoriesPage({
     const y = yearOfPhoto(p);
     photoCountByYear.set(y, (photoCountByYear.get(y) ?? 0) + 1);
   }
-  const legacyEntries = pastTrips.filter((p): p is typeof p & { photo_storage_path: string } => Boolean(p.photo_storage_path));
+  const legacyEntries = pastTrips.filter((p): p is typeof p & { photo_storage_path: string; year: number } => Boolean(p.photo_storage_path) && p.year != null);
   for (const p of legacyEntries) photoCountByYear.set(p.year, (photoCountByYear.get(p.year) ?? 0) + 1);
 
   const allYears = [...photoCountByYear.keys()].sort((a, b) => b - a);
@@ -191,9 +204,9 @@ export default async function MemoriesPage({
 
   const photoIdsInSelectedYear = selectedPhotoMeta.filter((p) => yearOfPhoto(p) === selectedYear).map((p) => p.id);
   const { data: photosRaw } = photoIdsInSelectedYear.length > 0
-    ? await supabase
-      .from("memory_photos")
-      .select("id, trip_id, past_trip_id, uploaded_by_person_id, storage_path, taken_at, caption, created_at, sort_order, is_selected, is_duplicate_of, quality_score")
+    ? await lumiCore
+      .from("travel_memory_photos")
+      .select("id, trip_id, past_trip_id, uploaded_by_household_member_id, storage_path, taken_at, caption, created_at, sort_order, is_selected, is_duplicate_of, quality_score")
       .in("id", photoIdsInSelectedYear)
       .order("taken_at", { ascending: false, nullsFirst: false })
     : { data: [] };
@@ -204,7 +217,7 @@ export default async function MemoriesPage({
   // Lightbox (components/PhotoLightbox.tsx nutzt weiterhin `url`, das hier
   // bewusst ein Thumbnail ist; siehe Optimierungsplan Punkt 4 -- die Lightbox
   // selbst lädt separat das Original bei tatsächlichem Öffnen).
-  const displayByPath = await getPhotoDisplayUrls("documents", photos.map((p) => p.storage_path), "thumb400");
+  const displayByPath = await getPhotoDisplayUrls(LUMI_CORE_DOCUMENTS_BUCKET, photos.map((p) => p.storage_path), "thumb400");
 
   // §"Neueste Bilder oben, mit einem Cut je Reise (z.B. 03/2025 Mauritius,
   // 07/2025 Malediven)": Fotos werden zuerst je Reise gruppiert (nicht mehr
@@ -260,7 +273,7 @@ export default async function MemoriesPage({
   const legacyInSelectedYear = legacyEntries.filter((p) => p.year === selectedYear);
   const legacyWithUrls = await Promise.all(
     legacyInSelectedYear.map(async (p) => {
-      const resolved = await getPhotoDisplayUrl("documents", p.photo_storage_path, "thumb400");
+      const resolved = await getPhotoDisplayUrl(LUMI_CORE_DOCUMENTS_BUCKET, p.photo_storage_path, "thumb400");
       return { entry: { id: p.id, country_or_region: p.country_or_region, places: p.places }, url: resolved?.url ?? null };
     }),
   );
@@ -312,7 +325,7 @@ export default async function MemoriesPage({
                   </div>
                   <div className="columns-2 sm:columns-3 gap-4">
                     {cut.entries.map(({ photo, url, resolvedPath }) => (
-                      <PhotoCard key={photo.id} photo={photo} url={url} resolvedPath={resolvedPath} personName={photo.uploaded_by_person_id ? personNameById.get(photo.uploaded_by_person_id) ?? null : null} returnTo={returnTo} isCover={coverPhotoIds.has(photo.id)} />
+                      <PhotoCard key={photo.id} photo={photo} url={url} resolvedPath={resolvedPath} personName={photo.uploaded_by_household_member_id ? personNameById.get(photo.uploaded_by_household_member_id) ?? null : null} returnTo={returnTo} isCover={coverPhotoIds.has(photo.id)} />
                     ))}
                   </div>
                 </div>

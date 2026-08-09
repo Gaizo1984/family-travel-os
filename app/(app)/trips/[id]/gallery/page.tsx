@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft, Trash2, Image as ImageIcon, ArrowUp, ArrowDown, Pencil } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
 import { getFamily } from "@/lib/family";
+import { listHouseholdMembers } from "@/lib/household-members";
 import {
   uploadMemoryPhotos, createMemoryUploadSlots, deleteMemoryPhoto,
   setCoverPhoto, reorderMemoryPhoto,
@@ -31,7 +33,7 @@ const ICON_BUTTON_STYLE: React.CSSProperties = {
 
 type PhotoRow = {
   id: string; storage_path: string; caption: string | null; taken_at: string | null
-  stage_id: string | null; uploaded_by_person_id: string | null
+  stage_id: string | null; uploaded_by_household_member_id: string | null
 };
 
 export default async function TripGalleryPage({
@@ -44,43 +46,42 @@ export default async function TripGalleryPage({
   const { id } = await params;
   const { error, uploaded } = await searchParams;
 
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
   const { id: familyId } = await getFamily();
   const returnTo = `/trips/${id}/gallery`;
 
-  const { data: trip } = await supabase
-    .from("trips")
+  const { data: trip } = await lumiCore
+    .from("travel_trips")
     .select("id, slug, title, cover_photo_id")
     .eq("slug", id)
     .maybeSingle();
   if (!trip) notFound();
 
-  const [{ data: photosRaw }, { count: hiddenCount }, { data: stagesRaw }, { data: personsRaw }] = await Promise.all([
-    supabase
-      .from("memory_photos")
-      .select("id, storage_path, caption, taken_at, stage_id, uploaded_by_person_id")
+  const [{ data: photosRaw }, { count: hiddenCount }, { data: stagesRaw }, householdMembers] = await Promise.all([
+    lumiCore
+      .from("travel_memory_photos")
+      .select("id, storage_path, caption, taken_at, stage_id, uploaded_by_household_member_id")
       .eq("trip_id", trip.id)
       .eq("is_selected", true)
       .order("sort_order", { ascending: true })
       .order("taken_at", { ascending: false, nullsFirst: false }),
-    supabase.from("memory_photos").select("id", { count: "exact", head: true }).eq("trip_id", trip.id).eq("is_selected", false),
-    supabase.from("stages").select("id, title, location").eq("trip_id", trip.id).order("sort_order", { ascending: true }),
-    supabase.from("persons").select("id, name").eq("family_id", familyId),
+    lumiCore.from("travel_memory_photos").select("id", { count: "exact", head: true }).eq("trip_id", trip.id).eq("is_selected", false),
+    lumiCore.from("travel_stages").select("id, title, location").eq("trip_id", trip.id).order("sort_order", { ascending: true }),
+    listHouseholdMembers(),
   ]);
 
   const photos = (photosRaw ?? []) as PhotoRow[];
   const stages = stagesRaw ?? [];
-  const persons = personsRaw ?? [];
   const stageById = new Map(stages.map((s) => [s.id, s.title]));
-  const personNameById = new Map(persons.map((p) => [p.id, p.name]));
+  const personNameById = new Map(householdMembers.map((p) => [p.id, p.name]));
 
   // §"Egress-Analyse 2026-07-16": Grid zeigt nur noch ein 400px-Vorschaubild;
   // die Lightbox lädt weiterhin das volle Original, aber erst wenn sie
   // tatsächlich geöffnet wird.
   const paths = photos.map((p) => p.storage_path);
   const [thumbByPath, originalByPath] = await Promise.all([
-    getPhotoDisplayUrls("documents", paths, "thumb400"),
-    getPhotoDisplayUrls("documents", paths, "original"),
+    getPhotoDisplayUrls(LUMI_CORE_DOCUMENTS_BUCKET, paths, "thumb400"),
+    getPhotoDisplayUrls(LUMI_CORE_DOCUMENTS_BUCKET, paths, "original"),
   ]);
   const photosWithUrls = photos.map((p) => {
     const thumb = thumbByPath.get(p.storage_path) ?? null;
@@ -203,8 +204,8 @@ export default async function TripGalleryPage({
                         {photo.stage_id && stageById.has(photo.stage_id) && (
                           <div style={{ color: "#C9A96E", fontSize: "0.56rem" }}>{stageById.get(photo.stage_id)}</div>
                         )}
-                        {photo.uploaded_by_person_id && personNameById.has(photo.uploaded_by_person_id) && (
-                          <div style={{ color: "#C9A96E", fontSize: "0.56rem" }}>{personNameById.get(photo.uploaded_by_person_id)}</div>
+                        {photo.uploaded_by_household_member_id && personNameById.has(photo.uploaded_by_household_member_id) && (
+                          <div style={{ color: "#C9A96E", fontSize: "0.56rem" }}>{personNameById.get(photo.uploaded_by_household_member_id)}</div>
                         )}
                       </div>
                       <div className="flex flex-col gap-0.5">

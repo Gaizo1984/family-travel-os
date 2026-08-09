@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { getFamily } from "@/lib/family";
 import { REEL_STYLE_LABELS } from "@/lib/ai-style-guidelines";
 import { listReelRenders, startReelRender, pollReelRenderStatus, deleteReelRender } from "@/lib/actions/reel-render";
@@ -16,18 +16,18 @@ import { ReelRenderPanel } from "@/components/ReelRenderPanel";
  */
 export default async function ReelRenderPage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
   const { id: familyId } = await getFamily();
 
-  const { data: project } = await supabase
-    .from("content_projects")
+  const { data: project } = await lumiCore
+    .from("travel_content_projects")
     .select("id, reel_style, reel_duration_seconds")
-    .eq("id", projectId).eq("family_id", familyId).eq("project_type", "reel")
+    .eq("id", projectId).eq("household_id", familyId).eq("project_type", "reel")
     .maybeSingle();
   if (!project) notFound();
 
-  const { data: draft } = await supabase
-    .from("content_drafts")
+  const { data: draft } = await lumiCore
+    .from("travel_content_drafts")
     .select("id")
     .eq("project_id", projectId).eq("draft_type", "video_reel")
     .order("created_at", { ascending: false }).limit(1).maybeSingle();

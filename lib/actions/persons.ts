@@ -1,15 +1,24 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
+import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
+import { getFamily } from '@/lib/family'
+import { resolveHouseholdMemberId, toProfilePhotoPath, LUMI_CORE_PROFILE_PHOTOS_BUCKET } from '@/lib/lumi-core-storage/paths'
+import { uploadToLumiCore, removeFromLumiCore } from '@/lib/lumi-core-storage/client'
 import { ALLOWED_DOCUMENT_MIME_TYPES, MAX_DOCUMENT_FILE_SIZE, readDateGroupFromFormData } from '@/lib/documents'
 import { TRAVEL_NEED_OPTIONS } from '@/lib/family-dna'
 
-function buildProfilePhotoPath(personId: string, fileName: string): string {
-  const ext = fileName.includes('.') ? fileName.split('.').pop()!.toLowerCase() : 'jpg'
-  return `profile-photos/${personId}/${crypto.randomUUID()}.${ext}`
-}
-
+/**
+ * FINALER CUTOVER, Schema-Luecken-Schliessung: `personId` ist weiterhin die
+ * LEGACY Travel-person_id (die `/family/[personId]/...`-Routen bleiben
+ * bewusst so benannt), wird hier aber sofort auf die echte Lumi-Core
+ * household_member_id aufgeloest (travel_person_migration_map, siehe
+ * lib/lumi-core-storage/paths.ts). name/birth_date/is_minor/avatar liegen
+ * bereits nativ auf household_members; role_label/description/
+ * interest_tags/travel_needs (kein Lumi-Core-Kernschema-Aequivalent, rein
+ * Travel-spezifisch) liegen in der neuen Zusatztabelle
+ * travel_household_member_profiles (1:1 zu household_members).
+ */
 export async function updatePersonProfile(formData: FormData) {
   const personId    = String(formData.get('person_id') ?? '')
   const name        = String(formData.get('name') ?? '').trim()
@@ -19,6 +28,9 @@ export async function updatePersonProfile(formData: FormData) {
   const isMinor     = formData.get('is_minor') === 'on'
   const returnTo    = String(formData.get('return_to') ?? '').trim()
   const editPath    = `/family/${personId}/edit`
+
+  const householdMemberId = await resolveHouseholdMemberId(personId)
+  if (!householdMemberId) redirect(`${editPath}?error=${encodeURIComponent('Person nicht gefunden.')}`)
 
   // §"Identische Datumsmatrix wie z.B. beim Flugvergleich verwenden"
   // (Nutzervorgabe): DateSelectFields liefert drei Felder (_day/_month/_year)
@@ -42,21 +54,8 @@ export async function updatePersonProfile(formData: FormData) {
   if (name.length < 1)
     redirect(`${editPath}?error=${encodeURIComponent('Name darf nicht leer sein')}`)
 
-  const supabase = await createClient()
-
-  const update: {
-    name: string; role_label: string | null; description: string | null
-    interest_tags: string[]; travel_needs: string[]; photo_storage_path?: string
-    birth_date: string | null; is_minor: boolean
-  } = {
-    name,
-    role_label: roleLabel || null,
-    description: description || null,
-    interest_tags: interestTags,
-    travel_needs: travelNeeds,
-    birth_date: birthDate,
-    is_minor: isMinor,
-  }
+  const lumiCore = await createLumiCoreClient()
+  const { id: householdId } = await getFamily()
 
   const file = formData.get('file')
   if (file instanceof File && file.size > 0) {
@@ -65,25 +64,47 @@ export async function updatePersonProfile(formData: FormData) {
     if (file.size > MAX_DOCUMENT_FILE_SIZE)
       redirect(`${editPath}?error=${encodeURIComponent('Die Datei ist zu groß (maximal 10 MB).')}`)
 
-    const { data: existing } = await supabase.from('persons').select('photo_storage_path').eq('id', personId).maybeSingle()
+    const { data: existing } = await lumiCore.from('household_members').select('avatar_storage_path').eq('id', householdMemberId).maybeSingle()
 
-    const newPath = buildProfilePhotoPath(personId, file.name)
-    const { error: uploadError } = await supabase.storage.from('documents').upload(newPath, file, { contentType: file.type, cacheControl: '31536000' })
+    const newPath = await toProfilePhotoPath(personId, file.name)
+    if (!newPath) redirect(`${editPath}?error=${encodeURIComponent('Foto-Upload fehlgeschlagen: Household nicht ermittelbar.')}`)
+
+    const { error: uploadError } = await uploadToLumiCore(LUMI_CORE_PROFILE_PHOTOS_BUCKET, newPath, file, { contentType: file.type })
     if (uploadError)
-      redirect(`${editPath}?error=${encodeURIComponent('Foto-Upload fehlgeschlagen: ' + uploadError.message)}`)
+      redirect(`${editPath}?error=${encodeURIComponent('Foto-Upload fehlgeschlagen: ' + uploadError)}`)
 
-    if (existing?.photo_storage_path) {
+    if (existing?.avatar_storage_path) {
       // Altes Foto erst nach erfolgreichem Upload des neuen entfernen — nie
       // verwaist im Storage lassen, aber auch nie das neue Foto riskieren.
-      await supabase.storage.from('documents').remove([existing.photo_storage_path])
+      await removeFromLumiCore(LUMI_CORE_PROFILE_PHOTOS_BUCKET, [existing.avatar_storage_path])
     }
 
-    update.photo_storage_path = newPath
+    await lumiCore.from('household_members').update({ avatar_storage_path: newPath }).eq('id', householdMemberId)
   }
 
-  const { error } = await supabase.from('persons').update(update).eq('id', personId)
-  if (error)
-    redirect(`${editPath}?error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
+  const { error: memberError } = await lumiCore
+    .from('household_members')
+    .update({ name, birth_date: birthDate, is_minor: isMinor })
+    .eq('id', householdMemberId)
+  if (memberError)
+    redirect(`${editPath}?error=${encodeURIComponent('Speicherfehler: ' + memberError.message)}`)
+
+  const { error: profileError } = await lumiCore
+    .from('travel_household_member_profiles')
+    .upsert(
+      {
+        household_id: householdId,
+        household_member_id: householdMemberId,
+        role_label: roleLabel || null,
+        description: description || null,
+        interest_tags: interestTags,
+        travel_needs: travelNeeds,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'household_member_id' },
+    )
+  if (profileError)
+    redirect(`${editPath}?error=${encodeURIComponent('Speicherfehler: ' + profileError.message)}`)
 
   redirect(returnTo || `/family/${personId}`)
 }

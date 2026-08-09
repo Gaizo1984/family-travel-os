@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { listHouseholdMembers } from "@/lib/household-members";
 import { updateTrip } from "@/lib/actions/trips";
 import { Banner } from "@/components/Banner";
 import { DateSelectFields } from "@/components/DateSelectFields";
@@ -22,7 +23,7 @@ type TripRow = {
   status: string
   start_date: string | null
   end_date: string | null
-  trip_members: Array<{ person_id: string }>
+  trip_members: Array<{ household_member_id: string }>
 }
 
 export default async function EditTripPage({
@@ -35,32 +36,39 @@ export default async function EditTripPage({
   const { id } = await params;
   const { error } = await searchParams;
 
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
 
-  const { data } = await supabase
-    .from("trips")
-    .select(`
-      id, slug, title, subtitle, status, start_date, end_date,
-      trip_members ( person_id ),
-      stages ( start_date, end_date ),
-      bookings ( type, status, start_datetime, end_datetime )
-    `)
+  const { data: tripRaw } = await lumiCore
+    .from("travel_trips")
+    .select("id, slug, title, subtitle, status, start_date, end_date")
     .eq("slug", id)
     .maybeSingle();
 
-  if (!data) notFound();
-  const trip = data as unknown as TripRow & {
+  if (!tripRaw) notFound();
+
+  // §Lumi-Core-Cutover: Lumi Core hat keine PostgREST-Embeddings zwischen
+  // travel_*-Tabellen -- ersetzt die frühere verschachtelte `trips`-Abfrage
+  // (trip_members/stages/bookings) durch drei flache Parallelabfragen.
+  const [{ data: membersRaw }, { data: stagesRaw }, { data: bookingsRaw }] = await Promise.all([
+    lumiCore.from("travel_trip_members").select("household_member_id").eq("trip_id", tripRaw.id),
+    lumiCore.from("travel_stages").select("start_date, end_date").eq("trip_id", tripRaw.id),
+    lumiCore.from("travel_bookings").select("type, status, start_datetime, end_datetime").eq("trip_id", tripRaw.id),
+  ]);
+
+  const trip: TripRow & {
     stages: Array<{ start_date: string | null; end_date: string | null }>
     bookings: Array<{ type: string; status: string; start_datetime: string | null; end_datetime: string | null }>
+  } = {
+    ...tripRaw,
+    trip_members: membersRaw ?? [],
+    stages: stagesRaw ?? [],
+    bookings: bookingsRaw ?? [],
   };
   const derivedRange = deriveTripDateRange(trip, trip.bookings, trip.stages);
 
-  const { data: persons } = await supabase
-    .from("persons")
-    .select("id, name, initials, color")
-    .order("name");
+  const persons = await listHouseholdMembers();
 
-  const memberIds = new Set(trip.trip_members.map((m) => m.person_id));
+  const memberIds = new Set(trip.trip_members.map((m) => m.household_member_id));
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>

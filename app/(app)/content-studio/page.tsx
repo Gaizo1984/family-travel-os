@@ -5,7 +5,7 @@ import {
   ArrowRight, ImagePlus, Settings, MapPin, Wand2, Clapperboard, Clock, Gauge, Film,
   LayoutGrid, Image as ImageIcon, FolderOpen, ScanSearch,
 } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { getFamily } from "@/lib/family";
 import { buildContentStrategyContext } from "@/lib/content-strategy-context";
 import { getCachedContentStrategy, generateAndCacheContentStrategy } from "@/lib/content-strategy";
@@ -56,7 +56,7 @@ export default async function ContentStudioPage({
   searchParams: Promise<{ job?: string }>;
 }) {
   const { job: jobId } = await searchParams;
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
   const { id: familyId } = await getFamily();
 
   // §"KI-Aufrufe hintergrundfest machen": "Andere Strategie"-Regenerierung
@@ -94,15 +94,24 @@ export default async function ContentStudioPage({
   // §"Entwürfe fortsetzen jetzt über eigene Kachel/Seite" (Nutzervorgabe):
   // der Hub selbst braucht Sessions/Reel-Projekte nicht mehr direkt -- die
   // vollständige Liste lebt jetzt in app/(app)/content-studio/entwuerfe.
-  const [{ data: recentIdeas }, strategyContext] = await Promise.all([
-    supabase
-      .from("content_ideas")
-      .select("id, content_goal, status, trip_id, trips(title)")
-      .eq("family_id", familyId)
+  // §Lumi-Core-Cutover: Lumi Core hat keine PostgREST-Embeddings zwischen
+  // travel_*-Tabellen -- der frühere `trips(title)`-Join wird durch eine
+  // zweite, flache Abfrage + Map-Reassembly ersetzt.
+  const [{ data: recentIdeasRaw }, strategyContext] = await Promise.all([
+    lumiCore
+      .from("travel_content_ideas")
+      .select("id, content_goal, status, trip_id")
+      .eq("household_id", familyId)
       .order("created_at", { ascending: false })
       .limit(3),
     buildContentStrategyContext(familyId),
   ]);
+  const recentIdeas = recentIdeasRaw ?? [];
+  const recentIdeaTripIds = recentIdeas.map((i) => i.trip_id).filter((id): id is string => Boolean(id));
+  const { data: recentIdeaTripsRaw } = recentIdeaTripIds.length > 0
+    ? await lumiCore.from("travel_trips").select("id, title").in("id", recentIdeaTripIds)
+    : { data: [] as { id: string; title: string }[] };
+  const tripTitleByIdForIdeas = new Map((recentIdeaTripsRaw ?? []).map((t) => [t.id, t.title]));
 
   // §"Vom Ideengenerator zum Content Director": nur EINE "Today's Content
   // Strategy" gleichzeitig, einmal pro Tag generiert und zwischengespeichert
@@ -275,7 +284,7 @@ export default async function ContentStudioPage({
           ))}
         </div>
 
-        {(recentIdeas ?? []).length > 0 && (
+        {recentIdeas.length > 0 && (
           <div>
             <div className="flex items-center justify-between mb-4">
               <h2 style={{ color: "var(--muted)", fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase" }}>
@@ -286,7 +295,7 @@ export default async function ContentStudioPage({
               </Link>
             </div>
             <div className="grid grid-cols-1 gap-2">
-              {(recentIdeas ?? []).map((idea) => (
+              {recentIdeas.map((idea) => (
                 <Link
                   key={idea.id}
                   href={`/content-studio/ideas/${idea.id}`}
@@ -294,7 +303,7 @@ export default async function ContentStudioPage({
                   style={{ background: "var(--surface)", border: "1px solid var(--border)", textDecoration: "none" }}
                 >
                   <span style={{ color: "var(--foreground)", fontSize: "0.82rem" }}>
-                    {(idea.trips as unknown as { title: string } | null)?.title ?? "Reise"}{idea.content_goal ? ` · ${idea.content_goal}` : ""}
+                    {(idea.trip_id && tripTitleByIdForIdeas.get(idea.trip_id)) ?? "Reise"}{idea.content_goal ? ` · ${idea.content_goal}` : ""}
                   </span>
                   <ArrowRight size={12} strokeWidth={1.5} style={{ color: "var(--accent)" }} />
                 </Link>

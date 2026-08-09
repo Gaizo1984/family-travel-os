@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft, Trophy } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { generateIdeaComparison } from "@/lib/actions/trip-idea-comparisons";
 import { chooseComparisonWinner } from "@/lib/actions/trip-ideas";
 import { LUXURY_TIER_LABELS, TIER_RANK, type LuxuryHotelTier } from "@/lib/data/luxury-hotel-brands";
@@ -75,16 +75,16 @@ export default async function CompareIdeasPage({
   const ideaIds = (ids ?? "").split(",").filter(Boolean);
   if (ideaIds.length < 2) notFound();
 
-  const supabase = await createClient();
-  const { data: ideasRaw } = await supabase
-    .from("trip_ideas")
+  const lumiCore = await createLumiCoreClient();
+  const { data: ideasRaw } = await lumiCore
+    .from("travel_trip_ideas")
     .select("id, destination, session_id, is_chosen, chosen_variant_type, variants")
     .in("id", ideaIds);
   const ideas = (ideasRaw ?? []) as unknown as IdeaRow[];
   if (ideas.length < 2) notFound();
 
-  const { data: comparisonRow } = await supabase
-    .from("trip_idea_comparisons")
+  const { data: comparisonRow } = await lumiCore
+    .from("travel_trip_idea_comparisons")
     .select("scores")
     .eq("comparison_key", [...ideaIds].sort().join(","))
     .maybeSingle();

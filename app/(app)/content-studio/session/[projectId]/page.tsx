@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
 import {
   createContentSessionUploadSlots, uploadContentSessionPhotos, analyzeContentSession,
   deleteContentSessionPhotosNow, retainContentSessionPhotoAsMemory, chooseContentSessionFormat,
@@ -81,15 +82,20 @@ export default async function ContentSessionPage({
   const { projectId } = await params;
   const { error, uploaded, package: packageCount, fit, reason, missing, altfocus, job: jobId } = await searchParams;
 
-  const supabase = await createClient();
-  const { data: project } = await supabase
-    .from("content_projects")
-    .select("id, title, trip_id, status, output_format, language, tonality, content_focus, custom_focus, mood, hint_text, trips(title)")
+  const lumiCore = await createLumiCoreClient();
+  const { data: project } = await lumiCore
+    .from("travel_content_projects")
+    .select("id, title, trip_id, status, output_format, language, tonality, content_focus, custom_focus, mood, hint_text")
     .eq("id", projectId)
     .eq("project_type", "session")
     .maybeSingle();
 
   if (!project) notFound();
+
+  // §Lumi-Core-Cutover: keine PostgREST-Embeddings -- Reisetitel per eigener Abfrage.
+  const { data: tripForTitle } = project.trip_id
+    ? await lumiCore.from("travel_trips").select("title").eq("id", project.trip_id).maybeSingle()
+    : { data: null };
 
   // §"KI-Aufrufe hintergrundfest machen": Wartezustand, solange die
   // Analyse/Generierung im Hintergrund läuft -- die Client-Komponente
@@ -110,30 +116,30 @@ export default async function ContentSessionPage({
   }
 
   const [{ data: photosRaw }, { data: drafts }, { count: retainedCount }] = await Promise.all([
-    supabase
-      .from("content_project_photos")
+    lumiCore
+      .from("travel_content_project_photos")
       .select("id, storage_path, temporary, expires_at, retained_as_memory, is_duplicate_of")
       .eq("project_id", projectId)
       .order("created_at", { ascending: true }),
-    supabase
-      .from("content_drafts")
+    lumiCore
+      .from("travel_content_drafts")
       .select("id, draft_type, created_at")
       .eq("project_id", projectId)
       .order("created_at", { ascending: false }),
     project.trip_id
-      ? supabase.from("memory_photos").select("id", { count: "exact", head: true }).eq("trip_id", project.trip_id).eq("is_selected", true)
+      ? lumiCore.from("travel_memory_photos").select("id", { count: "exact", head: true }).eq("trip_id", project.trip_id).eq("is_selected", true)
       : Promise.resolve({ count: 0 }),
   ]);
 
   const photos = (photosRaw ?? []).filter((p) => !p.is_duplicate_of);
   // §"Egress-Analyse 2026-07-16": kleine 3-4-spaltige Vorschau -- Thumbnail statt Original.
-  const displayByPath = await getPhotoDisplayUrls("documents", photos.map((p) => p.storage_path), "thumb400");
+  const displayByPath = await getPhotoDisplayUrls(LUMI_CORE_DOCUMENTS_BUCKET, photos.map((p) => p.storage_path), "thumb400");
   const photosWithUrls = photos.map((p) => {
     const resolved = displayByPath.get(p.storage_path) ?? null;
     return { ...p, url: resolved?.url ?? null, resolvedPath: resolved?.resolvedPath ?? p.storage_path };
   });
 
-  const tripTitle = (project.trips as unknown as { title: string } | null)?.title ?? project.title;
+  const tripTitle = tripForTitle?.title ?? project.title;
   const hasPhotos = photos.length > 0;
   const outputFormat = project.output_format;
   const formatLabel = outputFormat ? (CONTENT_FORMAT_LABELS[outputFormat] ?? outputFormat) : null;

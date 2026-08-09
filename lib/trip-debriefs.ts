@@ -1,4 +1,3 @@
-import type { SupabaseClient } from '@supabase/supabase-js'
 import { createLumiCoreClient } from './supabase/lumi-core-server'
 
 /**
@@ -106,8 +105,7 @@ function mapRow(row: DebriefRow): TripDebrief {
  * erzwingt das per partiellem Unique-Index) -- für die Anzeige reicht daher
  * `maybeSingle`.
  */
-export async function loadActiveDebrief(supabase: SupabaseClient, tripId: string): Promise<TripDebrief | null> {
-  void supabase
+export async function loadActiveDebrief(tripId: string): Promise<TripDebrief | null> {
   const lumiCore = await createLumiCoreClient()
   const { data } = await lumiCore
     .from('travel_trip_debriefs')
@@ -119,8 +117,7 @@ export async function loadActiveDebrief(supabase: SupabaseClient, tripId: string
 }
 
 /** Für einen Dashboard-Hinweis "ihr habt einen offenen Rückblick" -- über alle Reisen der Familie. Siehe Hinweis zu `supabase` bei loadActiveDebrief. */
-export async function loadActiveDebriefsForFamily(supabase: SupabaseClient, familyId: string): Promise<TripDebrief[]> {
-  void supabase
+export async function loadActiveDebriefsForFamily(familyId: string): Promise<TripDebrief[]> {
   const lumiCore = await createLumiCoreClient()
   const { data } = await lumiCore
     .from('travel_trip_debriefs')

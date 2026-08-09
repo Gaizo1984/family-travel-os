@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ChevronLeft, Trash2, Star } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { getFamily } from "@/lib/family";
 import { deleteTripIdea, toggleTripIdeaFavorite } from "@/lib/actions/trip-ideas";
 import { generateIdeaComparison } from "@/lib/actions/trip-idea-comparisons";
@@ -30,12 +30,12 @@ export default async function DiscoverIdeasPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const { error } = await searchParams;
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
   const { id: familyId } = await getFamily();
-  const { data: ideasRaw } = await supabase
-    .from("trip_ideas")
+  const { data: ideasRaw } = await lumiCore
+    .from("travel_trip_ideas")
     .select("id, destination, route_summary, best_season, reasoning, origin, session_id, converted_trip_id, is_favorite")
-    .eq("family_id", familyId);
+    .eq("household_id", familyId);
 
   // §"Ideen alphabetisch nach Ländern ordnen": destination ist Freitext
   // (z. B. "Costa Rica" oder "Bali + Nihi Sumba") -- kein separates

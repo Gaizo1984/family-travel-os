@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft, FileText, Trash2 } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { updateJourneyEvent, deleteJourneyEvent } from "@/lib/actions/journey-events";
 import { uploadJourneyEventDocument, deleteJourneyEventDocument } from "@/lib/actions/documents";
 import { getNarrowTripDateRange } from "@/lib/documents";
 import { getFamily } from "@/lib/family";
 import { loadTripParticipantOptions } from "@/lib/trip-participants";
 import { getCachedSignedUrl } from "@/lib/signed-storage-url";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
 import { DaySelectField } from "@/components/DaySelectField";
 import { TimeSelectField } from "@/components/TimeSelectField";
 import { Banner } from "@/components/Banner";
@@ -36,18 +37,18 @@ export default async function EditJourneyEventPage({
   const { id, eventId } = await params;
   const { return_to, error } = await searchParams;
 
-  const supabase = await createClient();
-  const { data: trip } = await supabase
-    .from("trips")
+  const lumiCore = await createLumiCoreClient();
+  const { data: trip } = await lumiCore
+    .from("travel_trips")
     .select("id, slug, title, start_date, end_date")
     .eq("slug", id)
     .maybeSingle();
 
   if (!trip) notFound();
 
-  const { data: event } = await supabase
-    .from("journey_events")
-    .select("id, trip_id, stage_id, date, time, category, title, location, notes, status, participant_person_ids")
+  const { data: event } = await lumiCore
+    .from("travel_journey_events")
+    .select("id, trip_id, stage_id, date, time, category, title, location, notes, status, participant_household_member_ids")
     .eq("id", eventId)
     .eq("trip_id", trip.id)
     .maybeSingle();
@@ -58,12 +59,12 @@ export default async function EditJourneyEventPage({
   // defensiv ignorieren" (Nutzervorgabe, wörtlich) -- gleiches Muster wie
   // bei Aktivitätsbuchungen (bookings/[bookingId]/edit/page.tsx).
   const { id: familyId } = await getFamily();
-  const participants = await loadTripParticipantOptions(supabase, trip.id, familyId);
+  const participants = await loadTripParticipantOptions(lumiCore, trip.id, familyId);
   const validParticipantIds = new Set(participants.map((p) => p.id));
-  const selectedParticipantIds = (event.participant_person_ids ?? []).filter((id) => validParticipantIds.has(id));
+  const selectedParticipantIds = (event.participant_household_member_ids ?? []).filter((id) => validParticipantIds.has(id));
 
-  const { data: stages } = await supabase
-    .from("stages")
+  const { data: stages } = await lumiCore
+    .from("travel_stages")
     .select("id, title")
     .eq("trip_id", trip.id)
     .order("sort_order");
@@ -71,14 +72,14 @@ export default async function EditJourneyEventPage({
   // §"Journal-Terminen eigenen Dokumenten-Upload geben, analog zu
   // Buchungen" (Nutzervorgabe, wörtlich) -- gleiches Muster wie die
   // Dokumente-Sektion auf der Buchungsdetailseite.
-  const { data: journeyEventDocsRaw } = await supabase
-    .from("documents")
+  const { data: journeyEventDocsRaw } = await lumiCore
+    .from("travel_documents")
     .select("id, label, storage_path")
     .eq("journey_event_id", event.id);
   const journeyEventDocuments = await Promise.all(
     (journeyEventDocsRaw ?? []).map(async (d) => ({
-      id: d.id, label: d.label ?? "Dokument", storage_path: d.storage_path,
-      url: await getCachedSignedUrl("documents", d.storage_path),
+      id: d.id, label: d.label ?? "Dokument", storage_path: d.storage_path ?? "",
+      url: d.storage_path ? await getCachedSignedUrl(LUMI_CORE_DOCUMENTS_BUCKET, d.storage_path) : null,
     })),
   );
 
@@ -135,7 +136,7 @@ export default async function EditJourneyEventPage({
               </div>
               <div>
                 <label htmlFor="je-status" style={LABEL_STYLE}>Status</label>
-                <select id="je-status" name="status" defaultValue={event.status} style={FIELD_STYLE}>
+                <select id="je-status" name="status" defaultValue={event.status ?? "idea"} style={FIELD_STYLE}>
                   {JOURNEY_EVENT_STATUS_ORDER.map((key) => (
                     <option key={key} value={key}>{JOURNEY_EVENT_STATUS_LABELS[key]}</option>
                   ))}

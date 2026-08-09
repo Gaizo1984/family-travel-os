@@ -1,6 +1,5 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { redirect } from 'next/navigation'
 import { after } from 'next/server'
@@ -141,12 +140,11 @@ export async function askConcierge(formData: FormData) {
             { onConflict: 'household_id,trip_id,for_date,question_key' },
           )
         }
-        await completeJob(jobId, ctx.returnTo, await createClient())
+        await completeJob(jobId, ctx.returnTo, lumiCoreRead)
         return
       }
 
       if (questionKey === 'whats_missing' || questionKey === 'explain_conflict') {
-        const supabase = await createClient()
         const lumiCore = await createLumiCoreClient()
         const { data: trip } = await lumiCore.from('travel_trips').select('slug').eq('id', ctx.tripId).maybeSingle()
         const answer = questionKey === 'whats_missing'
@@ -162,7 +160,7 @@ export async function askConcierge(formData: FormData) {
           },
           { onConflict: 'household_id,trip_id,for_date,question_key' },
         )
-        await completeJob(jobId, ctx.returnTo, supabase)
+        await completeJob(jobId, ctx.returnTo, lumiCore)
         return
       }
 
@@ -237,7 +235,6 @@ export async function askConcierge(formData: FormData) {
             const answer = await generateLumiBrainAnswer({ intent: brainIntent, context: brainContext, questionText: questionTextRaw })
             if (answer) {
               await incrementLumiBrainUsage(ctx.familyId)
-              const supabase = await createClient()
               const lumiCore = await createLumiCoreClient()
               const effectiveTripId = matchedTrip?.id ?? ctx.tripId
               const combinedBody = [
@@ -274,15 +271,14 @@ export async function askConcierge(formData: FormData) {
 
               if (matchedTrip) {
                 // §"Bei eindeutigem Treffer die UI-Auswahl sichtbar auf die
-                // erkannte Reise umstellen" (Nutzervorgabe): das familiengebundene
-                // "last_lumi_trip_id"-Persistieren entfällt seit dem Cutover
-                // bewusst (Schema-Lücke, siehe lib/actions/lumi-trip-selection.ts)
-                // -- die sichtbare Umstellung selbst passiert weiterhin über den
-                // ?trip=-Query-Parameter unten.
-                await completeJob(jobId, `${basePath}?trip=${encodeURIComponent(matchedTrip.slug)}`, supabase)
+                // erkannte Reise umstellen" (Nutzervorgabe): households.last_lumi_trip_id
+                // ist seit der Schema-Lücken-Schliessung eine echte, native FK
+                // auf travel_trips(id) -- Persistieren wieder aktiv, wie vor dem Cutover.
+                await lumiCore.from('households').update({ last_lumi_trip_id: matchedTrip.id }).eq('id', ctx.familyId)
+                await completeJob(jobId, `${basePath}?trip=${encodeURIComponent(matchedTrip.slug)}`, lumiCore)
                 return
               }
-              await completeJob(jobId, ctx.returnTo, supabase)
+              await completeJob(jobId, ctx.returnTo, lumiCore)
               return
             }
             fallbackNotice = 'Die spezialisierte LUMI-Antwort war gerade nicht verfügbar -- hier eine allgemeine Einschätzung.'

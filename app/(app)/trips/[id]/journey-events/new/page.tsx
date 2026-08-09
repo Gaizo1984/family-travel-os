@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { createJourneyEvent } from "@/lib/actions/journey-events";
 import { getNarrowTripDateRange } from "@/lib/documents";
 import { getFamily } from "@/lib/family";
@@ -34,17 +34,17 @@ export default async function NewJourneyEventPage({
   const { id } = await params;
   const { stage_id, date, return_to, error } = await searchParams;
 
-  const supabase = await createClient();
-  const { data: trip } = await supabase
-    .from("trips")
+  const lumiCore = await createLumiCoreClient();
+  const { data: trip } = await lumiCore
+    .from("travel_trips")
     .select("id, slug, title, start_date, end_date")
     .eq("slug", id)
     .maybeSingle();
 
   if (!trip) notFound();
 
-  const { data: stages } = await supabase
-    .from("stages")
+  const { data: stages } = await lumiCore
+    .from("travel_stages")
     .select("id, title")
     .eq("trip_id", trip.id)
     .order("sort_order");
@@ -55,7 +55,7 @@ export default async function NewJourneyEventPage({
   // vorausgewählt" (Nutzervorgabe, wörtlich) -- gleiche Quelle/Vorbefüllung
   // wie bei Aktivitätsbuchungen (BookingForm.tsx).
   const { id: familyId } = await getFamily();
-  const participants = await loadTripParticipantOptions(supabase, trip.id, familyId);
+  const participants = await loadTripParticipantOptions(lumiCore, trip.id, familyId);
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>

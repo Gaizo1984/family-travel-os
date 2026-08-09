@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import type { SavedOptionStatus } from "@/lib/supabase/types";
 import { getFamily } from "@/lib/family";
+import { listHouseholdMembers } from "@/lib/household-members";
 import { searchFlightsStandalone } from "@/lib/actions/flight-search";
 import {
   saveFlightOption, deleteSavedFlightOption, assignTripToSavedFlightOption,
@@ -119,12 +121,10 @@ export default async function DiscoverFlightsPage({
     );
   }
 
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
   const { id: familyId } = await getFamily();
-  const { data: persons } = await supabase
-    .from("persons")
-    .select("id, name, initials, color, birth_date, is_minor")
-    .order("name");
+  const householdMembers = await listHouseholdMembers();
+  const persons = householdMembers.map((m) => ({ id: m.id, name: m.name, birth_date: m.birthDate, is_minor: m.isMinor }));
 
   // §"Bei ungültigen vorausgefüllten Altdaten Werte leeren": ein Deep-Link
   // (z. B. von einer älteren Ideen-Seite) kann ein inzwischen vergangenes
@@ -153,10 +153,10 @@ export default async function DiscoverFlightsPage({
 
   if (mode === "flexible" && sp.search_keys) {
     const keys = sp.search_keys.split(",").filter(Boolean);
-    const { data: cachedRows } = await supabase
-      .from("flight_search_cache")
+    const { data: cachedRows } = await lumiCore
+      .from("travel_flight_search_cache")
       .select("search_key, results, is_sandbox_data, updated_at, departure_date, return_date, origin_codes, destination_code")
-      .eq("family_id", familyId)
+      .eq("household_id", familyId)
       .in("search_key", keys);
 
     const rows = cachedRows ?? [];
@@ -188,10 +188,10 @@ export default async function DiscoverFlightsPage({
       flightResult = { options: sorted, isSandboxData: anySandbox, searchedAt: latestUpdatedAt };
     }
   } else if (sp.search_key) {
-    const { data: cached } = await supabase
-      .from("flight_search_cache")
+    const { data: cached } = await lumiCore
+      .from("travel_flight_search_cache")
       .select("results, is_sandbox_data, updated_at, origin_codes, destination_code")
-      .eq("family_id", familyId)
+      .eq("household_id", familyId)
       .eq("search_key", sp.search_key)
       .maybeSingle();
     flightResult = cached
@@ -218,10 +218,10 @@ export default async function DiscoverFlightsPage({
   // vorher nur sichtbar, wenn gerade eine Suche für exakt diese Strecke lief
   // (currentRouteKey) -- jetzt immer alle gemerkten Verbindungen der Familie,
   // über alle Strecken hinweg, unabhängig vom aktuellen Suchzustand.
-  const { data: allSavedRows } = await supabase
-    .from("saved_flight_options")
+  const { data: allSavedRows } = await lumiCore
+    .from("travel_saved_flight_options")
     .select("id, route_key, option_id, flight_option, found_departure_date, found_return_date, created_at, search_key, status, trip_id, booking_id")
-    .eq("family_id", familyId)
+    .eq("household_id", familyId)
     .order("created_at", { ascending: true });
   const allSavedFlightsRaw = allSavedRows ?? [];
   // §Phase B "gebuchte Einträge nicht zusätzlich als bloß gemerkt anzeigen"
@@ -246,7 +246,7 @@ export default async function DiscoverFlightsPage({
   // Eine Batch-Abfrage statt N+1 Einzel-Lookups pro gemerktem Flug.
   const savedSearchKeys = [...new Set(allSavedFlights.map((s) => s.search_key).filter((k): k is string => Boolean(k)))];
   const { data: cacheExistRows } = savedSearchKeys.length > 0
-    ? await supabase.from("flight_search_cache").select("search_key").eq("family_id", familyId).in("search_key", savedSearchKeys)
+    ? await lumiCore.from("travel_flight_search_cache").select("search_key").eq("household_id", familyId).in("search_key", savedSearchKeys)
     : { data: [] as { search_key: string }[] };
   const cacheKeysPresent = new Set((cacheExistRows ?? []).map((r) => r.search_key));
 
@@ -365,7 +365,7 @@ export default async function DiscoverFlightsPage({
                               />
                               <SavedOptionStatusRow
                                 id={s.id}
-                                status={s.status}
+                                status={s.status as SavedOptionStatus}
                                 tripId={s.trip_id}
                                 tripTitle={s.trip_id ? tripById.get(s.trip_id)?.title ?? null : null}
                                 tripSlug={s.trip_id ? tripById.get(s.trip_id)?.slug ?? null : null}
@@ -411,7 +411,7 @@ export default async function DiscoverFlightsPage({
                     />
                     <SavedOptionStatusRow
                       id={s.id}
-                      status={s.status}
+                      status={s.status as SavedOptionStatus}
                       tripId={s.trip_id}
                       tripTitle={s.trip_id ? tripById.get(s.trip_id)?.title ?? null : null}
                       tripSlug={s.trip_id ? tripById.get(s.trip_id)?.slug ?? null : null}
@@ -449,7 +449,7 @@ export default async function DiscoverFlightsPage({
                       dateContext={{ departureDate: s.found_departure_date, returnDate: s.found_return_date, nights }}
                     />
                     <SavedOptionStatusRow
-                      id={s.id} status={s.status} tripId={s.trip_id}
+                      id={s.id} status={s.status as SavedOptionStatus} tripId={s.trip_id}
                       tripTitle={s.trip_id ? tripById.get(s.trip_id)?.title ?? null : null}
                       tripSlug={tripSlug} adoptionUrl={null} bookingId={s.booking_id}
                       trips={pickerTrips} returnTo={returnTo}

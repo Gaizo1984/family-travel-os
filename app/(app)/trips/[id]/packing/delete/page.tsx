@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { deletePackingList } from "@/lib/actions/packing-items";
 
 /**
@@ -18,11 +18,11 @@ export default async function DeletePackingListPage({
 }) {
   const { id } = await params;
 
-  const supabase = await createClient();
-  const { data: trip } = await supabase.from("trips").select("id, slug, title").eq("slug", id).maybeSingle();
+  const lumiCore = await createLumiCoreClient();
+  const { data: trip } = await lumiCore.from("travel_trips").select("id, slug, title").eq("slug", id).maybeSingle();
   if (!trip) notFound();
 
-  const { count } = await supabase.from("packing_items").select("id", { count: "exact", head: true }).eq("trip_id", trip.id);
+  const { count } = await lumiCore.from("travel_packing_items").select("id", { count: "exact", head: true }).eq("trip_id", trip.id);
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>

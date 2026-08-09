@@ -1,7 +1,6 @@
 'use server'
 
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt } from '@/lib/family-dna'
 import { generateIdeaComparisonScores } from '@/lib/trip-idea-advisor-ai'
@@ -64,7 +63,6 @@ export async function generateIdeaComparison(formData: FormData) {
 
   const compareUrl = `/discover/ideas/compare?ids=${ideaIds.join(',')}`
 
-  const supabase = await createClient()
   const lumiCore = await createLumiCoreClient()
   const { data: ideasRaw } = await lumiCore
     .from('travel_trip_ideas')
@@ -124,9 +122,9 @@ export async function generateIdeaComparison(formData: FormData) {
   }
 
   const comparisonKey = [...ideaIds].sort().join(',')
-  const { error } = await supabase.from('trip_idea_comparisons').upsert(
-    { family_id: familyId, idea_ids: ideaIds, comparison_key: comparisonKey, scores: scores as Json },
-    { onConflict: 'family_id,comparison_key' },
+  const { error } = await lumiCore.from('travel_trip_idea_comparisons').upsert(
+    { household_id: familyId, idea_ids: ideaIds, comparison_key: comparisonKey, scores: scores as Json },
+    { onConflict: 'household_id,comparison_key' },
   )
   if (error) redirect(`${compareUrl}&error=${encodeURIComponent('Speicherfehler: ' + error.message)}`)
 

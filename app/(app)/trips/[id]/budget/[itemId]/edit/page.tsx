@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
 import { updateBudgetItem, deleteBudgetItem, removeBudgetItemReceipt } from "@/lib/actions/budget-items";
 import { BUDGET_CATEGORY_ORDER, BUDGET_CATEGORY_LABELS } from "@/lib/budget";
 import { suggestTripCurrencies } from "@/lib/currency-suggestions";
@@ -29,17 +30,17 @@ export default async function EditBudgetItemPage({
   const { id, itemId } = await params;
   const { error, return_to } = await searchParams;
 
-  const supabase = await createClient();
-  const { data: trip } = await supabase
-    .from("trips")
+  const lumiCore = await createLumiCoreClient();
+  const { data: trip } = await lumiCore
+    .from("travel_trips")
     .select("id, slug, title, subtitle, budget_currency")
     .eq("slug", id)
     .maybeSingle();
 
   if (!trip) notFound();
 
-  const { data: item } = await supabase
-    .from("budget_items")
+  const { data: item } = await lumiCore
+    .from("travel_budget_items")
     .select("id, trip_id, stage_id, booking_id, category, label, amount_actual, currency, storage_bucket, storage_path, details")
     .eq("id", itemId)
     .eq("trip_id", trip.id)
@@ -47,27 +48,33 @@ export default async function EditBudgetItemPage({
 
   if (!item) notFound();
 
-  const { data: stages } = await supabase
-    .from("stages")
+  const { data: stages } = await lumiCore
+    .from("travel_stages")
     .select("id, title, location")
     .eq("trip_id", trip.id)
     .order("sort_order");
 
-  const { data: bookings } = await supabase
-    .from("bookings")
+  const { data: bookings } = await lumiCore
+    .from("travel_bookings")
     .select("id, title, provider")
     .eq("trip_id", trip.id)
     .order("start_datetime");
 
+  // §Lumi-Core-Cutover: travel_trips.budget_currency und
+  // travel_budget_items.currency sind nullable (Travels Original war jeweils
+  // NOT NULL mit Default 'EUR') -- gleicher Fallback wie der bisherige
+  // DB-Default, nirgends sonst im Verhalten geändert.
+  const budgetCurrency = trip.budget_currency ?? "EUR";
+  const itemCurrency = item.currency ?? "EUR";
   const currencySuggestions = Array.from(new Set([
-    trip.budget_currency,
-    ...suggestTripCurrencies(trip, stages ?? [], trip.budget_currency),
+    budgetCurrency,
+    ...suggestTripCurrencies(trip, stages ?? [], budgetCurrency),
     "USD", "CHF", "GBP",
-    item.currency,
+    itemCurrency,
   ]));
 
   const receiptUrl = item.storage_path
-    ? await getCachedSignedUrl(item.storage_bucket ?? "documents", item.storage_path)
+    ? await getCachedSignedUrl(item.storage_bucket ?? LUMI_CORE_DOCUMENTS_BUCKET, item.storage_path)
     : null;
   const isImageReceipt = item.storage_path ? /\.(jpe?g|png|webp)$/i.test(item.storage_path) : false;
 
@@ -128,7 +135,7 @@ export default async function EditBudgetItemPage({
                 name="currency"
                 label="Währung"
                 suggestions={currencySuggestions}
-                defaultValue={item.currency}
+                defaultValue={itemCurrency}
               />
             </div>
 

@@ -1,6 +1,5 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { redirect } from 'next/navigation'
 import { COMPASS_CATEGORY_ORDER, HOTEL_CRITERIA_OPTIONS } from '@/lib/family-dna'
@@ -14,7 +13,6 @@ export async function saveFamilyCompass(formData: FormData) {
   const familyId = String(formData.get('family_id') ?? '')
   const editPath = '/family/compass/edit'
 
-  const supabase = await createClient()
   const lumiCore = await createLumiCoreClient()
 
   for (const key of COMPASS_CATEGORY_ORDER) {
@@ -38,13 +36,15 @@ export async function saveFamilyCompass(formData: FormData) {
     .map((o) => o.key)
     .filter((key) => formData.get(`hotel_${key}`) === 'on')
 
-  const { error: familyError } = await supabase
-    .from('families')
-    .update({ exceptional_hotel_criteria: hotelCriteria })
-    .eq('id', familyId)
+  const { data: existingPrefs } = await lumiCore.from('app_preferences').select('settings').eq('household_id', familyId).maybeSingle()
+  const settings = { ...(existingPrefs?.settings ?? {}), travel_exceptional_hotel_criteria: hotelCriteria }
 
-  if (familyError)
-    redirect(`${editPath}?error=${encodeURIComponent('Speicherfehler (Hotelkriterien): ' + familyError.message)}`)
+  const { error: prefsError } = await lumiCore
+    .from('app_preferences')
+    .upsert({ household_id: familyId, settings, updated_at: new Date().toISOString() }, { onConflict: 'household_id' })
+
+  if (prefsError)
+    redirect(`${editPath}?error=${encodeURIComponent('Speicherfehler (Hotelkriterien): ' + prefsError.message)}`)
 
   redirect('/family')
 }

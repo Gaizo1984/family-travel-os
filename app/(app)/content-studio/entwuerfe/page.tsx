@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft, Trash2, Film, LayoutGrid, Image as ImageIcon, FileText } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { getFamily } from "@/lib/family";
 import { deleteContentSessionProject } from "@/lib/actions/content-sessions";
 import { deleteReelProject } from "@/lib/actions/content-reels";
@@ -44,29 +44,39 @@ type DraftListItem = {
  * bis die Familie sie manuell löscht.
  */
 export default async function ContentStudioDraftsPage() {
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
   const { id: familyId } = await getFamily();
 
   const [{ data: openSessions }, { data: reelProjects }] = await Promise.all([
-    supabase
-      .from("content_projects")
-      .select("id, title, trip_id, output_format, status, updated_at, trips(title)")
-      .eq("family_id", familyId)
+    lumiCore
+      .from("travel_content_projects")
+      .select("id, title, trip_id, output_format, status, updated_at")
+      .eq("household_id", familyId)
       .eq("project_type", "session")
       .order("updated_at", { ascending: false }),
-    supabase
-      .from("content_projects")
-      .select("id, title, trip_id, reel_style, reel_duration_seconds, status, updated_at, trips(title)")
-      .eq("family_id", familyId)
+    lumiCore
+      .from("travel_content_projects")
+      .select("id, title, trip_id, reel_style, reel_duration_seconds, status, updated_at")
+      .eq("household_id", familyId)
       .eq("project_type", "reel")
       .order("updated_at", { ascending: false }),
   ]);
+
+  // §Lumi-Core-Cutover: keine PostgREST-Embeddings -- Reisetitel für beide
+  // Projektlisten über eine gemeinsame flache Zusatzabfrage + Map.
+  const allTripIds = [...(openSessions ?? []), ...(reelProjects ?? [])]
+    .map((p) => p.trip_id)
+    .filter((id): id is string => Boolean(id));
+  const { data: draftTripsRaw } = allTripIds.length > 0
+    ? await lumiCore.from("travel_trips").select("id, title").in("id", allTripIds)
+    : { data: [] as { id: string; title: string }[] };
+  const tripTitleById = new Map((draftTripsRaw ?? []).map((t) => [t.id, t.title]));
 
   const draftItems: DraftListItem[] = [
     ...(openSessions ?? []).map((s): DraftListItem => ({
       id: s.id, kind: "session", href: `/content-studio/session/${s.id}`,
       Icon: iconForSessionFormat(s.output_format),
-      tripLabel: (s.trips as unknown as { title: string } | null)?.title ?? s.title,
+      tripLabel: (s.trip_id && tripTitleById.get(s.trip_id)) ?? s.title,
       typeLabel: s.output_format ? (CONTENT_FORMAT_LABELS[s.output_format] ?? s.output_format) : "Format offen",
       statusLabel: SESSION_STATUS_LABELS[s.status] ?? s.status,
       updatedAt: s.updated_at,
@@ -75,7 +85,7 @@ export default async function ContentStudioDraftsPage() {
       const step = p.status === "draft_created" ? "timeline" : "media";
       return {
         id: p.id, kind: "reel", href: `/content-studio/reel/${p.id}/${step}`, Icon: Film,
-        tripLabel: (p.trips as unknown as { title: string } | null)?.title ?? p.title,
+        tripLabel: (p.trip_id && tripTitleById.get(p.trip_id)) ?? p.title,
         typeLabel: `${REEL_STYLE_LABELS[p.reel_style ?? ""] ?? p.reel_style} · ${p.reel_duration_seconds}s`,
         statusLabel: REEL_PROJECT_STATUS_LABELS[p.status] ?? p.status,
         updatedAt: p.updated_at,

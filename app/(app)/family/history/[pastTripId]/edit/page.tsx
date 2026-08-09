@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
+import { listHouseholdMembers } from "@/lib/household-members";
 import { updatePastTrip, deletePastTrip } from "@/lib/actions/past-trips";
 import { Banner } from "@/components/Banner";
 import { getPhotoDisplayUrl } from "@/lib/photo-thumbnails";
@@ -26,21 +28,23 @@ export default async function EditPastTripPage({
   const { pastTripId } = await params;
   const { error } = await searchParams;
 
-  const supabase = await createClient();
-  const { data: pastTrip } = await supabase
-    .from("past_trips")
-    .select("id, family_id, country_or_region, year, places, duration_days, note, photo_storage_path")
+  const lumiCore = await createLumiCoreClient();
+  const { data: pastTrip } = await lumiCore
+    .from("travel_past_trips")
+    .select("id, household_id, country_or_region, year, places, duration_days, note, photo_storage_path")
     .eq("id", pastTripId)
     .maybeSingle();
 
   if (!pastTrip) notFound();
 
-  const { data: persons } = await supabase.from("persons").select("id, name").eq("family_id", pastTrip.family_id).order("name");
-  const { data: travelers } = await supabase.from("past_trip_travelers").select("person_id").eq("past_trip_id", pastTripId);
-  const travelerIds = new Set((travelers ?? []).map((t) => t.person_id));
+  const [persons, { data: travelers }] = await Promise.all([
+    listHouseholdMembers(),
+    lumiCore.from("travel_past_trip_travelers").select("household_member_id").eq("past_trip_id", pastTripId),
+  ]);
+  const travelerIds = new Set((travelers ?? []).map((t) => t.household_member_id));
 
   const photoUrl = pastTrip.photo_storage_path
-    ? (await getPhotoDisplayUrl("documents", pastTrip.photo_storage_path, "thumb400"))?.url ?? null
+    ? (await getPhotoDisplayUrl(LUMI_CORE_DOCUMENTS_BUCKET, pastTrip.photo_storage_path, "thumb400"))?.url ?? null
     : null;
 
   return (
@@ -85,7 +89,7 @@ export default async function EditPastTripPage({
               </div>
               <div>
                 <label htmlFor="pt-year" style={LABEL_STYLE}>Jahr *</label>
-                <input id="pt-year" name="year" type="number" required min="1950" max={new Date().getFullYear() + 1} defaultValue={pastTrip.year} style={FIELD_STYLE} />
+                <input id="pt-year" name="year" type="number" required min="1950" max={new Date().getFullYear() + 1} defaultValue={pastTrip.year ?? undefined} style={FIELD_STYLE} />
               </div>
             </div>
 

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft, Trash2 } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { deleteSavedFlightOption } from "@/lib/actions/saved-flights";
 import { deleteSavedHotelOption } from "@/lib/actions/saved-hotels";
 import { computeSavedOptionBreakdown, type SavedOptionRow } from "@/lib/booking-status-breakdown";
@@ -88,26 +88,26 @@ function StatusColumn({ title, items }: { title: string; items: StatusColumnItem
  */
 export default async function TripBookingsOverviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
 
-  const { data: trip } = await supabase.from("trips").select("id, slug, title").eq("slug", id).maybeSingle();
+  const { data: trip } = await lumiCore.from("travel_trips").select("id, slug, title").eq("slug", id).maybeSingle();
   if (!trip) notFound();
 
   const [{ data: savedFlightRows }, { data: savedHotelRows }, { data: realBookings }] = await Promise.all([
-    supabase.from("saved_flight_options").select("id, status, booking_id, flight_option").eq("trip_id", trip.id),
-    supabase.from("saved_hotel_options").select("id, status, booking_id, hotel_option, destination").eq("trip_id", trip.id),
-    supabase.from("bookings").select("id, type, title, provider, start_datetime, amount, currency")
+    lumiCore.from("travel_saved_flight_options").select("id, status, booking_id, flight_option").eq("trip_id", trip.id),
+    lumiCore.from("travel_saved_hotel_options").select("id, status, booking_id, hotel_option, destination").eq("trip_id", trip.id),
+    lumiCore.from("travel_bookings").select("id, type, title, provider, start_datetime, amount, currency")
       .eq("trip_id", trip.id).in("type", REAL_BOOKING_ONLY_TYPES.map((t) => t.type)),
   ]);
 
   const flightBreakdown = computeSavedOptionBreakdown(
     (savedFlightRows ?? []).map((r): SavedOptionRow<FlightSearchOption> => ({
-      id: r.id, status: r.status, bookingId: r.booking_id, data: r.flight_option as unknown as FlightSearchOption,
+      id: r.id, status: r.status as SavedOptionRow<FlightSearchOption>["status"], bookingId: r.booking_id, data: r.flight_option as unknown as FlightSearchOption,
     })),
   );
   const hotelBreakdown = computeSavedOptionBreakdown(
     (savedHotelRows ?? []).map((r): SavedOptionRow<HotelShortlistItem> => ({
-      id: r.id, status: r.status, bookingId: r.booking_id, data: r.hotel_option as unknown as HotelShortlistItem,
+      id: r.id, status: r.status as SavedOptionRow<HotelShortlistItem>["status"], bookingId: r.booking_id, data: r.hotel_option as unknown as HotelShortlistItem,
     })),
   );
 
@@ -210,7 +210,7 @@ export default async function TripBookingsOverviewPage({ params }: { params: Pro
                             {b.provider && <div style={{ color: "var(--muted)", fontSize: "0.68rem" }}>{b.provider}</div>}
                           </div>
                           {b.amount != null && (
-                            <span style={{ color: "var(--muted)", fontSize: "0.7rem" }}>{formatCurrencyDE(b.amount, b.currency)}</span>
+                            <span style={{ color: "var(--muted)", fontSize: "0.7rem" }}>{formatCurrencyDE(b.amount, b.currency ?? "EUR")}</span>
                           )}
                         </Link>
                       ))}

@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft, Video, Plus, Minus, ArrowUp, ArrowDown, Clock, Sparkles } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
 import { getFamily } from "@/lib/family";
 import {
   createReelVideoUploadSlots, uploadReelVideos,
@@ -61,17 +62,20 @@ export default async function ReelMediaPage({
   const { projectId } = await params;
   const { error, uploaded, storyboard, job: jobId } = await searchParams;
 
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
   const { id: familyId } = await getFamily();
   const returnTo = `/content-studio/reel/${projectId}/media`;
 
-  const { data: project } = await supabase
-    .from("content_projects")
-    .select("id, title, trip_id, project_type, reel_style, reel_duration_seconds, trips(title)")
+  const { data: project } = await lumiCore
+    .from("travel_content_projects")
+    .select("id, title, trip_id, project_type, reel_style, reel_duration_seconds")
     .eq("id", projectId)
     .eq("project_type", "reel")
     .maybeSingle();
   if (!project || !project.trip_id) notFound();
+
+  // §Lumi-Core-Cutover: keine PostgREST-Embeddings -- Reisetitel per eigener Abfrage.
+  const { data: tripForTitle } = await lumiCore.from("travel_trips").select("title").eq("id", project.trip_id).maybeSingle();
 
   // §"KI-Aufrufe hintergrundfest machen": Wartezustand, solange das
   // Storyboard im Hintergrund erzeugt wird.
@@ -91,24 +95,24 @@ export default async function ReelMediaPage({
   }
 
   const [{ data: photosRaw }, { data: videosRaw }, { data: itemsRaw }, { data: draftRaw }] = await Promise.all([
-    supabase
-      .from("memory_photos")
+    lumiCore
+      .from("travel_memory_photos")
       .select("id, storage_path, caption")
       .eq("trip_id", project.trip_id)
       .eq("is_selected", true)
       .order("sort_order", { ascending: true }),
-    supabase
-      .from("memory_videos")
+    lumiCore
+      .from("travel_memory_videos")
       .select("id, storage_path, thumbnail_storage_path, duration_seconds, caption, created_at")
       .eq("trip_id", project.trip_id)
       .order("created_at", { ascending: false }),
-    supabase
-      .from("content_reel_media_items")
+    lumiCore
+      .from("travel_content_reel_media_items")
       .select("id, source_type, source_id, sort_order")
       .eq("project_id", projectId)
       .order("sort_order", { ascending: true }),
-    supabase
-      .from("content_drafts")
+    lumiCore
+      .from("travel_content_drafts")
       .select("id, structure, created_at")
       .eq("project_id", projectId)
       .eq("draft_type", "video_reel")
@@ -124,7 +128,7 @@ export default async function ReelMediaPage({
   const itemBySourceId = new Map(selectedItems.map((it) => [`${it.source_type}:${it.source_id}`, it]));
   const orderPositionById = new Map(selectedItems.map((it, idx) => [it.id, idx + 1]));
 
-  const photoThumbs = await getPhotoDisplayUrls("documents", photos.map((p) => p.storage_path), "thumb400");
+  const photoThumbs = await getPhotoDisplayUrls(LUMI_CORE_DOCUMENTS_BUCKET, photos.map((p) => p.storage_path), "thumb400");
 
   const availableTiles: MediaTile[] = [
     ...photos.map((p) => {
@@ -168,7 +172,7 @@ export default async function ReelMediaPage({
       selectedVideosWithoutThumbnail.map(async (t) => {
         const v = videos.find((vv) => vv.id === t.sourceId);
         if (!v) return null;
-        const { data: signed } = await supabase.storage.from("documents").createSignedUrl(v.storage_path, 300);
+        const { data: signed } = await lumiCore.storage.from(LUMI_CORE_DOCUMENTS_BUCKET).createSignedUrl(v.storage_path, 300);
         return signed?.signedUrl ? { videoId: v.id, signedUrl: signed.signedUrl } : null;
       })
     )
@@ -191,7 +195,7 @@ export default async function ReelMediaPage({
           Reel · {REEL_STYLE_LABELS[project.reel_style ?? ""] ?? project.reel_style} · {project.reel_duration_seconds}s
         </div>
         <h1 className="font-light mb-2" style={{ color: "var(--foreground)", fontSize: "1.4rem", letterSpacing: "0.01em" }}>
-          {(project.trips as unknown as { title: string } | null)?.title ?? project.title}
+          {tripForTitle?.title ?? project.title}
         </h1>
         <p className="mb-8" style={{ color: "var(--muted)", fontSize: "0.75rem" }}>
           {selectedCount} von {limit.min}–{limit.max} Medien ausgewählt

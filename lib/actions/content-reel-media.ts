@@ -1,7 +1,6 @@
 'use server'
 
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { getFamily } from '@/lib/family'
 import { createUploadSlots, type UploadSlot } from '@/lib/actions/photo-staging'
@@ -124,23 +123,12 @@ export async function uploadReelVideos(formData: FormData) {
     // ausgewählt ist (siehe lib/reel-video-cleanup.ts). Manuelles, früheres
     // Löschen bleibt jederzeit möglich (lib/actions/content-reel-media.ts::deleteReelVideo).
     //
-    // FINALER CUTOVER, bekannte Schema-Lücke: travel_memory_videos fehlen
-    // aktuell temporary/expires_at/retained_as_memory (in Travels eigenem
-    // memory_videos erst per Migration 20260727000012 ergänzt, NACH dem
-    // urspruenglichen 38-Tabellen-Copy-Lauf -- echte fehlende Spalten in
-    // Lumi Core, kein reines TypeScript-Typproblem). Dieser eine
-    // Insert-Pfad bleibt daher bewusst auf Travel, bis eine Nachtrags-
-    // Migration diese 3 Spalten ergänzt (gleiche Kategorie wie
-    // travel_content_reel_renders in lib/actions/reel-render.ts).
+    // FINALER CUTOVER, Schema-Luecken-Schliessung: travel_memory_videos hat
+    // jetzt temporary/expires_at/retained_as_memory -- Insert läuft wieder
+    // vollständig über Lumi Core.
     const REEL_VIDEO_TTL_HOURS = 48
-    const supabase = await createClient()
-    // familyId (getFamily()) ist seit dem Cutover die Lumi-Core household_id,
-    // nicht Travels eigene families.id -- fuer diesen einen Travel-Schreib-
-    // zugriff hier explizit Travels echte (einzige) family_id auflösen.
-    const { data: travelFamily } = await supabase.from('families').select('id').limit(1).single()
-    if (!travelFamily) { rejectedCount++; continue }
-    const { error: insertError } = await supabase.from('memory_videos').insert({
-      family_id: travelFamily.id,
+    const { error: insertError } = await lumiCore.from('travel_memory_videos').insert({
+      household_id: familyId,
       trip_id: project.trip_id,
       storage_path: finalPath,
       duration_seconds: durations[i] ?? null,

@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { resolveHouseholdMemberId, LUMI_CORE_PROFILE_PHOTOS_BUCKET } from "@/lib/lumi-core-storage/paths";
 import { updatePersonProfile } from "@/lib/actions/persons";
 import { TRAVEL_NEED_OPTIONS, ageAtDate } from "@/lib/family-dna";
 import { PhotoCropInput } from "@/components/PhotoCropInput";
@@ -31,17 +32,30 @@ export default async function EditPersonPage({
   const { personId } = await params;
   const { error, return_to } = await searchParams;
 
-  const supabase = await createClient();
-  const { data: person } = await supabase
-    .from("persons")
-    .select("id, name, role_label, description, interest_tags, travel_needs, photo_storage_path, birth_date, is_minor")
-    .eq("id", personId)
-    .maybeSingle();
+  const lumiCore = await createLumiCoreClient();
+  const householdMemberId = await resolveHouseholdMemberId(personId);
+  if (!householdMemberId) notFound();
 
-  if (!person) notFound();
+  const [{ data: member }, { data: profile }] = await Promise.all([
+    lumiCore.from("household_members").select("id, name, avatar_storage_path, birth_date, is_minor").eq("id", householdMemberId).maybeSingle(),
+    lumiCore.from("travel_household_member_profiles").select("role_label, description, interest_tags, travel_needs").eq("household_member_id", householdMemberId).maybeSingle(),
+  ]);
+  if (!member) notFound();
+
+  const person = {
+    id: personId,
+    name: member.name,
+    role_label: profile?.role_label ?? null,
+    description: profile?.description ?? null,
+    interest_tags: profile?.interest_tags ?? [],
+    travel_needs: profile?.travel_needs ?? [],
+    photo_storage_path: member.avatar_storage_path,
+    birth_date: member.birth_date,
+    is_minor: member.is_minor,
+  };
 
   const photoUrl = person.photo_storage_path
-    ? (await getPhotoDisplayUrl("documents", person.photo_storage_path, "thumb800"))?.url ?? null
+    ? (await getPhotoDisplayUrl(LUMI_CORE_PROFILE_PHOTOS_BUCKET, person.photo_storage_path, "thumb800"))?.url ?? null
     : null;
 
   const cancelHref = return_to || `/family/${person.id}`;

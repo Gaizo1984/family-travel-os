@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft, Pencil, Trash2 } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
 import { getFamily } from "@/lib/family";
+import { getHouseholdMemberById, deriveInitials } from "@/lib/household-members";
 import { getPhotoDisplayUrl, getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
 import { uploadMemoryPhotos, createMemoryUploadSlots, deleteMemoryPhoto } from "@/lib/actions/memories";
 import { DirectPhotoUploadForm } from "@/components/DirectPhotoUploadForm";
@@ -55,38 +57,43 @@ export default async function PastTripDetailPage({
   const { error, uploaded } = await searchParams;
   const returnTo = `/family/history/${pastTripId}`;
 
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
   const { id: familyId } = await getFamily();
-  const { data: pastTrip } = await supabase
-    .from("past_trips")
-    .select("id, family_id, country_or_region, year, places, duration_days, note, photo_storage_path")
+  const { data: pastTrip } = await lumiCore
+    .from("travel_past_trips")
+    .select("id, household_id, country_or_region, year, places, duration_days, note, photo_storage_path")
     .eq("id", pastTripId)
     .maybeSingle();
 
   if (!pastTrip) notFound();
 
-  const [{ data: travelerRows }, { data: galleryPhotosRaw }] = await Promise.all([
-    supabase.from("past_trip_travelers").select("persons ( id, name, initials, color )").eq("past_trip_id", pastTripId),
-    supabase
-      .from("memory_photos")
+  // §Lumi-Core-Cutover: keine PostgREST-Embeddings zwischen travel_*-Tabellen --
+  // flache Abfrage (travel_past_trip_travelers -> household_members) statt
+  // verschachteltem Select, exakt wie lib/travel-world.ts::fetchTravelWorldRawData.
+  const [{ data: travelerLinks }, { data: galleryPhotosRaw }] = await Promise.all([
+    lumiCore.from("travel_past_trip_travelers").select("household_member_id").eq("past_trip_id", pastTripId),
+    lumiCore
+      .from("travel_memory_photos")
       .select("id, storage_path, caption")
       .eq("past_trip_id", pastTripId)
       .order("sort_order", { ascending: true })
       .order("taken_at", { ascending: false, nullsFirst: false }),
   ]);
-  const travelers = (travelerRows ?? [])
-    .map((t) => t.persons as unknown as { id: string; name: string; initials: string; color: string } | null)
-    .filter((p): p is { id: string; name: string; initials: string; color: string } => Boolean(p));
+  const travelerIds = (travelerLinks ?? []).map((t) => t.household_member_id);
+  const travelerMembers = await Promise.all(travelerIds.map((id) => getHouseholdMemberById(id)));
+  const travelers = travelerMembers
+    .filter((m): m is NonNullable<typeof m> => m !== null)
+    .map((m) => ({ id: m.id, name: m.name, initials: deriveInitials(m.name), color: m.color }));
 
   const galleryPhotos = galleryPhotosRaw ?? [];
-  const galleryUrlByPath = await getPhotoDisplayUrls("documents", galleryPhotos.map((p) => p.storage_path), "thumb400");
+  const galleryUrlByPath = await getPhotoDisplayUrls(LUMI_CORE_DOCUMENTS_BUCKET, galleryPhotos.map((p) => p.storage_path), "thumb400");
   const galleryWithUrls = galleryPhotos.map((p) => {
     const resolved = galleryUrlByPath.get(p.storage_path);
     return { photo: p, url: resolved?.url ?? null, resolvedPath: resolved?.resolvedPath ?? p.storage_path };
   });
 
   const photoUrl = pastTrip.photo_storage_path
-    ? (await getPhotoDisplayUrl("documents", pastTrip.photo_storage_path, "thumb800"))?.url ?? null
+    ? (await getPhotoDisplayUrl(LUMI_CORE_DOCUMENTS_BUCKET, pastTrip.photo_storage_path, "thumb800"))?.url ?? null
     : null;
 
   const subtitle = [pastTrip.places, pastTrip.duration_days ? `${pastTrip.duration_days} Tage` : null].filter(Boolean).join(" · ");

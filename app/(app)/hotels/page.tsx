@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import type { SavedOptionStatus } from "@/lib/supabase/types";
 import { getFamily } from "@/lib/family";
 import { searchHotelsStandalone } from "@/lib/actions/hotel-search";
 import {
@@ -31,15 +32,15 @@ export default async function HotelsPage({
 }) {
   const sp = await searchParams;
 
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
   const { id: familyId } = await getFamily();
 
   let hotelResult: { items: HotelShortlistItem[]; belowStandard: boolean; limitedInventory: boolean; searchedAt: string } | null = null;
   if (sp.search_key) {
-    const { data: cached } = await supabase
-      .from("hotel_search_cache")
+    const { data: cached } = await lumiCore
+      .from("travel_hotel_search_cache")
       .select("results, is_below_standard, updated_at")
-      .eq("family_id", familyId)
+      .eq("household_id", familyId)
       .eq("search_key", sp.search_key)
       .maybeSingle();
     hotelResult = cached
@@ -59,20 +60,20 @@ export default async function HotelsPage({
   // hotel_search_cache -- keine neue Tabelle/Migration nötig, jede
   // abgeschlossene Suche liegt dort schon mit destination/search_key/
   // updated_at.
-  const { data: recentSearches } = await supabase
-    .from("hotel_search_cache")
+  const { data: recentSearches } = await lumiCore
+    .from("travel_hotel_search_cache")
     .select("destination, search_key, updated_at")
-    .eq("family_id", familyId)
+    .eq("household_id", familyId)
     .order("updated_at", { ascending: false })
     .limit(3);
 
   // §"Echte Hotel-Merkfunktion ergänzen, immer sichtbar" (Nutzervorgabe,
   // kombinierter Fix-Sprint): alle gemerkten Hotels der Familie, unabhängig
   // vom aktuellen Suchzustand -- gruppiert nach Ziel.
-  const { data: allSavedRows } = await supabase
-    .from("saved_hotel_options")
+  const { data: allSavedRows } = await lumiCore
+    .from("travel_saved_hotel_options")
     .select("id, search_key, destination, option_id, hotel_option, created_at, status, trip_id, booking_id")
-    .eq("family_id", familyId)
+    .eq("household_id", familyId)
     .order("created_at", { ascending: true });
   const allSavedHotelsRaw = allSavedRows ?? [];
   // §Phase B "gebuchte Einträge nicht zusätzlich als bloß gemerkt anzeigen" (Nutzervorgabe).
@@ -154,7 +155,7 @@ export default async function HotelsPage({
                             </Link>
                             <SavedOptionStatusRow
                               id={s.id}
-                              status={s.status}
+                              status={s.status as SavedOptionStatus}
                               tripId={s.trip_id}
                               tripTitle={s.trip_id ? tripById.get(s.trip_id)?.title ?? null : null}
                               tripSlug={s.trip_id ? tripById.get(s.trip_id)?.slug ?? null : null}
@@ -191,7 +192,7 @@ export default async function HotelsPage({
                   <div key={s.id}>
                     <HotelCard hotel={hotel} destination={s.destination} />
                     <SavedOptionStatusRow
-                      id={s.id} status={s.status} tripId={s.trip_id}
+                      id={s.id} status={s.status as SavedOptionStatus} tripId={s.trip_id}
                       tripTitle={s.trip_id ? tripById.get(s.trip_id)?.title ?? null : null}
                       tripSlug={tripSlug} adoptionUrl={null} bookingId={s.booking_id}
                       trips={pickerTrips} returnTo={returnTo}

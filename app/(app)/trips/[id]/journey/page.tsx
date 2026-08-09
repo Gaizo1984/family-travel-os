@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
+import { listHouseholdMembers, deriveInitials } from "@/lib/household-members";
 import { sortBookingsChronologically } from "@/lib/bookings";
 import { sortStagesChronologically } from "@/lib/journey";
 import type { StageInput, TimelineBooking, TimelineEvent } from "@/lib/journey";
@@ -49,22 +51,48 @@ type TripDetail = {
 export default async function TripJourneyPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
 
-  const { data } = await supabase
-    .from("trips")
-    .select(`
-      id, slug, title, status, start_date, end_date,
-      trip_members ( persons ( id, name, initials, color ) ),
-      stages ( id, title, location, start_date, end_date, nights, accommodation, sort_order, country_code, cover_photo_id, is_transit ),
-      bookings ( id, type, title, provider, status, start_datetime, end_datetime, stage_id, details, created_at ),
-      journey_events ( id, stage_id, date, time, category, title, location, status )
-    `)
+  const { data: tripRaw } = await lumiCore
+    .from("travel_trips")
+    .select("id, slug, title, status, start_date, end_date")
     .eq("slug", id)
     .maybeSingle();
 
-  if (!data) notFound();
-  const trip = data as unknown as TripDetail;
+  if (!tripRaw) notFound();
+
+  // §Lumi-Core-Cutover: Lumi Core hat keine PostgREST-Embeddings zwischen
+  // travel_*-Tabellen -- ersetzt die frühere verschachtelte `trips`-Abfrage
+  // (trip_members/persons, stages, bookings, journey_events) durch flache
+  // Parallelabfragen + manuelles Map-Reassembly, analog
+  // app/(app)/today/page.tsx::fetchTripsForToday.
+  const [{ data: membersRaw }, { data: stagesRaw }, { data: bookingsRaw }, { data: eventsRaw }, householdMembers] = await Promise.all([
+    lumiCore.from("travel_trip_members").select("household_member_id").eq("trip_id", tripRaw.id),
+    lumiCore
+      .from("travel_stages")
+      .select("id, title, location, start_date, end_date, nights, accommodation, sort_order, country_code, cover_photo_id, is_transit")
+      .eq("trip_id", tripRaw.id),
+    lumiCore
+      .from("travel_bookings")
+      .select("id, type, title, provider, status, start_datetime, end_datetime, stage_id, details, created_at")
+      .eq("trip_id", tripRaw.id),
+    lumiCore
+      .from("travel_journey_events")
+      .select("id, stage_id, date, time, category, title, location, status")
+      .eq("trip_id", tripRaw.id),
+    listHouseholdMembers(),
+  ]);
+
+  const personById = new Map(householdMembers.map((m) => [m.id, { id: m.id, name: m.name, initials: deriveInitials(m.name), color: m.color }]));
+
+  const trip: TripDetail = {
+    id: tripRaw.id, slug: tripRaw.slug, title: tripRaw.title, status: tripRaw.status,
+    start_date: tripRaw.start_date, end_date: tripRaw.end_date,
+    trip_members: (membersRaw ?? []).map((m) => ({ persons: personById.get(m.household_member_id) ?? null })),
+    stages: (stagesRaw ?? []) as unknown as StageRow[],
+    bookings: (bookingsRaw ?? []) as unknown as BookingRow[],
+    journey_events: (eventsRaw ?? []) as unknown as JourneyEventRow[],
+  };
 
   const stages = sortStagesChronologically(trip.stages);
   const bookings = sortBookingsChronologically(trip.bookings) as unknown as TimelineBooking[];
@@ -74,8 +102,8 @@ export default async function TripJourneyPage({ params }: { params: Promise<{ id
   const todayIso = todayIsoInFamilyTimezone();
   const historical = isTripHistorical({ status: trip.status, start_date: tripDateRange.startDate, end_date: tripDateRange.endDate });
 
-  const { data: photosRaw } = await supabase
-    .from("memory_photos")
+  const { data: photosRaw } = await lumiCore
+    .from("travel_memory_photos")
     .select("id, stage_id, taken_at, created_at, caption, storage_path")
     .eq("trip_id", trip.id)
     .eq("is_selected", true)
@@ -117,7 +145,7 @@ export default async function TripJourneyPage({ params }: { params: Promise<{ id
   // §"Nach der Reise ohne Wetter-Ausblick": Ausblick ist nur vor Reisebeginn relevant.
   const weatherOutlook = overview.phase === "before" ? [...weatherByDate.values()].sort((a, b) => a.date.localeCompare(b.date)) : [];
 
-  const photoDisplayByPath = await getPhotoDisplayUrls("documents", photos.map((p) => p.storage_path), "thumb400");
+  const photoDisplayByPath = await getPhotoDisplayUrls(LUMI_CORE_DOCUMENTS_BUCKET, photos.map((p) => p.storage_path), "thumb400");
   const photoUrlByPhotoId = new Map<string, string>();
   for (const p of photos) {
     const resolved = photoDisplayByPath.get(p.storage_path);

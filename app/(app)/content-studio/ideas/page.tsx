@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ChevronLeft, Star } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { getFamily } from "@/lib/family";
 import { WhatCanAI } from "../WhatCanAI";
 
@@ -12,16 +12,25 @@ export default async function ContentIdeasLibraryPage({
   const { archiv } = await searchParams;
   const showArchived = archiv === "1";
 
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
   const { id: familyId } = await getFamily();
-  const { data: allIdeas } = await supabase
-    .from("content_ideas")
-    .select("id, content_goal, status, is_favorite, created_at, trip_id, trips(title)")
-    .eq("family_id", familyId)
+  const { data: allIdeasRaw } = await lumiCore
+    .from("travel_content_ideas")
+    .select("id, content_goal, status, is_favorite, created_at, trip_id")
+    .eq("household_id", familyId)
     .order("created_at", { ascending: false });
+  const allIdeas = allIdeasRaw ?? [];
 
-  const ideas = (allIdeas ?? []).filter((i) => (showArchived ? i.status === "archived" : i.status !== "archived"));
-  const archivedCount = (allIdeas ?? []).filter((i) => i.status === "archived").length;
+  // §Lumi-Core-Cutover: keine PostgREST-Embeddings -- Reisetitel über eine
+  // zweite flache Abfrage + Map statt verschachteltem `trips(title)`-Select.
+  const ideaTripIds = allIdeas.map((i) => i.trip_id).filter((id): id is string => Boolean(id));
+  const { data: ideaTripsRaw } = ideaTripIds.length > 0
+    ? await lumiCore.from("travel_trips").select("id, title").in("id", ideaTripIds)
+    : { data: [] as { id: string; title: string }[] };
+  const tripTitleById = new Map((ideaTripsRaw ?? []).map((t) => [t.id, t.title]));
+
+  const ideas = allIdeas.filter((i) => (showArchived ? i.status === "archived" : i.status !== "archived"));
+  const archivedCount = allIdeas.filter((i) => i.status === "archived").length;
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>
@@ -77,7 +86,7 @@ export default async function ContentIdeasLibraryPage({
         ) : (
           <div className="grid grid-cols-1 gap-3">
             {ideas.map((idea) => {
-              const tripTitle = (idea.trips as unknown as { title: string } | null)?.title;
+              const tripTitle = idea.trip_id ? tripTitleById.get(idea.trip_id) : undefined;
               return (
                 <Link
                   key={idea.id}

@@ -466,7 +466,7 @@ export async function recurateVacationPostSelectionNow(formData: FormData) {
   const lumiCore = await createLumiCoreClient()
   const { id: familyId } = await getFamily()
 
-  const jobId = await createJob(familyId, 'vacation_post_recurate', supabase)
+  const jobId = await createJob(familyId, 'vacation_post_recurate', lumiCore)
 
   after(async () => {
     try {
@@ -481,7 +481,7 @@ export async function recurateVacationPostSelectionNow(formData: FormData) {
         : { data: [] }
       const candidates = candidateRows ?? []
       if (candidates.length === 0) {
-        await failJob(jobId, 'Keine vorgemerkten Bilder vorhanden.', supabase)
+        await failJob(jobId, 'Keine vorgemerkten Bilder vorhanden.', lumiCore)
         return
       }
 
@@ -492,7 +492,7 @@ export async function recurateVacationPostSelectionNow(formData: FormData) {
       }))
       const selection = await curateVacationPostSelection(vacationPostCandidates, tripDigest)
       if (!selection) {
-        await failJob(jobId, 'Die Kuration ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.', supabase)
+        await failJob(jobId, 'Die Kuration ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.', lumiCore)
         return
       }
 
@@ -505,10 +505,10 @@ export async function recurateVacationPostSelectionNow(formData: FormData) {
         }).eq('id', c.id),
       ))
 
-      await completeJob(jobId, returnPath, supabase)
+      await completeJob(jobId, returnPath, lumiCore)
     } catch (e) {
       console.error('[image-check] recurateVacationPostSelectionNow fehlgeschlagen:', e instanceof Error ? e.message : e)
-      await failJob(jobId, 'Die Kuration ist gerade nicht verfügbar. Bitte später erneut versuchen.', supabase)
+      await failJob(jobId, 'Die Kuration ist gerade nicht verfügbar. Bitte später erneut versuchen.', lumiCore)
     }
   })
 

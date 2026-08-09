@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft, AlertTriangle, CircleAlert, CircleCheck } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { computeTripReadiness, READINESS_THEME_LABELS } from "@/lib/readiness";
 import type { ReadinessTheme } from "@/lib/readiness";
 import { isTripHistorical } from "@/lib/trip-status";
@@ -22,14 +22,23 @@ export default async function ReadyToTravelPage({
 }) {
   const { id } = await params;
 
-  const supabase = await createClient();
-  const { data: tripRaw } = await supabase
-    .from("trips")
-    .select("id, slug, title, status, start_date, end_date, stages ( start_date, end_date ), bookings ( type, status, start_datetime, end_datetime )")
+  const lumiCore = await createLumiCoreClient();
+  const { data: tripBase } = await lumiCore
+    .from("travel_trips")
+    .select("id, slug, title, status, start_date, end_date")
     .eq("slug", id)
     .maybeSingle();
 
-  if (!tripRaw) notFound();
+  if (!tripBase) notFound();
+
+  // §Lumi-Core-Cutover: Lumi Core hat keine PostgREST-Embeddings zwischen
+  // travel_*-Tabellen -- ersetzt die frühere verschachtelte `trips`-Abfrage
+  // (stages/bookings) durch zwei flache Parallelabfragen.
+  const [{ data: stagesRaw }, { data: bookingsRaw }] = await Promise.all([
+    lumiCore.from("travel_stages").select("start_date, end_date").eq("trip_id", tripBase.id),
+    lumiCore.from("travel_bookings").select("type, status, start_datetime, end_datetime").eq("trip_id", tripBase.id),
+  ]);
+  const tripRaw = { ...tripBase, stages: stagesRaw ?? [], bookings: bookingsRaw ?? [] };
 
   // §"Reisezeitraum automatisch ableiten": ohne manuelles Datum, aber mit
   // Buchungen/Etappen, gilt die Reise trotzdem korrekt als "erlebt" (lib/trip-dates.ts).

@@ -4,9 +4,11 @@ import {
   FileQuestion, CloudSun, Shuffle, AlertTriangle, RefreshCw, Route, Plane, Hotel, Heart, Trash2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
 import { Banner } from "@/components/Banner";
 import { getFamily } from "@/lib/family";
+import { listHouseholdMembers } from "@/lib/household-members";
 import { isTripCurrentlyRunning, isTripHistorical, tripCountdownDisplay } from "@/lib/trip-status";
 import { getTripDuration } from "@/lib/demo-data";
 import { deriveTripDateRange } from "@/lib/trip-dates";
@@ -71,9 +73,9 @@ async function findTodaysFlightWithBoardingPasses(trips: TripRow[], todayIso: st
 
   if (todaysFlights.length === 0) return null;
 
-  const supabase = await createClient();
-  const { data: passDocs } = await supabase
-    .from("documents")
+  const lumiCore = await createLumiCoreClient();
+  const { data: passDocs } = await lumiCore
+    .from("travel_documents")
     .select("booking_id")
     .eq("doc_type", "boarding_pass")
     .in("booking_id", todaysFlights.map((f) => f.id));
@@ -96,14 +98,14 @@ type OnThisDayMemory = { id: string; storagePath: string; caption: string | null
  * Highlight-Erkennungen in dieser App.
  */
 async function findOnThisDayMemories(familyId: string, todayIso: string): Promise<OnThisDayMemory[]> {
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
   const [y, m, d] = todayIso.split("-");
   const candidateDates = [1, 2, 3].map((yearsAgo) => `${Number(y) - yearsAgo}-${m}-${d}`);
 
-  const { data } = await supabase
-    .from("memory_photos")
+  const { data } = await lumiCore
+    .from("travel_memory_photos")
     .select("id, storage_path, caption, taken_at")
-    .eq("family_id", familyId)
+    .eq("household_id", familyId)
     .in("taken_at", candidateDates);
 
   return (data ?? []).map((p) => ({
@@ -114,7 +116,6 @@ async function findOnThisDayMemories(familyId: string, todayIso: string): Promis
   }));
 }
 
-type PersonRow = { id: string; name: string };
 type StageRow = {
   id: string; title: string; location: string | null; nights: number | null;
   start_date: string | null; end_date: string | null; accommodation: string | null;
@@ -132,9 +133,96 @@ type JourneyEventRow = {
 type TripRow = {
   id: string; slug: string; title: string; subtitle: string | null; status: string;
   start_date: string | null; end_date: string | null;
-  trip_members: Array<{ persons: PersonRow | null }>;
+  trip_members: Array<{ household_member_id: string }>;
   stages: StageRow[]; bookings: BookingRow[]; journey_events: JourneyEventRow[];
 };
+
+/**
+ * §Lumi-Core-Cutover: Lumi Core hat keine PostgREST-Embeddings zwischen
+ * travel_*-Tabellen -- ersetzt die frühere verschachtelte `trips`-Abfrage
+ * (trip_members/stages/bookings/journey_events) durch vier flache
+ * Parallelabfragen + manuelles Map-Reassembly, exakt wie
+ * lib/travel-world.ts::fetchTravelWorldRawData.
+ */
+async function fetchTripsForToday(
+  lumiCore: Awaited<ReturnType<typeof createLumiCoreClient>>,
+  familyId: string,
+): Promise<TripRow[]> {
+  const { data: tripsRaw } = await lumiCore
+    .from("travel_trips")
+    .select("id, slug, title, subtitle, status, start_date, end_date")
+    .eq("household_id", familyId);
+
+  const trips = tripsRaw ?? [];
+  const tripIds = trips.map((t) => t.id);
+
+  const [{ data: membersRaw }, { data: stagesRaw }, { data: bookingsRaw }, { data: eventsRaw }] = tripIds.length
+    ? await Promise.all([
+        lumiCore.from("travel_trip_members").select("trip_id, household_member_id").in("trip_id", tripIds),
+        lumiCore
+          .from("travel_stages")
+          .select("trip_id, id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code, cover_photo_id, is_transit")
+          .in("trip_id", tripIds),
+        lumiCore
+          .from("travel_bookings")
+          .select("trip_id, id, type, title, provider, status, start_datetime, end_datetime, stage_id, details, created_at")
+          .in("trip_id", tripIds),
+        lumiCore
+          .from("travel_journey_events")
+          .select("trip_id, id, stage_id, date, time, category, title, location, status")
+          .in("trip_id", tripIds),
+      ])
+    : ([{ data: [] }, { data: [] }, { data: [] }, { data: [] }] as const);
+
+  const membersByTrip = new Map<string, TripRow["trip_members"]>();
+  (membersRaw ?? []).forEach((m) => {
+    const list = membersByTrip.get(m.trip_id) ?? [];
+    list.push({ household_member_id: m.household_member_id });
+    membersByTrip.set(m.trip_id, list);
+  });
+
+  const stagesByTrip = new Map<string, StageRow[]>();
+  (stagesRaw ?? []).forEach((s) => {
+    const list = stagesByTrip.get(s.trip_id) ?? [];
+    list.push({
+      id: s.id, title: s.title, location: s.location, nights: s.nights,
+      start_date: s.start_date, end_date: s.end_date, accommodation: s.accommodation,
+      sort_order: s.sort_order, country_code: s.country_code, cover_photo_id: s.cover_photo_id,
+    });
+    stagesByTrip.set(s.trip_id, list);
+  });
+
+  const bookingsByTrip = new Map<string, BookingRow[]>();
+  (bookingsRaw ?? []).forEach((b) => {
+    const list = bookingsByTrip.get(b.trip_id) ?? [];
+    list.push({
+      id: b.id, type: b.type as BookingType, title: b.title, provider: b.provider, status: b.status as BookingStatus,
+      start_datetime: b.start_datetime, end_datetime: b.end_datetime, stage_id: b.stage_id,
+      details: b.details as Record<string, string> | null, created_at: b.created_at,
+    });
+    bookingsByTrip.set(b.trip_id, list);
+  });
+
+  const eventsByTrip = new Map<string, JourneyEventRow[]>();
+  (eventsRaw ?? []).forEach((e) => {
+    const list = eventsByTrip.get(e.trip_id) ?? [];
+    list.push({
+      id: e.id, stage_id: e.stage_id, date: e.date, time: e.time,
+      category: e.category as JourneyEventCategory, title: e.title, location: e.location,
+      status: e.status as JourneyEventStatus,
+    });
+    eventsByTrip.set(e.trip_id, list);
+  });
+
+  return trips.map((t) => ({
+    id: t.id, slug: t.slug, title: t.title, subtitle: t.subtitle, status: t.status,
+    start_date: t.start_date, end_date: t.end_date,
+    trip_members: membersByTrip.get(t.id) ?? [],
+    stages: stagesByTrip.get(t.id) ?? [],
+    bookings: bookingsByTrip.get(t.id) ?? [],
+    journey_events: eventsByTrip.get(t.id) ?? [],
+  }));
+}
 
 /** §"einheitliche Schriftgrößen/Letterspacing der Abschnittsüberschriften": `subline` optional, alle bisherigen Aufrufstellen (ohne subline) bleiben unverändert. */
 function SectionLabel({ children, subline }: { children: React.ReactNode; subline?: string }) {
@@ -448,7 +536,6 @@ export default async function TodayPage({
 }) {
   const { error, stopover, job: jobId } = await searchParams;
   const preferStopover = stopover === "1";
-  const supabase = await createClient();
   const family = await getFamily();
   const familyId = family.id;
 
@@ -480,26 +567,20 @@ export default async function TodayPage({
   let tomorrowIso = addDaysIso(todayIso, 1);
   let nowHHMM = nowHHMMInFamilyTimezone();
 
-  const [{ data: trips }, onThisDayMemories, dna, { data: pastTripsForAvoid }, tripHints, activeDebriefs] = await Promise.all([
-    supabase
-      .from("trips")
-      .select(`
-        id, slug, title, subtitle, status, start_date, end_date,
-        trip_members ( persons ( id, name ) ),
-        stages ( id, title, location, nights, start_date, end_date, accommodation, sort_order, country_code, cover_photo_id, is_transit ),
-        bookings ( id, type, title, provider, status, start_datetime, end_datetime, stage_id, details, created_at ),
-        journey_events ( id, stage_id, date, time, category, title, location, status )
-      `)
-      .eq("family_id", familyId),
+  const lumiCore = await createLumiCoreClient();
+  const [trips, onThisDayMemories, dna, { data: pastTripsForAvoid }, tripHints, activeDebriefs, householdMembers] = await Promise.all([
+    fetchTripsForToday(lumiCore, familyId),
     findOnThisDayMemories(familyId, todayIso),
     buildFamilyDnaSummary(familyId),
-    supabase.from("past_trips").select("country_or_region").eq("family_id", familyId),
-    loadTopTripHints(supabase, familyId),
-    loadActiveDebriefsForFamily(supabase, familyId),
+    lumiCore.from("travel_past_trips").select("country_or_region").eq("household_id", familyId),
+    loadTopTripHints(lumiCore, familyId),
+    loadActiveDebriefsForFamily(familyId),
+    listHouseholdMembers(),
   ]);
+  const nameById = new Map(householdMembers.map((m) => [m.id, m.name]));
 
   // §"Egress-Analyse 2026-07-16": 120×120-Kachel -- Thumbnail statt Original, gecachte Signed URL statt Neusignierung bei jedem Dashboard-Aufruf.
-  const onThisDayDisplayByPath = await getPhotoDisplayUrls("documents", onThisDayMemories.map((m) => m.storagePath), "thumb400");
+  const onThisDayDisplayByPath = await getPhotoDisplayUrls(LUMI_CORE_DOCUMENTS_BUCKET, onThisDayMemories.map((m) => m.storagePath), "thumb400");
   const onThisDayMemoriesWithUrls = onThisDayMemories.map((m) => ({ ...m, url: onThisDayDisplayByPath.get(m.storagePath)?.url ?? null }));
 
   // todayIso (Familienzeitzone) explizit übergeben, statt auf den UTC-basierten
@@ -512,7 +593,7 @@ export default async function TodayPage({
   // dieser Seite (aktive Reise, nächste Reise, Dauer/Countdown, Journey-
   // Timeline) nutzen dadurch automatisch dieselbe Ableitung, ohne sie erneut
   // zu bauen.
-  const allTrips = ((trips ?? []) as unknown as TripRow[]).map((t) => {
+  const allTrips = trips.map((t) => {
     const range = deriveTripDateRange(t, t.bookings, t.stages);
     return { ...t, start_date: range.startDate, end_date: range.endDate };
   });
@@ -570,7 +651,17 @@ export default async function TodayPage({
 
   // ── Kein aktiver Reisetag, aber eine bevorstehende Reise: Wetter zuerst ──
   if (!activeTrip && nextTrip) {
-    const nextContext = await resolveTripAiContext(nextTrip, false, todayIso);
+    // §lib/today-trip-context.ts::resolveTripAiContext erwartet weiterhin die
+    // { persons: { name } }-Form (siehe lib/lumi-context.ts::buildLumiContext
+    // für dasselbe Muster) -- hier aus household_member_id + nameById übersetzt,
+    // statt die gemeinsam genutzte Signatur zu ändern.
+    const nextContextTrip = {
+      ...nextTrip,
+      trip_members: nextTrip.trip_members.map((m) => ({
+        persons: nameById.has(m.household_member_id) ? { name: nameById.get(m.household_member_id)! } : null,
+      })),
+    };
+    const nextContext = await resolveTripAiContext(nextContextTrip, false, todayIso);
     const nextTripDuration = nextTrip.start_date && nextTrip.end_date ? getTripDuration(nextTrip.start_date, nextTrip.end_date) : 0;
     const nextTripCountdown = tripCountdownDisplay(nextTrip, nextTripDuration, todayIso);
     const nextWeather = nextContext.weather;
@@ -738,7 +829,7 @@ export default async function TodayPage({
   // Bleibt bewusst unverändert der tatsächliche JETZIGE Aufenthaltsort (Hero-Bild,
   // 📍-Label, "Wetter gerade jetzt") -- siehe lib/today.ts::resolvePlanningLocation.
   const currentLocation = resolveCurrentLocation(activeTrip, stages, bookings, todayIso);
-  const stageImages = await resolveStageImages(supabase, stages);
+  const stageImages = await resolveStageImages(lumiCore, stages);
   const heroImage = (currentLocation.stageId && stageImages.get(currentLocation.stageId)) || {
     url: (currentLocation.countryCode && COUNTRY_STAGE_IMAGES[currentLocation.countryCode]) || FALLBACK_STAGE_IMAGE,
     storagePath: null,
@@ -802,7 +893,10 @@ export default async function TodayPage({
     ? (planningWeatherDescribed ? `${planningWeather!.currentTemp}°C, ${planningWeatherDescribed.label}` : null)
     : weatherSummary;
   const familyDnaText = formatFamilyDnaForPrompt(dna, todayIso);
-  const conciergeMemberNames = activeTrip.trip_members.flatMap((m) => (m.persons ? [m.persons.name] : []));
+  const conciergeMemberNames = activeTrip.trip_members.flatMap((m) => {
+    const name = nameById.get(m.household_member_id);
+    return name ? [name] : [];
+  });
 
   // §"Wichtig: KI nur auf ausdrückliche Nutzeraktion": kein automatischer
   // Aufruf mehr bei erkanntem Highlight -- nur noch Lesezugriff auf den Cache,

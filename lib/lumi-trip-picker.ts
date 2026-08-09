@@ -1,4 +1,3 @@
-import { createClient } from './supabase/server'
 import { createLumiCoreClient } from './supabase/lumi-core-server'
 import { deriveTripDateRange, formatTripDateRangeLabel, type TripDateRange } from './trip-dates'
 import { isTripCurrentlyRunning, isTripHistorical } from './trip-status'
@@ -153,9 +152,16 @@ export function resolveDefaultTripId(trips: TripPickerEntry[], rememberedTripId:
   return null
 }
 
-/** §"Nur für diese Familie speichern" (Nutzervorgabe): liest die serverseitig gemerkte letzte Reise -- kein Cookie, siehe lib/actions/lumi-trip-selection.ts. */
+/**
+ * §"Nur für diese Familie speichern" (Nutzervorgabe): liest die serverseitig
+ * gemerkte letzte Reise -- kein Cookie, siehe lib/actions/lumi-trip-selection.ts.
+ * FINALER CUTOVER, Schema-Luecken-Schliessung: `households.last_lumi_trip_id`
+ * ist jetzt eine echte, native FK auf travel_trips(id) (beide Tabellen leben
+ * im selben Lumi-Core-Projekt) -- die frühere Travel-Spalte
+ * `families.last_lumi_trip_id` wird nicht mehr genutzt.
+ */
 export async function getRememberedTripId(familyId: string): Promise<string | null> {
-  const supabase = await createClient()
-  const { data } = await supabase.from('families').select('last_lumi_trip_id').eq('id', familyId).maybeSingle()
+  const lumiCore = await createLumiCoreClient()
+  const { data } = await lumiCore.from('households').select('last_lumi_trip_id').eq('id', familyId).maybeSingle()
   return data?.last_lumi_trip_id ?? null
 }

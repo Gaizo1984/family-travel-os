@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { resolveHouseholdMemberId } from "@/lib/lumi-core-storage/paths";
+import { getHouseholdMemberById } from "@/lib/household-members";
 import { deleteDocument } from "@/lib/actions/documents";
 
 export default async function DeleteDocumentPage({
@@ -11,23 +13,22 @@ export default async function DeleteDocumentPage({
 }) {
   const { personId, documentId } = await params;
 
-  const supabase = await createClient();
-  const { data: person } = await supabase
-    .from("persons")
-    .select("id, name")
-    .eq("id", personId)
-    .maybeSingle();
+  const lumiCore = await createLumiCoreClient();
+  const householdMemberId = await resolveHouseholdMemberId(personId);
+  if (!householdMemberId) notFound();
 
-  if (!person) notFound();
+  const member = await getHouseholdMemberById(householdMemberId);
+  if (!member) notFound();
+  const person = { id: personId, name: member.name };
 
-  const { data: document } = await supabase
-    .from("documents")
+  const { data: document } = await lumiCore
+    .from("travel_documents")
     .select("id, label, storage_path")
     .eq("id", documentId)
-    .eq("person_id", person.id)
+    .eq("household_member_id", householdMemberId)
     .maybeSingle();
 
-  if (!document) notFound();
+  if (!document || !document.label || !document.storage_path) notFound();
 
   return (
     <div className="flex-1" style={{ background: "var(--background)" }}>

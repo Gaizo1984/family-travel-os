@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { ChevronLeft, Map as MapIcon, Globe, CalendarDays, Compass } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { getFamily } from "@/lib/family";
+import { listHouseholdMembers, resolveLegacyTravelPersonId } from "@/lib/household-members";
+import { resolveHouseholdMemberId } from "@/lib/lumi-core-storage/paths";
 import { buildTravelWorld, syncTripDerivedCountryVisits } from "@/lib/travel-world";
 import { WorldMap } from "@/components/WorldMap";
 import { COUNTRY_NAMES } from "@/lib/geo-suggestions";
@@ -30,7 +32,7 @@ export default async function FamilyWorldPage({
 }) {
   const { person: personFilter } = await searchParams;
 
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
   const { id: familyId } = await getFamily();
 
   // §"Besuchte Länder personenbezogen" (Nutzervorgabe): hält
@@ -39,10 +41,19 @@ export default async function FamilyWorldPage({
   // buildTravelWorld selbst, kein Hintergrundjob.
   await syncTripDerivedCountryVisits(familyId);
 
-  const [{ data: persons }, travelWorld] = await Promise.all([
-    supabase.from("persons").select("id, name").eq("family_id", familyId).order("name"),
+  const [householdMembers, travelWorld] = await Promise.all([
+    listHouseholdMembers(),
+    // §ID-Space: buildTravelWorld erwartet weiterhin Travels legacy person_id
+    // (siehe lib/travel-world.ts) -- personFilter kommt unten konsistent aus
+    // resolveLegacyTravelPersonId, nicht aus household_member_id.
     buildTravelWorld({ familyId, personId: personFilter || undefined }),
   ]);
+  // §Rückrichtung (lib/household-members.ts::resolveLegacyTravelPersonId):
+  // die Personenfilter-Chips müssen weiterhin auf Travels legacy person_id
+  // verlinken, damit buildTravelWorld() oben dieselbe ID korrekt auflösen kann.
+  const persons = await Promise.all(
+    householdMembers.map(async (m) => ({ id: (await resolveLegacyTravelPersonId(m.id)) ?? m.id, name: m.name })),
+  );
 
   // §"familienweite Ansicht: Land markieren sobald mindestens eine Person
   // dort war; Personenfilter: nur Länder der ausgewählten Person markieren"
@@ -50,16 +61,20 @@ export default async function FamilyWorldPage({
   // (Reise + manuell), NICHT mehr nur travelWorld.countryCodes -- erfasst
   // dadurch auch rein manuell markierte Länder. Statistik/Zeitstrahl bleiben
   // unverändert bei travelWorld (ausschließlich echte Reisen).
-  const familyPersonIds = (persons ?? []).map((p) => p.id);
+  // §ID-Space: travel_person_country_visits.household_member_id ist die
+  // echte Lumi-Core-ID (siehe lib/actions/country-visits.ts) -- personFilter
+  // (legacy) muss dafür erst aufgelöst werden, anders als bei buildTravelWorld oben.
+  const familyMemberIds = householdMembers.map((m) => m.id);
+  const filterMemberId = personFilter ? await resolveHouseholdMemberId(personFilter) : null;
   let mapVisitedCodes = new Set<string>();
-  if (familyPersonIds.length > 0) {
-    let query = supabase.from("person_country_visits").select("country_code, person_id").in("person_id", familyPersonIds);
-    if (personFilter) query = query.eq("person_id", personFilter);
+  if (familyMemberIds.length > 0) {
+    let query = lumiCore.from("travel_person_country_visits").select("country_code, household_member_id").in("household_member_id", familyMemberIds);
+    if (filterMemberId) query = query.eq("household_member_id", filterMemberId);
     const { data: visitRows } = await query;
     mapVisitedCodes = new Set((visitRows ?? []).map((r) => r.country_code));
   }
 
-  const selectedPersonName = (persons ?? []).find((p) => p.id === personFilter)?.name;
+  const selectedPersonName = persons.find((p) => p.id === personFilter)?.name;
   const recentEntries = [...travelWorld.timeline].reverse().slice(0, 5);
   const lastCountryName = travelWorld.lastCountryCode ? COUNTRY_NAMES[travelWorld.lastCountryCode] ?? travelWorld.lastCountryCode : null;
   const historyHref = personFilter ? `/family/history?person=${personFilter}` : "/family/history";

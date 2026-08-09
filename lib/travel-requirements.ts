@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createLumiCoreClient } from './supabase/lumi-core-server'
+import type { LumiCoreDatabase } from './supabase/lumi-core-types'
 import { listHouseholdMembers, resolveLegacyTravelPersonId } from './household-members'
 import type { DocumentType } from './documents'
 import { deriveTripDateRange } from './trip-dates'
@@ -61,7 +62,7 @@ type RequirementContext = {
   members: Array<{ id: string; name: string; legacyPersonId: string | null }>
   countryCodes: Set<string>
   documentsByPerson: Map<string, PersonDoc[]>
-  lumiCore: Awaited<ReturnType<typeof createLumiCoreClient>>
+  lumiCore: SupabaseClient<LumiCoreDatabase>
 }
 
 type RequirementRule = {
@@ -130,9 +131,8 @@ export function resolveWaypointCountry(text: string | null | undefined): 'US' | 
  * können), alle Personendokumente der Mitreisenden (nicht nur Einreise-
  * dokumente — auch für z. B. die Reisepass-Regel wiederverwendbar).
  */
-async function buildRequirementContext(tripId: string, returnTo?: string, supabaseOverride?: SupabaseClient): Promise<RequirementContext | null> {
-  void supabaseOverride
-  const lumiCore = await createLumiCoreClient()
+async function buildRequirementContext(tripId: string, returnTo?: string, lumiCoreOverride?: SupabaseClient<LumiCoreDatabase>): Promise<RequirementContext | null> {
+  const lumiCore = lumiCoreOverride ?? await createLumiCoreClient()
   const { data: trip } = await lumiCore.from('travel_trips').select('slug, start_date, end_date').eq('id', tripId).maybeSingle()
   if (!trip) return null
 
@@ -310,17 +310,14 @@ const REGISTERED_RULES: RequirementRule[] = [passportRule, estaRule, etaRule]
  * `returnTo` steuert, wohin ein "Dokument hinzufügen"-Flow nach dem
  * Speichern zurückführt (Default: die Reisedokumente-Übersicht selbst).
  *
- * FINALER CUTOVER, bekannte Lücke (gleiche Kategorie wie
- * lib/trip-digest.ts/lib/hint-generation.ts): alle Abfragen laufen jetzt
- * gegen Lumi Core (cookie-basiert). `supabaseOverride` erlaubte bisher den
- * Aufruf aus einem sitzungslosen Kontext (z. B. dem Hinweis-Generierungs-
- * Cron, lib/hints/rules/document-expiring.ts) mit einem Travel-Service-
- * Role-Client -- hat für die (jetzt Lumi-Core-only) Abfragen hier aktuell
- * KEINE Wirkung mehr, solange es keinen Lumi-Core-Service-Role-Client gibt.
- * Parameter bleibt aus Kompatibilitätsgründen erhalten.
+ * FINALER CUTOVER: `supabaseOverride` ist jetzt wieder wirksam -- der
+ * Hinweis-Generierungs-Cron (lib/hint-generation.ts über lib/hints/context.ts)
+ * übergibt den neuen Lumi-Core-Service-Role-Client
+ * (lib/supabase/lumi-core-service.ts), ein normaler Seitenaufruf lässt den
+ * Parameter weg und bekommt den cookie-basierten `createLumiCoreClient()`.
  */
-export async function computeTripRequirements(tripId: string, returnTo?: string, supabaseOverride?: SupabaseClient): Promise<TravelRequirement[]> {
-  const ctx = await buildRequirementContext(tripId, returnTo, supabaseOverride)
+export async function computeTripRequirements(tripId: string, returnTo?: string, lumiCoreOverride?: SupabaseClient<LumiCoreDatabase>): Promise<TravelRequirement[]> {
+  const ctx = await buildRequirementContext(tripId, returnTo, lumiCoreOverride)
   if (!ctx) return []
 
   const results = await Promise.all(REGISTERED_RULES.map((rule) => rule.evaluate(ctx)))

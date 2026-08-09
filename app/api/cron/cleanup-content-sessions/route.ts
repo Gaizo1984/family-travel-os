@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { cleanupExpiredContentSessionPhotos } from '@/lib/content-session-cleanup'
 import { cleanupExpiredReelVideos } from '@/lib/reel-video-cleanup'
 import { cleanupExpiredBookingDocuments } from '@/lib/booking-document-cleanup'
+import { createLumiCoreServiceClient } from '@/lib/supabase/lumi-core-service'
 
 export const maxDuration = 60
 
@@ -33,9 +34,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
+  const lumiCore = createLumiCoreServiceClient()
   const [photosResult, videosResult, bookingDocumentsResult] = await Promise.allSettled([
-    cleanupExpiredContentSessionPhotos(),
-    cleanupExpiredReelVideos(),
+    cleanupExpiredContentSessionPhotos(lumiCore),
+    cleanupExpiredReelVideos(lumiCore),
     cleanupExpiredBookingDocuments(),
   ])
   if (photosResult.status === 'rejected') console.error('[cron:cleanup-content-sessions] Foto-Cleanup fehlgeschlagen', photosResult.reason)

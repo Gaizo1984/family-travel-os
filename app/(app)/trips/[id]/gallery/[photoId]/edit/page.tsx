@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
 import { getFamily } from "@/lib/family";
 import { updateMemoryPhoto, replaceMemoryPhoto, deleteMemoryPhoto, createMemoryUploadSlots } from "@/lib/actions/memories";
 import { DirectPhotoUploadForm } from "@/components/DirectPhotoUploadForm";
@@ -29,20 +30,20 @@ export default async function GalleryPhotoEditPage({
   const { id, photoId } = await params;
   const { error } = await searchParams;
 
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
   const { id: familyId } = await getFamily();
 
-  const { data: trip } = await supabase.from("trips").select("id, slug, title").eq("slug", id).maybeSingle();
+  const { data: trip } = await lumiCore.from("travel_trips").select("id, slug, title").eq("slug", id).maybeSingle();
   if (!trip) notFound();
 
   const [{ data: photo }, { data: stagesRaw }] = await Promise.all([
-    supabase.from("memory_photos").select("id, storage_path, caption, stage_id, trip_id").eq("id", photoId).maybeSingle(),
-    supabase.from("stages").select("id, title").eq("trip_id", trip.id).order("sort_order", { ascending: true }),
+    lumiCore.from("travel_memory_photos").select("id, storage_path, caption, stage_id, trip_id").eq("id", photoId).maybeSingle(),
+    lumiCore.from("travel_stages").select("id, title").eq("trip_id", trip.id).order("sort_order", { ascending: true }),
   ]);
   if (!photo || photo.trip_id !== trip.id) notFound();
 
   const stages = stagesRaw ?? [];
-  const resolvedPhoto = await getPhotoDisplayUrl("documents", photo.storage_path, "thumb800");
+  const resolvedPhoto = await getPhotoDisplayUrl(LUMI_CORE_DOCUMENTS_BUCKET, photo.storage_path, "thumb800");
   const returnTo = `/trips/${trip.slug}/gallery`;
 
   return (

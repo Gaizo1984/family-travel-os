@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { getFamily } from "@/lib/family";
 import { loadTripParticipantOptions } from "@/lib/trip-participants";
 import { loadPackingItems, loadPackingLuggage, computeLuggageWeightSummary } from "@/lib/packing-list";
@@ -36,15 +36,15 @@ export default async function PackingLuggagePage({
 }) {
   const { id } = await params;
 
-  const supabase = await createClient();
+  const lumiCore = await createLumiCoreClient();
   const { id: familyId } = await getFamily();
-  const { data: trip } = await supabase.from("trips").select("id, slug, title").eq("slug", id).maybeSingle();
+  const { data: trip } = await lumiCore.from("travel_trips").select("id, slug, title").eq("slug", id).maybeSingle();
   if (!trip) notFound();
 
   const [participants, items, luggage] = await Promise.all([
-    loadTripParticipantOptions(supabase, trip.id, familyId),
-    loadPackingItems(supabase, trip.id),
-    loadPackingLuggage(supabase, trip.id),
+    loadTripParticipantOptions(lumiCore, trip.id, familyId),
+    loadPackingItems(lumiCore, trip.id),
+    loadPackingLuggage(lumiCore, trip.id),
   ]);
 
   const unassignedCount = items.filter((i) => i.luggageId === null && i.status !== "nicht_benoetigt").length;

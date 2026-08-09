@@ -1,9 +1,9 @@
 'use server'
 
 import OpenAI from 'openai'
-import { createClient } from '@/lib/supabase/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { getFamily } from '@/lib/family'
+import { listHouseholdMembers } from '@/lib/household-members'
 import { redirect } from 'next/navigation'
 import { after } from 'next/server'
 import { buildFamilyDnaSummary, formatFamilyDnaForPrompt } from '@/lib/family-dna'
@@ -122,39 +122,34 @@ export async function generateTripIdeas(formData: FormData) {
     nightsMax = nightsMaxRaw ? Number(nightsMaxRaw) : Number(nightsMinRaw)
   }
 
-  const supabase = await createClient()
-  const { data: family } = await supabase.from('families').select('id').limit(1).single()
-  if (!family?.id)
+  const { id: householdId } = await getFamily()
+  if (!householdId)
     redirect(`${planPath}?error=${encodeURIComponent('Familiendaten nicht gefunden')}`)
 
-  const jobId = await createJob(family.id, 'trip_ideas_generate', supabase)
-
   const lumiCore = await createLumiCoreClient()
+  const jobId = await createJob(householdId, 'trip_ideas_generate', lumiCore)
 
   after(async () => {
     try {
-      const { data: allPersons } = await supabase.from('persons').select('id, name, birth_date').eq('family_id', family.id)
-      const selectedTravelers = (allPersons ?? []).filter((p) => travelerIds.includes(p.id))
+      const allHouseholdMembers = await listHouseholdMembers()
+      const selectedTravelers = allHouseholdMembers
+        .filter((p) => travelerIds.includes(p.id))
+        .map((p) => ({ id: p.id, name: p.name, birth_date: p.birthDate }))
 
-      // FINALER CUTOVER, Korrektur: travel_past_trips.household_id ist die
-      // Lumi-Core household_id, NICHT Travels family.id -- über getFamily()
-      // aufgelöst (persons/trips/bookings direkt darunter bleiben bewusst
-      // auf Travels family.id, da travelerIds hier noch legacy Travel-
-      // person_ids sind, siehe Formular; eine vollständige Umstellung
-      // bräuchte zusätzlich die Umstellung des Reisenden-Auswahlformulars).
-      const { id: householdIdForPastTrips } = await getFamily()
-      const { data: pastTrips } = await lumiCore.from('travel_past_trips').select('country_or_region, year').eq('household_id', householdIdForPastTrips)
-      const { data: completedTrips } = await supabase.from('trips').select('id, title').eq('family_id', family.id).in('status', ['completed', 'active'])
+      const [{ data: pastTrips }, { data: completedTrips }] = await Promise.all([
+        lumiCore.from('travel_past_trips').select('country_or_region, year').eq('household_id', householdId),
+        lumiCore.from('travel_trips').select('id, title').eq('household_id', householdId).in('status', ['completed', 'active']),
+      ])
       // §"Lieblingshotels" (LUMI Intelligence v1, §8): kein eigenes Favoriten-Flag
       // im Schema -- bisher genutzte Unterkunftsnamen aus abgeschlossenen/
       // laufenden Reisen sind die nächstliegende, ohne Migration verfügbare
       // Annäherung, ergänzend zu den bereits vorhandenen Hotelkriterien-Tags.
       const completedTripIds = (completedTrips ?? []).map((t) => t.id)
       const { data: pastAccommodations } = completedTripIds.length > 0
-        ? await supabase.from('bookings').select('title').eq('type', 'accommodation').in('trip_id', completedTripIds)
+        ? await lumiCore.from('travel_bookings').select('title').eq('type', 'accommodation').in('trip_id', completedTripIds)
         : { data: [] as Array<{ title: string }> }
 
-      const dnaSummary = await buildFamilyDnaSummary(householdIdForPastTrips)
+      const dnaSummary = await buildFamilyDnaSummary(householdId)
       // §"atDate-Bug beheben": nur ein echtes, valides Reisedatum (konkreter
       // Modus) wird als Stichtag für die Altersberechnung übergeben -- nie mehr
       // roher Freitext, der bei new Date(...) lautlos zu Invalid Date führte.
@@ -223,17 +218,17 @@ export async function generateTripIdeas(formData: FormData) {
         })
         parsed = JSON.parse(response.output_text)
       } catch {
-        await failJob(jobId, 'Die Reiseideen-KI ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.', supabase)
+        await failJob(jobId, 'Die Reiseideen-KI ist gerade nicht verfügbar. Bitte gleich noch einmal versuchen.', lumiCore)
         return
       }
 
       if (!parsed.feasible || parsed.ideas.length === 0) {
-        await failJob(jobId, 'Aus diesem Wunsch konnten keine Reiseideen entwickelt werden. Bitte etwas konkreter beschreiben.', supabase)
+        await failJob(jobId, 'Aus diesem Wunsch konnten keine Reiseideen entwickelt werden. Bitte etwas konkreter beschreiben.', lumiCore)
         return
       }
 
       const { data: session, error: sessionError } = await lumiCore.from('travel_trip_idea_sessions').insert({
-        household_id: family.id,
+        household_id: householdId,
         input_text: wishText,
         clarifying_answers: {
           departure_city: departureCity || null,
@@ -271,14 +266,14 @@ export async function generateTripIdeas(formData: FormData) {
       }).select('id').single()
 
       if (sessionError || !session) {
-        await failJob(jobId, 'Speicherfehler: ' + (sessionError?.message ?? 'unbekannt'), supabase)
+        await failJob(jobId, 'Speicherfehler: ' + (sessionError?.message ?? 'unbekannt'), lumiCore)
         return
       }
 
       const { error: ideasError } = await lumiCore.from('travel_trip_ideas').insert(
         parsed.ideas.map((idea) => ({
           session_id: session.id,
-          household_id: family.id,
+          household_id: householdId,
           origin: 'plan_ai',
           destination: idea.destination,
           route_summary: idea.route_summary,
@@ -294,14 +289,14 @@ export async function generateTripIdeas(formData: FormData) {
       )
 
       if (ideasError) {
-        await failJob(jobId, 'Speicherfehler: ' + ideasError.message, supabase)
+        await failJob(jobId, 'Speicherfehler: ' + ideasError.message, lumiCore)
         return
       }
 
-      await completeJob(jobId, `/plan/ideas/${session.id}`, supabase)
+      await completeJob(jobId, `/plan/ideas/${session.id}`, lumiCore)
     } catch (e) {
       console.error('[trip-idea-generation] generateTripIdeas fehlgeschlagen:', e instanceof Error ? e.message : e)
-      await failJob(jobId, 'Die Reiseideen-KI ist gerade nicht verfügbar. Bitte später erneut versuchen.', supabase)
+      await failJob(jobId, 'Die Reiseideen-KI ist gerade nicht verfügbar. Bitte später erneut versuchen.', lumiCore)
     }
   })
 

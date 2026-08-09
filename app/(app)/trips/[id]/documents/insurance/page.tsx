@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft, Shield } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { assignPolicyToTrip } from "@/lib/actions/insurance";
 import { Banner } from "@/components/Banner";
 
@@ -15,23 +15,23 @@ export default async function AssignInsuranceToTripPage({
   const { id } = await params;
   const { error } = await searchParams;
 
-  const supabase = await createClient();
-  const { data: trip } = await supabase
-    .from("trips")
+  const lumiCore = await createLumiCoreClient();
+  const { data: trip } = await lumiCore
+    .from("travel_trips")
     .select("id, slug, title")
     .eq("slug", id)
     .maybeSingle();
 
   if (!trip) notFound();
 
-  const { data: assignedRows } = await supabase
-    .from("insurance_policy_trips")
+  const { data: assignedRows } = await lumiCore
+    .from("travel_insurance_policy_trips")
     .select("policy_id")
     .eq("trip_id", trip.id);
   const assignedIds = new Set((assignedRows ?? []).map((r) => r.policy_id));
 
-  const { data: allPolicies } = await supabase
-    .from("insurance_policies")
+  const { data: allPolicies } = await lumiCore
+    .from("travel_insurance_policies")
     .select("id, label, provider")
     .order("created_at", { ascending: true });
 

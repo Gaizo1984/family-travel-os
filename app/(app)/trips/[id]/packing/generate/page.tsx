@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { Banner } from "@/components/Banner";
 import { generatePackingList } from "@/lib/actions/packing-list-generation";
 import { PACK_STYLE_ORDER, PACK_STYLE_LABELS } from "@/lib/packing-list-generation";
@@ -27,8 +27,8 @@ export default async function GeneratePackingListPage({
   const { id } = await params;
   const { error } = await searchParams;
 
-  const supabase = await createClient();
-  const { data: trip } = await supabase.from("trips").select("id, slug, title").eq("slug", id).maybeSingle();
+  const lumiCore = await createLumiCoreClient();
+  const { data: trip } = await lumiCore.from("travel_trips").select("id, slug, title").eq("slug", id).maybeSingle();
   if (!trip) notFound();
 
   return (

@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
+import { resolveHouseholdMemberId, LUMI_CORE_PROFILE_PHOTOS_BUCKET, LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
+import { deriveInitials } from "@/lib/household-members";
 import {
   DOCUMENT_TYPE_CONFIG, PASSPORT_VALIDITY_LABELS, PASSPORT_VALIDITY_COLORS,
   getPassportValidity, formatExpiresAt,
@@ -70,14 +72,28 @@ export default async function PersonDetailPage({
 }) {
   const { personId } = await params;
 
-  const supabase = await createClient();
-  const { data: person } = await supabase
-    .from("persons")
-    .select("id, name, initials, color, role_label, description, interest_tags, travel_needs, photo_storage_path, birth_date")
-    .eq("id", personId)
-    .maybeSingle();
+  const lumiCore = await createLumiCoreClient();
+  const householdMemberId = await resolveHouseholdMemberId(personId);
+  if (!householdMemberId) notFound();
 
-  if (!person) notFound();
+  const [{ data: member }, { data: profile }] = await Promise.all([
+    lumiCore.from("household_members").select("id, name, color, avatar_storage_path, birth_date").eq("id", householdMemberId).maybeSingle(),
+    lumiCore.from("travel_household_member_profiles").select("role_label, description, interest_tags, travel_needs").eq("household_member_id", householdMemberId).maybeSingle(),
+  ]);
+  if (!member) notFound();
+
+  const person = {
+    id: personId,
+    name: member.name,
+    initials: deriveInitials(member.name),
+    color: member.color,
+    role_label: profile?.role_label ?? null,
+    description: profile?.description ?? null,
+    interest_tags: profile?.interest_tags ?? [],
+    travel_needs: profile?.travel_needs ?? [],
+    photo_storage_path: member.avatar_storage_path,
+    birth_date: member.birth_date,
+  };
 
   const { id: familyId } = await getFamily();
 
@@ -86,11 +102,11 @@ export default async function PersonDetailPage({
   // §"Egress-Analyse 2026-07-16": 40px-Avatar + 1/1-Grid -- Thumbnails statt Originale, gecachte Signed URLs.
   const [resolvedPhoto, { data: documents }, personWorldStats, { data: memoryPhotosRaw }, trips] = await Promise.all([
     person.photo_storage_path
-      ? getPhotoDisplayUrl("documents", person.photo_storage_path, "thumb400")
+      ? getPhotoDisplayUrl(LUMI_CORE_PROFILE_PHOTOS_BUCKET, person.photo_storage_path, "thumb400")
       : Promise.resolve(null),
-    supabase.from("documents").select("id, doc_type, label, expires_at, details").eq("person_id", person.id).order("created_at", { ascending: true }),
+    lumiCore.from("travel_documents").select("id, doc_type, label, expires_at, details").eq("household_member_id", householdMemberId).order("created_at", { ascending: true }),
     buildTravelWorld({ familyId, personId: person.id }),
-    supabase.from("memory_photos").select("id, storage_path, caption, taken_at, created_at").eq("uploaded_by_person_id", person.id).order("taken_at", { ascending: false, nullsFirst: false }).limit(12),
+    lumiCore.from("travel_memory_photos").select("id, storage_path, caption, taken_at, created_at").eq("uploaded_by_household_member_id", householdMemberId).order("taken_at", { ascending: false, nullsFirst: false }).limit(12),
     listTripsForPicker(familyId),
   ]);
   const photoUrl = resolvedPhoto?.url ?? null;
@@ -105,7 +121,7 @@ export default async function PersonDetailPage({
   const nextTrip = trips.find((t) => t.status === "active" || t.status === "upcoming") ?? null;
   const ageAtNextTrip = nextTrip?.startDate ? ageAtDate(person.birth_date, nextTrip.startDate) : null;
 
-  const memoryPhotosDisplayByPath = await getPhotoDisplayUrls("documents", (memoryPhotosRaw ?? []).map((p) => p.storage_path), "thumb400");
+  const memoryPhotosDisplayByPath = await getPhotoDisplayUrls(LUMI_CORE_DOCUMENTS_BUCKET, (memoryPhotosRaw ?? []).map((p) => p.storage_path), "thumb400");
   const memoryPhotos = (memoryPhotosRaw ?? []).map((p) => ({ ...p, url: memoryPhotosDisplayByPath.get(p.storage_path)?.url ?? null }));
 
   return (

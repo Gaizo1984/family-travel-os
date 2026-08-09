@@ -1,4 +1,4 @@
-import { createServiceRoleClient } from '@/lib/supabase/service-role'
+import { createLumiCoreServiceClient } from '@/lib/supabase/lumi-core-service'
 
 export type CacheCleanupResult = Record<string, number>
 
@@ -21,6 +21,12 @@ export type CacheCleanupResult = Record<string, number>
  * `persons`, `past_trips`, `saved_flight_options`, `lumi_brain_usage`,
  * `flight_search_usage` (dauerhaft bzw. bewusst ohne Ablauf, siehe
  * Architekturplan) -- niemals in diesem Cleanup berühren.
+ *
+ * FINALER CUTOVER: läuft jetzt gegen Lumi Core über den neuen
+ * Service-Role-Client (lib/supabase/lumi-core-service.ts) -- der
+ * cookie-basierte createLumiCoreClient() liefert in diesem sitzungslosen
+ * Cron-Kontext keine authentifizierte Session, RLS würde jede Abfrage
+ * still auf 0 Zeilen filtern.
  */
 const CATEGORY_PLACES_TTL_DAYS = 14
 const DAY_PLAN_TTL_DAYS = 7
@@ -35,37 +41,37 @@ function cutoffIso(days: number): string {
 }
 
 export async function cleanupExpiredCacheEntries(): Promise<CacheCleanupResult> {
-  const supabase = createServiceRoleClient()
+  const lumiCore = createLumiCoreServiceClient()
   const result: CacheCleanupResult = {}
 
   const jobs = [
     {
-      table: 'category_places_cache',
-      run: () => supabase.from('category_places_cache').delete({ count: 'exact' }).lt('updated_at', cutoffIso(CATEGORY_PLACES_TTL_DAYS)),
+      table: 'travel_category_places_cache',
+      run: () => lumiCore.from('travel_category_places_cache').delete({ count: 'exact' }).lt('updated_at', cutoffIso(CATEGORY_PLACES_TTL_DAYS)),
     },
     {
-      table: 'day_plan_cache',
-      run: () => supabase.from('day_plan_cache').delete({ count: 'exact' }).lt('updated_at', cutoffIso(DAY_PLAN_TTL_DAYS)),
+      table: 'travel_day_plan_cache',
+      run: () => lumiCore.from('travel_day_plan_cache').delete({ count: 'exact' }).lt('updated_at', cutoffIso(DAY_PLAN_TTL_DAYS)),
     },
     {
-      table: 'flight_search_cache',
-      run: () => supabase.from('flight_search_cache').delete({ count: 'exact' }).lt('updated_at', cutoffIso(FLIGHT_SEARCH_TTL_DAYS)),
+      table: 'travel_flight_search_cache',
+      run: () => lumiCore.from('travel_flight_search_cache').delete({ count: 'exact' }).lt('updated_at', cutoffIso(FLIGHT_SEARCH_TTL_DAYS)),
     },
     {
-      table: 'concierge_messages',
-      run: () => supabase.from('concierge_messages').delete({ count: 'exact' }).lt('created_at', cutoffIso(CONCIERGE_MESSAGES_TTL_DAYS)),
+      table: 'travel_concierge_messages',
+      run: () => lumiCore.from('travel_concierge_messages').delete({ count: 'exact' }).lt('created_at', cutoffIso(CONCIERGE_MESSAGES_TTL_DAYS)),
     },
     {
-      table: 'today_recommendations',
-      run: () => supabase.from('today_recommendations').delete({ count: 'exact' }).lt('created_at', cutoffIso(TODAY_RECOMMENDATIONS_TTL_DAYS)),
+      table: 'travel_today_recommendations',
+      run: () => lumiCore.from('travel_today_recommendations').delete({ count: 'exact' }).lt('created_at', cutoffIso(TODAY_RECOMMENDATIONS_TTL_DAYS)),
     },
     {
-      table: 'content_strategies',
-      run: () => supabase.from('content_strategies').delete({ count: 'exact' }).lt('created_at', cutoffIso(CONTENT_STRATEGIES_TTL_DAYS)),
+      table: 'travel_content_strategies',
+      run: () => lumiCore.from('travel_content_strategies').delete({ count: 'exact' }).lt('created_at', cutoffIso(CONTENT_STRATEGIES_TTL_DAYS)),
     },
     {
-      table: 'concierge_category_suggestions',
-      run: () => supabase.from('concierge_category_suggestions').delete({ count: 'exact' }).lt('updated_at', cutoffIso(CONCIERGE_CATEGORY_SUGGESTIONS_TTL_DAYS)),
+      table: 'travel_concierge_category_suggestions',
+      run: () => lumiCore.from('travel_concierge_category_suggestions').delete({ count: 'exact' }).lt('updated_at', cutoffIso(CONCIERGE_CATEGORY_SUGGESTIONS_TTL_DAYS)),
     },
   ]
 
