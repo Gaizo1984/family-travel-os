@@ -149,7 +149,7 @@ export async function uploadContentSessionPhotos(formData: FormData) {
       }
 
       const compressed = await compressImageForStorage(staged.buffer)
-      const storagePath = `content-session/${project.household_id}/${projectId}/${crypto.randomUUID()}.webp`
+      const storagePath = `${project.household_id}/content-session/${projectId}/${crypto.randomUUID()}.webp`
 
       const { error: uploadError } = await lumiCore.storage.from('travel-documents')
         .upload(storagePath, new Blob([new Uint8Array(compressed)], { type: 'image/webp' }), { contentType: 'image/webp', cacheControl: '31536000' })
