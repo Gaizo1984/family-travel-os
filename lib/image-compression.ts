@@ -9,7 +9,13 @@ const MAX_WIDTH = 2000
  * Wiederverwendbar für jede künftige Foto-Upload-Stelle, nicht nur Memories.
  */
 export async function compressImageForStorage(buffer: Buffer): Promise<Buffer> {
-  const compressed = await sharp(buffer)
+  // §Fix "Invalid SOS parameters for sequential JPEG": manche Smartphone-/
+  // Messenger-JPEGs sind leicht nicht-konform kodiert (z. B. ungewöhnliche
+  // Restart-Marker) -- libvips lehnt sie standardmäßig komplett ab, obwohl
+  // sie sich fehlertolerant decodieren lassen. `failOn: 'none'` erlaubt
+  // genau das (statt eines harten Abbruchs), ohne die Kompressions-/
+  // Qualitätslogik selbst zu verändern.
+  const compressed = await sharp(buffer, { failOn: 'none' })
     // §"Bilder im Querformat stehen auf dem Kopf": Fotos von Smartphones
     // speichern die Pixel oft unrotiert und markieren die tatsächliche
     // Ausrichtung nur im EXIF-Orientation-Tag. Ohne .rotate() übernimmt
