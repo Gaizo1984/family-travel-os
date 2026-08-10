@@ -62,7 +62,16 @@ const nextConfig: NextConfig = {
       // nicht ihre eigene Domain -- ohne diesen Eintrag würden dadurch ALLE
       // Server Actions (nahezu jede Mutation der App) mit einem Origin-Fehler
       // abgelehnt. localhost:3006 zusätzlich für den lokalen Multi-Zones-Test.
-      allowedOrigins: ["lumi-launcher.vercel.app", "localhost:3006"],
+      //
+      // §Preview-Testrunde: die Lumi-Launcher-PRODUCTION-Domain allein reicht
+      // für einen Preview-Test nicht -- der Launcher läuft dort unter einer
+      // eigenen, wechselnden Vercel-Preview-URL. TRAVEL_ALLOWED_SERVER_ACTION_ORIGINS
+      // (serverseitige, kommagetrennte Environment Variable, pro Vercel-
+      // Environment einzeln setzbar) ergänzt/ersetzt die feste Liste, ohne
+      // diese Datei je Testrunde anfassen zu müssen.
+      allowedOrigins: process.env.TRAVEL_ALLOWED_SERVER_ACTION_ORIGINS
+        ? process.env.TRAVEL_ALLOWED_SERVER_ACTION_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean)
+        : ["lumi-launcher.vercel.app", "localhost:3006"],
     },
   },
   // §Bugfix "Service-Worker-Update erreicht das installierte App-Icon nicht

@@ -26,9 +26,24 @@ import { BASE_PATH } from './lib/base-path'
  * tatsächlich zu Travels echter Domain navigiert, darf/kann den Cookie dort
  * korrekt setzen -- das übernimmt derselbe proxy() weiter unten, sobald er
  * auf der echten Domain mit `return_to` im Query-String läuft.
+ *
+ * §Preview-Testrunde: "Travels eigene Domain" ist NICHT immer die fixe
+ * Production-URL -- ein Preview-Deployment dieser App läuft unter einer
+ * eigenen, pro Deployment wechselnden Vercel-URL. Ohne dynamische Erkennung
+ * würde der Guard während eines Preview-Tests fälschlich auf die Production-
+ * Domain umleiten (falscher Passkey-Kontext, kaputter Testlauf). Vercel
+ * setzt `VERCEL_ENV`/`VERCEL_URL` automatisch pro Deployment, ganz ohne
+ * manuelle Env-Var-Pflege je Testrunde -- nur für den bekannten Production-
+ * Fall bleibt die feste Domain hartkodiert (deckungsgleich mit der
+ * Rollback-Anforderung).
  */
-const TRAVEL_OWN_ORIGIN = 'https://family-travel-os-xi.vercel.app'
-const TRAVEL_OWN_HOSTS = ['family-travel-os-xi.vercel.app', 'localhost:3001', '127.0.0.1:3001']
+const TRAVEL_OWN_ORIGIN =
+  process.env.VERCEL_ENV === 'production'
+    ? 'https://family-travel-os-xi.vercel.app'
+    : process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : 'http://localhost:3001'
+const TRAVEL_OWN_HOSTS = [new URL(TRAVEL_OWN_ORIGIN).host, 'localhost:3001', '127.0.0.1:3001']
 const RETURN_TO_COOKIE_MAX_AGE_SECONDS = 600
 
 function isForeignHost(request: NextRequest): boolean {
