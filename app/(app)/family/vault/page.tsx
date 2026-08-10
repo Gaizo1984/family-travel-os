@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Shield } from "lucide-react";
 import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { getFamily } from "@/lib/family";
-import { listHouseholdMembers, resolveLegacyTravelPersonId, deriveInitials } from "@/lib/household-members";
+import { listHouseholdMembers, deriveInitials } from "@/lib/household-members";
 import {
   DOCUMENT_TYPE_CONFIG, DOCUMENT_VALIDITY_LABELS, DOCUMENT_VALIDITY_COLORS,
   getDocumentValidity,
@@ -41,13 +41,10 @@ function DocGroup({
   title,
   docsByPerson,
   persons,
-  legacyIdByMemberId,
 }: {
   title: string;
   docsByPerson: Map<string, DocumentRow[]>;
   persons: PersonRow[];
-  /** §Rückrichtung (lib/household-members.ts::resolveLegacyTravelPersonId): docsByPerson/persons sind mit der echten household_member_id verschlüsselt (passend zu travel_documents), der Link muss aber weiterhin auf Travels legacy /family/[personId] zeigen. */
-  legacyIdByMemberId: Map<string, string>;
 }) {
   const relevantPersons = persons.filter((p) => (docsByPerson.get(p.id) ?? []).length > 0);
   if (relevantPersons.length === 0) return null;
@@ -73,11 +70,10 @@ function DocGroup({
               {(docsByPerson.get(person.id) ?? []).map((doc) => {
                 const config = DOCUMENT_TYPE_CONFIG[doc.doc_type];
                 const validity = getDocumentValidity(doc);
-                const legacyPersonId = legacyIdByMemberId.get(person.id);
                 return (
                   <Link
                     key={doc.id}
-                    href={legacyPersonId ? `/family/${legacyPersonId}/documents/${doc.id}` : "/family"}
+                    href={`/family/${person.id}/documents/${doc.id}`}
                     className="flex items-center justify-between gap-3"
                     style={{ textDecoration: "none" }}
                   >
@@ -115,12 +111,6 @@ export default async function TravelVaultPage() {
     id: d.id, person_id: d.household_member_id!, doc_type: d.doc_type as DocumentType,
     label: d.label ?? "", expires_at: d.expires_at, details: d.details as DocumentDetails | null,
   }));
-
-  // §Rückrichtung (lib/household-members.ts::resolveLegacyTravelPersonId): DocGroup
-  // verlinkt weiterhin auf Travels legacy /family/[personId]-Route.
-  const legacyIdByMemberId = new Map(
-    await Promise.all(personList.map(async (p): Promise<[string, string]> => [p.id, (await resolveLegacyTravelPersonId(p.id)) ?? p.id])),
-  );
 
   const identityByPerson = new Map<string, DocumentRow[]>();
   const entryByPerson = new Map<string, DocumentRow[]>();
@@ -170,8 +160,8 @@ export default async function TravelVaultPage() {
 
         {hasAnyData ? (
           <>
-            <DocGroup title="Reisepässe & Ausweise" docsByPerson={identityByPerson} persons={personList} legacyIdByMemberId={legacyIdByMemberId} />
-            <DocGroup title="Visa & Einreise" docsByPerson={entryByPerson} persons={personList} legacyIdByMemberId={legacyIdByMemberId} />
+            <DocGroup title="Reisepässe & Ausweise" docsByPerson={identityByPerson} persons={personList} />
+            <DocGroup title="Visa & Einreise" docsByPerson={entryByPerson} persons={personList} />
 
             {policies.length > 0 && (
               <section>

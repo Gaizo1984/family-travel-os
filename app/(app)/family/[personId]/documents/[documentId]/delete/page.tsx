@@ -2,7 +2,6 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
-import { resolveHouseholdMemberId } from "@/lib/lumi-core-storage/paths";
 import { getHouseholdMemberById } from "@/lib/household-members";
 import { deleteDocument } from "@/lib/actions/documents";
 
@@ -14,8 +13,8 @@ export default async function DeleteDocumentPage({
   const { personId, documentId } = await params;
 
   const lumiCore = await createLumiCoreClient();
-  const householdMemberId = await resolveHouseholdMemberId(personId);
-  if (!householdMemberId) notFound();
+  // §ID-Space: /family/[personId] ist die echte household_member_id.
+  const householdMemberId = personId;
 
   const member = await getHouseholdMemberById(householdMemberId);
   if (!member) notFound();

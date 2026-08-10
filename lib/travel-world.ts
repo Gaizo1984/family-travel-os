@@ -1,5 +1,4 @@
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
-import { resolveHouseholdMemberId } from '@/lib/lumi-core-storage/paths'
 import { isTripHistorical, isTripCurrentlyRunning } from '@/lib/trip-status'
 import { deriveTripDateRange, tripDurationDays } from '@/lib/trip-dates'
 
@@ -203,11 +202,10 @@ export async function buildTravelWorld(params: {
   statusFilter?: 'historical' | 'all'
 }): Promise<TravelWorld> {
   const raw = await fetchTravelWorldRawData(params.familyId)
-  // FINALER CUTOVER: aufrufende Seiten (z.B. app/(app)/family/[personId]/page.tsx)
-  // liefern weiterhin Travels legacy person_id (Route-Parameter) -- travel_trip_members
-  // speichert jetzt household_member_id, daher hier übersetzen.
-  const householdMemberId = params.personId ? await resolveHouseholdMemberId(params.personId) : undefined
-  return computeTravelWorld(raw, { personId: householdMemberId ?? undefined, statusFilter: params.statusFilter })
+  // §ID-Space: alle Aufrufer (z. B. app/(app)/family/[personId]/page.tsx) liefern
+  // bereits die echte household_member_id -- travel_trip_members speichert
+  // dieselbe ID, keine Übersetzung nötig.
+  return computeTravelWorld(raw, { personId: params.personId, statusFilter: params.statusFilter })
 }
 
 /**
@@ -230,12 +228,10 @@ export async function buildTravelWorldForFamilyAndPersons(
 ): Promise<{ family: TravelWorld; byPersonId: Map<string, TravelWorld> }> {
   const raw = await fetchTravelWorldRawData(familyId)
   const family = computeTravelWorld(raw, { statusFilter })
-  // FINALER CUTOVER: personIds kommen weiterhin als Travels legacy person_id
-  // von den Aufrufern (siehe app/(app)/page.tsx) -- hier auf household_member_id
-  // übersetzen, da travel_trip_members darauf umgestellt ist.
-  const householdMemberIds = await Promise.all(personIds.map((id) => resolveHouseholdMemberId(id)))
+  // §ID-Space: personIds sind bereits echte household_member_ids (siehe
+  // app/(app)/page.tsx), travel_trip_members speichert dieselbe ID.
   const byPersonId = new Map(
-    personIds.map((legacyId, i) => [legacyId, computeTravelWorld(raw, { personId: householdMemberIds[i] ?? undefined, statusFilter })]),
+    personIds.map((id) => [id, computeTravelWorld(raw, { personId: id, statusFilter })]),
   )
   return { family, byPersonId }
 }

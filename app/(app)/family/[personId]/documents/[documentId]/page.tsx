@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
-import { resolveHouseholdMemberId, LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
+import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
 import { getHouseholdMemberById } from "@/lib/household-members";
 import { getFamily } from "@/lib/family";
 import {
@@ -47,8 +47,8 @@ export default async function DocumentDetailPage({
   const { error } = await searchParams;
 
   const lumiCore = await createLumiCoreClient();
-  const householdMemberId = await resolveHouseholdMemberId(personId);
-  if (!householdMemberId) notFound();
+  // §ID-Space: /family/[personId] ist die echte household_member_id.
+  const householdMemberId = personId;
 
   const member = await getHouseholdMemberById(householdMemberId);
   if (!member) notFound();

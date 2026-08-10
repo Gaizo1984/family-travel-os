@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
-import { resolveHouseholdMemberId, LUMI_CORE_PROFILE_PHOTOS_BUCKET, LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
+import { LUMI_CORE_PROFILE_PHOTOS_BUCKET, LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
 import { deriveInitials } from "@/lib/household-members";
 import {
   DOCUMENT_TYPE_CONFIG, PASSPORT_VALIDITY_LABELS, PASSPORT_VALIDITY_COLORS,
@@ -73,8 +73,9 @@ export default async function PersonDetailPage({
   const { personId } = await params;
 
   const lumiCore = await createLumiCoreClient();
-  const householdMemberId = await resolveHouseholdMemberId(personId);
-  if (!householdMemberId) notFound();
+  // §ID-Space: /family/[personId] ist die echte household_member_id
+  // (household_members ist die Core-Wahrheit) -- keine Legacy-Übersetzung mehr.
+  const householdMemberId = personId;
 
   const [{ data: member }, { data: profile }] = await Promise.all([
     lumiCore.from("household_members").select("id, name, color, avatar_storage_path, birth_date").eq("id", householdMemberId).maybeSingle(),

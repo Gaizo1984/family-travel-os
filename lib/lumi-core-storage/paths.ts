@@ -44,10 +44,8 @@ export async function resolveHouseholdMemberId(travelPersonId: string): Promise<
   return data.household_member_id
 }
 
-export async function toProfilePhotoPath(travelPersonId: string, filename: string): Promise<string | null> {
+export async function toProfilePhotoPath(householdMemberId: string, filename: string): Promise<string | null> {
   const householdId = await getLumiCoreHouseholdId()
   if (!householdId) return null
-  const householdMemberId = await resolveHouseholdMemberId(travelPersonId)
-  if (!householdMemberId) return null
   return `${householdId}/${householdMemberId}/${filename}`
 }

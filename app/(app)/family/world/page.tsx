@@ -2,8 +2,7 @@ import Link from "next/link";
 import { ChevronLeft, Map as MapIcon, Globe, CalendarDays, Compass } from "lucide-react";
 import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { getFamily } from "@/lib/family";
-import { listHouseholdMembers, resolveLegacyTravelPersonId } from "@/lib/household-members";
-import { resolveHouseholdMemberId } from "@/lib/lumi-core-storage/paths";
+import { listHouseholdMembers } from "@/lib/household-members";
 import { buildTravelWorld, syncTripDerivedCountryVisits } from "@/lib/travel-world";
 import { WorldMap } from "@/components/WorldMap";
 import { COUNTRY_NAMES } from "@/lib/geo-suggestions";
@@ -43,17 +42,11 @@ export default async function FamilyWorldPage({
 
   const [householdMembers, travelWorld] = await Promise.all([
     listHouseholdMembers(),
-    // §ID-Space: buildTravelWorld erwartet weiterhin Travels legacy person_id
-    // (siehe lib/travel-world.ts) -- personFilter kommt unten konsistent aus
-    // resolveLegacyTravelPersonId, nicht aus household_member_id.
+    // §ID-Space: personFilter ist bereits die echte household_member_id
+    // (household_members ist die Core-Wahrheit) -- siehe lib/travel-world.ts.
     buildTravelWorld({ familyId, personId: personFilter || undefined }),
   ]);
-  // §Rückrichtung (lib/household-members.ts::resolveLegacyTravelPersonId):
-  // die Personenfilter-Chips müssen weiterhin auf Travels legacy person_id
-  // verlinken, damit buildTravelWorld() oben dieselbe ID korrekt auflösen kann.
-  const persons = await Promise.all(
-    householdMembers.map(async (m) => ({ id: (await resolveLegacyTravelPersonId(m.id)) ?? m.id, name: m.name })),
-  );
+  const persons = householdMembers.map((m) => ({ id: m.id, name: m.name }));
 
   // §"familienweite Ansicht: Land markieren sobald mindestens eine Person
   // dort war; Personenfilter: nur Länder der ausgewählten Person markieren"
@@ -61,15 +54,11 @@ export default async function FamilyWorldPage({
   // (Reise + manuell), NICHT mehr nur travelWorld.countryCodes -- erfasst
   // dadurch auch rein manuell markierte Länder. Statistik/Zeitstrahl bleiben
   // unverändert bei travelWorld (ausschließlich echte Reisen).
-  // §ID-Space: travel_person_country_visits.household_member_id ist die
-  // echte Lumi-Core-ID (siehe lib/actions/country-visits.ts) -- personFilter
-  // (legacy) muss dafür erst aufgelöst werden, anders als bei buildTravelWorld oben.
   const familyMemberIds = householdMembers.map((m) => m.id);
-  const filterMemberId = personFilter ? await resolveHouseholdMemberId(personFilter) : null;
   let mapVisitedCodes = new Set<string>();
   if (familyMemberIds.length > 0) {
     let query = lumiCore.from("travel_person_country_visits").select("country_code, household_member_id").in("household_member_id", familyMemberIds);
-    if (filterMemberId) query = query.eq("household_member_id", filterMemberId);
+    if (personFilter) query = query.eq("household_member_id", personFilter);
     const { data: visitRows } = await query;
     mapVisitedCodes = new Set((visitRows ?? []).map((r) => r.country_code));
   }

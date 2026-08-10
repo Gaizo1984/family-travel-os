@@ -3,33 +3,29 @@
 import { redirect } from 'next/navigation'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { getFamily } from '@/lib/family'
-import { resolveHouseholdMemberId, toProfilePhotoPath, LUMI_CORE_PROFILE_PHOTOS_BUCKET } from '@/lib/lumi-core-storage/paths'
+import { toProfilePhotoPath, LUMI_CORE_PROFILE_PHOTOS_BUCKET } from '@/lib/lumi-core-storage/paths'
 import { uploadToLumiCore, removeFromLumiCore } from '@/lib/lumi-core-storage/client'
 import { ALLOWED_DOCUMENT_MIME_TYPES, MAX_DOCUMENT_FILE_SIZE, readDateGroupFromFormData } from '@/lib/documents'
 import { TRAVEL_NEED_OPTIONS } from '@/lib/family-dna'
 
 /**
- * FINALER CUTOVER, Schema-Luecken-Schliessung: `personId` ist weiterhin die
- * LEGACY Travel-person_id (die `/family/[personId]/...`-Routen bleiben
- * bewusst so benannt), wird hier aber sofort auf die echte Lumi-Core
- * household_member_id aufgeloest (travel_person_migration_map, siehe
- * lib/lumi-core-storage/paths.ts). name/birth_date/is_minor/avatar liegen
- * bereits nativ auf household_members; role_label/description/
- * interest_tags/travel_needs (kein Lumi-Core-Kernschema-Aequivalent, rein
- * Travel-spezifisch) liegen in der neuen Zusatztabelle
+ * §ID-Space: `person_id` ist die echte Lumi-Core household_member_id
+ * (household_members ist die Core-Wahrheit, siehe /family/[personId]-Routen).
+ * name/birth_date/is_minor/avatar liegen bereits nativ auf household_members;
+ * role_label/description/interest_tags/travel_needs (kein Lumi-Core-
+ * Kernschema-Aequivalent, rein Travel-spezifisch) liegen in der Zusatztabelle
  * travel_household_member_profiles (1:1 zu household_members).
  */
 export async function updatePersonProfile(formData: FormData) {
-  const personId    = String(formData.get('person_id') ?? '')
+  const householdMemberId = String(formData.get('person_id') ?? '')
   const name        = String(formData.get('name') ?? '').trim()
   const roleLabel   = String(formData.get('role_label') ?? '').trim()
   const description = String(formData.get('description') ?? '').trim()
   const tagsRaw      = String(formData.get('interest_tags') ?? '').trim()
   const isMinor     = formData.get('is_minor') === 'on'
   const returnTo    = String(formData.get('return_to') ?? '').trim()
-  const editPath    = `/family/${personId}/edit`
+  const editPath    = `/family/${householdMemberId}/edit`
 
-  const householdMemberId = await resolveHouseholdMemberId(personId)
   if (!householdMemberId) redirect(`${editPath}?error=${encodeURIComponent('Person nicht gefunden.')}`)
 
   // §"Identische Datumsmatrix wie z.B. beim Flugvergleich verwenden"
@@ -66,7 +62,7 @@ export async function updatePersonProfile(formData: FormData) {
 
     const { data: existing } = await lumiCore.from('household_members').select('avatar_storage_path').eq('id', householdMemberId).maybeSingle()
 
-    const newPath = await toProfilePhotoPath(personId, file.name)
+    const newPath = await toProfilePhotoPath(householdMemberId, file.name)
     if (!newPath) redirect(`${editPath}?error=${encodeURIComponent('Foto-Upload fehlgeschlagen: Household nicht ermittelbar.')}`)
 
     const { error: uploadError } = await uploadToLumiCore(LUMI_CORE_PROFILE_PHOTOS_BUCKET, newPath, file, { contentType: file.type })
@@ -106,5 +102,5 @@ export async function updatePersonProfile(formData: FormData) {
   if (profileError)
     redirect(`${editPath}?error=${encodeURIComponent('Speicherfehler: ' + profileError.message)}`)
 
-  redirect(returnTo || `/family/${personId}`)
+  redirect(returnTo || `/family/${householdMemberId}`)
 }

@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createLumiCoreClient } from './supabase/lumi-core-server'
 import type { LumiCoreDatabase } from './supabase/lumi-core-types'
-import { listHouseholdMembers, resolveLegacyTravelPersonId } from './household-members'
+import { listHouseholdMembers } from './household-members'
 import type { DocumentType } from './documents'
 import { deriveTripDateRange } from './trip-dates'
 
@@ -59,7 +59,7 @@ type RequirementContext = {
   tripSlug: string
   tripEnd: string
   returnTo: string
-  members: Array<{ id: string; name: string; legacyPersonId: string | null }>
+  members: Array<{ id: string; name: string }>
   countryCodes: Set<string>
   documentsByPerson: Map<string, PersonDoc[]>
   lumiCore: SupabaseClient<LumiCoreDatabase>
@@ -159,11 +159,9 @@ async function buildRequirementContext(tripId: string, returnTo?: string, lumiCo
   if (!dateRange.endDate) return null
 
   const memberIdSet = new Set((tripMemberRows ?? []).map((m) => m.household_member_id))
-  const members = await Promise.all(
-    householdMembers
-      .filter((m) => memberIdSet.has(m.id))
-      .map(async (m) => ({ id: m.id, name: m.name, legacyPersonId: await resolveLegacyTravelPersonId(m.id) })),
-  )
+  const members = householdMembers
+    .filter((m) => memberIdSet.has(m.id))
+    .map((m) => ({ id: m.id, name: m.name }))
 
   const countryCodes = new Set<string>()
   for (const s of stages) {
@@ -236,7 +234,7 @@ function createDocumentRequirementRule(opts: {
           if (opts.autoLink) toLink.push({ document_id: validForTrip.id, trip_id: ctx.tripId })
           results.push({
             type: opts.type, category: 'document', label: opts.label, status: 'satisfied', priority: opts.priority,
-            personId: member.legacyPersonId, personName: member.name,
+            personId: member.id, personName: member.name,
             reason: `${opts.label} von ${member.name} ist bis mindestens Reiseende gültig.`,
             actionLabel: null, actionHref: null, documentId: validForTrip.id,
           })
@@ -257,16 +255,14 @@ function createDocumentRequirementRule(opts: {
         results.push({
           type: opts.type, category: 'document', label: opts.label,
           status: hasAnyDocOfType ? 'expired' : 'missing', priority: opts.priority,
-          personId: member.legacyPersonId, personName: member.name,
+          personId: member.id, personName: member.name,
           reason: hasAnyDocOfType
             ? `${opts.label} von ${member.name} läuft vor oder während des Reiseendes ab.`
             : `${member.name} hat kein/e gültige/n ${opts.label} hinterlegt.`,
           actionLabel: hasAnyDocOfType ? `${opts.label} erneuern` : `${opts.label} hinzufügen`,
-          actionHref: member.legacyPersonId
-            ? (hasAnyDocOfType
-              ? `/family/${member.legacyPersonId}/documents/${mostRecentExpiring!.id}`
-              : `/family/${member.legacyPersonId}/documents/new?type=${opts.docType}&return_to=${encodeURIComponent(ctx.returnTo)}&assign_trip=${ctx.tripId}`)
-            : '/family',
+          actionHref: hasAnyDocOfType
+            ? `/family/${member.id}/documents/${mostRecentExpiring!.id}`
+            : `/family/${member.id}/documents/new?type=${opts.docType}&return_to=${encodeURIComponent(ctx.returnTo)}&assign_trip=${ctx.tripId}`,
           documentId: null,
         })
       }

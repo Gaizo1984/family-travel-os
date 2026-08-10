@@ -1,5 +1,4 @@
 import { createLumiCoreClient } from './supabase/lumi-core-server'
-import { resolveLegacyTravelPersonId } from './household-members'
 import type { DocumentType } from './documents'
 import { detectFlightStopoverSuggestions, detectSingleFlightLayoverSuggestions } from './flight-stopovers'
 import { computeTripRequirements } from './travel-requirements'
@@ -135,11 +134,10 @@ export async function computeTripReadiness(tripId: string): Promise<ReadinessRes
   for (const doc of assignedEntryDocsRaw ?? []) {
     if (!MANUALLY_ASSIGNED_ENTRY_TYPES.includes(doc.doc_type as DocumentType)) continue
     if (doc.expires_at && doc.expires_at <= tripEnd) {
-      const legacyPersonId = doc.household_member_id ? await resolveLegacyTravelPersonId(doc.household_member_id) : null
       findings.push({
         severity: 'conflict', theme: 'entry',
         message: `${doc.label} läuft vor oder während des Reiseendes ab.`,
-        href: legacyPersonId ? `/family/${legacyPersonId}/documents/${doc.id}` : '/family',
+        href: doc.household_member_id ? `/family/${doc.household_member_id}/documents/${doc.id}` : '/family',
       })
     }
   }

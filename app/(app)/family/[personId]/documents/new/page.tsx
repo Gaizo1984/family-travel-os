@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { resolveHouseholdMemberId } from "@/lib/lumi-core-storage/paths";
 import { getHouseholdMemberById } from "@/lib/household-members";
 import { createDocument } from "@/lib/actions/documents";
 import { extractDocumentData } from "@/lib/actions/document-extraction";
@@ -32,8 +31,8 @@ export default async function NewDocumentPage({
     try { draft = JSON.parse(draftRaw) as DraftFields; } catch { draft = null; }
   }
 
-  const householdMemberId = await resolveHouseholdMemberId(personId);
-  if (!householdMemberId) notFound();
+  // §ID-Space: /family/[personId] ist die echte household_member_id.
+  const householdMemberId = personId;
 
   const member = await getHouseholdMemberById(householdMemberId);
   if (!member) notFound();
