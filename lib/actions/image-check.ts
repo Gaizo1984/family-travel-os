@@ -103,18 +103,20 @@ export async function uploadImageCheckPhotos(formData: FormData) {
 
       const { error: uploadError } = await lumiCore.storage.from('travel-documents')
         .upload(storagePath, new Blob([new Uint8Array(compressed)], { type: 'image/webp' }), { contentType: 'image/webp', cacheControl: '31536000' })
-      if (uploadError) { failedCount++; continue }
+      if (uploadError) { console.error('[image-check] Storage-Upload fehlgeschlagen:', uploadError.message); failedCount++; continue }
 
       const { error: insertError } = await lumiCore.from('travel_content_project_photos').insert({
         project_id: projectId, storage_path: storagePath, temporary: true, expires_at: expiresAt,
       })
       if (insertError) {
+        console.error('[image-check] DB-Insert fehlgeschlagen:', insertError.message)
         await lumiCore.storage.from('travel-documents').remove([storagePath])
         failedCount++
         continue
       }
       savedCount++
-    } catch {
+    } catch (e) {
+      console.error('[image-check] unerwarteter Fehler beim Foto-Upload:', e instanceof Error ? e.message : e)
       failedCount++
     }
   }

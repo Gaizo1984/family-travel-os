@@ -153,7 +153,7 @@ export async function uploadContentSessionPhotos(formData: FormData) {
 
       const { error: uploadError } = await lumiCore.storage.from('travel-documents')
         .upload(storagePath, new Blob([new Uint8Array(compressed)], { type: 'image/webp' }), { contentType: 'image/webp', cacheControl: '31536000' })
-      if (uploadError) { failedCount++; continue }
+      if (uploadError) { console.error('[content-sessions] Storage-Upload fehlgeschlagen:', uploadError.message); failedCount++; continue }
 
       const phash = await computeDHash(compressed)
       const duplicateOf = phash !== null
@@ -171,13 +171,15 @@ export async function uploadContentSessionPhotos(formData: FormData) {
       }).select('id').single()
 
       if (insertError || !photoRow) {
+        console.error('[content-sessions] DB-Insert fehlgeschlagen:', insertError?.message ?? 'kein Datensatz zurückgegeben')
         await lumiCore.storage.from('travel-documents').remove([storagePath])
         failedCount++
         continue
       }
       if (phash) hashPool.push({ id: photoRow.id, phash })
       savedCount++
-    } catch {
+    } catch (e) {
+      console.error('[content-sessions] unerwarteter Fehler beim Foto-Upload:', e instanceof Error ? e.message : e)
       failedCount++
     }
   }

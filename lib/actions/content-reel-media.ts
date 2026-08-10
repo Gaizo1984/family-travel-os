@@ -113,6 +113,7 @@ export async function uploadReelVideos(formData: FormData) {
 
     const { error: moveError } = await lumiCore.storage.from(STORAGE_BUCKET).move(stagingPath, finalPath)
     if (moveError) {
+      console.error('[content-reel-media] Storage-Move fehlgeschlagen:', moveError.message)
       rejectedCount++
       continue
     }
@@ -136,6 +137,7 @@ export async function uploadReelVideos(formData: FormData) {
       expires_at: new Date(Date.now() + REEL_VIDEO_TTL_HOURS * 60 * 60 * 1000).toISOString(),
     })
     if (insertError) {
+      console.error('[content-reel-media] DB-Insert fehlgeschlagen:', insertError.message)
       rejectedCount++
       continue
     }
