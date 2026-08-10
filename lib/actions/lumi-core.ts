@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { cookies } from 'next/headers'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { PASSKEY_PENDING_LC_COOKIE } from '@/lib/passkey-lumi-core-gate'
+import { redirectAfterLogin } from '@/lib/travel-return-to'
 
 /**
  * FINALER CUTOVER: `connectLumiCore` (Phase 3A, "kontrollierter Re-Login"
@@ -60,5 +61,5 @@ export async function establishLumiCoreSession(formData: FormData) {
   const cookieStore = await cookies()
   cookieStore.delete(PASSKEY_PENDING_LC_COOKIE)
 
-  redirect(target)
+  await redirectAfterLogin(target)
 }

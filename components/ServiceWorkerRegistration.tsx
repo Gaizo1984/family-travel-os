@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
+import { BASE_PATH } from '@/lib/base-path'
 
 /**
  * §"Offline-Reisen wirklich ohne Netzverbindung ladbar machen" (Nutzervorgabe):
@@ -28,8 +29,8 @@ export function ServiceWorkerRegistration() {
       // vertrauen, ist die Registrierungs-URL pro Deploy eindeutig --
       // jeder neue Build ist damit aus Browsersicht unmissverständlich
       // eine neue Datei, die sofort installiert wird.
-      const swUrl = `/sw.js?v=${process.env.NEXT_PUBLIC_SW_BUILD_ID ?? 'dev'}`
-      navigator.serviceWorker.register(swUrl, { scope: '/', updateViaCache: 'none' }).catch((err) => {
+      const swUrl = `${BASE_PATH}/sw.js?v=${process.env.NEXT_PUBLIC_SW_BUILD_ID ?? 'dev'}`
+      navigator.serviceWorker.register(swUrl, { scope: `${BASE_PATH}/`, updateViaCache: 'none' }).catch((err) => {
         console.warn('[sw] Registrierung fehlgeschlagen -- Offline-Reisen funktioniert dann nur online.', err)
       })
     }

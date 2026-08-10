@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
+import { BASE_PATH } from '@/lib/base-path'
 
 /**
  * Security Foundation 1A: einziger Einstiegspunkt für Supabase-Auth-E-Mail-
@@ -16,9 +17,12 @@ import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 
 /** Nur relative interne Pfade zulassen -- verhindert Open-Redirect über
  *  einen manipulierten "next"-Query-Parameter (z. B. "//evil.example",
- *  das der Browser als protokollrelative externe URL auflösen würde). */
+ *  das der Browser als protokollrelative externe URL auflösen würde).
+ *  §"App-like Lumi Travel": `NextResponse.redirect(new URL(...))` bekommt
+ *  anders als next/navigation's redirect() KEIN automatisches basePath --
+ *  der Fallback-Pfad braucht den Präfix deshalb manuell. */
 function sanitizeNextPath(value: string | null): string {
-  if (!value || !value.startsWith('/') || value.startsWith('//')) return '/'
+  if (!value || !value.startsWith('/') || value.startsWith('//')) return `${BASE_PATH}/`
   return value
 }
 
@@ -39,7 +43,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const errorUrl = new URL('/login', request.url)
+  const errorUrl = new URL(`${BASE_PATH}/login`, request.url)
   errorUrl.searchParams.set('error', 'Der Link ist ungültig oder abgelaufen. Bitte erneut anfordern.')
   return NextResponse.redirect(errorUrl)
 }

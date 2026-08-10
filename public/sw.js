@@ -36,12 +36,21 @@
  *     fetch(), weder "navigate" noch rsc-Header) wurde dadurch nie
  *     gecached, obwohl der Code das schon lange vorgab zu tun. Jetzt wird
  *     jeder GET-Request zu den beiden Offline-Reisen-Routen gecached.
+ * v5: §"App-like Lumi Travel" -- alle Pfade auf den neuen /travel-basePath
+ *     umgestellt (OFFLINE_TRIP_PATH_PREFIX, _next/static-Match, Offline-
+ *     Fallback-Link). Alte v4-Caches referenzieren noch unpräfixierte
+ *     Pfade und werden beim nächsten Online-Laden automatisch entfernt.
  */
 
-const CACHE_VERSION = 'v4'
+const CACHE_VERSION = 'v5'
 const CACHE_NAME = `lumi-offline-reisen-${CACHE_VERSION}`
 
-const OFFLINE_TRIP_PATH_PREFIX = '/mehr/offline-reisen'
+// §"App-like Lumi Travel": diese Datei wird unverändert als statische Datei
+// ausgeliefert (basePath schreibt NUR die Route, unter der sie erreichbar
+// ist, um -- nicht ihren Inhalt) -- der /travel-Präfix muss hier deshalb
+// hart hinterlegt werden, muss exakt next.config.ts's basePath entsprechen.
+const BASE_PATH = '/travel'
+const OFFLINE_TRIP_PATH_PREFIX = `${BASE_PATH}/mehr/offline-reisen`
 
 function isOfflineTripRoute(pathname) {
   return pathname === OFFLINE_TRIP_PATH_PREFIX || pathname.startsWith(`${OFFLINE_TRIP_PATH_PREFIX}/`)
@@ -89,7 +98,7 @@ function offlineFallbackResponse() {
 <body>
   <div class="eyebrow">Keine Verbindung</div>
   <p>Diese Seite braucht Internet. Eure offline gespeicherten Reisen sind trotzdem erreichbar.</p>
-  <a href="/mehr/offline-reisen">Zu den Offline-Reisen</a>
+  <a href="${OFFLINE_TRIP_PATH_PREFIX}">Zu den Offline-Reisen</a>
 </body>
 </html>`
   return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
@@ -129,7 +138,7 @@ self.addEventListener('fetch', (event) => {
   // §"nur App-Shell und notwendige _next/static-Assets für diese
   // Offline-Routen" (Nutzervorgabe) -- _next/static-Dateinamen sind
   // Content-Hash-basiert/unveränderlich, Cache-first ist hier sicher.
-  if (url.pathname.startsWith('/_next/static/')) {
+  if (url.pathname.startsWith(`${BASE_PATH}/_next/static/`)) {
     event.respondWith(
       (async () => {
         const cache = await caches.open(CACHE_NAME)

@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { establishLumiCoreSession } from "@/lib/actions/lumi-core";
+import { TRAVEL_RETURN_TO_COOKIE } from "@/lib/passkey-lumi-core-gate";
 import { Banner } from "@/components/Banner";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
 import { PasswordField } from "@/components/PasswordField";
@@ -38,7 +40,14 @@ export default async function ConnectLumiCorePage({
   const {
     data: { user },
   } = await lumiCore.auth.getUser();
-  if (user) redirect(target);
+  if (user) {
+    // §"App-like Lumi Travel": Cookies dürfen in einer Server-Component-
+    // Render-Funktion nur GELESEN werden (Schreiben/Löschen ist Server
+    // Actions/Route Handlern vorbehalten) -- deshalb hier nur Lesezugriff,
+    // im Gegensatz zu establishLumiCoreSession() (siehe lib/travel-return-to.ts).
+    const returnTo = (await cookies()).get(TRAVEL_RETURN_TO_COOKIE)?.value;
+    redirect(returnTo || target);
+  }
 
   return (
     <div className="flex-1 flex items-center justify-center" style={{ background: "var(--background)" }}>

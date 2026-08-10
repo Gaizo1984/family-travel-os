@@ -1,6 +1,16 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // §"App-like Lumi Travel": Next.js Multi-Zones -- diese App läuft künftig
+  // server-seitig transparent unter /travel auf der Lumi-Launcher-Origin
+  // (next.config.ts dort: rewrites() -> family-travel-os-xi.vercel.app).
+  // basePath hängt automatisch /travel vor next/link, next/navigation's
+  // redirect(), alle App-Router-Routen (inkl. Metadata-Routen wie
+  // manifest.ts) und generierte /_next/static-Asset-URLs -- keine
+  // Codeänderung an der eigentlichen Navigations-/Fachlogik nötig, da diese
+  // bereits durchgängig root-relativ ist. Kein separates assetPrefix nötig,
+  // da keine andere Zone /travel/_next beansprucht.
+  basePath: "/travel",
   // §Root-Cause-Fix Broken-Image-Bug: sharp ist ein natives Binary-Addon.
   // Ohne diese Angabe kann Next.js' Serverless-Bundling (File-Tracing) die
   // native Binary beim Deploy auf Vercel falsch/unvollständig einpacken —
@@ -46,6 +56,13 @@ const nextConfig: NextConfig = {
       // ließ den Upload schon auf Framework-Ebene scheitern, bevor die
       // eigene Pro-Datei-Validierung greifen konnte.
       bodySizeLimit: "50mb",
+      // §"App-like Lumi Travel": Next.js prüft bei Server Actions den
+      // Origin-Header gegen Host/X-Forwarded-Host (CSRF-Schutz). Hinter dem
+      // Multi-Zones-Proxy sieht diese App als Host die Lumi-Launcher-Origin,
+      // nicht ihre eigene Domain -- ohne diesen Eintrag würden dadurch ALLE
+      // Server Actions (nahezu jede Mutation der App) mit einem Origin-Fehler
+      // abgelehnt. localhost:3006 zusätzlich für den lokalen Multi-Zones-Test.
+      allowedOrigins: ["lumi-launcher.vercel.app", "localhost:3006"],
     },
   },
   // §Bugfix "Service-Worker-Update erreicht das installierte App-Icon nicht

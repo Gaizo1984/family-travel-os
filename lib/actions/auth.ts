@@ -3,6 +3,8 @@
 import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
+import { BASE_PATH } from '@/lib/base-path'
+import { redirectAfterLogin } from '@/lib/travel-return-to'
 
 /**
  * FINALER CUTOVER: normales E-Mail/Passwort-Login läuft primär über
@@ -36,7 +38,7 @@ export async function login(formData: FormData) {
     redirect(`/login?error=${encodeURIComponent('Anmeldung fehlgeschlagen: E-Mail oder Passwort falsch.')}`)
   }
 
-  redirect('/')
+  await redirectAfterLogin('/')
 }
 
 export async function logout() {
@@ -61,9 +63,15 @@ export async function requestPasswordReset(formData: FormData) {
   const protocol = process.env.NODE_ENV === 'development' ? 'http' : 'https'
   const origin = headersList.get('origin') ?? (host ? `${protocol}://${host}` : '')
 
+  // §"App-like Lumi Travel": `origin` wird aus dem eingehenden Request-Header
+  // ermittelt und kennt daher hinter dem Multi-Zones-Proxy nur die
+  // Lumi-Launcher-Origin, nicht das eigene basePath-Präfix -- ohne den
+  // manuellen BASE_PATH-Zusatz würde der Link in der Reset-Mail ins Leere
+  // laufen (Next.js hängt basePath nur bei intern generierten Pfaden an,
+  // nicht bei so zusammengesetzten Strings).
   const lumiCore = await createLumiCoreClient()
   const { error } = await lumiCore.auth.resetPasswordForEmail(email, {
-    redirectTo: `${origin}/auth/confirm?type=recovery&next=/reset-password`,
+    redirectTo: `${origin}${BASE_PATH}/auth/confirm?type=recovery&next=${encodeURIComponent(`${BASE_PATH}/reset-password`)}`,
   })
 
   if (error) {
