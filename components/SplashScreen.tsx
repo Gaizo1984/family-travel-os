@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { BASE_PATH } from '@/lib/base-path'
 
 const HOLD_MS_BROWSER = 900
 const FADE_MS_BROWSER = 450
@@ -117,7 +118,7 @@ export function SplashScreen() {
       `}</style>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src="/splash/splash-1170x2532.jpg"
+        src={`${BASE_PATH}/splash/splash-1170x2532.jpg`}
         alt=""
         fetchPriority="high"
         className="absolute inset-0 w-full h-full object-cover"
