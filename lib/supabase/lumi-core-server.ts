@@ -2,19 +2,24 @@ import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import type { LumiCoreDatabase } from './lumi-core-types'
 
-// Zweiter, komplett unabhängiger Supabase-Client für Phase 3A -- zeigt auf
-// Lumi Core, NICHT auf Travels eigenes Projekt (siehe lib/supabase/server.ts).
-// Eigene Env-Vars (NEXT_PUBLIC_LUMI_CORE_*), keine Service Role.
+// §Zentraler Lumi-Login (Masterprompt §6): Client für Lumi Core, komplett
+// unabhängig von Travels eigenem Supabase-Projekt (siehe lib/supabase/server.ts).
 //
-// Session-Trennung ist explizit erzwungen, nicht dem Zufall überlassen:
-// @supabase/ssr würde die Session-Cookies zwar ohnehin unter einem aus der
-// Projekt-Referenz der URL abgeleiteten Namen ablegen (der sich technisch
-// bereits von Travels eigenem Cookie-Namen unterscheidet) -- hier wird
-// zusätzlich ein eigener "lc-"-Präfix über einen eigenen Cookie-Adapter
-// erzwungen, damit die beiden Sessions unter GARANTIERT unterschiedlichen
-// Keys liegen, unabhängig von der internen Namensableitung von @supabase/ssr.
-const COOKIE_PREFIX = 'lc-'
-
+// §Bugfix/Vereinheitlichung: bis hierhin erzwang dieser Client über einen
+// eigenen Cookie-Adapter ein "lc-"-Präfix, um während der Cutover-
+// Übergangszeit zwei GLEICHZEITIGE Sessions (Travels eigene + Lumi Core)
+// unter garantiert unterschiedlichen Keys zu halten. Lumi Launcher und Lumi
+// Assistance haben für ihre jeweilige Lumi-Core-Session nie ein Präfix
+// gebraucht (@supabase/ssr leitet den Cookie-Namen ohnehin schon aus der
+// Projekt-Referenz der URL ab -- Travels eigenes Projekt hat eine andere
+// Referenz als Lumi Core, es gab also nie ein echtes Kollisionsrisiko).
+// Jetzt, wo der zentrale Login alle drei Apps auf dieselbe Session bringen
+// soll (§6 "gemeinsame Lumi-Core-Session"), muss auch Travel denselben
+// Standard-Namespace verwenden wie Launcher/Assistance, sonst funktioniert
+// SSO über die gemeinsame Browser-Origin nicht (unterschiedliche
+// Cookie-Namen für dieselbe Session). Reiner Pass-through-Adapter, exakt
+// dasselbe Muster wie lib/supabase/server.ts und lumi-assistance/lib/
+// supabase/server.ts.
 export async function createLumiCoreClient() {
   const cookieStore = await cookies()
 
@@ -24,15 +29,12 @@ export async function createLumiCoreClient() {
     {
       cookies: {
         getAll() {
-          return cookieStore
-            .getAll()
-            .filter((cookie) => cookie.name.startsWith(COOKIE_PREFIX))
-            .map((cookie) => ({ name: cookie.name.slice(COOKIE_PREFIX.length), value: cookie.value }))
+          return cookieStore.getAll()
         },
         setAll(cookiesToSet) {
           try {
             cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(`${COOKIE_PREFIX}${name}`, value, options)
+              cookieStore.set(name, value, options)
             )
           } catch {
             // Server Component — cookies können hier nicht gesetzt werden
