@@ -1,7 +1,6 @@
 'use server'
 
 import OpenAI from 'openai'
-import { createClient } from '@/lib/supabase/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { toTravelDocumentsPath } from '@/lib/lumi-core-storage/paths'
 import { redirect } from 'next/navigation'
@@ -54,7 +53,6 @@ export async function startContentSession(formData: FormData) {
   const requestedFormat = String(formData.get('output_format') ?? '').trim()
   const outputFormat = requestedFormat && requestedFormat in CONTENT_FORMAT_SCHEMAS ? requestedFormat : null
 
-  const supabase = await createClient()
   const lumiCore = await createLumiCoreClient()
   const { id: familyId } = await getFamily()
   const { data: trip } = await lumiCore.from('travel_trips').select('title').eq('id', tripId).maybeSingle()
@@ -401,7 +399,6 @@ export async function analyzeContentSession(formData: FormData) {
   if (!process.env.OPENAI_API_KEY)
     redirect(`${returnPath}?error=${encodeURIComponent('Die Content-KI ist aktuell nicht konfiguriert.')}`)
 
-  const supabase = await createClient()
   const lumiCore = await createLumiCoreClient()
   const { data: project } = await lumiCore
     .from('travel_content_projects').select('id, trip_id, household_id, output_format').eq('id', projectId).maybeSingle()
@@ -717,7 +714,6 @@ export async function createContentSessionFromVacationPostSelection(formData: Fo
   if (!process.env.OPENAI_API_KEY)
     redirect(`${returnPath}?error=${encodeURIComponent('Die Content-KI ist aktuell nicht konfiguriert.')}`)
 
-  const supabase = await createClient()
   const lumiCore = await createLumiCoreClient()
   const { id: familyId } = await getFamily()
 

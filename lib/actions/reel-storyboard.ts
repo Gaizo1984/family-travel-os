@@ -3,7 +3,6 @@
 import OpenAI from 'openai'
 import { redirect } from 'next/navigation'
 import { after } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { getFamily } from '@/lib/family'
 import { createJob, completeJob, failJob } from '@/lib/ai-generation-jobs'
@@ -111,7 +110,6 @@ export async function generateReelStoryboard(formData: FormData) {
   const project = await loadOwnedReelProjectWithDetails(projectId, familyId)
   if (!project || !project.trip_id) redirect(returnTo || '/content-studio')
 
-  const supabase = await createClient()
   const lumiCore = await createLumiCoreClient()
   const jobId = await createJob(familyId, 'reel_storyboard_generate', lumiCore)
 

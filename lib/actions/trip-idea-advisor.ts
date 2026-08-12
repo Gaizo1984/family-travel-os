@@ -2,7 +2,6 @@
 
 import { redirect } from 'next/navigation'
 import { after } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { createJob, completeJob, failJob } from '@/lib/ai-generation-jobs'
 import { geocodeLocation, searchLodging, computeLodgingRadiusMeters, type LodgingResult } from '@/lib/providers/places-provider'
@@ -29,7 +28,6 @@ type IdeaRow = {
 }
 
 async function loadIdeaContext(ideaId: string) {
-  const supabase = await createClient()
   const lumiCore = await createLumiCoreClient()
   const { data: idea } = await lumiCore
     .from('travel_trip_ideas')
@@ -59,7 +57,7 @@ async function loadIdeaContext(ideaId: string) {
   const effectiveDate = session?.travel_start_date ?? new Date().toISOString().slice(0, 10)
 
   return {
-    supabase, lumiCore, idea: idea as unknown as IdeaRow, dnaSummary, selectedPersons, effectiveDate,
+    lumiCore, idea: idea as unknown as IdeaRow, dnaSummary, selectedPersons, effectiveDate,
     climatePreference: (session?.climate_preference as string | null) ?? null,
     tripTypePreference: (session?.trip_type_preference as string | null) ?? null,
     stopoverPreference: (session?.stopover_preference as string | null) ?? null,
@@ -81,7 +79,7 @@ export async function generateHotelShortlist(formData: FormData) {
 
   const ctx = await loadIdeaContext(ideaId)
   if (!ctx) redirect(returnTo)
-  const { supabase, lumiCore, idea, dnaSummary, selectedPersons, effectiveDate } = ctx
+  const { lumiCore, idea, dnaSummary, selectedPersons, effectiveDate } = ctx
 
   const jobId = await createJob(idea.household_id, 'trip_idea_hotel_shortlist', lumiCore)
 
@@ -274,7 +272,7 @@ export async function estimateTripIdeaBudget(formData: FormData) {
 
   const ctx = await loadIdeaContext(ideaId)
   if (!ctx) redirect(returnTo)
-  const { supabase, lumiCore, idea, dnaSummary, selectedPersons, effectiveDate } = ctx
+  const { lumiCore, idea, dnaSummary, selectedPersons, effectiveDate } = ctx
 
   const jobId = await createJob(idea.household_id, 'trip_idea_budget_estimate', lumiCore)
 
@@ -334,7 +332,7 @@ export async function generateTripVariants(formData: FormData) {
 
   const ctx = await loadIdeaContext(ideaId)
   if (!ctx) redirect(returnTo)
-  const { supabase, lumiCore, idea, dnaSummary, selectedPersons, effectiveDate, climatePreference, tripTypePreference, stopoverPreference, maxStopovers } = ctx
+  const { lumiCore, idea, dnaSummary, selectedPersons, effectiveDate, climatePreference, tripTypePreference, stopoverPreference, maxStopovers } = ctx
 
   const jobId = await createJob(idea.household_id, 'trip_idea_variants_generate', lumiCore)
 

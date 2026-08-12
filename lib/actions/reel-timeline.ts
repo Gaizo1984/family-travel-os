@@ -1,7 +1,6 @@
 'use server'
 
 import OpenAI from 'openai'
-import { createClient } from '@/lib/supabase/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { uploadToLumiCore } from '@/lib/lumi-core-storage/client'
 import { getFamily } from '@/lib/family'
@@ -32,11 +31,6 @@ type Result = { ok: boolean; structure?: ReelStoryboardStructure; error?: string
 
 async function loadOwnedDraftContext(projectId: string) {
   const { id: familyId } = await getFamily()
-  // FINALER CUTOVER: content_projects/content_drafts/memory_photos/
-  // memory_videos laufen jetzt alle ueber Lumi Core (travel_*). `supabase`
-  // (Travel) bleibt im Rueckgabewert nur aus Kompatibilitaet erhalten,
-  // wird aktuell von keiner Funktion in dieser Datei mehr gelesen.
-  const supabase = await createClient()
   const lumiCore = await createLumiCoreClient()
   const { data: project } = await lumiCore
     .from('travel_content_projects')
@@ -52,7 +46,7 @@ async function loadOwnedDraftContext(projectId: string) {
     .order('created_at', { ascending: false }).limit(1).maybeSingle()
   if (!draft) return null
 
-  return { supabase, lumiCore, familyId, project, draftId: draft.id, structure: draft.structure as unknown as ReelStoryboardStructure }
+  return { lumiCore, familyId, project, draftId: draft.id, structure: draft.structure as unknown as ReelStoryboardStructure }
 }
 
 async function saveStructure(

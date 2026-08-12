@@ -2,7 +2,6 @@
 
 import { redirect } from 'next/navigation'
 import { after } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { toTravelDocumentsPath } from '@/lib/lumi-core-storage/paths'
 import { getFamily } from '@/lib/family'
@@ -31,7 +30,6 @@ export async function startImageCheckProject(formData: FormData) {
   const newPath = '/content-studio/bild-check/new'
   if (!tripId) redirect(`${newPath}?error=${encodeURIComponent('Bitte eine Reise auswählen.')}`)
 
-  const supabase = await createClient()
   const lumiCore = await createLumiCoreClient()
   const { id: familyId } = await getFamily()
   const { data: trip } = await lumiCore.from('travel_trips').select('title').eq('id', tripId).maybeSingle()
@@ -212,7 +210,6 @@ export async function adoptImageCheckPhotoToSession(formData: FormData) {
   const returnPath = `/content-studio/bild-check/${projectId}`
   if (!photoId || !projectId || (format !== 'carousel' && format !== 'story')) redirect(returnPath)
 
-  const supabase = await createClient()
   const lumiCore = await createLumiCoreClient()
   const { id: familyId } = await getFamily()
 
@@ -261,7 +258,6 @@ export async function adoptImageCheckPhotoToReel(formData: FormData) {
   const returnPath = `/content-studio/bild-check/${projectId}`
   if (!photoId || !projectId) redirect(returnPath)
 
-  const supabase = await createClient()
   const lumiCore = await createLumiCoreClient()
   const { id: familyId } = await getFamily()
 
@@ -322,7 +318,6 @@ export async function markImageCheckPhotoForVacationPost(formData: FormData) {
   const returnPath = `/content-studio/bild-check/${projectId}`
   if (!photoId || !projectId) redirect(returnPath)
 
-  const supabase = await createClient()
   const lumiCore = await createLumiCoreClient()
   const { id: familyId } = await getFamily()
 
@@ -464,7 +459,6 @@ export async function recurateVacationPostSelectionNow(formData: FormData) {
   if (!tripId) redirect('/content-studio')
   if (!process.env.OPENAI_API_KEY) redirect(`${returnPath}?error=${encodeURIComponent('Die Kuration ist aktuell nicht konfiguriert.')}`)
 
-  const supabase = await createClient()
   const lumiCore = await createLumiCoreClient()
   const { id: familyId } = await getFamily()
 

@@ -2,7 +2,6 @@ import Link from "next/link";
 import { login } from "@/lib/actions/auth";
 import { Banner } from "@/components/Banner";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
-import { PasskeyLoginButton } from "@/components/PasskeyLoginButton";
 import { PasswordField } from "@/components/PasswordField";
 
 const LABEL_STYLE: React.CSSProperties = {
@@ -38,7 +37,6 @@ export default async function LoginPage({
         {reset && <Banner variant="success">Passwort erfolgreich geändert. Bitte melde dich mit dem neuen Passwort an.</Banner>}
 
         <div className="rounded-xl p-6" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-          <PasskeyLoginButton />
           <form action={login}>
             <div className="mb-5">
               <label htmlFor="login-email" style={LABEL_STYLE}>E-Mail</label>

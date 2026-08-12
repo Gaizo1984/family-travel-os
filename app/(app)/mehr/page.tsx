@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Users, CloudDownload, Images, Fingerprint, ChevronRight, TerminalSquare, type LucideIcon } from "lucide-react";
+import { Users, CloudDownload, Images, ChevronRight, TerminalSquare, type LucideIcon } from "lucide-react";
 import { LogoutButton } from "@/components/LogoutButton";
 
 interface MoreLink {
@@ -21,7 +21,6 @@ const MORE_LINKS: MoreLink[] = [
   { href: "/family", label: "Familie", description: "Reiseprofile & Vorlieben", Icon: Users },
   { href: "/mehr/offline-reisen", label: "Offline-Reisen", description: "Gespeicherte Reisen ohne Verbindung nutzen", Icon: CloudDownload },
   { href: "/memories", label: "Travel Memory", description: "Eure gemeinsame Reisegalerie", Icon: Images },
-  { href: "/mehr/passkeys", label: "Passkeys verwalten", description: "Anmeldung per Fingerabdruck oder Gesichtserkennung", Icon: Fingerprint },
   { href: "/mehr/developer", label: "Developer", description: "Serverseitige Testmodule für neue Integrationen", Icon: TerminalSquare },
 ];
 
