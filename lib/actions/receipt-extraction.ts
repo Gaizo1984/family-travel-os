@@ -1,7 +1,6 @@
 'use server'
 
 import OpenAI from 'openai'
-import { createClient } from '@/lib/supabase/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { redirect } from 'next/navigation'
 import { ALLOWED_DOCUMENT_MIME_TYPES, MAX_DOCUMENT_FILE_SIZE } from '@/lib/documents'
@@ -87,7 +86,6 @@ export async function extractReceiptData(formData: FormData) {
   if (file.size > MAX_DOCUMENT_FILE_SIZE)
     fail('Die Datei ist zu groß (maximal 10 MB).')
 
-  const supabase = await createClient()
   const lumiCore = await createLumiCoreClient()
   const rawPath = buildReceiptStoragePath(tripId, file.name)
   const storagePath = await toTravelDocumentsPath(rawPath)

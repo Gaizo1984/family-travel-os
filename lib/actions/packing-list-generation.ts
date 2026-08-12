@@ -3,7 +3,6 @@
 import OpenAI from 'openai'
 import { redirect } from 'next/navigation'
 import { after } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { getFamily } from '@/lib/family'
 import { listHouseholdMembers } from '@/lib/household-members'
@@ -70,7 +69,6 @@ export async function generatePackingList(formData: FormData) {
     redirect(`${generatePath(slug)}?error=${encodeURIComponent('Die automatische Erstellung ist aktuell nicht konfiguriert.')}`)
   }
 
-  const supabase = await createClient()
   const lumiCore = await createLumiCoreClient()
   const { id: familyId } = await getFamily()
 

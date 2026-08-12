@@ -1,6 +1,5 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { toTravelDocumentsPath } from '@/lib/lumi-core-storage/paths'
 import { redirect } from 'next/navigation'
@@ -151,7 +150,6 @@ export async function uploadMemoryPhotos(formData: FormData) {
   if (stagedPaths.length > MAX_PHOTOS_PER_UPLOAD)
     redirect(`${backPath}?error=${encodeURIComponent(`Maximal ${MAX_PHOTOS_PER_UPLOAD} Fotos pro Upload.`)}`)
 
-  const supabase = await createClient()
   const lumiCore = await createLumiCoreClient()
   const tripId = pastTripId ? null : (String(formData.get('trip_id') ?? '').trim() || await suggestTripId(lumiCore, familyId, takenAt))
 

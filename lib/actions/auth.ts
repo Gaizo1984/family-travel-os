@@ -3,22 +3,15 @@
 import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
-import { createClient } from '@/lib/supabase/server'
 import { BASE_PATH } from '@/lib/base-path'
-import { redirectAfterLogin } from '@/lib/travel-return-to'
 
 /**
- * FINALER CUTOVER: normales E-Mail/Passwort-Login läuft primär über
- * Lumi Core (nicht mehr Travel) -- Marcel und Sarah haben beide bereits
- * echte, funktionierende Lumi-Core-Konten (siehe Phase 1). Passkey bleibt
- * unverändert Travel-basiert, siehe PasskeyLoginButton.tsx +
- * app/(auth)/connect-lumi-core (eigener Zwischenschritt für diesen Fall) --
- * das ist die einzige noch erlaubte Travel-Auth-Abhängigkeit. Passwort-Reset
- * lief bisher noch gegen Travels eigene Auth (vestigial aus der Zeit vor dem
- * Login-Umzug) -- das war falsch, seit Lumi Core primär ist: ein zurück-
- * gesetztes Travel-Passwort hätte gar nicht das tatsächlich genutzte Konto
- * betroffen. Jetzt konsequent auf Lumi Core umgestellt (identische
- * Supabase-Auth-API, nur anderes Projekt).
+ * FINALER LEGACY-CLEANUP: Travel hat kein eigenes Auth-Projekt mehr im
+ * produktiven Pfad -- Login, Passkey und Passwort-Reset laufen
+ * ausschließlich über Lumi Core. Die vormals hier bestehende
+ * Travel-eigene Passkey-Bridge (PasskeyLoginButton.tsx,
+ * app/(auth)/connect-lumi-core, lib/travel-return-to.ts) wurde entfernt,
+ * nachdem der zentrale Lumi-Core-Login inkl. Passkey produktiv bestätigt war.
  */
 
 /** Muss mit der in Supabase Auth konfigurierten Mindestpasswortlänge übereinstimmen. */
@@ -39,26 +32,12 @@ export async function login(formData: FormData) {
     redirect(`/login?error=${encodeURIComponent('Anmeldung fehlgeschlagen: E-Mail oder Passwort falsch.')}`)
   }
 
-  await redirectAfterLogin('/')
+  redirect('/')
 }
 
-/**
- * §Zentraler Logout (Masterprompt §10): "Solange Legacy-Travel-Passkey noch
- * existiert, dessen alte Session beim Logout ebenfalls sauber beenden."
- * Beendet deshalb bewusst BEIDE Sessions -- Lumi Core UND Travels eigenes
- * Projekt (relevant für per Passkey eingeloggte Nutzer, siehe proxy.ts) --
- * nicht nur eine. Ohne den zweiten Schritt würde proxy.ts nach dem
- * Abmelden fälschlich wieder auf /connect-lumi-core statt /login leiten
- * (Travels eigene Session wäre ja noch aktiv). Gleiches Muster wird vom
- * zentralen Launcher-Logout über app/api/auth/legacy-signout/route.ts
- * separat abgedeckt, für den Fall, dass der Nutzer sich dort statt hier abmeldet.
- */
 export async function logout() {
   const lumiCore = await createLumiCoreClient()
   await lumiCore.auth.signOut()
-
-  const travel = await createClient()
-  await travel.auth.signOut()
 
   redirect('/login')
 }

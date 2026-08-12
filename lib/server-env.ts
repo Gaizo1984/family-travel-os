@@ -14,10 +14,9 @@ import 'server-only'
  * dieses Modul (auch nur transitiv) je in ein Client-Bundle gerät --
  * zusätzliche Absicherung neben der ohnehin serverseitigen Nutzung.
  *
- * Bewusst nur Validierung, kein AWS-/Supabase-Client selbst -- der Client
- * für den Service-Role-Zugriff liegt separat in `lib/supabase/admin.ts`,
- * der Render-Trigger-Code (noch nicht gebaut, spätere Etappe) wird
- * `getRemotionLambdaEnv()` von dort aus konsumieren.
+ * Bewusst nur Validierung, kein AWS-Client selbst -- der Render-Trigger-Code
+ * (noch nicht gebaut, spätere Etappe) wird `getRemotionLambdaEnv()` von dort
+ * aus konsumieren.
  */
 
 export const ALLOWED_REMOTION_AWS_REGION = 'eu-central-1'
@@ -55,9 +54,4 @@ export function getRemotionLambdaEnv(): RemotionLambdaEnv {
 
   cachedRemotionLambdaEnv = { awsAccessKeyId, awsSecretAccessKey, awsRegion: ALLOWED_REMOTION_AWS_REGION }
   return cachedRemotionLambdaEnv
-}
-
-/** Wirft, falls SUPABASE_SERVICE_ROLE_KEY fehlt. Der Wert selbst wird nie in eine Fehlermeldung/ein Log geschrieben. */
-export function getSupabaseServiceRoleKey(): string {
-  return requireEnv('SUPABASE_SERVICE_ROLE_KEY')
 }
