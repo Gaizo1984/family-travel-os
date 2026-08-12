@@ -58,16 +58,18 @@ function buildForeignOriginalUrl(request: NextRequest): string {
 }
 
 /**
- * FINALER CUTOVER: primäre Session-Prüfung ist jetzt Lumi Core (`lc-*`-
- * Cookies), nicht mehr Travel. Travels eigene Session (`sb-*`) wird nur
- * noch für den Passkey-Sonderfall geprüft (Lumi Core hat kein eigenes
- * Passkey/WebAuthn) -- ein per Passkey eingeloggter Nutzer landet auf dem
- * Lumi-Core-Gate statt auf /login, weil er sich ja bereits erfolgreich
- * (nur eben gegen Travel) authentifiziert hat.
+ * FINALER CUTOVER + §Zentraler Lumi-Login (Masterprompt §6): primäre
+ * Session-Prüfung ist Lumi Core, jetzt über denselben Standard-Cookie-
+ * Namespace wie Launcher/Assistance (kein "lc-"-Präfix mehr, siehe
+ * lib/supabase/lumi-core-server.ts) -- echtes SSO über die gemeinsame
+ * Browser-Origin. Travels eigene Session (Standard-Cookiename, aber
+ * anderes Supabase-Projekt) wird nur noch für den Passkey-Sonderfall
+ * geprüft (Lumi Core hat kein eigenes Passkey/WebAuthn) -- ein per Passkey
+ * eingeloggter Nutzer landet auf dem Lumi-Core-Gate statt auf /login, weil
+ * er sich ja bereits erfolgreich (nur eben gegen Travel) authentifiziert hat.
  * Bewusst ohne Business-Logik/Datenbankzugriffe -- nur Auth-Tokenprüfung.
  */
 const PUBLIC_PATHS = ['/login', '/auth/confirm', LUMI_CORE_GATE_PATH]
-const LC_COOKIE_PREFIX = 'lc-'
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`))
@@ -104,22 +106,20 @@ export async function proxy(request: NextRequest) {
     })
   }
 
-  // ── Primär: Lumi-Core-Session (lc-*-Cookies) ──────────────────────────
+  // ── Primär: Lumi-Core-Session (Standard-Cookie-Namespace, siehe
+  // lib/supabase/lumi-core-server.ts) ───────────────────────────────────
   const lumiCore = createServerClient(
     process.env.NEXT_PUBLIC_LUMI_CORE_URL!,
     process.env.NEXT_PUBLIC_LUMI_CORE_PUBLISHABLE_KEY!,
     {
       cookies: {
         getAll() {
-          return request.cookies
-            .getAll()
-            .filter((cookie) => cookie.name.startsWith(LC_COOKIE_PREFIX))
-            .map((cookie) => ({ name: cookie.name.slice(LC_COOKIE_PREFIX.length), value: cookie.value }))
+          return request.cookies.getAll()
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) => request.cookies.set(`${LC_COOKIE_PREFIX}${name}`, value))
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
           response = NextResponse.next({ request })
-          cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(`${LC_COOKIE_PREFIX}${name}`, value, options))
+          cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options))
         },
       },
     },
@@ -147,13 +147,18 @@ export async function proxy(request: NextRequest) {
   if (isPublicPath(request.nextUrl.pathname)) return response
 
   // ── Kein Lumi-Core-Login: Sonderfall Passkey (nur gegen Travel) ───────
+  // Eigenes Supabase-Projekt, andere Projekt-Referenz -- @supabase/ssr
+  // leitet daraus intern einen anderen Cookie-Namen ab als der Lumi-Core-
+  // Client oben, ein manueller Präfix-Filter ist dafür nicht nötig
+  // (gleiches Muster wie ein normaler Einzel-Client, siehe
+  // lumi-assistance/proxy.ts).
   const travel = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
         getAll() {
-          return request.cookies.getAll().filter((cookie) => !cookie.name.startsWith(LC_COOKIE_PREFIX))
+          return request.cookies.getAll()
         },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))

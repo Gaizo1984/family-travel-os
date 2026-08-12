@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
+import { createClient } from '@/lib/supabase/server'
 import { BASE_PATH } from '@/lib/base-path'
 import { redirectAfterLogin } from '@/lib/travel-return-to'
 
@@ -41,9 +42,24 @@ export async function login(formData: FormData) {
   await redirectAfterLogin('/')
 }
 
+/**
+ * §Zentraler Logout (Masterprompt §10): "Solange Legacy-Travel-Passkey noch
+ * existiert, dessen alte Session beim Logout ebenfalls sauber beenden."
+ * Beendet deshalb bewusst BEIDE Sessions -- Lumi Core UND Travels eigenes
+ * Projekt (relevant für per Passkey eingeloggte Nutzer, siehe proxy.ts) --
+ * nicht nur eine. Ohne den zweiten Schritt würde proxy.ts nach dem
+ * Abmelden fälschlich wieder auf /connect-lumi-core statt /login leiten
+ * (Travels eigene Session wäre ja noch aktiv). Gleiches Muster wird vom
+ * zentralen Launcher-Logout über app/api/auth/legacy-signout/route.ts
+ * separat abgedeckt, für den Fall, dass der Nutzer sich dort statt hier abmeldet.
+ */
 export async function logout() {
   const lumiCore = await createLumiCoreClient()
   await lumiCore.auth.signOut()
+
+  const travel = await createClient()
+  await travel.auth.signOut()
+
   redirect('/login')
 }
 
