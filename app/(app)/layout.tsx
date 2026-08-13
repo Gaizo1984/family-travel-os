@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { LayoutDashboard, Plane, Users, Sparkles, Camera, MoreHorizontal, Images } from "lucide-react";
+import { LayoutDashboard, Plane, Users, Sparkles, Camera, MoreHorizontal, Images, LayoutGrid } from "lucide-react";
 import { RoutePrefetcher } from "@/components/RoutePrefetcher";
+import { LUMI_LAUNCHER_URL } from "@/lib/launcher-url";
 
 // §"Neue Reiseideen und Frag LUMI sollen ins Dashboard LUMI integriert
 // werden": beide sind keine eigenen Nav-Einträge mehr (weder Sidebar noch
@@ -44,20 +45,37 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         className="hidden md:flex flex-col w-52 shrink-0"
         style={{ borderRight: "1px solid var(--border)", background: "var(--surface-2)" }}
       >
-        {/* Logo */}
-        <div className="px-7 py-8" style={{ borderBottom: "1px solid var(--border)" }}>
-          <div
-            className="text-sm font-semibold tracking-widest uppercase"
-            style={{ color: "var(--accent)", letterSpacing: "0.22em" }}
-          >
-            LUMI
+        {/* Logo + Lumi-Home-Link (§Lumi Home Navigation: einheitlicher Rückweg
+            zum Launcher, hier im gemeinsamen Sidebar-Header integriert, damit
+            er automatisch auf jeder Unterseite verfügbar ist, ohne pro Seite
+            dupliziert zu werden). */}
+        <div className="px-7 py-8 flex items-start justify-between gap-2" style={{ borderBottom: "1px solid var(--border)" }}>
+          <div>
+            <div
+              className="text-sm font-semibold tracking-widest uppercase"
+              style={{ color: "var(--accent)", letterSpacing: "0.22em" }}
+            >
+              LUMI
+            </div>
+            <div
+              className="text-xs font-medium tracking-widest uppercase mt-0.5"
+              style={{ color: "var(--muted)", letterSpacing: "0.2em" }}
+            >
+              Family Travel OS
+            </div>
           </div>
-          <div
-            className="text-xs font-medium tracking-widest uppercase mt-0.5"
-            style={{ color: "var(--muted)", letterSpacing: "0.2em" }}
+          <a
+            href={LUMI_LAUNCHER_URL}
+            aria-label="Lumi Home"
+            title="Lumi Home"
+            style={{
+              width: "32px", height: "32px", display: "flex", alignItems: "center", justifyContent: "center",
+              flexShrink: 0, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "50%",
+              color: "var(--muted)",
+            }}
           >
-            Family Travel OS
-          </div>
+            <LayoutGrid size={15} strokeWidth={1.6} />
+          </a>
         </div>
 
         {/* Nav */}
@@ -81,6 +99,27 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* Main */}
       <main className="flex-1 flex flex-col min-w-0 pb-safe-nav md:pb-0">{children}</main>
+
+      {/* Lumi-Home-Link — mobile (Sidebar mit dem Desktop-Pendant ist hier
+          "hidden md:flex", braucht daher ein eigenes, kleines Gegenstück statt
+          Duplizierung auf jeder einzelnen Seite). Fixed oben rechts, bewusst
+          klein/dezent (32px) und mit sichtbarem Abstand zum Seiteninhalt, um
+          eigene Header-Aktionen einzelner Seiten (z.B. Abmelden auf /mehr)
+          nicht zu verdecken. */}
+      <a
+        href={LUMI_LAUNCHER_URL}
+        aria-label="Lumi Home"
+        title="Lumi Home"
+        className="md:hidden fixed z-50"
+        style={{
+          top: "12px", right: "12px", width: "32px", height: "32px",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "50%",
+          color: "var(--muted)", boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+        }}
+      >
+        <LayoutGrid size={15} strokeWidth={1.6} />
+      </a>
 
       {/* Bottom nav — mobile */}
       <nav
