@@ -2,6 +2,7 @@ import { Star, ExternalLink, Search, Sparkles, Bookmark } from "lucide-react";
 import { LUXURY_TIER_LABELS, type LuxuryHotelTier } from "@/lib/data/luxury-hotel-brands";
 import { buildHolidayCheckSearchUrl } from "@/lib/hotel-qualification";
 import type { HotelShortlistItem } from "@/lib/trip-idea-hotel-types";
+import { BASE_PATH } from "@/lib/base-path";
 
 export const TIER_COLORS: Record<LuxuryHotelTier, string> = {
   upper_upscale: "var(--accent)",
@@ -47,9 +48,15 @@ export function HotelCard({
   return (
     <div className="rounded-xl overflow-hidden" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
       {hotel.photoName && (
+        // §Bugfix (Hotelbilder nach Suche nicht sichtbar): next.config.ts
+        // setzt basePath "/travel" -- das hängt Next.js automatisch an
+        // next/link & Co., NICHT aber an einen rohen <img src>-String. Ohne
+        // Präfix zeigte dieser Pfad auf die Root-Domain statt auf die
+        // tatsächliche Route app/api/places-photo/[...path] unter /travel,
+        // der Proxy-Request lief dadurch ins Leere (404).
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={`/api/places-photo/${hotel.photoName}?maxWidthPx=400`}
+          src={`${BASE_PATH}/api/places-photo/${hotel.photoName}?maxWidthPx=400`}
           alt={hotel.name}
           className="w-full object-cover"
           style={{ height: "140px" }}

@@ -18,6 +18,7 @@ import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress"
 import type { StageInput, TimelineBooking } from "@/lib/journey";
 import { loadJob } from "@/lib/ai-generation-jobs";
 import { PendingGenerationView } from "@/components/PendingGenerationView";
+import { BASE_PATH } from "@/lib/base-path";
 
 const CATEGORY_JOB_PENDING_LABELS: Record<string, string> = {
   category_suggestion_generate: "LUMI erstellt einen Vorschlag im Hintergrund … Ihr könnt die App währenddessen schließen.",
@@ -304,9 +305,12 @@ async function PlacesCategorySection({
               <Card key={item.placeId}>
                 <div className="flex gap-3">
                   {item.photoName && (
+                    // §Bugfix (Places-Fotos nicht sichtbar, siehe HotelCard.tsx):
+                    // basePath "/travel" wird an einen rohen <img src> nicht
+                    // automatisch angehängt.
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={`/api/places-photo/${item.photoName}?maxWidthPx=200`}
+                      src={`${BASE_PATH}/api/places-photo/${item.photoName}?maxWidthPx=200`}
                       alt="" width={72} height={72}
                       style={{ borderRadius: "8px", objectFit: "cover", flexShrink: 0 }}
                     />
