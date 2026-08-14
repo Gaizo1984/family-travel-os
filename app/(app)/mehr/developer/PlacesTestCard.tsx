@@ -2,6 +2,7 @@ import { DevTestCard, inputStyle, buttonStyle } from './DevTestCard'
 import { runPlacesTest, type PlacesTestResult } from '@/lib/actions/dev-tests/places-test'
 import type { DevTestRun } from '@/lib/dev-test-runs'
 import type { PlacesCategory } from '@/lib/providers/places-provider'
+import { BASE_PATH } from '@/lib/base-path'
 
 const CATEGORIES: PlacesCategory[] = ['restaurant', 'attraction', 'beach', 'nature']
 const CATEGORY_LABELS: Record<PlacesCategory, string> = {
@@ -62,9 +63,12 @@ export function PlacesTestCard({ lastRun }: { lastRun: DevTestRun | null }) {
                     {items.map((p) => (
                       <li key={p.id} className="flex items-center gap-2 flex-wrap" style={{ fontSize: '0.72rem', color: '#d1d5db' }}>
                         {p.photoName && (
+                          // §Bugfix (Places-Fotos nicht sichtbar, siehe HotelCard.tsx):
+                          // basePath "/travel" wird an einen rohen <img src> nicht
+                          // automatisch angehängt.
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
-                            src={`/api/places-photo/${p.photoName}?maxWidthPx=64`}
+                            src={`${BASE_PATH}/api/places-photo/${p.photoName}?maxWidthPx=64`}
                             alt=""
                             width={28}
                             height={28}
