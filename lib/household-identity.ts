@@ -1,3 +1,4 @@
+import { cache } from 'react'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { getCurrentPerson } from '@/lib/current-person'
 
@@ -24,16 +25,19 @@ export type HouseholdMemberProfile = {
  * Lumi-Core-Sitzung im Browser vorliegt (z.B. noch nie verbunden,
  * Sitzung abgelaufen) oder keine Verknüpfung existiert -- blockiert nie,
  * ersetzt getCurrentPerson() nicht.
+ *
+ * §Performance-Audit: getCurrentPerson() hat die Sitzung bereits über
+ * auth.getUser() geprüft (cache()-dedupliziert) -- ein zweiter, eigener
+ * auth.getUser()-Aufruf hier war rein redundant (`user` wurde unterhalb nie
+ * verwendet, nur für denselben Null-Check, den `!person` bereits abdeckt).
+ * Entfernt, zusätzlich cache()-gewrappt für den Fall künftiger
+ * Mehrfachaufrufe innerhalb desselben Requests.
  */
-export async function getHouseholdMemberProfile(): Promise<HouseholdMemberProfile | null> {
+export const getHouseholdMemberProfile = cache(async (): Promise<HouseholdMemberProfile | null> => {
   const person = await getCurrentPerson()
   if (!person) return null
 
   const lumiCore = await createLumiCoreClient()
-  const {
-    data: { user },
-  } = await lumiCore.auth.getUser()
-  if (!user) return null
 
   const { data: mapping } = await lumiCore
     .from('travel_person_migration_map')
@@ -58,4 +62,4 @@ export async function getHouseholdMemberProfile(): Promise<HouseholdMemberProfil
     avatarEmoji: member.avatar_emoji,
     avatarStoragePath: member.avatar_storage_path,
   }
-}
+})

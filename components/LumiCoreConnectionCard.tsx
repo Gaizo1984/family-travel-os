@@ -15,7 +15,7 @@ export async function LumiCoreConnectionCard() {
   const person = await getCurrentPerson();
   if (!person) return null;
 
-  const travelAccess = await getTravelModuleAccess();
+  const travelAccess = await getTravelModuleAccess(person.id);
 
   return (
     <div className="mb-14 p-5 rounded-xl" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
