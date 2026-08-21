@@ -35,6 +35,9 @@
     "tailwindcss": "^4",
     "typescript": "^5"
   },
+  "overrides": {
+    "sharp": "^0.35.3"
+  },
   "allowScripts": {
     "sharp@0.34.5": true,
     "sharp@0.35.3": true,
