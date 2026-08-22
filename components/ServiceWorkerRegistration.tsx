@@ -8,9 +8,7 @@ import { BASE_PATH } from '@/lib/base-path'
  * registriert public/sw.js -- bewusst NUR in Production (Nutzervorgabe: "Service
  * Worker nur in Production registrieren", vermeidet veraltete Caches während
  * `next dev`) und erst NACH dem `window.load`-Event, damit die Registrierung
- * selbst nicht mit dem initialen Seitenaufbau konkurriert (siehe
- * components/SplashScreen.tsx: die Standalone-Haltezeit hängt ebenfalls an
- * `window.load`).
+ * selbst nicht mit dem initialen Seitenaufbau konkurriert.
  *
  * §"Bei Fehlern normale Online-App nicht beeinträchtigen" (Nutzervorgabe):
  * jeder Fehler hier wird abgefangen und nur geloggt -- eine fehlgeschlagene
