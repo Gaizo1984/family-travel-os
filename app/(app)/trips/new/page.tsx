@@ -113,7 +113,7 @@ export default async function NewTripPage({
             </div>
 
             <div className="mb-3" style={{ color: "var(--muted)", fontSize: "0.68rem", lineHeight: 1.5 }}>
-              Start- und Enddatum (optional) -- ohne Angabe zeigt die Reise „Zeitraum noch offen", bis Buchungen
+              Start- und Enddatum (optional) -- ohne Angabe zeigt die Reise „Zeitraum noch offen&quot;, bis Buchungen
               oder Etappen hinterlegt sind.
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

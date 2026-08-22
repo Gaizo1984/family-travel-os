@@ -18,8 +18,6 @@ import { getPhotoDisplayUrls } from "@/lib/photo-thumbnails";
 import { JourneyBeforeSection } from "@/components/journey/JourneyBeforeSection";
 import { JourneyTimeline } from "@/components/journey/JourneyTimeline";
 import { JourneyAfterSection } from "@/components/journey/JourneyAfterSection";
-import type { BookingType, BookingStatus } from "@/lib/supabase/types";
-import type { JourneyEventCategory, JourneyEventStatus } from "@/lib/journey-events";
 
 function addDaysIso(date: string, delta: number): string {
   const d = new Date(date + "T00:00:00Z");

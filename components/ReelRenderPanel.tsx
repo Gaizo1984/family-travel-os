@@ -213,7 +213,6 @@ export function ReelRenderPanel({
             {r.status === 'completed' && (
               <div className="flex flex-col gap-3">
                 {r.downloadUrl && (
-                  // eslint-disable-next-line jsx-a11y/media-has-caption
                   <video controls src={r.downloadUrl} style={{ width: '100%', maxWidth: 220, borderRadius: 10, alignSelf: 'center', aspectRatio: '9/16', background: '#000' }} />
                 )}
                 <div className="flex items-center justify-between flex-wrap gap-2">

@@ -191,7 +191,7 @@ export default async function EditStagePage({
             <label className="flex items-start gap-2.5 mb-8" style={{ cursor: "pointer" }}>
               <input type="checkbox" name="is_transit" value="true" defaultChecked={s.is_transit} style={{ marginTop: "3px" }} />
               <span style={{ color: "var(--muted)", fontSize: "0.78rem", lineHeight: 1.5 }}>
-                Nur Zwischenstopp -- zählt nicht als besuchtes Land in "Unsere Welt"
+                Nur Zwischenstopp -- zählt nicht als besuchtes Land in &quot;Unsere Welt&quot;
               </span>
             </label>
 

@@ -17,6 +17,7 @@ import type { BookingParticipantOption } from '@/app/(app)/trips/[id]/bookings/B
  * jetzt ausschließlich gegen Lumi Core (`travel_trip_members` +
  * `listHouseholdMembers()`, bereits household-gescoped).
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- _familyId bleibt in der Signatur für Aufrufer-Kompatibilität erhalten (s. Kommentar oben, FINALER CUTOVER), kein totes Argument.
 export async function loadTripParticipantOptions(_supabase: SupabaseClient, tripId: string, _familyId: string): Promise<BookingParticipantOption[]> {
   const lumiCore = await createLumiCoreClient()
   const { data: tripMemberRows } = await lumiCore

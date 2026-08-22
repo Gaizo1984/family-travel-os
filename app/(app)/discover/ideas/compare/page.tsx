@@ -256,7 +256,7 @@ export default async function CompareIdeasPage({
             </form>
 
             <p style={{ color: "var(--muted)", fontSize: "0.65rem", fontStyle: "italic" }}>
-              Grobe Schätzungen und qualitative Einschätzungen, keine Live-Preise, Verfügbarkeiten oder Buchungen. "Als Gewinner markieren" ist eine strukturierte Vormerkung, keine Buchung.
+              Grobe Schätzungen und qualitative Einschätzungen, keine Live-Preise, Verfügbarkeiten oder Buchungen. &quot;Als Gewinner markieren&quot; ist eine strukturierte Vormerkung, keine Buchung.
             </p>
           </>
         )}

@@ -87,6 +87,7 @@ async function googleComputeRoute(params: {
     const route = data?.routes?.[0]
     if (!route) return null
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- rohes, ungetyptes Google-Routes-JSON vor dem Mapping in interne Typen (Provider-Konvention, s. CLAUDE.md).
     const legs: RouteLeg[] = (route.legs ?? []).map((leg: any) => ({
       durationSeconds: parseDurationSeconds(leg.duration) ?? 0,
       distanceMeters: leg.distanceMeters ?? 0,
@@ -137,6 +138,7 @@ async function googleComputeRouteMatrix(params: { origins: LatLng[]; destination
     }
     const data = await res.json()
     if (!Array.isArray(data)) return null
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- rohes, ungetyptes Google-Routes-JSON (Provider-Konvention, s. CLAUDE.md).
     return data.map((el: any) => ({
       originIndex: el.originIndex ?? 0,
       destinationIndex: el.destinationIndex ?? 0,

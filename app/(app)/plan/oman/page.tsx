@@ -14,11 +14,6 @@ const PHOTOS = {
   wadi:   P("photo-1763377357842-039959a0012a"), // sunlit canyon, turquoise pool
 };
 
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-const H_FG   = "#F0EBE3";
-const H_MUTED = "#A89880";
-
 // ── Data ─────────────────────────────────────────────────────────────────────
 
 interface Station {
@@ -582,7 +577,7 @@ export default function OmanPlanPage() {
                 letterSpacing: "0.01em",
               }}
             >
-              „Der größte Unterschied ist nicht, was ihr seht – sondern wie sich die Reise anfühlt."
+              „Der größte Unterschied ist nicht, was ihr seht – sondern wie sich die Reise anfühlt.&quot;
             </p>
           </div>
         </section>

@@ -170,7 +170,7 @@ export default async function FamilyPage() {
               Was eine perfekte Reise für uns bedeutet
             </div>
             <blockquote className="font-light leading-relaxed" style={{ color: "var(--foreground)", fontSize: "1.45rem", letterSpacing: "0.01em", maxWidth: "600px", lineHeight: 1.55 }}>
-              „Ein besonderer Ort. Zeit füreinander. Etwas, das wir noch nie gesehen haben. Und am Ende Geschichten, die nur uns gehören."
+              „Ein besonderer Ort. Zeit füreinander. Etwas, das wir noch nie gesehen haben. Und am Ende Geschichten, die nur uns gehören.&quot;
             </blockquote>
             <div className="pt-8">
               <Link

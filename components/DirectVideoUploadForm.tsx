@@ -232,7 +232,7 @@ export function DirectVideoUploadForm({
       {compressing && (
         <div className="mt-2 flex flex-col gap-1.5">
           <p style={{ color: 'var(--muted)', fontSize: '0.7rem' }}>
-            „{compressing.fileName}" wird komprimiert … {Math.round(compressing.progress * 100)}%
+            „{compressing.fileName}&quot; wird komprimiert … {Math.round(compressing.progress * 100)}%
           </p>
           <div style={{ height: 4, borderRadius: 2, background: 'var(--surface)', overflow: 'hidden' }}>
             <div style={{ height: '100%', width: `${Math.round(compressing.progress * 100)}%`, background: 'var(--accent)', transition: 'width 0.3s' }} />
@@ -250,7 +250,7 @@ export function DirectVideoUploadForm({
         <div className="mt-2 flex flex-col gap-0.5">
           {compressionSummaries.map((s) => (
             <p key={s.fileName} style={{ color: 'var(--muted)', fontSize: '0.68rem' }}>
-              „{s.fileName}" komprimiert: {formatMB(s.originalSizeBytes)} → {formatMB(s.compressedSizeBytes)}
+              „{s.fileName}&quot; komprimiert: {formatMB(s.originalSizeBytes)} → {formatMB(s.compressedSizeBytes)}
             </p>
           ))}
         </div>

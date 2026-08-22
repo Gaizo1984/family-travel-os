@@ -166,7 +166,7 @@ export function PhotoCropInput({ name, label, existingPhotoUrl }: {
             </>
           )}
           <p className="mt-2" style={{ color: 'var(--muted)', fontSize: '0.62rem' }}>
-            Foto auswählen, mit der Maus/dem Finger im Kreis verschieben, Zoom anpassen, dann „Übernehmen".
+            Foto auswählen, mit der Maus/dem Finger im Kreis verschieben, Zoom anpassen, dann „Übernehmen&quot;.
           </p>
         </div>
       </div>

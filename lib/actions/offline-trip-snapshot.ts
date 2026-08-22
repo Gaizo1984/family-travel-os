@@ -8,7 +8,6 @@ import { sortBookingsChronologically, formatDateTimeDE } from '@/lib/bookings'
 import { deriveTripDateRange, tripDurationDays, TRIP_DATE_RANGE_OPEN_LABEL } from '@/lib/trip-dates'
 import { formatDateDE } from '@/lib/demo-data'
 import type { BookingType, BookingStatus } from '@/lib/supabase/types'
-import type { JourneyEventCategory, JourneyEventStatus } from '@/lib/journey-events'
 import type { OfflineTripSnapshot } from '@/lib/offline-document-cache'
 import { sortForBoardingPassViewer } from '@/lib/boarding-passes'
 import { getCachedSignedUrl } from '@/lib/signed-storage-url'
@@ -25,11 +24,6 @@ type BookingRow = {
   details: Record<string, string> | null; created_at: string
   booking_reference: string | null
 }
-type JourneyEventRow = {
-  id: string; stage_id: string | null; date: string; time: string | null
-  category: JourneyEventCategory; title: string; location: string | null; status: JourneyEventStatus
-}
-
 /**
  * §"Offline-Bereich" (Nutzervorgabe, kombinierter Fix-Sprint): liefert genau
  * die Daten, die `components/SaveTripOfflineButton.tsx` client-seitig per
@@ -192,5 +186,6 @@ export async function fetchTripDocumentsForOfflineCache(tripId: string): Promise
     }),
   )
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Destrukturierungs-Idiom zum Entfernen von `name` aus dem Ergebnis, `_name` ist absichtlich ungenutzt.
   return sortForBoardingPassViewer(results).map(({ name: _name, ...r }) => r)
 }

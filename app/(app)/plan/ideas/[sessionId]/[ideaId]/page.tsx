@@ -458,7 +458,7 @@ export default async function TripIdeaDetailPage({
 
           {!hotelShortlist || hotelShortlist.items.length < 2 ? (
             <p className="mb-4" style={{ color: "var(--muted)", fontSize: "0.72rem", fontStyle: "italic" }}>
-              Für hotelspezifische Empfehlungen je Variante zuerst "Hotels vorschlagen" oben nutzen — Varianten funktionieren aber auch ohne (dann ohne konkrete Hotelempfehlung).
+              Für hotelspezifische Empfehlungen je Variante zuerst &quot;Hotels vorschlagen&quot; oben nutzen — Varianten funktionieren aber auch ohne (dann ohne konkrete Hotelempfehlung).
             </p>
           ) : null}
 

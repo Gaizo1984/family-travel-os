@@ -90,6 +90,7 @@ Sprich die Familie direkt und persönlich an, wie ein Concierge, der ihre Reise 
     })
 
     const parsed = JSON.parse(response.output_text)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- rohes, ungetyptes OpenAI-JSON-Schema-Ergebnis vor dem Mapping in interne Typen.
     const toPart = (p: any): TodayRecommendationPart => ({
       title: p.title, description: p.description, suggestedTimeWindow: p.suggested_time_window, weatherFit: p.weather_fit,
     })

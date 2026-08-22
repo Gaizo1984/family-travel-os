@@ -74,6 +74,5 @@ export function WorldMap({ visitedCodes }: { visitedCodes: Set<string> }) {
     .replace('<svg ', '<svg style="width:100%;height:auto;display:block" ')
     .replace('</svg>', `${style}${markers}</svg>`)
 
-  // eslint-disable-next-line react/no-danger
   return <div dangerouslySetInnerHTML={{ __html: html }} />
 }

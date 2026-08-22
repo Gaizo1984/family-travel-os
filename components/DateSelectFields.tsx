@@ -108,6 +108,7 @@ export function DateSelectFields({
     const tooLate = maxIso ? iso > maxIso : false;
     if (tooEarly || tooLate) {
       const cleared: DateParts = { day: "", month: "", year: "" };
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- bewusste Validierung: Auswahl wird geleert, sobald eine geänderte min-/maxIso-Schranke sie ungültig macht (s. Kommentar oben), kein Bug.
       setParts(cleared);
       onChange?.(null, cleared);
     }

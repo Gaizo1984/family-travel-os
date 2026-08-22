@@ -158,6 +158,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 type StationType = { name: string; nights: number; photo: string; hotel: string | null; active: boolean };
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- showChedi wird von einem Aufrufer (Zeile ~787) gesetzt, aber aktuell nicht im Render ausgewertet -- vermutlich unfertiges Feature, absichtlich nicht angefasst (kein Refactoring ohne Produktentscheidung).
 function RouteOverview({ stations, showChedi = false }: { stations: StationType[]; showChedi?: boolean }) {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -326,7 +327,7 @@ function HotelCard({ hotel }: { hotel: Hotel }) {
             className="mb-4 font-light leading-tight"
             style={{ color: "var(--foreground)", fontSize: "1.05rem", fontStyle: "italic" }}
           >
-            „{hotel.character}"
+            „{hotel.character}&quot;
           </p>
           <p
             className="leading-relaxed mb-6"
@@ -594,7 +595,7 @@ export default function OmanHotelsPage() {
             >
               „Eure Reise wird später noch Wüste, Berge und Meer bieten. Deshalb muss Muscat
               nicht schon alles gleichzeitig sein. Das Chedi gibt euch genau das, was am Anfang
-              wertvoll ist: ankommen, durchatmen und gemeinsam in die Reise finden."
+              wertvoll ist: ankommen, durchatmen und gemeinsam in die Reise finden.&quot;
             </p>
 
             <div
@@ -781,7 +782,7 @@ export default function OmanHotelsPage() {
               letterSpacing: "0.01em",
             }}
           >
-            „Ein Hotel steht nie allein."
+            „Ein Hotel steht nie allein.&quot;
           </div>
           <SectionLabel>So sieht eure Reise jetzt aus</SectionLabel>
           <RouteOverview stations={STATIONS_WITH_CHEDI} showChedi />

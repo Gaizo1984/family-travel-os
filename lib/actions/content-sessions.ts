@@ -18,7 +18,6 @@ import {
 } from '@/lib/ai-style-guidelines'
 import { MAX_RETAINED_MEMORIES_PER_TRIP, MAX_PHOTOS_BY_FORMAT, DEFAULT_MAX_PHOTOS, MAX_SELECTED_FOR_CAROUSEL, CONTENT_FORMAT_LABELS } from '@/lib/content-session-limits'
 import { BASE_CONTENT_PROPS } from '@/lib/content-schema-fragments'
-import type { Json } from '@/lib/supabase/types'
 
 /** Gleiches Modell wie alle übrigen KI-Flows (Pass/ESTA/Beleg/Reiseideen/Content). */
 const OPENAI_MODEL = 'gpt-5.4'

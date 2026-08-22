@@ -131,6 +131,7 @@ export function OfflineTripDetail({ tripId }: { tripId: string }) {
   // unabhängigen Einzel-Get.
   useEffect(() => {
     listTripSnapshots().then((all) => setSnapshot(all.find((s) => s.tripId === tripId) ?? null));
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- bewusstes Laden beim Mount/tripId-Wechsel (s. §Bugfix oben), kein Bug.
     reloadDocuments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tripId]);

@@ -31,6 +31,7 @@ export type ConciergeLink = { label: string; href: string }
 export type ConciergeAnswer = { title: string; body: string; links: ConciergeLink[] }
 
 /** "Was fehlt?": Hinweise (nicht Konflikte) aus der bestehenden Reisebereitschaft. */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- tripSlug bleibt für die einheitliche Handler-Signatur der Concierge-Aktionen erhalten (s. lib/actions/concierge-actions.ts), Aufrufer übergeben ihn bewusst.
 export async function buildWhatsMissingAnswer(tripId: string, tripSlug: string): Promise<ConciergeAnswer> {
   const readiness = await computeTripReadiness(tripId)
   const hints = readiness.findings.filter((f) => f.severity === 'hint')

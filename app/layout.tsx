@@ -85,7 +85,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         className="min-h-screen flex flex-col md:flex-row"
         style={{ background: "var(--background)", color: "var(--foreground)" }}
       >
-        {/* eslint-disable-next-line @next/next/no-sync-scripts */}
         <script dangerouslySetInnerHTML={{ __html: SPLASH_SCRIPT }} />
         <ServiceWorkerRegistration />
         {children}

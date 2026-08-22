@@ -189,7 +189,7 @@ export default async function ContentIdeaDetailPage({
                   {FORMAT_LABELS[s.format] ?? s.format}
                 </span>
               </div>
-              <p className="mb-2 italic" style={{ color: "var(--muted)", fontSize: "0.78rem" }}>„{s.hook}"</p>
+              <p className="mb-2 italic" style={{ color: "var(--muted)", fontSize: "0.78rem" }}>„{s.hook}&quot;</p>
               <p className="mb-3" style={{ color: "var(--foreground)", fontSize: "0.76rem" }}>{s.angle}</p>
               <p className="mb-3 leading-relaxed" style={{ color: "var(--muted)", fontSize: "0.74rem" }}>{s.caption_draft}</p>
               {s.hashtags.length > 0 && (

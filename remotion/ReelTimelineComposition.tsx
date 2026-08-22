@@ -68,6 +68,7 @@ export function ReelTimelineComposition({ scenes, style, musicUrl }: ReelTimelin
   const placedScenes = scenes.map((scene) => {
     const durationInFrames = Math.max(1, Math.round(scene.durationSeconds * fps));
     const from = cursor;
+    // eslint-disable-next-line react-hooks/immutability -- False Positive: rein lokaler Laufindex innerhalb EINES synchronen .map()-Durchlaufs (frisch je Render via `let cursor = 0` initialisiert), keine Mutation, die den Render überlebt oder nach außen sichtbar wird.
     cursor += durationInFrames;
     return { ...scene, from, durationInFrames };
   });

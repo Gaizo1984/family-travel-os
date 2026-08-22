@@ -63,7 +63,7 @@ export default async function ReelMediaPage({
   const { error, uploaded, storyboard, job: jobId } = await searchParams;
 
   const lumiCore = await createLumiCoreClient();
-  const { id: familyId } = await getFamily();
+  await getFamily();
   const returnTo = `/content-studio/reel/${projectId}/media`;
 
   const { data: project } = await lumiCore

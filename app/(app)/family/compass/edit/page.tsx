@@ -93,7 +93,7 @@ export default async function EditFamilyCompassPage({
           </div>
 
           <div className="rounded-xl p-8" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
-            <div style={LABEL_STYLE}>Was bedeutet für uns „außergewöhnliche Hotels"?</div>
+            <div style={LABEL_STYLE}>Was bedeutet für uns „außergewöhnliche Hotels&quot;?</div>
             <p className="mb-4" style={{ color: "var(--muted)", fontSize: "0.72rem", lineHeight: 1.5 }}>
               Diese Kriterien gelten dauerhaft für die Familie — das Budget bleibt weiterhin je Reise separat festgelegt.
             </p>

@@ -1,10 +1,5 @@
 import Link from "next/link";
-import { ChevronRight, Plane, Clock, ArrowRight, Info } from "lucide-react";
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-const H_FG    = "#F0EBE3";
-const H_MUTED = "#A89880";
+import { ChevronRight, Plane, ArrowRight, Info } from "lucide-react";
 
 // ── Data ─────────────────────────────────────────────────────────────────────
 
@@ -349,7 +344,7 @@ function FlightCard({ flight }: { flight: FlightOption }) {
                 fontStyle: "italic",
               }}
             >
-              „{flight.character}"
+              „{flight.character}&quot;
             </p>
           </div>
           {/* Demo price */}
@@ -644,7 +639,7 @@ export default function OmanFlightsPage() {
                 }}
               >
                 „Weil eure Reise im Chedi ruhig beginnt, ist eine angenehme Ankunft
-                wichtiger als die frühestmögliche Landung."
+                wichtiger als die frühestmögliche Landung.&quot;
               </p>
             </div>
           </div>
@@ -688,7 +683,7 @@ export default function OmanFlightsPage() {
             >
               „Eure Reise hat vier Stationen. Deshalb muss bereits die Anreise nicht zum ersten
               Abenteuer werden. Ein Direktflug reduziert genau die Reibung, die mit fünf
-              Reisenden und einer zweijährigen Lumi unnötig wäre."
+              Reisenden und einer zweijährigen Lumi unnötig wäre.&quot;
             </p>
 
             <div
@@ -797,7 +792,7 @@ export default function OmanFlightsPage() {
                 lineHeight: 1.4,
               }}
             >
-              „Was kostet euch die schlechtere Verbindung?"
+              „Was kostet euch die schlechtere Verbindung?&quot;
             </div>
           </div>
         </section>
@@ -876,7 +871,7 @@ export default function OmanFlightsPage() {
                 }}
               >
                 „Für zwei Erwachsene wäre der Umstieg eine echte Alternative. Mit drei Kindern
-                und Lumi als Zweijähriger würden wir für diese Reise zum Direktflug tendieren."
+                und Lumi als Zweijähriger würden wir für diese Reise zum Direktflug tendieren.&quot;
               </p>
             </div>
           </div>
@@ -1016,7 +1011,7 @@ export default function OmanFlightsPage() {
                 lineHeight: 1.3,
               }}
             >
-              „Die Reise beginnt nicht in Oman."
+              „Die Reise beginnt nicht in Oman.&quot;
             </div>
             <p
               className="leading-relaxed mb-9"

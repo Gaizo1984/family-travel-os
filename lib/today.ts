@@ -52,6 +52,7 @@ export function buildTodayTimelineItems(day: TimelineDay): TodayTimelineItem[] {
     })
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Destrukturierungs-Idiom zum Entfernen des temporären Sortierschlüssels aus dem Ergebnis, `sortKey` ist absichtlich ungenutzt.
   return items.sort((a, b) => a.sortKey.localeCompare(b.sortKey)).map(({ sortKey, ...rest }) => rest)
 }
 

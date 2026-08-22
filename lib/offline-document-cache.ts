@@ -207,6 +207,7 @@ export async function cacheDocument(
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
   })
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Destrukturierungs-Idiom zum Entfernen von `blob` aus dem Ergebnis, `_blob` ist absichtlich ungenutzt.
   const { blob: _blob, ...meta } = record
   return meta
 }
@@ -349,6 +350,7 @@ export async function listCachedDocumentsForTrip(tripId: string): Promise<Cached
       if (!cursor) return
       const record = cursor.value as CachedDocumentRecord
       if (record.tripId === tripId) {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Destrukturierungs-Idiom zum Entfernen von `blob` aus dem Ergebnis, `_blob` ist absichtlich ungenutzt.
         const { blob: _blob, ...meta } = record
         results.push(meta)
       }

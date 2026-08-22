@@ -358,7 +358,7 @@ export default async function PlanPage({
                   className="mb-6 px-4 py-3 rounded-lg"
                   style={{ background: "rgba(184,154,94,0.12)", border: "1px solid rgba(184,154,94,0.3)", color: "var(--accent)", fontSize: "0.75rem", letterSpacing: "0.02em" }}
                 >
-                  Aus eurer Reiseidee „{fromIdea.destination}" übernommen — Name bitte prüfen, Termine sind noch offen.
+                  Aus eurer Reiseidee „{fromIdea.destination}&quot; übernommen — Name bitte prüfen, Termine sind noch offen.
                 </div>
               )}
 

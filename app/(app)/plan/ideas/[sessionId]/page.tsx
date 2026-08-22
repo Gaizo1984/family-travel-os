@@ -46,7 +46,7 @@ export default async function TripIdeaSessionPage({
           Drei Ideen zu eurem Wunsch
         </h1>
         <p className="mb-8 italic" style={{ color: "var(--muted)", fontSize: "0.82rem", lineHeight: 1.6 }}>
-          „{session.input_text}"
+          „{session.input_text}&quot;
         </p>
 
         <div className="grid grid-cols-1 gap-4">

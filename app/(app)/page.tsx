@@ -410,6 +410,7 @@ export default async function Dashboard() {
   // für den aktuellen Tag" (Nutzervorgabe, wörtlich): journey_events/
   // memory_photos werden nur geladen, wenn die Reise gerade läuft -- für eine
   // bevorstehende Reise gibt es noch keinen "heutigen Tag" der Reise selbst.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Travel-Startseite bewusst nicht angefasst (Nutzervorgabe); perPersonWorlds aktuell ungenutzt, kein Refactoring ohne funktionalen Grund.
   const [{ family: worldStats, byPersonId: perPersonWorlds }, nextTripReadiness, nextTripWeather, journeyEventsRaw, journeyPhotosRaw] = await Promise.all([
     buildTravelWorldForFamilyAndPersons(familyId, persons.map((p) => p.id)),
     computeTripReadiness(nextTrip.id),
@@ -428,6 +429,7 @@ export default async function Dashboard() {
   // Tages-Logik. nextEventId bewusst null (kein "nächstes Ereignis"-Bold
   // nötig für eine einzelne, isolierte Tageskarte außerhalb der vollen Timeline).
   let todayJourneyDay: JourneyDayBucket | null = null;
+  // eslint-disable-next-line prefer-const -- Travel-Startseite bewusst nicht angefasst (Nutzervorgabe); `let` statt `const` ist stilistisch, kein Bug.
   let todayPhotoUrlByPhotoId = new Map<string, string>();
   if (isNextTripActive) {
     const events = journeyEventsRaw as unknown as TimelineEvent[];

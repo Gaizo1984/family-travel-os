@@ -110,12 +110,15 @@ function parseIsoDurationMinutes(iso: string | undefined): number {
 }
 
 /** §"Gepäcklogik, nicht repräsentativ": pro Passagier, direkt aus Duffels segment.passengers[].baggages[] -- fehlt das Feld, ist der Status 'unknown', NIE stillschweigend 'excluded'. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- rohes, ungetyptes Duffel-JSON vor dem Mapping in interne Typen (Provider-Konvention, s. CLAUDE.md); vollständige Duffel-Response-Typen wären ein eigenes Typing-Projekt, kein Hygiene-Fix.
 function baggageEntryStatus(passenger: any): BaggageEntryStatus {
   if (!Array.isArray(passenger?.baggages)) return 'unknown'
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- s.o.
   const hasCheckedIncluded = passenger.baggages.some((b: any) => b?.type === 'checked' && Number(b?.quantity ?? 0) > 0)
   return hasCheckedIncluded ? 'included' : 'excluded'
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- s.o.
 function mapSegment(raw: any): FlightSegment {
   return {
     carrierCode: raw?.operating_carrier?.iata_code ?? raw?.operating_carrier?.id ?? '',
@@ -130,6 +133,7 @@ function mapSegment(raw: any): FlightSegment {
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- rohes, ungetyptes Duffel-JSON vor dem Mapping in interne Typen (Provider-Konvention, s. CLAUDE.md).
 function mapSlice(raw: any): FlightItinerary {
   const segments: FlightSegment[] = (raw?.segments ?? []).map(mapSegment)
   return {
@@ -139,6 +143,7 @@ function mapSlice(raw: any): FlightItinerary {
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- rohes, ungetyptes Duffel-JSON vor dem Mapping in interne Typen (Provider-Konvention, s. CLAUDE.md).
 function mapOffer(offer: any, originCode: string): FlightSearchOption | null {
   const slices = offer?.slices ?? []
   if (slices.length === 0 || !offer?.id) return null
@@ -215,6 +220,7 @@ async function duffelSearchFlights(params: {
         throw err
       }
       const data = await res.json()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- rohes, ungetyptes Duffel-JSON (Provider-Konvention, s. CLAUDE.md).
       const offers: any[] = Array.isArray(data?.data?.offers) ? data.data.offers : []
       for (const offer of offers) {
         const mapped = mapOffer(offer, originCode)
@@ -245,6 +251,7 @@ async function duffelResolveAirportCode(query: string): Promise<{ code: string; 
       throw err
     }
     const data = await res.json()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- rohes, ungetyptes Duffel-JSON (Provider-Konvention, s. CLAUDE.md).
     const items: any[] = Array.isArray(data?.data) ? data.data : []
     const match = items.find((i) => typeof i?.iata_code === 'string' && i.iata_code.length === 3)
     if (!match) return null

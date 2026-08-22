@@ -346,7 +346,7 @@ export function TripBriefingWizard({ persons, action, children }: { persons: Bri
             )}
           </div>
           <p style={{ color: 'var(--muted)', fontSize: '0.72rem', fontStyle: 'italic' }}>
-            Ihr könnt über „Zurück" jederzeit einzelne Angaben ändern.
+            Ihr könnt über „Zurück&quot; jederzeit einzelne Angaben ändern.
           </p>
         </div>
 

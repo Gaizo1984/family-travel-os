@@ -347,7 +347,7 @@ export function BookingForm({
             Lücke. */}
         {!config.supportsExtraction && (
           <p className="mb-8" style={{ color: "var(--muted)", fontSize: "0.7rem" }}>
-            Belege oder Tickets kannst du nach dem Speichern auf der Buchungsseite hochladen (Abschnitt "Dokumente").
+            Belege oder Tickets kannst du nach dem Speichern auf der Buchungsseite hochladen (Abschnitt &quot;Dokumente&quot;).
           </p>
         )}
 

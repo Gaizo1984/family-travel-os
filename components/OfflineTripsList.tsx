@@ -34,6 +34,7 @@ export function OfflineTripsList() {
     setRows(withSize)
   }, [])
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- bewusstes Laden beim Mount aus IndexedDB (s. Kommentar oben, einzige Datenquelle), kein Bug.
   useEffect(() => { load() }, [load])
 
   // §Bugfix "Entfernen blieb lautlos hängen": Fehler jetzt sichtbar statt

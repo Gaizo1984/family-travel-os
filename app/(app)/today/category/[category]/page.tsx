@@ -206,7 +206,7 @@ export default async function TodayCategoryPage({
         {job?.status === "failed" && (
           <Banner variant="error">{job.errorMessage ?? "Etwas ist schiefgelaufen. Bitte erneut versuchen."}</Banner>
         )}
-        {saved && <Banner variant="success">Gemerkt -- in der Journey unter „Idee" zu finden.</Banner>}
+        {saved && <Banner variant="success">Gemerkt -- in der Journey unter „Idee&quot; zu finden.</Banner>}
 
         {config.placesCategory ? (
           <PlacesCategorySection

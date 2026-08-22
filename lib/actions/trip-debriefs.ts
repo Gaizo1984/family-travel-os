@@ -6,14 +6,10 @@ import { tripDebriefs } from '@/lib/lumi-core-data/group1-documents-insurance-jo
 import { createPendingMemoryCandidate, hasDeclinedSimilarMemory } from '@/lib/family-memories'
 import {
   DEBRIEF_STEPS, nextDebriefStep, previousDebriefStep, buildDebriefMemoryCandidates, PACKING_FEEDBACK_TYPES,
-  type DebriefStep, type DebriefAnswers, type PackingFeedbackType, type PackingFeedbackEntry,
+  type DebriefStep, type DebriefAnswers, type PackingFeedbackEntry,
 } from '@/lib/trip-debriefs'
 import { loadPackingItems } from '@/lib/packing-list'
 import { maybeSuggestPackingPreference } from '@/lib/actions/packing-preference-learning'
-
-function isPackingFeedbackType(value: string): value is PackingFeedbackType {
-  return (PACKING_FEEDBACK_TYPES as string[]).includes(value)
-}
 
 function isDebriefStep(value: string): value is DebriefStep {
   return (DEBRIEF_STEPS as readonly string[]).includes(value)

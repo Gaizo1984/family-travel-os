@@ -14,7 +14,6 @@ import { getFamily } from '@/lib/family'
 import { readDateGroupFromFormData } from '@/lib/documents'
 import { deriveTripDateRange } from '@/lib/trip-dates'
 import { MAX_SELECTED_PHOTOS_PER_TRIP } from '@/lib/memory-limits'
-import type { SupabaseClient } from '@supabase/supabase-js'
 
 type LumiCoreClient = Awaited<ReturnType<typeof createLumiCoreClient>>
 

@@ -165,7 +165,7 @@ export default async function TripDebriefPage({ params }: { params: Promise<{ id
                 Wie war eure Reise?
               </h1>
               <p className="mb-6" style={{ color: "var(--muted)", fontSize: "0.82rem", lineHeight: 1.6 }}>
-                Ein paar kurze Fragen zu "{trip.title}" -- dauert nur wenige Minuten und hilft LUMI, künftige Vorschläge besser auf euch abzustimmen.
+                Ein paar kurze Fragen zu &quot;{trip.title}&quot; -- dauert nur wenige Minuten und hilft LUMI, künftige Vorschläge besser auf euch abzustimmen.
                 Nichts wird automatisch gespeichert, ihr entscheidet am Ende, was übernommen wird.
               </p>
               <div className="flex items-center gap-4">
@@ -320,7 +320,7 @@ export default async function TripDebriefPage({ params }: { params: Promise<{ id
                 <input type="hidden" name="slug" value={trip.slug} />
                 <input type="hidden" name="step" value={step} />
               </form>
-              <h2 className="font-light mb-2" style={{ color: "var(--foreground)", fontSize: "1.1rem" }}>Wie war's mit der Packliste?</h2>
+              <h2 className="font-light mb-2" style={{ color: "var(--foreground)", fontSize: "1.1rem" }}>Wie war&apos;s mit der Packliste?</h2>
               <p className="mb-5" style={{ color: "var(--muted)", fontSize: "0.76rem" }}>Optional -- hilft LUMI, künftige Packlisten für euch zu verbessern. Bestehende Gegenstände direkt anhaken, Fehlendes per Freitext ergänzen.</p>
 
               <div className="space-y-4 mb-6">
@@ -384,7 +384,7 @@ export default async function TripDebriefPage({ params }: { params: Promise<{ id
               {previewCandidates.length > 0 ? (
                 <>
                   <p className="mb-3" style={{ color: "var(--muted)", fontSize: "0.78rem", lineHeight: 1.5 }}>
-                    Diese Erkenntnisse werden als Vorschlag unter "Unsere Vorlieben" angelegt -- gespeichert wird erst, wenn ihr sie dort bestätigt:
+                    Diese Erkenntnisse werden als Vorschlag unter &quot;Unsere Vorlieben&quot; angelegt -- gespeichert wird erst, wenn ihr sie dort bestätigt:
                   </p>
                   <ul className="mb-6 space-y-2">
                     {previewCandidates.map((c, i) => (

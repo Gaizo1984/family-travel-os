@@ -643,7 +643,7 @@ export default async function TodayPage({
     >
       <Heart size={15} strokeWidth={1.6} style={{ flexShrink: 0, color: "var(--accent)" }} />
       <span className="flex-1 min-w-0 truncate" style={{ color: "var(--foreground)", fontSize: "0.8rem", letterSpacing: "0.02em" }}>
-        Wie war "{debriefTrip.title}"? Kurzer Rückblick wartet
+        Wie war &quot;{debriefTrip.title}&quot;? Kurzer Rückblick wartet
       </span>
       <ChevronRight size={14} strokeWidth={1.6} style={{ flexShrink: 0, color: "var(--muted)" }} />
     </Link>

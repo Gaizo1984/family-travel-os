@@ -39,7 +39,7 @@ export function FlightSearchTestCard({ lastRun }: { lastRun: DevTestRun | null }
             <input name="adults" type="number" min={1} max={10} defaultValue="1" style={inputStyle} />
           </label>
           <label style={{ flex: 1 }}>
-            <div style={{ fontSize: '0.68rem', color: '#9ca3af', marginBottom: '0.25rem' }}>Kinderalter, kommagetrennt (optional, z. B. "8, 3, 0")</div>
+            <div style={{ fontSize: '0.68rem', color: '#9ca3af', marginBottom: '0.25rem' }}>Kinderalter, kommagetrennt (optional, z. B. &quot;8, 3, 0&quot;)</div>
             <input name="child_ages" placeholder="z. B. 8, 3, 0" style={inputStyle} />
           </label>
         </div>

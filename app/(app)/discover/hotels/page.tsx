@@ -39,7 +39,7 @@ export default async function DiscoverHotelsPage() {
 
         {criteria.size === 0 && (
           <p className="mb-6" style={{ color: "var(--muted)", fontSize: "0.72rem", fontStyle: "italic" }}>
-            Legt eure Kriterien für „außergewöhnliche Hotels" im{" "}
+            Legt eure Kriterien für „außergewöhnliche Hotels&quot; im{" "}
             <Link href="/family/compass/edit" style={{ color: "var(--accent)" }}>Reisekompass</Link> fest, um die Sortierung zu personalisieren.
           </p>
         )}

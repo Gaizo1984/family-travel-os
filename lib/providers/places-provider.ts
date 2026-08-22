@@ -197,6 +197,7 @@ async function googlePlacesSearch(params: PlacesSearchParams): Promise<PlaceResu
       throw err
     }
     const data = await res.json()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- rohes, ungetyptes Google-Places-JSON vor dem Mapping in interne Typen (Provider-Konvention, s. CLAUDE.md).
     const places: any[] = data?.places ?? []
     return places.map((p) => ({
       id: p.id,
@@ -371,6 +372,7 @@ async function fetchLodgingPageRaw(textQuery: string, locationBias: LodgingLocat
     throw err
   }
   const data = await res.json()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- rohes, ungetyptes Google-Places-JSON (Provider-Konvention, s. CLAUDE.md).
   const places: any[] = data?.places ?? []
   return places.map((p) => ({
     id: p.id,

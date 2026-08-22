@@ -40,6 +40,7 @@ function EventRow({ event, isNext }: { event: JourneyEvent; isNext: boolean }) {
   const emphasize = event.priority === "high" || isNext;
   const rowContent = (
     <div className="flex items-center gap-3" style={{ minHeight: "44px" }}>
+      {/* eslint-disable-next-line react-hooks/static-components -- False Positive: resolveIcon() liefert stabile Referenzen aus statischen Modul-Konstanten (EXTRA_ICONS/BOOKING_TYPE_CONFIG/JOURNEY_EVENT_CATEGORIES), keine bei jedem Render neu erzeugte Komponente. */}
       <Icon size={13} strokeWidth={1.4} style={{ color: emphasize ? "var(--accent)" : "var(--muted)", flexShrink: 0 }} />
       <span className="flex-1 min-w-0 truncate" style={{ color: STATUS_COLOR[event.status], fontSize: "0.82rem", fontWeight: emphasize ? 600 : 400 }}>
         {event.title}

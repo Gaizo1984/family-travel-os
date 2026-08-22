@@ -191,6 +191,7 @@ Wähle genau 5 dieser Orte aus, die am besten zu dieser Familie passen. Regeln f
     })
 
     const parsed = JSON.parse(response.output_text)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- rohes, ungetyptes OpenAI-JSON-Schema-Ergebnis vor dem Mapping in interne Typen.
     return parsed.recommendations.map((r: any) => ({
       placeName: r.place_name, why: r.why,
       kinderEignung: r.kinder_eignung, wetterEignung: r.wetter_eignung,

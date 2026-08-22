@@ -1,7 +1,7 @@
 import Link from "next/link";
 import {
-  Plane, Car, FileText, Shield, Clock, ArrowRight,
-  ChevronRight, MapPin, Users, Check, Package, WifiOff,
+  Plane, Car, FileText, Shield, ArrowRight,
+  ChevronRight, MapPin, Check, WifiOff,
 } from "lucide-react";
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
@@ -832,7 +832,7 @@ export default function VaultPage() {
                 paddingTop: "4px",
               }}
             >
-              „Eine Reise ist erst vorbereitet, wenn sie für alle vorbereitet ist."
+              „Eine Reise ist erst vorbereitet, wenn sie für alle vorbereitet ist.&quot;
             </p>
           </section>
 
