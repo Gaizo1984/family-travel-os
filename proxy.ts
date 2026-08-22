@@ -28,8 +28,22 @@ function isCronPath(pathname: string): boolean {
   return pathname.startsWith('/api/cron/')
 }
 
+/**
+ * §Reise-Postfach: Google Cloud Pub/Sub ruft diesen Endpunkt ohne
+ * Browser-Session auf (kein `user`) -- die Session-Weiterleitung unten
+ * würde das mit 307 auf /login umbiegen, BEVOR die routen-eigene
+ * OIDC-Prüfung (app/api/gmail/webhook/route.ts, lib/gmail/pubsub-auth.ts)
+ * überhaupt liefe. Gleiches Muster wie isCronPath oben -- der Endpunkt
+ * sichert sich vollständig selbst (Google-signiertes OIDC-Token, geprüft
+ * auf Signatur/Audience/erwartete Service-Account-Identität), keine
+ * Session nötig oder sinnvoll.
+ */
+function isGmailWebhookPath(pathname: string): boolean {
+  return pathname === '/api/gmail/webhook'
+}
+
 export async function proxy(request: NextRequest) {
-  if (isCronPath(request.nextUrl.pathname)) return NextResponse.next()
+  if (isCronPath(request.nextUrl.pathname) || isGmailWebhookPath(request.nextUrl.pathname)) return NextResponse.next()
 
   let response = NextResponse.next({ request })
 
