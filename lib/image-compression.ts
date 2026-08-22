@@ -1,4 +1,5 @@
 import sharp from 'sharp'
+import { assertSafeImageFormat } from './image-format-guard'
 
 const MAX_WIDTH = 2000
 
@@ -7,8 +8,20 @@ const MAX_WIDTH = 2000
  * serverseitig in Supabase Storage speichern, komprimieren") — Resize auf
  * eine sinnvolle Maximalbreite (nur falls größer) + WebP-Reencoding.
  * Wiederverwendbar für jede künftige Foto-Upload-Stelle, nicht nur Memories.
+ *
+ * §Sharp 0.34.4-Pinning (siehe lib/image-format-guard.ts): dies ist der
+ * EINZIGE Einstiegspunkt, über den rohe, ungeprüfte Upload-Bytes an sharp
+ * gelangen -- alle Upload-Aktionen (memories.ts/trips.ts/content-sessions.ts/
+ * image-check.ts) rufen ausschließlich diese Funktion mit dem frischen
+ * Nutzer-Upload auf; jede weitere sharp-Nutzung im Projekt (Thumbnails,
+ * dHash, KI-Analyse-Vorverarbeitung) verarbeitet ausschließlich bereits
+ * hierüber gelaufene, also schon auf WebP re-encodete Buffer. Die
+ * Formatprüfung hier reicht deshalb aus, um GIF/TIFF u. ä. konsequent von
+ * sharp fernzuhalten, ohne sie an jeder einzelnen Aufrufstelle zu duplizieren.
  */
 export async function compressImageForStorage(buffer: Buffer): Promise<Buffer> {
+  assertSafeImageFormat(buffer)
+
   // §Fix "Invalid SOS parameters for sequential JPEG": manche Smartphone-/
   // Messenger-JPEGs sind leicht nicht-konform kodiert (z. B. ungewöhnliche
   // Restart-Marker) -- libvips lehnt sie standardmäßig komplett ab, obwohl
