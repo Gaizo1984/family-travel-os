@@ -2,7 +2,7 @@
 
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { redirect } from 'next/navigation'
-import { BOOKING_TYPE_CONFIG, TRIP_BOUNDED_BOOKING_TYPES, BOOKING_CATEGORIES, combineDateTime, AUTO_STAGE_NOTE_LAYOVER } from '@/lib/bookings'
+import { BOOKING_TYPE_CONFIG, BOOKING_DOCUMENT_LABEL, TRIP_BOUNDED_BOOKING_TYPES, BOOKING_CATEGORIES, combineDateTime, AUTO_STAGE_NOTE_LAYOVER } from '@/lib/bookings'
 import { suggestCountryCode } from '@/lib/geo-suggestions'
 import { readDateGroupFromFormData, getNarrowTripDateRange } from '@/lib/documents'
 import { deriveTripDateRange } from '@/lib/trip-dates'
@@ -337,6 +337,51 @@ async function checkTripBoundedDateRange(
   return null
 }
 
+/**
+ * §Bugfix "kein doppelter Upload" (Nutzervorgabe, wörtlich: "Der Extra
+ * Upload im Nachgang ist ein doppelter Aufwand"): die per KI-Auslesung
+ * bereits hochgeladene Buchungsbestätigung (existing_storage_path, s.
+ * lib/actions/booking-extraction.ts) wird nach erfolgreichem Speichern der
+ * Buchung automatisch als travel_documents-Zeile (doc_type='booking_document')
+ * hinterlegt — dieselbe Datei, kein zweiter Upload, kein manueller
+ * Zusatzschritt über den separaten "Dokument hinzufügen"-Bereich der
+ * Buchungsdetailseite (lib/actions/documents.ts::uploadBookingDocument, hier
+ * bewusst NICHT wiederverwendet, da dessen `label` ein Pflichtfeld aus einem
+ * Formular ist, das dieser Fluss nicht hat).
+ *
+ * Best effort: ein Fehler hier darf die bereits erfolgreich gespeicherte
+ * Buchung nie im Nachhinein ungültig machen (gleiches Prinzip wie
+ * maybeSuggestActivityPreference oben) — im schlimmsten Fall bleibt die
+ * Buchungsbestätigung unangehängt und kann wie bisher manuell nachgetragen
+ * werden, der Rest der Buchung ist davon unberührt.
+ */
+async function attachExtractedDocumentToBooking(
+  lumiCore: LumiCore,
+  existingStoragePath: string,
+  tripId: string,
+  bookingId: string,
+  type: BookingType,
+): Promise<void> {
+  try {
+    const { id: householdId } = await getFamily()
+    const { error } = await lumiCore.from('travel_documents').insert({
+      household_id: householdId,
+      trip_id: tripId,
+      booking_id: bookingId,
+      household_member_id: null,
+      doc_type: 'booking_document',
+      label: BOOKING_DOCUMENT_LABEL[type] ?? 'Buchungsunterlage',
+      details: { source: 'extracted' },
+      storage_provider: 'supabase_storage',
+      storage_bucket: 'travel-documents',
+      storage_path: existingStoragePath,
+    })
+    if (error) console.error('[bookings] Buchungsbestätigung konnte nicht automatisch hinterlegt werden:', error.message)
+  } catch (e) {
+    console.error('[bookings] Buchungsbestätigung konnte nicht automatisch hinterlegt werden:', e)
+  }
+}
+
 export async function createBooking(formData: FormData) {
   const tripId   = String(formData.get('trip_id') ?? '')
   const slug     = String(formData.get('slug') ?? '')
@@ -356,6 +401,10 @@ export async function createBooking(formData: FormData) {
   // statt zur Reiseseite. Weiterhin manuell zu bestätigen, kein
   // automatisches Durchbuchen.
   const returnDraftRaw = String(formData.get('return_draft') ?? '').trim()
+  // §Bugfix "kein doppelter Upload": nur gesetzt, wenn das Formular über eine
+  // vorangegangene KI-Auslesung befüllt wurde (s. BookingForm.tsx,
+  // existingStoragePath) -- s. attachExtractedDocumentToBooking unten.
+  const existingStoragePath = String(formData.get('existing_storage_path') ?? '').trim()
   const f = readCommonFields(formData)
   const participantIds = readParticipantPersonIds(formData, f.type)
 
@@ -419,6 +468,9 @@ export async function createBooking(formData: FormData) {
   if (error)
     redirectWithDraft(newPath, 'Speicherfehler: ' + error.message, f)
 
+  if (existingStoragePath && created)
+    await attachExtractedDocumentToBooking(lumiCore, existingStoragePath, tripId, created.id, f.type)
+
   // §"So lernt LUMI Brain automatisch auch die Vorlieben" (Nutzervorgabe) --
   // nur bei Neuanlage (nicht bei updateBooking, keine Vorschlags-Flut durch
   // reines Bearbeiten), best effort: ein Fehler hier darf die bereits
@@ -462,6 +514,9 @@ export async function updateBooking(formData: FormData) {
   const bookingId = String(formData.get('booking_id') ?? '')
   const slug       = String(formData.get('slug') ?? '')
   const editPath = `/trips/${slug}/bookings/${bookingId}/edit?`
+  // §Bugfix "kein doppelter Upload": s. createBooking oben -- greift hier,
+  // wenn beim Bearbeiten erneut eine Buchungsbestätigung ausgelesen wurde.
+  const existingStoragePath = String(formData.get('existing_storage_path') ?? '').trim()
   const f = readCommonFields(formData)
   const participantIds = readParticipantPersonIds(formData, f.type)
 
@@ -538,6 +593,9 @@ export async function updateBooking(formData: FormData) {
 
   if (error)
     redirectWithDraft(editPath, 'Speicherfehler: ' + error.message, f)
+
+  if (existingStoragePath && tripId)
+    await attachExtractedDocumentToBooking(lumiCore, existingStoragePath, tripId, bookingId, f.type)
 
   redirect(`/trips/${slug}/bookings/${bookingId}`)
 }

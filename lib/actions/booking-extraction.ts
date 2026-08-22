@@ -4,7 +4,7 @@ import OpenAI from 'openai'
 import { createLumiCoreClient } from '@/lib/supabase/lumi-core-server'
 import { redirect } from 'next/navigation'
 import { ALLOWED_DOCUMENT_MIME_TYPES, MAX_DOCUMENT_FILE_SIZE, buildBookingStoragePath } from '@/lib/documents'
-import { BOOKING_TYPE_CONFIG, combineDateTime } from '@/lib/bookings'
+import { BOOKING_TYPE_CONFIG, BOOKING_DOCUMENT_LABEL, combineDateTime } from '@/lib/bookings'
 import type { BookingType } from '@/lib/supabase/types'
 import { toTravelDocumentsPath } from '@/lib/lumi-core-storage/paths'
 
@@ -44,14 +44,8 @@ const BOOKING_SCHEMA = {
   additionalProperties: false,
 }
 
-const DOCUMENT_KIND_LABEL: Record<string, string> = {
-  flight: 'Boardingpass oder Flugbuchungsbestätigung',
-  accommodation: 'Hotelbuchungsbestätigung',
-  rental_car: 'Mietwagen-Buchungsbestätigung',
-}
-
 function buildPrompt(type: BookingType): string {
-  const kind = DOCUMENT_KIND_LABEL[type] ?? 'Buchungsbestätigung'
+  const kind = BOOKING_DOCUMENT_LABEL[type] ?? 'Buchungsbestätigung'
   return (
     `Du liest einen ${kind} aus einem Foto oder PDF aus und extrahierst ausschließlich Daten, die im ` +
     `Dokument tatsächlich sichtbar sind. Erfinde niemals Werte — wenn ein Feld nicht erkennbar oder nicht ` +
@@ -152,12 +146,17 @@ export async function extractBookingData(formData: FormData) {
   if (file.size > MAX_DOCUMENT_FILE_SIZE)
     fail('Die Datei ist zu groß (maximal 10 MB).')
 
-  // §Upload dient hier nur als Zwischenschritt für die OpenAI-Auslesung, nicht
-  // als dauerhafte Anlage an die Buchung -- bookings hat kein eigenes
-  // Dokumenten-/Foto-Feld (Boardingpässe sind ein separates, personenbezogenes
-  // Feature, siehe app/(app)/trips/[id]/bookings/[bookingId]/boarding-passes).
-  // storage_path dient dem Formular anschließend nur als UI-Signal ("bereits
-  // ausgelesen"), nicht als Referenz auf eine gespeicherte Datei.
+  // §Bugfix "kein doppelter Upload" (Nutzervorgabe, wörtlich): dieser Upload
+  // ist der EINZIGE Upload der Datei. bookings selbst hat weiterhin kein
+  // eigenes Dokumenten-/Foto-Feld (Boardingpässe sind ein separates,
+  // personenbezogenes Feature, siehe
+  // app/(app)/trips/[id]/bookings/[bookingId]/boarding-passes) -- storage_path
+  // fließt stattdessen über das Formular-Hiddenfeld "existing_storage_path"
+  // zu lib/actions/bookings.ts::createBooking/updateBooking, die daraus nach
+  // erfolgreichem Speichern der Buchung automatisch eine echte
+  // travel_documents-Zeile (doc_type='booking_document') anlegen -- dieselbe
+  // bereits hochgeladene Datei wird dadurch wiederverwendet, nie ein zweites
+  // Mal hochgeladen.
   const supabase = await createLumiCoreClient()
   const rawPath = buildBookingStoragePath(bookingId || 'staging', file.name)
   const storagePath = await toTravelDocumentsPath(rawPath)

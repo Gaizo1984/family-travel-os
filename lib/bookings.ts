@@ -264,6 +264,23 @@ export const BOOKING_TYPE_CONFIG: Record<BookingType, BookingTypeConfig> = {
   },
 }
 
+/**
+ * §"Buchungsbestätigung beim Auslesen automatisch an der Buchung hinterlegen,
+ * kein doppelter Upload" (Nutzervorgabe, wörtlich): Bezeichnung, unter der das
+ * bereits für die KI-Auslesung hochgeladene Dokument als Buchungsunterlage
+ * gespeichert wird (siehe lib/actions/bookings.ts::attachExtractedDocumentToBooking).
+ * Nur für Typen mit supportsExtraction relevant — für alle anderen greift der
+ * generische Fallback-Label in attachExtractedDocumentToBooking.
+ * Gemeinsam mit lib/actions/booking-extraction.ts genutzt (dort für den
+ * KI-Prompt), damit dieselbe, an einer Stelle gepflegte Bezeichnung sowohl
+ * beim Auslesen erklärt als auch beim Speichern als Dokumentname verwendet wird.
+ */
+export const BOOKING_DOCUMENT_LABEL: Partial<Record<BookingType, string>> = {
+  flight: 'Boardingpass oder Flugbuchungsbestätigung',
+  accommodation: 'Hotelbuchungsbestätigung',
+  rental_car: 'Mietwagen-Buchungsbestätigung',
+}
+
 // §"Gebucht statt Reserviert, dauerhaft" (Nutzervorgabe, wörtlich): 'reserved'
 // entfernt (siehe Migration 20260801000001_normalize_booking_journey_status.sql,
 // bestehende Zeilen wurden vorher auf 'pending' migriert); 'confirmed' heißt
