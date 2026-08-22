@@ -158,7 +158,11 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 type StationType = { name: string; nights: number; photo: string; hotel: string | null; active: boolean };
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- showChedi wird von einem Aufrufer (Zeile ~787) gesetzt, aber aktuell nicht im Render ausgewertet -- vermutlich unfertiges Feature, absichtlich nicht angefasst (kein Refactoring ohne Produktentscheidung).
+// §TODO Oman-Reiseplanung (noch nicht fertiggestellt, wird später separat
+// weitergebaut, ebenso Sri Lanka): showChedi wird von einem Aufrufer
+// (Zeile ~787) bewusst gesetzt, aber noch nicht im Render ausgewertet --
+// kein Bug, sondern offenes Feature. Absichtlich unveraendert.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- s.o.
 function RouteOverview({ stations, showChedi = false }: { stations: StationType[]; showChedi?: boolean }) {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
