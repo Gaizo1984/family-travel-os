@@ -3,122 +3,70 @@
 import { useEffect, useState } from 'react'
 import { BASE_PATH } from '@/lib/base-path'
 
-const HOLD_MS_BROWSER = 900
-const FADE_MS_BROWSER = 450
-
-/** §"Splashbild 1 Sekunde länger zeigen" (Nutzervorgabe nach erstem funktionierendem Test): 2600ms -> 3600ms. */
-const MIN_HOLD_MS_STANDALONE = 3600
-const FADE_MS_STANDALONE = 500
-
-/**
- * §Bugfix "Eigener Splash wird in der installierten Android-PWA übersprungen",
- * dritter Anlauf: die ersten beiden Versuche banden die Sichtdauer an eine
- * FEST GERATENE Zeitspanne ab Mount (1,35s, dann 3,2s) -- beide blieben laut
- * Nutzer-Test wirkungslos. Das deutet darauf hin, dass der tatsächliche
- * Seitenaufbau in `display-mode: standalone` (Supabase-Auth-Check in
- * proxy.ts + teils datenintensive Server Components, z. B. das Hauptdashboard
- * app/(app)/page.tsx mit mehreren parallelen Supabase-/Wetter-Abfragen)
- * länger dauert als jede bisher geratene Zahl -- Android hält seinen eigenen
- * Splash entsprechend länger, unser Overlay war da längst schon
- * ausgeblendet.
- *
- * Statt weiter eine Zahl zu raten, jetzt ein echtes Bereitschaftssignal:
- * `window.load` feuert erst, wenn das Dokument INKLUSIVE aller Ressourcen --
- * auch unser eigenes Splash-Bild -- tatsächlich fertig geladen ist. Die
- * Mindest-Sichtdauer (`MIN_HOLD_MS_STANDALONE`) zählt in Standalone daher erst
- * AB diesem Zeitpunkt, nicht ab Mount. `LOAD_WAIT_CAP_MS` verhindert, dass ein
- * hängender Request (load feuert pathologisch spät/nie) die Sichtdauer
- * unbegrenzt verzögert.
- *
- * Der Browser-Tab (bereits vom Nutzer bestätigt korrekt) bleibt unverändert
- * auf der schnellen, mount-basierten Logik.
- */
-const LOAD_WAIT_CAP_MS = 4000
-
-/**
- * §Bugfix "friert bei gescheiterter/zu langsamer Hydration ein": rein
- * CSS-getriebenes Notnetz, unabhängig vom JS-State oben -- blendet auch ganz
- * ohne je laufendes JS irgendwann aus. Bewusst über dem realistischen
- * JS-Worst-Case (LOAD_WAIT_CAP_MS + MIN_HOLD_MS_STANDALONE + FADE_MS_STANDALONE
- * = 8100ms), damit sie im Erfolgsfall nie sichtbar eingreift.
- */
-const CSS_FALLBACK_MS = 9500
-const CSS_FALLBACK_HOLD_PERCENT = 94
+// Splash-Screen beim App-Start — nur im "standalone"-Modus (Homescreen-
+// Icon), nicht bei jedem normalen Browser-Tab-Aufruf. Gleiches Muster wie
+// lumi-assistance/lumi-launcher/depot-v3 components/SplashScreen.tsx.
+//
+// §Konsistente Lumi-Splash-Dauer + Einmal-pro-Sitzung (Nutzervorgabe, gilt
+// identisch für Launcher/Assistance/Travel/Finance/Tax): 2.500ms gesamt --
+// 300ms Fade-in, 1.900ms sichtbar, 300ms Fade-out. Ersetzt die vorherige,
+// deutlich komplexere Logik (unterschiedliche Haltezeiten für Browser-Tab
+// vs. Standalone, `window.load`-Gating, CSS-Fallback-Notnetz für hängende
+// Hydration) -- diese war eine Reaktion auf eine feste GERATENE Wartezeit,
+// die in der installierten PWA zu früh ablief. Mit der jetzt EINHEITLICH
+// über die ganze Lumi-Familie vorgegebenen, festen 2.500ms-Dauer (explizite
+// Nutzervorgabe: "keine künstliche zusätzliche Ladezeit über 2,5s hinaus")
+// entfällt die Notwendigkeit für dieses Warten auf ein Bereitschaftssignal.
+// Zusätzlich NEU: sessionStorage-Sperre -- fehlte hier bisher komplett,
+// wodurch der Splash bei jeder erneuten Foreground-/Mount-Situation in der
+// Standalone-App erneut erschien, nicht nur beim ersten Öffnen.
+const SPLASH_SHOWN_KEY = 'lumi-travel-splash-shown'
+const TOTAL_MS = 2500
+const FADE_IN_MS = 300
+const FADE_OUT_MS = 300
+const FADE_IN_PCT = (FADE_IN_MS / TOTAL_MS) * 100
+const FADE_OUT_START_PCT = ((TOTAL_MS - FADE_OUT_MS) / TOTAL_MS) * 100
 
 export function SplashScreen() {
-  const [fading, setFading] = useState(false)
-  const [fadeMs, setFadeMs] = useState(FADE_MS_BROWSER)
-  const [removed, setRemoved] = useState(false)
+  const [show, setShow] = useState(false)
 
   useEffect(() => {
-    const standalone = window.matchMedia('(display-mode: standalone)').matches
-    let fadeTimer: ReturnType<typeof setTimeout>
-    let removeTimer: ReturnType<typeof setTimeout>
+    const isStandalone =
+      window.matchMedia('(display-mode: standalone)').matches ||
+      (window.navigator as unknown as { standalone?: boolean }).standalone === true
+    if (!isStandalone) return
 
-    if (!standalone) {
-      setFadeMs(FADE_MS_BROWSER)
-      fadeTimer = setTimeout(() => setFading(true), HOLD_MS_BROWSER)
-      removeTimer = setTimeout(() => setRemoved(true), HOLD_MS_BROWSER + FADE_MS_BROWSER + 50)
-      return () => {
-        clearTimeout(fadeTimer)
-        clearTimeout(removeTimer)
-      }
+    try {
+      if (sessionStorage.getItem(SPLASH_SHOWN_KEY)) return
+      sessionStorage.setItem(SPLASH_SHOWN_KEY, '1')
+    } catch {
+      // sessionStorage nicht verfügbar -- dann lieber zeigen als abstürzen.
     }
 
-    setFadeMs(FADE_MS_STANDALONE)
-    let started = false
-    const startHold = () => {
-      if (started) return
-      started = true
-      fadeTimer = setTimeout(() => setFading(true), MIN_HOLD_MS_STANDALONE)
-      removeTimer = setTimeout(() => setRemoved(true), MIN_HOLD_MS_STANDALONE + FADE_MS_STANDALONE + 50)
-    }
-
-    if (document.readyState === 'complete') {
-      startHold()
-    } else {
-      window.addEventListener('load', startHold, { once: true })
-    }
-    const capTimer = setTimeout(startHold, LOAD_WAIT_CAP_MS)
-
-    return () => {
-      window.removeEventListener('load', startHold)
-      clearTimeout(capTimer)
-      clearTimeout(fadeTimer)
-      clearTimeout(removeTimer)
-    }
+    setShow(true)
+    const removeTimer = setTimeout(() => setShow(false), TOTAL_MS)
+    return () => clearTimeout(removeTimer)
   }, [])
 
-  if (removed) return null
+  if (!show) return null
 
   return (
     <div
       aria-hidden="true"
-      className="lumi-splash-overlay"
-      style={
-        fading
-          ? { animation: 'none', transition: `opacity ${fadeMs}ms ease`, opacity: 0, pointerEvents: 'none' }
-          : undefined
-      }
+      className="fixed inset-0 z-[999] overflow-hidden"
+      style={{ background: '#E8E3DA', animation: `lumi-splash-fade ${TOTAL_MS}ms ease forwards` }}
     >
       <style>{`
-        @keyframes lumi-splash-fallback {
-          0% { opacity: 1; pointer-events: auto; }
-          ${CSS_FALLBACK_HOLD_PERCENT}% { opacity: 1; pointer-events: auto; }
-          ${Math.min(CSS_FALLBACK_HOLD_PERCENT + 1, 100)}% { pointer-events: none; }
-          100% { opacity: 0; pointer-events: none; }
-        }
-        .lumi-splash-overlay {
-          position: fixed;
-          inset: 0;
-          z-index: 9999;
-          background: #E8E3DA;
-          animation: lumi-splash-fallback ${CSS_FALLBACK_MS}ms ease forwards;
+        @keyframes lumi-splash-fade {
+          0% { opacity: 0; }
+          ${FADE_IN_PCT}% { opacity: 1; }
+          ${FADE_OUT_START_PCT}% { opacity: 1; }
+          100% { opacity: 0; }
         }
       `}</style>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src={`${BASE_PATH}/splash/splash-1170x2532.jpg`}
+        src={`${BASE_PATH}/splash/splash-travel.png`}
         alt=""
         fetchPriority="high"
         className="absolute inset-0 w-full h-full object-cover"

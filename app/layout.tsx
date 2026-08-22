@@ -20,20 +20,17 @@ export const metadata: Metadata = {
   },
   icons: {
     apple: `${BASE_PATH}/icons/apple-icon-180.png`,
+    // §Splash-Bild-Ersatz (Nutzervorgabe): neues Motiv ersetzt die
+    // bisherigen zwei geräte-spezifischen JPGs (splash-1170x2532/
+    // splash-1668x2388) -- nur noch eine Bilddatei, deshalb ohne
+    // Geräte-Media-Queries für exakte native Pixelmaße. Reine iOS-
+    // Zusatzoptimierung (natives Startbild vor dem JS-Splash); die
+    // eigentliche, plattformübergreifende Anzeige läuft weiterhin über
+    // components/SplashScreen.tsx.
     other: [
       {
         rel: "apple-touch-startup-image",
-        url: `${BASE_PATH}/splash/splash-1170x2532.jpg`,
-        media: "(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3)",
-      },
-      {
-        rel: "apple-touch-startup-image",
-        url: `${BASE_PATH}/splash/splash-1668x2388.jpg`,
-        media: "(device-width: 834px) and (device-height: 1194px) and (-webkit-device-pixel-ratio: 2)",
-      },
-      {
-        rel: "apple-touch-startup-image",
-        url: `${BASE_PATH}/splash/splash-1170x2532.jpg`,
+        url: `${BASE_PATH}/splash/splash-travel.png`,
       },
     ],
   },
