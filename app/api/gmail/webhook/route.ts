@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyPubSubPushRequest } from '@/lib/gmail/pubsub-auth'
+import { processGmailPush } from '@/lib/gmail/process-push'
 
 /**
- * §Reise-Postfach, Implementierungsschritt "Webhook-Grundgerüst"
- * (Nutzervorgabe, wörtlich): "Noch keine Mailinhalte verarbeiten; zunächst
- * nur validierte Pub/Sub-Push-Nachrichten sicher annehmen und mit 2xx
- * quittieren." Diese Route tut ausschließlich das -- kein Gmail-API-Aufruf,
- * keine Extraktion, keine Buchungs-/Dokumentlogik. Das folgt erst in einem
- * späteren Schritt, sobald die bestehende Pull-Subscription gemeinsam auf
- * Push + OIDC umgestellt ist.
+ * §Reise-Postfach, Implementierungsschritt "Mail-Verarbeitung"
+ * (Nutzervorgabe, wörtlich): nach erfolgreicher OIDC-Prüfung wird jetzt
+ * tatsächlich verarbeitet (lib/gmail/process-push.ts) -- Whitelist-Prüfung
+ * vor jedem weiteren Laden/jeder KI-Verarbeitung, nicht erlaubte Absender
+ * werden dort sofort in den Papierkorb verschoben. Diese Route selbst
+ * bleibt schlank: Auth prüfen, Verarbeitung anstoßen, immer mit 2xx
+ * quittieren (auch wenn die Verarbeitung selbst scheitert -- s. Kommentar
+ * unten -- sonst lässt Pub/Sub denselben Push endlos erneut zustellen).
  *
  * §Sicherheit: von proxy.ts explizit von der normalen Login-Pflicht
  * ausgenommen (s. dortiger Kommentar `isGmailWebhookPath`, analog zu
@@ -21,7 +23,7 @@ import { verifyPubSubPushRequest } from '@/lib/gmail/pubsub-auth'
  * OIDC-Prüfung verlangt, niemals umgekehrt.
  */
 export const runtime = 'nodejs'
-export const maxDuration = 30
+export const maxDuration = 60
 
 function isSharedSecretValid(request: NextRequest): boolean {
   const configured = process.env.GMAIL_WEBHOOK_SHARED_SECRET
@@ -69,14 +71,27 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, accepted: false })
   }
 
-  // §Vorgabe (dieser Schritt): nur annehmen und quittieren. NIE
-  // envelope.message.data (Base64 der eigentlichen Gmail-Benachrichtigung)
-  // loggen oder auswerten -- nur unkritische Zustellungs-Metadaten.
+  // Nie envelope.message.data (Base64 der eigentlichen Gmail-Benachrichtigung
+  // -- enthält lediglich {emailAddress, historyId}, aber grundsätzlich nie
+  // Mailinhalte) loggen oder auswerten -- process-push.ts liest stattdessen
+  // direkt per Gmail API nach, beginnend mit den minimalen Headern.
   console.log('[gmail-webhook] validierte Push-Nachricht angenommen', {
     subscription: envelope.subscription ?? null,
     messageId: envelope.message?.messageId ?? null,
     publishTime: envelope.message?.publishTime ?? null,
   })
+
+  try {
+    const result = await processGmailPush()
+    console.log('[gmail-webhook] Verarbeitung abgeschlossen', result)
+  } catch (e) {
+    // §Fail-safe statt Fail-closed hier bewusst umgekehrt: ein Fehler in der
+    // Verarbeitung darf NICHT zu endlosen Pub/Sub-Zustellversuchen führen --
+    // eine noch unverarbeitete Nachricht bleibt in INBOX und wird beim
+    // nächsten Push (oder erneuten Aufruf) automatisch erneut versucht,
+    // ohne dass Pub/Sub selbst in eine Retry-Schleife gerät.
+    console.error('[gmail-webhook] Verarbeitung fehlgeschlagen', e instanceof Error ? e.message : e)
+  }
 
   return NextResponse.json({ ok: true, accepted: true })
 }
