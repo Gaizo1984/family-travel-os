@@ -622,6 +622,38 @@ export interface LumiCoreDatabase {
           redirect_path?: string | null; created_at?: string; updated_at?: string
         }
       >
+
+      // ── "Intelligentes Reise-Postfach" (E-Mail-Import), Schritt 1 ──────────
+      // Typen bereits vorbereitet, existieren in der DB aber erst nach der
+      // gezeigten, noch nicht ausgeführten Migration
+      // (supabase/cutover/06_email_inbox.sql) -- gleiches Vorgehen wie bei
+      // vorherigen, noch nicht angewendeten Migrationen in diesem Projekt.
+      travel_email_allowed_senders: TableDef<
+        {
+          id: string; household_id: string; household_member_id: string; email: string
+          active: boolean; created_at: string; updated_at: string
+        },
+        {
+          id?: string; household_id: string; household_member_id: string; email: string
+          active?: boolean; created_at?: string; updated_at?: string
+        }
+      >
+      travel_email_imports: TableDef<
+        {
+          id: string; household_id: string; gmail_message_id: string; gmail_thread_id: string | null
+          sender_email: string; forwarded_by_household_member_id: string | null; received_at: string | null
+          extracted_data: unknown; suggested_booking_type: string | null; suggested_trip_id: string | null
+          assignment_confidence: number | null; import_status: string; resulting_booking_id: string | null
+          error_message: string | null; processed_at: string | null; created_at: string; updated_at: string
+        },
+        {
+          id?: string; household_id: string; gmail_message_id: string; gmail_thread_id?: string | null
+          sender_email: string; forwarded_by_household_member_id?: string | null; received_at?: string | null
+          extracted_data?: unknown; suggested_booking_type?: string | null; suggested_trip_id?: string | null
+          assignment_confidence?: number | null; import_status?: string; resulting_booking_id?: string | null
+          error_message?: string | null; processed_at?: string | null; created_at?: string; updated_at?: string
+        }
+      >
     }
     Views: Record<string, never>
     Functions: Record<string, never>

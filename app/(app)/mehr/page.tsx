@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Users, CloudDownload, Images, ChevronRight, TerminalSquare, type LucideIcon } from "lucide-react";
+import { Users, CloudDownload, Images, ChevronRight, TerminalSquare, Inbox, type LucideIcon } from "lucide-react";
 import { LogoutButton } from "@/components/LogoutButton";
 
 interface MoreLink {
@@ -19,6 +19,7 @@ interface MoreLink {
 // "Offline-Reisen" (neues Feature, siehe app/(app)/mehr/offline-reisen).
 const MORE_LINKS: MoreLink[] = [
   { href: "/family", label: "Familie", description: "Reiseprofile & Vorlieben", Icon: Users },
+  { href: "/mehr/reise-postfach", label: "Reise-Postfach", description: "Weitergeleitete Buchungsbestätigungen automatisch erkennen", Icon: Inbox },
   { href: "/mehr/offline-reisen", label: "Offline-Reisen", description: "Gespeicherte Reisen ohne Verbindung nutzen", Icon: CloudDownload },
   { href: "/memories", label: "Travel Memory", description: "Eure gemeinsame Reisegalerie", Icon: Images },
   { href: "/mehr/developer", label: "Developer", description: "Serverseitige Testmodule für neue Integrationen", Icon: TerminalSquare },
