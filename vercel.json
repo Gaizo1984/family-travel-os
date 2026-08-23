@@ -15,6 +15,10 @@
     {
       "path": "/travel/api/cron/trigger-trip-debriefs",
       "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/travel/api/cron/renew-gmail-watch",
+      "schedule": "0 7 * * *"
     }
   ]
 }
