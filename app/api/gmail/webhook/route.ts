@@ -44,6 +44,18 @@ export async function POST(request: NextRequest) {
   if (!auth.ok) {
     // Nie das Token selbst loggen -- s. lib/gmail/pubsub-auth.ts.
     console.error('[gmail-webhook] OIDC-Prüfung fehlgeschlagen:', auth.reason)
+    // §Bugfix (Verifizierbarkeit ohne Log-Zugriff): "fehlende Konfiguration"
+    // bekommt bewusst einen eigenen Status -- gleiches Muster wie
+    // app/api/cron/cleanup-caches/route.ts (503 statt 401 bei fehlendem
+    // Secret). Kein Reason-Text/Wert im Response-Body (§Vorgabe "keine
+    // Werte oder Secrets ausgeben") -- nur dieser eine, absichtlich grobe
+    // Statuscode-Unterschied, der von außen ohne Log-Zugriff prüfbar macht,
+    // ob GMAIL_PUBSUB_OIDC_AUDIENCE/GMAIL_PUBSUB_SERVICE_ACCOUNT_EMAIL im
+    // Production-Runtime ankommen, ohne einem Angreifer mehr über den
+    // GENAUEN Grund einer 401-Ablehnung zu verraten als bisher.
+    if (auth.reason === 'not_configured') {
+      return NextResponse.json({ error: 'not configured' }, { status: 503 })
+    }
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
