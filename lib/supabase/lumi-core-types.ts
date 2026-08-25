@@ -654,6 +654,18 @@ export interface LumiCoreDatabase {
           error_message?: string | null; processed_at?: string | null; created_at?: string; updated_at?: string
         }
       >
+      // Typ bereits vorbereitet, existiert in der DB erst nach der gezeigten,
+      // noch nicht ausgeführten Migration (supabase/cutover/07_gmail_oauth_connection.sql).
+      travel_gmail_connections: TableDef<
+        {
+          id: string; household_id: string; gmail_account_email: string; refresh_token: string
+          connected_by: string | null; created_at: string; updated_at: string
+        },
+        {
+          id?: string; household_id: string; gmail_account_email: string; refresh_token: string
+          connected_by?: string | null; created_at?: string; updated_at?: string
+        }
+      >
     }
     Views: Record<string, never>
     Functions: Record<string, never>

@@ -33,7 +33,7 @@ const MAX_MESSAGES_PER_RUN = 15
 export type ProcessPushResult = { processed: number; rejected: number; errored: number }
 
 export async function processGmailPush(): Promise<ProcessPushResult> {
-  const gmail = createGmailClient()
+  const gmail = await createGmailClient()
   const lumiCore = createLumiCoreServiceClient()
 
   const { data: listData } = await gmail.users.messages.list({ userId: 'me', labelIds: ['INBOX'], maxResults: MAX_MESSAGES_PER_RUN })

@@ -1,5 +1,6 @@
 import 'server-only'
 import { gmail, auth } from '@googleapis/gmail'
+import { createLumiCoreServiceClient } from '@/lib/supabase/lumi-core-service'
 
 /**
  * §Reise-Postfach, Implementierungsschritt "Server-seitiger Gmail-Client"
@@ -10,24 +11,25 @@ import { gmail, auth } from '@googleapis/gmail'
  * bereits beim Build, s. lib/actions/booking-extraction.ts für dasselbe
  * Prinzip bei OPENAI_API_KEY).
  *
- * Der Refresh-Token stammt aus dem einmaligen, bereits durchgeführten
- * OAuth-Consent-Flow für das dedizierte LUMI-Travel-Gmail-Postfach (Scope
- * gmail.modify) -- keine erneute interaktive Anmeldung nötig, der
- * OAuth2-Client erneuert Access-Tokens im Hintergrund selbst.
- *
- * NOCH UNGENUTZT (bewusst): diese Datei wird aktuell von keinem Aufrufer
- * importiert. Der Webhook (app/api/gmail/webhook/route.ts) nimmt Pub/Sub-
- * Push-Nachrichten bislang nur entgegen und quittiert sie -- er ruft die
- * Gmail API noch nicht auf (§Nutzervorgabe "noch keine echte
- * Mailverarbeitung aktivieren"). Diese Datei ist vorbereitete
- * Infrastruktur für den nächsten Schritt.
- *
  * §Bugfix (vor Auslieferung gefunden): bewusst `@googleapis/gmail` (nur der
  * Gmail-Teil) statt des vollen `googleapis`-Pakets -- letzteres bündelt die
  * TypeScript-Typen für praktisch alle Google-APIs in einem Paket und ließ
  * `tsc --noEmit` in diesem bereits großen Projekt mit "JavaScript heap out
  * of memory" abbrechen. Gleiche Laufzeit-API (`googleapis-common`
  * darunter), nur ohne den unnötigen Typ-Ballast.
+ *
+ * §OAuth-Verbindungsfluss (Nutzervorgabe, wörtlich): "serverseitige sichere
+ * Speicherung der Tokens, familienbezogen" -- der Refresh Token kommt jetzt
+ * bevorzugt aus travel_gmail_connections (per In-App-"Gmail verbinden"-Flow
+ * gespeichert, s. lib/gmail/oauth-client.ts + app/api/auth/gmail/*), NICHT
+ * mehr primär aus der Env-Var. GMAIL_REFRESH_TOKEN bleibt als Fallback
+ * bestehen -- rein additiv, damit die bereits produktiv laufende Pipeline
+ * (Webhook/Watch-Renewal) durch diese Umstellung nicht unterbrochen wird,
+ * solange noch niemand über den neuen Button verbunden hat. Es gibt
+ * realistisch genau EINE Verbindung (ein dediziertes Postfach für die ganze
+ * Familie) -- deshalb hier bewusst ohne householdId-Parameter, anders als
+ * lib/calendar/google/client.ts::getAccessTokenForHousehold in Lumi
+ * Assistance (dort mehrere Haushalte mit je eigenem Kalender denkbar).
  */
 function requireGmailEnv(name: 'GMAIL_CLIENT_ID' | 'GMAIL_CLIENT_SECRET' | 'GMAIL_REFRESH_TOKEN'): string {
   const value = process.env[name]
@@ -35,17 +37,28 @@ function requireGmailEnv(name: 'GMAIL_CLIENT_ID' | 'GMAIL_CLIENT_SECRET' | 'GMAI
   return value
 }
 
+async function loadRefreshToken(): Promise<string> {
+  try {
+    const lumiCore = createLumiCoreServiceClient()
+    const { data } = await lumiCore.from('travel_gmail_connections').select('refresh_token').limit(1).maybeSingle()
+    if (data?.refresh_token) return data.refresh_token
+  } catch {
+    // z. B. lokal ohne LUMI_CORE_SERVICE_ROLE_KEY -- Fallback unten greift trotzdem.
+  }
+  return requireGmailEnv('GMAIL_REFRESH_TOKEN')
+}
+
 /** Neuer OAuth2-Client pro Aufruf (kein Modul-Singleton) -- gleiche Vorsicht wie bei anderen server-only-Clients in diesem Projekt (z. B. createLumiCoreClient()), keine versteckte, aufrufübergreifend geteilte Instanz mit Nebenwirkungen. */
-export function createGmailOAuthClient() {
+export async function createGmailOAuthClient() {
   const oauth2Client = new auth.OAuth2(
     requireGmailEnv('GMAIL_CLIENT_ID'),
     requireGmailEnv('GMAIL_CLIENT_SECRET'),
   )
-  oauth2Client.setCredentials({ refresh_token: requireGmailEnv('GMAIL_REFRESH_TOKEN') })
+  oauth2Client.setCredentials({ refresh_token: await loadRefreshToken() })
   return oauth2Client
 }
 
 /** Typisierter Gmail-API-Client (v1) für das dedizierte LUMI-Travel-Postfach. */
-export function createGmailClient() {
-  return gmail({ version: 'v1', auth: createGmailOAuthClient() })
+export async function createGmailClient() {
+  return gmail({ version: 'v1', auth: await createGmailOAuthClient() })
 }

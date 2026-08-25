@@ -33,7 +33,7 @@ export type GmailWatchResult = { historyId: string; expiration: string }
  * über Logging/Statuscode, hier keine stille Fehlerbehandlung.
  */
 export async function renewGmailWatch(): Promise<GmailWatchResult> {
-  const gmail = createGmailClient()
+  const gmail = await createGmailClient()
   const response = await gmail.users.watch({
     userId: 'me',
     requestBody: {
