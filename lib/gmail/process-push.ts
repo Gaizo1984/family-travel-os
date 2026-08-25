@@ -57,6 +57,18 @@ export async function processGmailPush(): Promise<ProcessPushResult> {
 
 type LumiCoreServiceClient = ReturnType<typeof createLumiCoreServiceClient>
 
+/**
+ * §Bugfix (Nutzer-Feedback: "Mail landet unter LUMI/Fehler, aber es gibt
+ * keine Zeile in travel_email_imports"): schlug der INSERT fehl, wurde das
+ * bisher nur geloggt -- der Aufrufer archivierte/labelte die Mail trotzdem
+ * weiter, als wäre alles wie vorgesehen gelaufen. Ergebnis: die Nachricht
+ * verschwindet aus INBOX, obwohl es dafür GAR KEINEN Datensatz gibt --
+ * unsichtbar für Nutzer UND für einen künftigen Retry (sie ist ja nicht mehr
+ * "neu in INBOX"). Gibt jetzt zurück, ob der Schreibvorgang wirklich
+ * geglückt ist -- der Aufrufer darf NUR bei true labeln/archivieren, bei
+ * false bleibt die Mail bewusst unangetastet in INBOX liegen (wird beim
+ * nächsten Push erneut versucht, da sie weiterhin "neu" ist).
+ */
 async function insertImportRow(
   lumiCore: LumiCoreServiceClient,
   args: {
@@ -64,7 +76,7 @@ async function insertImportRow(
     senderEmail: string; receivedAt: string | null; extractedData: ExtractionResult | null
     suggestedType: string | null; status: 'needs_review' | 'error'; errorMessage: string | null
   },
-): Promise<void> {
+): Promise<boolean> {
   const { error } = await lumiCore.from('travel_email_imports').insert({
     household_id: args.householdId,
     gmail_message_id: args.messageId,
@@ -78,12 +90,14 @@ async function insertImportRow(
     error_message: args.errorMessage,
     processed_at: new Date().toISOString(),
   })
+  if (!error) return true
   // §Idempotenz: eine erneute/gleichzeitige Zustellung derselben Nachricht
   // kann hier auf den bestehenden Unique-Index (household_id,
-  // gmail_message_id) laufen -- erwarteter Dedupe-Fall, kein echter Fehler.
-  if (error && error.code !== '23505') {
-    console.error('[gmail-webhook] travel_email_imports-Insert fehlgeschlagen', error.message)
-  }
+  // gmail_message_id) laufen -- erwarteter Dedupe-Fall, kein echter Fehler,
+  // die Nachricht darf trotzdem als "schon erfasst" weiterbehandelt werden.
+  if (error.code === '23505') return true
+  console.error('[gmail-webhook] travel_email_imports-Insert fehlgeschlagen', error.message)
+  return false
 }
 
 async function processOneMessage(
@@ -155,13 +169,13 @@ async function processOneMessage(
   }
 
   if (!extractionInput) {
-    await insertImportRow(lumiCore, {
+    const saved = await insertImportRow(lumiCore, {
       householdId: allowed.household_id, forwardedBy: allowed.household_member_id,
       messageId, threadId, senderEmail, receivedAt,
       extractedData: null, suggestedType: null, status: 'error',
       errorMessage: 'Kein auswertbarer Inhalt gefunden (kein unterstützter Anhang, kein Textkörper).',
     })
-    await applyLabelAndArchive(gmail, messageId, 'LUMI/Fehler')
+    if (saved) await applyLabelAndArchive(gmail, messageId, 'LUMI/Fehler')
     return 'errored'
   }
 
@@ -173,28 +187,28 @@ async function processOneMessage(
     parsed = await callBookingExtractionModel(extractionInput, EMAIL_BOOKING_SCHEMA, buildAutoDetectBookingPrompt())
   } catch (e) {
     console.error('[gmail-webhook] Extraktion fehlgeschlagen', e instanceof Error ? e.message : e)
-    await insertImportRow(lumiCore, {
+    const saved = await insertImportRow(lumiCore, {
       householdId: allowed.household_id, forwardedBy: allowed.household_member_id,
       messageId, threadId, senderEmail, receivedAt,
       extractedData: null, suggestedType: null, status: 'error',
       errorMessage: 'KI-Auslesung nicht verfügbar (Fehler oder Zeitüberschreitung).',
     })
-    await applyLabelAndArchive(gmail, messageId, 'LUMI/Fehler')
+    if (saved) await applyLabelAndArchive(gmail, messageId, 'LUMI/Fehler')
     return 'errored'
   }
 
   if (!parsed.readable) {
-    await insertImportRow(lumiCore, {
+    const saved = await insertImportRow(lumiCore, {
       householdId: allowed.household_id, forwardedBy: allowed.household_member_id,
       messageId, threadId, senderEmail, receivedAt,
       extractedData: parsed, suggestedType: null, status: 'error',
       errorMessage: 'Inhalt nicht zuverlässig lesbar.',
     })
-    await applyLabelAndArchive(gmail, messageId, 'LUMI/Fehler')
+    if (saved) await applyLabelAndArchive(gmail, messageId, 'LUMI/Fehler')
     return 'errored'
   }
 
-  await insertImportRow(lumiCore, {
+  const saved = await insertImportRow(lumiCore, {
     householdId: allowed.household_id, forwardedBy: allowed.household_member_id,
     messageId, threadId, senderEmail, receivedAt,
     extractedData: parsed,
@@ -202,6 +216,6 @@ async function processOneMessage(
     status: 'needs_review',
     errorMessage: null,
   })
-  await applyLabelAndArchive(gmail, messageId, 'LUMI/Prüfen')
-  return 'processed'
+  if (saved) await applyLabelAndArchive(gmail, messageId, 'LUMI/Prüfen')
+  return saved ? 'processed' : 'errored'
 }
