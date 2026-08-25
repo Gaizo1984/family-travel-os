@@ -90,13 +90,20 @@ export default async function ReisePostfachPage({
               Verbindet das dedizierte LUMI-Travel-Gmail-Postfach. Es wird nur Lesen/Verwalten von
               Nachrichten und Labels angefragt (kein Kalender-/Kontakte-/Drive-Zugriff).
             </p>
-            <a
+            {/* §Bugfix (Nutzer-Feedback: "Gmail verbinden meldet 404"): ein rohes
+                <a href="/api/auth/gmail/start"> hängt den basePath ("/travel")
+                NICHT automatisch an -- nur next/link tut das. prefetch={false},
+                da diese Route echte Seiteneffekte hat (setzt das CSRF-state-
+                Cookie, würde bei einem reinen Prefetch also unnötig/verwirrend
+                mit ausgelöst). */}
+            <Link
               href="/api/auth/gmail/start"
+              prefetch={false}
               className="inline-block text-center"
               style={{ background: "var(--foreground)", color: "var(--surface)", border: "none", borderRadius: "6px", padding: "10px 18px", fontSize: "0.72rem", letterSpacing: "0.06em", cursor: "pointer", textDecoration: "none" }}
             >
               Gmail verbinden
-            </a>
+            </Link>
           </div>
         ) : (
           <div className="rounded-xl p-6 mb-4 space-y-3" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
