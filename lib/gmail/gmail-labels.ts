@@ -41,7 +41,15 @@ export async function applyLabelAndArchive(gmail: gmail_v1.Gmail, messageId: str
   })
 }
 
-/** §Nutzervorgabe ("nicht erlaubte Absender: direkt in Gmail-Papierkorb verschieben"): Gmail räumt den Papierkorb standardmäßig nach 30 Tagen automatisch -- akzeptiert, kein eigener Hard-Delete-Job. */
+/**
+ * §Bugfix/Nutzervorgabe (spätere Korrektur, wörtlich): "bei nicht erlaubten
+ * Absendern INBOX nicht entfernen, keine automatische Archivierung, keine
+ * Löschung" -- wird von lib/gmail/process-push.ts NICHT MEHR automatisch
+ * aufgerufen (ursprünglich für nicht erlaubte Absender vorgesehen). Bewusst
+ * hier belassen statt gelöscht, falls ein bewusster, manuell ausgelöster
+ * Papierkorb-Weg (z. B. ein künftiger Admin-Button) je gebraucht wird --
+ * aktuell ohne Aufrufer.
+ */
 export async function trashMessage(gmail: gmail_v1.Gmail, messageId: string): Promise<void> {
   await gmail.users.messages.trash({ userId: 'me', id: messageId })
 }

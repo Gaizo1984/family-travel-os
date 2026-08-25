@@ -3,16 +3,28 @@ import type { gmail_v1 } from '@googleapis/gmail'
 import { createGmailClient } from './gmail-client'
 import { createLumiCoreServiceClient } from '@/lib/supabase/lumi-core-service'
 import { extractSenderEmail, findHeader, listValidAttachments, extractPlainTextBody, decodeBase64Url } from './gmail-message'
-import { applyLabelAndArchive, trashMessage } from './gmail-labels'
+import { applyLabelAndArchive } from './gmail-labels'
 import { EMAIL_BOOKING_SCHEMA, buildAutoDetectBookingPrompt, callBookingExtractionModel, type ExtractionResult, type ExtractionInput } from '@/lib/booking-extraction-core'
 
 /**
  * §Reise-Postfach, Implementierungsschritt "Mail-Verarbeitung" (Nutzervorgabe,
  * wörtlich): "Beim Gmail-Push niemals sofort vollständigen Mailinhalt oder
  * Anhänge laden und niemals OpenAI aufrufen. Zuerst ausschließlich minimale
- * Gmail-Metadaten/Header laden... Nicht erlaubte Absender sofort in den
- * Papierkorb... Erst für erlaubte Absender vollständige Nachricht und
- * Anhänge abrufen und die bestehende Booking-Extraction starten."
+ * Gmail-Metadaten/Header laden... Erst für erlaubte Absender vollständige
+ * Nachricht und Anhänge abrufen und die bestehende Booking-Extraction
+ * starten."
+ *
+ * §Bugfix/Nutzervorgabe (spätere Korrektur, wörtlich): "bei nicht erlaubten
+ * Absendern INBOX nicht entfernen, keine automatische Archivierung, keine
+ * Löschung" -- ein ursprünglich hier vorgesehenes automatisches
+ * trashMessage() für nicht erlaubte/nicht bestimmbare Absender ist bewusst
+ * ENTFERNT worden. Eine solche Nachricht wird nur übersprungen (kein
+ * Datensatz, kein KI-Aufruf), aber in Gmail vollständig unangetastet
+ * gelassen -- bleibt sichtbar in INBOX, wird bei jedem weiteren Push erneut
+ * geprüft (es gibt für sie keinen Dedupe-Datensatz, absichtlich: ein
+ * Whitelist-Eintrag kann jederzeit nachträglich ergänzt werden, dieselbe
+ * Mail soll dann beim nächsten Push automatisch erkannt werden, ohne erneut
+ * weitergeleitet werden zu müssen).
  *
  * §Standing Nutzervorgabe (unverändert bindend, aus einem früheren Schritt):
  * "Bei mittlerer oder niedriger Reisezuordnung niemals automatisch eine
@@ -56,6 +68,30 @@ export async function processGmailPush(): Promise<ProcessPushResult> {
 }
 
 type LumiCoreServiceClient = ReturnType<typeof createLumiCoreServiceClient>
+
+/**
+ * §Nutzervorgabe (wörtlich): "Sendervergleich weiterhin sauber über die
+ * extrahierte E-Mail-Adresse durchführen: lowercase, trim, keinen
+ * Display-Namen vergleichen." `senderEmail` kommt bereits normalisiert aus
+ * extractSenderEmail() (gmail-message.ts: trim + lowercase, nur der reine
+ * Adressteil ohne Display-Namen). Bewusst NICHT per `.eq('email', ...)`
+ * exakt gegen die Datenbank-Spalte, sondern alle aktiven Einträge laden und
+ * in JS mit `.trim().toLowerCase()` vergleichen -- macht die Prüfung robust
+ * gegen einen Whitelist-Eintrag, der z. B. durch eine manuelle SQL-Korrektur
+ * nicht exakt normalisiert gespeichert wurde, statt sich blind auf die
+ * bereits-korrekte Normalisierung beim Anlegen (lib/actions/
+ * email-allowed-senders.ts) zu verlassen. Die Anzahl der Einträge ist
+ * immer klein (eine Handvoll pro Haushalt), kein Performance-Bedenken.
+ */
+export async function findAllowedSender(
+  lumiCore: LumiCoreServiceClient,
+  senderEmail: string,
+): Promise<{ data: { household_id: string; household_member_id: string } | null; error: string | null }> {
+  const { data, error } = await lumiCore.from('travel_email_allowed_senders').select('household_id, household_member_id, email').eq('active', true)
+  if (error) return { data: null, error: error.message }
+  const match = (data ?? []).find((row) => row.email.trim().toLowerCase() === senderEmail)
+  return { data: match ? { household_id: match.household_id, household_member_id: match.household_member_id } : null, error: null }
+}
 
 /**
  * §Bugfix (Nutzer-Feedback: "Mail landet unter LUMI/Fehler, aber es gibt
@@ -110,41 +146,35 @@ async function processOneMessage(
   const meta = await gmail.users.messages.get({ userId: 'me', id: messageId, format: 'metadata', metadataHeaders: ['From'] })
   const senderEmail = extractSenderEmail(findHeader(meta.data.payload?.headers ?? undefined, 'From'))
 
+  // §Nutzervorgabe (wörtlich): "bei nicht erlaubten Absendern INBOX nicht
+  // entfernen, keine automatische Archivierung, keine Löschung" -- ein
+  // nicht bestimmbarer/nicht erlaubter Absender wird ab jetzt bewusst NUR
+  // übersprungen (kein trashMessage()-Aufruf mehr, s. §Bugfix in
+  // gmail-labels.ts-Import oben). Die Nachricht bleibt vollständig
+  // unangetastet in INBOX -- sichtbar, nichts wird für sie gelöscht,
+  // archiviert oder verschoben.
   if (!senderEmail) {
-    await trashMessage(gmail, messageId)
-    console.log('[gmail-webhook] Absender nicht ermittelbar -- in Papierkorb verschoben')
+    console.log('[gmail-webhook] Absender nicht ermittelbar -- übersprungen, INBOX unverändert')
     return 'rejected'
   }
 
   // 2. §Vorgabe "Absender gegen travel_email_allowed_senders prüfen" --
-  // VOR jedem weiteren Laden, VOR jeder KI-Verarbeitung. email wurde beim
-  // Anlegen des Whitelist-Eintrags bereits kleingeschrieben gespeichert
-  // (lib/actions/email-allowed-senders.ts), extractSenderEmail liefert
-  // ebenfalls kleingeschrieben -- einfacher, eindeutiger eq()-Vergleich.
-  const { data: allowed, error: allowedError } = await lumiCore
-    .from('travel_email_allowed_senders')
-    .select('household_id, household_member_id')
-    .eq('email', senderEmail)
-    .eq('active', true)
-    .limit(1)
-    .maybeSingle()
+  // VOR jedem weiteren Laden, VOR jeder KI-Verarbeitung. Siehe
+  // findAllowedSender() oben für die robuste lowercase/trim-Prüfung.
+  const { data: allowed, error: allowedErrorMessage } = await findAllowedSender(lumiCore, senderEmail)
 
   // §Bugfix (vor Auslieferung gefunden): ein echter Abfragefehler (z. B.
   // vorübergehende DB-Störung) darf NIE wie "nicht erlaubt" behandelt
   // werden -- sonst würde eine eigentlich erlaubte Mail fälschlich
-  // getrasht. Bei Unsicherheit bleibt die Mail unangetastet in INBOX und
-  // wird beim nächsten Push erneut versucht (`limit(1)` vor maybeSingle()
-  // verhindert zusätzlich, dass maybeSingle() selbst bei einem
-  // theoretischen Mehrfachtreffer -- z. B. dieselbe Adresse in zwei
-  // Haushalten -- einen Fehler wirft).
-  if (allowedError) {
-    console.error('[gmail-webhook] Whitelist-Prüfung fehlgeschlagen', allowedError.message)
+  // übersprungen. Bei Unsicherheit bleibt die Mail unangetastet in INBOX
+  // und wird beim nächsten Push erneut versucht.
+  if (allowedErrorMessage) {
+    console.error('[gmail-webhook] Whitelist-Prüfung fehlgeschlagen', allowedErrorMessage)
     return 'errored'
   }
 
   if (!allowed) {
-    await trashMessage(gmail, messageId)
-    console.log('[gmail-webhook] Absender nicht auf Whitelist -- in Papierkorb verschoben')
+    console.log('[gmail-webhook] Absender nicht auf Whitelist -- übersprungen, INBOX unverändert')
     return 'rejected'
   }
 

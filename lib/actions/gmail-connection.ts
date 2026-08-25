@@ -6,6 +6,7 @@ import { getCurrentPerson } from '@/lib/current-person'
 import { createLumiCoreServiceClient } from '@/lib/supabase/lumi-core-service'
 import { createGmailClient } from '@/lib/gmail/gmail-client'
 import { extractSenderEmail, findHeader } from '@/lib/gmail/gmail-message'
+import { findAllowedSender } from '@/lib/gmail/process-push'
 
 const REISE_POSTFACH_PATH = '/mehr/reise-postfach'
 
@@ -65,13 +66,10 @@ export async function testGmailConnection() {
       const meta = await gmail.users.messages.get({ userId: 'me', id, format: 'metadata', metadataHeaders: ['From'] })
       const senderEmail = extractSenderEmail(findHeader(meta.data.payload?.headers ?? undefined, 'From'))
       if (!senderEmail) continue
-      const { data: allowed } = await lumiCore
-        .from('travel_email_allowed_senders')
-        .select('id')
-        .eq('email', senderEmail)
-        .eq('active', true)
-        .limit(1)
-        .maybeSingle()
+      // §Konsistenz: dieselbe robuste lowercase/trim-Prüfung wie in
+      // lib/gmail/process-push.ts -- eine Whitelist-Logik statt zweier
+      // leicht unterschiedlicher Kopien.
+      const { data: allowed } = await findAllowedSender(lumiCore, senderEmail)
       if (allowed) allowedCount++
     }
   } catch (e) {
