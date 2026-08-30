@@ -12,6 +12,40 @@
   --bottom-nav-height: 4.5rem;
 }
 
+/*
+ * §Bugfix "App friert in der installierten PWA ein, Dashboard-Wechsel/
+ * Reise-Klick reagieren nicht" (Nutzer-Feedback, Android + iOS, reproduzierbar,
+ * kein Cache-Problem -- im normalen Browser-Tab dagegen unauffällig):
+ * das blockierende Inline-<script> in app/layout.tsx erzeugte den
+ * Splash-Overlay bisher per document.body.appendChild() -- ein DOM-Knoten,
+ * von dem React beim Hydratisieren nichts weiß, weil er nie Teil von
+ * RootLayouts JSX war. Nur im Standalone-Modus (installierte App) führte
+ * das Script diesen Zweig überhaupt aus, exakt deckungsgleich mit dem
+ * beobachteten Muster ("Browser-Tab geht, installierte App friert ein").
+ * Ein solcher, React unbekannter Body-Kindknoten kann beim Hydratisieren zu
+ * einem Mismatch führen, der Klick-Handler in der ganzen App durcheinander-
+ * bringt. Fix: der Splash-Div ist jetzt fest Teil von RootLayouts JSX
+ * (React kennt/besitzt ihn vollständig, IMMER unsichtbar per Default-Regel
+ * hier) -- das Script mutiert ausschließlich <head> (eine <style>-Regel
+ * ein-/ausblenden), fasst <body> nie mehr an.
+ */
+#lumi-splash {
+  display: none;
+}
+#lumi-splash img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+@keyframes lumiSplashFade {
+  0% { opacity: 0; }
+  12% { opacity: 1; }
+  88% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
 body {
   background: var(--background);
   color: var(--foreground);

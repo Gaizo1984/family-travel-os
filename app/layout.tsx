@@ -15,8 +15,22 @@ import "./globals.css";
 // als buchstäblich ERSTES Element in <body> -- der Browser pausiert das
 // weitere Parsen/Malen der restlichen Seite, bis dieses Script fertig ist,
 // wodurch der Splash-Overlay bereits im allerersten Frame sichtbar ist,
-// falls nötig. Läuft komplett DOM-basiert, unabhängig von React/Hydration
-// -- ersetzt die bisherige Komponente vollständig.
+// falls nötig.
+//
+// §Bugfix (Nutzer-Feedback, Folgefehler: "App friert in der installierten
+// PWA ein, Dashboard-Wechsel/Reise-Klick reagieren nicht -- nur in der
+// installierten App, im Browser-Tab unauffällig, harter Neustart hilft
+// nicht"): die ursprüngliche Fassung dieses Scripts erzeugte den Splash-Div
+// per document.body.appendChild() -- ein DOM-Knoten, den React beim
+// Hydratisieren nicht kennt (er ist nirgends Teil von RootLayouts JSX). Da
+// dieser Zweig NUR im Standalone-Modus (installierte App) überhaupt lief,
+// deckt sich das exakt mit dem beobachteten Muster. Ein solcher body-fremder
+// Knoten kann beim Hydratisieren zu einem Mismatch führen, der Klick-Handler
+// in der ganzen App durcheinanderbringt. Fix: der Splash-Div ist jetzt fest
+// Teil dieser Komponente (s. JSX unten, React kennt/besitzt ihn vollständig,
+// per Default unsichtbar über app/globals.css) -- dieses Script mutiert nur
+// noch <head> (eine <style>-Regel zeitlich befristet ein-/ausblenden),
+// fasst <body>/den Splash-Div selbst nie mehr direkt an.
 const SPLASH_SCRIPT = `(function(){
   try {
     var standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
@@ -25,19 +39,11 @@ const SPLASH_SCRIPT = `(function(){
     if (sessionStorage.getItem(KEY)) return;
     sessionStorage.setItem(KEY, '1');
   } catch (e) { return; }
-  var TOTAL = 2500, FADE = 300;
+  var TOTAL = 2500;
   var style = document.createElement('style');
-  style.textContent = '@keyframes lumiSplashFade{0%{opacity:0}' + ((FADE/TOTAL)*100) + '%{opacity:1}' + (((TOTAL-FADE)/TOTAL)*100) + '%{opacity:1}100%{opacity:0}}';
+  style.textContent = '#lumi-splash{display:block;position:fixed;inset:0;z-index:999;overflow:hidden;background:#E8E3DA;animation:lumiSplashFade ' + TOTAL + 'ms ease forwards;pointer-events:none}';
   document.head.appendChild(style);
-  var div = document.createElement('div');
-  div.style.cssText = 'position:fixed;inset:0;z-index:999;overflow:hidden;background:#E8E3DA;animation:lumiSplashFade ' + TOTAL + 'ms ease forwards;pointer-events:none';
-  var img = document.createElement('img');
-  img.src = '${BASE_PATH}/splash/splash-travel.png';
-  img.alt = '';
-  img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover';
-  div.appendChild(img);
-  document.body.appendChild(div);
-  setTimeout(function(){ div.remove(); style.remove(); }, TOTAL + 50);
+  setTimeout(function(){ style.remove(); }, TOTAL + 50);
 })();`;
 
 const geist = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -86,6 +92,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         style={{ background: "var(--background)", color: "var(--foreground)" }}
       >
         <script dangerouslySetInnerHTML={{ __html: SPLASH_SCRIPT }} />
+        {/* §Bugfix (s. Kommentar oben): fest Teil des React-Baums (per Default
+            unsichtbar, app/globals.css), damit das Inline-Script diesen Knoten
+            nie selbst erzeugen/entfernen muss -- keine Hydration-Konflikte mehr. */}
+        <div id="lumi-splash" aria-hidden="true">
+          {/* eslint-disable-next-line @next/next/no-img-element -- rein clientseitig per <head>-Style ein-/ausgeblendetes Splash-Bild, kein next/image-Setup nötig. */}
+          <img src={`${BASE_PATH}/splash/splash-travel.png`} alt="" />
+        </div>
         <ServiceWorkerRegistration />
         {children}
       </body>
