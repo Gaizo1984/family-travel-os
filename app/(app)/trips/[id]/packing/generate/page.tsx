@@ -7,6 +7,19 @@ import { generatePackingList } from "@/lib/actions/packing-list-generation";
 import { PACK_STYLE_ORDER, PACK_STYLE_LABELS } from "@/lib/packing-list-generation";
 import { SubmitButtonWithProgress } from "@/components/SubmitButtonWithProgress";
 
+// §Bugfix "Packlisten-Erstellung haengt endlos" (Oman-Bug): Server Actions
+// laufen unter der maxDuration DIESER Seite (siehe Next.js-Doku zu
+// maxDuration/after -- "If using Server Actions, set the maxDuration at the
+// page level"). generatePackingList() ruft ein Reasoning-Modell
+// (gpt-5.6-terra, effort: medium) auf, das deutlich laenger braucht als ein
+// normaler Chat-Aufruf -- ohne dieses Limit lief die Seite unter der
+// Plattform-Standardzeit, Vercel killt die after()-Fortsetzung dann MITTEN
+// in der Ausfuehrung (kein Catch-Block greift mehr), der Job bleibt fuer
+// immer auf "pending" stehen (endlose Ladeanzeige, kein Fehler, kein
+// Ergebnis). Gleiches, bereits etabliertes Muster wie
+// app/(app)/discover/flights/page.tsx und app/(app)/mehr/developer/page.tsx.
+export const maxDuration = 280;
+
 const LABEL_STYLE: React.CSSProperties = {
   display: "block", color: "var(--muted)", fontSize: "0.55rem",
   letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: "8px",

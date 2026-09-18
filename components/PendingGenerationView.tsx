@@ -6,6 +6,15 @@ import { Loader2 } from 'lucide-react'
 import { loadJob } from '@/lib/ai-generation-jobs'
 
 const POLL_INTERVAL_MS = 2500
+// §Bugfix "Endlose Ladeanzeige ohne Ausweg" (Oman-Packlisten-Bug): wird die
+// Server-Funktion, die den Job abschließt, von der Plattform mitten in der
+// Ausführung beendet (z. B. Timeout, siehe maxDuration-Fix in
+// app/(app)/trips/[id]/packing/generate/page.tsx), bleibt der Job für immer
+// auf "pending" -- ohne dieses Limit poll(t) diese Komponente unbegrenzt
+// weiter, ohne jemals einen Zurück-Weg anzubieten. Rein clientseitige
+// Notbremse: nach dieser Wartezeit gilt der Job als mutmaßlich hängen
+// geblieben, unabhängig von der Ursache.
+const STALE_AFTER_MS = 4 * 60 * 1000
 
 /**
  * Gemeinsamer Wartezustand für alle auf `ai_generation_jobs` umgestellten
@@ -29,6 +38,7 @@ export function PendingGenerationView({
 
   useEffect(() => {
     let cancelled = false
+    const startedAt = Date.now()
 
     const poll = async () => {
       try {
@@ -38,6 +48,8 @@ export function PendingGenerationView({
           router.replace(job.redirectPath ?? fallbackPath)
         } else if (job.status === 'failed') {
           setError(job.errorMessage ?? 'Etwas ist schiefgelaufen. Bitte erneut versuchen.')
+        } else if (Date.now() - startedAt > STALE_AFTER_MS) {
+          setError('Das dauert ungewöhnlich lange und wurde vermutlich unterbrochen. Bitte erneut versuchen.')
         }
       } catch {
         // Netzwerkfehler beim Poll -- nächster Versuch folgt automatisch.
