@@ -189,10 +189,19 @@ export async function generatePackingList(formData: FormData) {
             household_member_id: item.personKey.toLowerCase() === 'gemeinsam' ? null : (personIdByName.get(item.personKey.toLowerCase()) ?? null),
             label: item.label, category: item.category, quantity: item.quantity,
             priority: item.priority, is_last_minute: item.isLastMinute,
-            // travel_packing_items.needs_check ist in Lumi Core ein reines boolean-Flag
-            // (anders als Travels bisheriges Grund-Enum) -- die konkrete Prüf-Ursache
-            // steckt weiterhin im reasoning-Text, siehe needsCheckFlagToPersisted.
-            needs_check: needsCheckFlagToPersisted(item.needsCheckFlag) !== null,
+            // §Bugfix "Oman-Packliste haengt/speichert nicht" (per Produktions-
+            // Fehlermeldung bestaetigt: CHECK-Constraint-Verletzung auf
+            // travel_packing_items.needs_check): die Annahme aus der Cutover-
+            // Umverdrahtung ("needs_check ist in Lumi Core ein reines boolean-
+            // Flag") war FALSCH -- die Spalte ist in der echten Lumi-Core-
+            // Datenbank weiterhin dasselbe TEXT-Feld mit CHECK-Constraint wie im
+            // alten Travel-Schema ('baggage_allowance' | 'hotel_amenity' |
+            // 'airline_rule' | NULL). Der Code schickte bisher true/false statt
+            // des tatsaechlichen String-Werts -- daher schlug JEDE KI-generierte
+            // Packliste beim Speichern fehl. needsCheckFlagToPersisted() liefert
+            // bereits exakt den richtigen Typ (NeedsCheck | null), keine
+            // Umwandlung zu boolean noetig.
+            needs_check: needsCheckFlagToPersisted(item.needsCheckFlag),
             reasoning: reasoningWithReadinessNotice(item.reasoning, status === 'eingepackt'),
             source: item.source, source_key: item.sourceKey,
             status, luggage_assignment: 'unassigned', sort_order: index,
@@ -201,14 +210,11 @@ export async function generatePackingList(formData: FormData) {
         const { error: insertError } = await lumiCore.from('travel_packing_items').insert(rows)
         if (insertError) {
           console.error('[packing-list-generation] Insert fehlgeschlagen:', insertError.message)
-          // §Bugfix "Fehlerursache unsichtbar" (Diagnose Oman-Packliste): die
-          // konkrete Postgres-/RLS-Fehlermeldung landete bisher NUR in den
-          // Vercel-Funktionslogs (kein Zugriff außerhalb des Vercel-Dashboards)
-          // -- die Familie sah nur den generischen Satz, ohne jeden Hinweis auf
-          // die Ursache. Temporär (bis die eigentliche Ursache behoben ist) wird
-          // die technische Detailmeldung angehängt, damit sie aus der App
-          // heraus sichtbar/kopierbar ist, statt nur serverseitig zu verpuffen.
-          await failJob(jobId, `Die Packliste konnte nicht gespeichert werden. Bitte erneut versuchen. (Technische Details: ${insertError.message})`, lumiCore)
+          // §Diagnose-Anhang (temporär fuer den Oman-Bug, jetzt gefunden+behoben,
+          // s. needs_check-Fix oben) wieder entfernt -- die Familie sieht wieder
+          // nur den freundlichen Satz, der eigentliche Fehler bleibt weiterhin
+          // zusaetzlich im Server-Log sichtbar.
+          await failJob(jobId, 'Die Packliste konnte nicht gespeichert werden. Bitte erneut versuchen.', lumiCore)
           return
         }
         await completeJob(jobId, packingPath(slug), lumiCore)
@@ -222,8 +228,7 @@ export async function generatePackingList(formData: FormData) {
       )
       if (draftError) {
         console.error('[packing-list-generation] Entwurf-Upsert fehlgeschlagen:', draftError.message)
-        // s. o. (Insert-Zweig): technische Detailmeldung temporär anhängen, bis die Ursache gefunden/behoben ist.
-        await failJob(jobId, `Die aktualisierte Packliste konnte nicht gespeichert werden. Bitte erneut versuchen. (Technische Details: ${draftError.message})`, lumiCore)
+        await failJob(jobId, 'Die aktualisierte Packliste konnte nicht gespeichert werden. Bitte erneut versuchen.', lumiCore)
         return
       }
       await completeJob(jobId, `${packingPath(slug)}/diff`, lumiCore)
@@ -267,8 +272,8 @@ export async function applyPackingListDiff(formData: FormData) {
       const status = initialStatusForItem({ category: d.category, label: d.label, personKey: d.personLabel }, readyPassportPersonKeys)
       return {
         trip_id: tripId, household_member_id: d.personId, label: d.label, category: d.category, quantity: d.quantity,
-        // s. o.: travel_packing_items.needs_check ist in Lumi Core boolean, nicht das Grund-Enum.
-        priority: d.priority, is_last_minute: d.isLastMinute, needs_check: d.needsCheck !== null,
+        // s. o. (generatePackingList): needs_check ist ein TEXT-Feld mit CHECK-Constraint, kein boolean.
+        priority: d.priority, is_last_minute: d.isLastMinute, needs_check: d.needsCheck,
         reasoning: reasoningWithReadinessNotice(d.reasoning, status === 'eingepackt'),
         source: d.source, source_key: d.sourceKey,
         status, luggage_assignment: 'unassigned',
@@ -278,7 +283,7 @@ export async function applyPackingListDiff(formData: FormData) {
   for (const d of toUpdate) {
     await lumiCore.from('travel_packing_items').update({
       label: d.label, category: d.category, quantity: d.quantity, reasoning: d.reasoning,
-      priority: d.priority, is_last_minute: d.isLastMinute, needs_check: d.needsCheck !== null,
+      priority: d.priority, is_last_minute: d.isLastMinute, needs_check: d.needsCheck,
     }).eq('id', d.existingItemId as string)
   }
   if (toRemove.length > 0) {

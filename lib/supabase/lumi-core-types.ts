@@ -215,18 +215,27 @@ export interface LumiCoreDatabase {
           allowed_weight_grams?: number | null; sort_order?: number; created_at?: string; updated_at?: string
         }
       >
+      // §Bugfix "Oman-Packliste haengt/speichert nicht": needs_check war hier
+      // faelschlich als boolean deklariert (Annahme aus der Cutover-
+      // Umverdrahtung, nie gegen die echte Lumi-Core-Datenbank verifiziert).
+      // Per Produktions-Fehlermeldung bestaetigt: die Spalte ist tatsaechlich
+      // weiterhin TEXT mit CHECK-Constraint ('baggage_allowance' |
+      // 'hotel_amenity' | 'airline_rule' | NULL), identisch zum alten Travel-
+      // Schema (siehe lib/supabase/types.ts, dort korrekt als string | null
+      // gefuehrt) -- s. lib/actions/packing-list-generation.ts fuer den
+      // zugehoerigen Schreibpfad-Fix.
       travel_packing_items: TableDef<
         {
           id: string; trip_id: string; household_member_id: string | null; luggage_id: string | null
           label: string; category: string | null; quantity: number; status: string; priority: string | null
-          luggage_assignment: string | null; needs_check: boolean; is_last_minute: boolean
+          luggage_assignment: string | null; needs_check: string | null; is_last_minute: boolean
           weight_grams: number | null; reasoning: string | null; source: string | null; source_key: string | null
           note: string | null; sort_order: number; created_at: string; updated_at: string
         },
         {
           id?: string; trip_id: string; household_member_id?: string | null; luggage_id?: string | null
           label: string; category?: string | null; quantity?: number; status?: string; priority?: string | null
-          luggage_assignment?: string | null; needs_check?: boolean; is_last_minute?: boolean
+          luggage_assignment?: string | null; needs_check?: string | null; is_last_minute?: boolean
           weight_grams?: number | null; reasoning?: string | null; source?: string | null; source_key?: string | null
           note?: string | null; sort_order?: number; created_at?: string; updated_at?: string
         }
