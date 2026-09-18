@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { Loader2 } from 'lucide-react'
 import { loadJob } from '@/lib/ai-generation-jobs'
 
@@ -67,9 +68,11 @@ export function PendingGenerationView({
     return (
       <div className="rounded-xl p-8 text-center" style={{ background: 'var(--surface)', border: '1px solid rgba(181,98,74,0.3)' }}>
         <p className="mb-4" style={{ color: '#B5624A', fontSize: '0.85rem', lineHeight: 1.6 }}>{error}</p>
-        <a href={fallbackPath} style={{ color: 'var(--accent)', fontSize: '0.7rem', letterSpacing: '0.08em', textDecoration: 'none' }}>
+        {/* §Bugfix "Zurück-Link führt auf 404": basePath ("/travel") wird nur von
+            next/link automatisch vorangestellt, nicht von einem rohen <a href>. */}
+        <Link href={fallbackPath} style={{ color: 'var(--accent)', fontSize: '0.7rem', letterSpacing: '0.08em', textDecoration: 'none' }}>
           Zurück
-        </a>
+        </Link>
       </div>
     )
   }
