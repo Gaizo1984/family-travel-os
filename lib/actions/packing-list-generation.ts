@@ -201,7 +201,14 @@ export async function generatePackingList(formData: FormData) {
         const { error: insertError } = await lumiCore.from('travel_packing_items').insert(rows)
         if (insertError) {
           console.error('[packing-list-generation] Insert fehlgeschlagen:', insertError.message)
-          await failJob(jobId, 'Die Packliste konnte nicht gespeichert werden. Bitte erneut versuchen.', lumiCore)
+          // §Bugfix "Fehlerursache unsichtbar" (Diagnose Oman-Packliste): die
+          // konkrete Postgres-/RLS-Fehlermeldung landete bisher NUR in den
+          // Vercel-Funktionslogs (kein Zugriff außerhalb des Vercel-Dashboards)
+          // -- die Familie sah nur den generischen Satz, ohne jeden Hinweis auf
+          // die Ursache. Temporär (bis die eigentliche Ursache behoben ist) wird
+          // die technische Detailmeldung angehängt, damit sie aus der App
+          // heraus sichtbar/kopierbar ist, statt nur serverseitig zu verpuffen.
+          await failJob(jobId, `Die Packliste konnte nicht gespeichert werden. Bitte erneut versuchen. (Technische Details: ${insertError.message})`, lumiCore)
           return
         }
         await completeJob(jobId, packingPath(slug), lumiCore)
@@ -215,7 +222,8 @@ export async function generatePackingList(formData: FormData) {
       )
       if (draftError) {
         console.error('[packing-list-generation] Entwurf-Upsert fehlgeschlagen:', draftError.message)
-        await failJob(jobId, 'Die aktualisierte Packliste konnte nicht gespeichert werden. Bitte erneut versuchen.', lumiCore)
+        // s. o. (Insert-Zweig): technische Detailmeldung temporär anhängen, bis die Ursache gefunden/behoben ist.
+        await failJob(jobId, `Die aktualisierte Packliste konnte nicht gespeichert werden. Bitte erneut versuchen. (Technische Details: ${draftError.message})`, lumiCore)
         return
       }
       await completeJob(jobId, `${packingPath(slug)}/diff`, lumiCore)
