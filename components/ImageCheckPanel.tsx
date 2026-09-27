@@ -43,13 +43,15 @@ function Badge({ children }: { children: React.ReactNode }) {
  * try/catch als zweite Absicherungsebene neben der serverseitigen Kapselung.
  */
 export function ImageCheckPanel({
-  projectId, photos, runAnalysis, adoptToSession, adoptToReel, markForVacationPost, hasTrip, alreadyMarkedPhotoIds,
+  projectId, photos, runAnalysis, adoptToSession, adoptToReel, adoptToGallery, markForVacationPost, hasTrip, alreadyMarkedPhotoIds,
 }: {
   projectId: string
   photos: Photo[]
   runAnalysis: (projectId: string) => Promise<ImageCheckResult>
   adoptToSession: AdoptAction
   adoptToReel: AdoptAction
+  /** §"Direkt in der Galerie der Reise speichern" (Nutzervorgabe): wie markForVacationPost entfällt der Button ganz ohne trip_id -- die Galerie ist reisebezogen. */
+  adoptToGallery?: AdoptAction
   /** §"Vormerkung muss immer einer konkreten Reise zugeordnet sein" (Nutzervorgabe): Button entfällt ganz, wenn das Bild-Check-Projekt keine trip_id hat. */
   markForVacationPost?: AdoptAction
   hasTrip?: boolean
@@ -172,6 +174,13 @@ export function ImageCheckPanel({
                     <input type="hidden" name="project_id" value={projectId} />
                     <button type="submit" style={adoptButtonStyle}>→ Reel</button>
                   </form>
+                  {adoptToGallery && hasTrip && (
+                    <form action={adoptToGallery}>
+                      <input type="hidden" name="photo_id" value={r.photoId} />
+                      <input type="hidden" name="project_id" value={projectId} />
+                      <button type="submit" style={adoptButtonStyle}>→ Galerie</button>
+                    </form>
+                  )}
                   {markForVacationPost && hasTrip && (
                     alreadyMarkedPhotoIds?.has(r.photoId) ? (
                       <span style={{ ...adoptButtonStyle, border: '1px solid rgba(76,122,93,0.4)', color: '#4C7A5D', cursor: 'default' }}>

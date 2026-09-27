@@ -11,6 +11,7 @@ import { parseStagedPaths } from '@/lib/staged-paths'
 import { compressImageForStorage } from '@/lib/image-compression'
 import { assessImageCheckBatch, compressForAiAnalysis, type ImageCheckAssessment } from '@/lib/photo-quality-analysis'
 import { MAX_IMAGE_CHECK_PHOTOS, MAX_RETAINED_MEMORIES_PER_TRIP } from '@/lib/content-session-limits'
+import { MAX_SELECTED_PHOTOS_PER_TRIP } from '@/lib/memory-limits'
 import { buildTripDigest } from '@/lib/trip-digest'
 import {
   computeVacationPostExpiresAt, curateVacationPostSelection, MAX_VACATION_POST_PHOTOS,
@@ -297,6 +298,65 @@ export async function adoptImageCheckPhotoToReel(formData: FormData) {
   }
 
   redirect('/content-studio/reel/new')
+}
+
+/**
+ * §"Direkt in der Galerie der Reise speichern" (Nutzervorgabe): eigenständige
+ * Übernahme-Aktion neben "→ Reel" -- bisher landete ein Bild-Check-Foto nur
+ * dann in der Galerie (`travel_memory_photos`, is_selected=true), wenn man es
+ * "→ Reel" übernahm, also den (viel schwereren) Reel-Workflow lostrat. Diese
+ * Aktion macht exakt denselben Kopier-Schritt (Download → Kompression →
+ * Re-Upload unter memories/... → Insert), aber OHNE Reel-Nebeneffekt und
+ * bleibt danach auf der Bild-Check-Seite (kein Rausspringen aus der laufenden
+ * Prüfung mehrerer Fotos). Deckelung gegen MAX_SELECTED_PHOTOS_PER_TRIP
+ * (dasselbe Limit, das die Galerie-Seite selbst ausweist), NICHT gegen
+ * MAX_RETAINED_MEMORIES_PER_TRIP (das ist der Reel-Adoptions-Pool).
+ */
+export async function adoptImageCheckPhotoToGallery(formData: FormData) {
+  const photoId = String(formData.get('photo_id') ?? '')
+  const projectId = String(formData.get('project_id') ?? '')
+  const returnPath = `/content-studio/bild-check/${projectId}`
+  if (!photoId || !projectId) redirect(returnPath)
+
+  const lumiCore = await createLumiCoreClient()
+  const { id: familyId } = await getFamily()
+
+  const { data: bildCheckProject } = await lumiCore
+    .from('travel_content_projects').select('id, trip_id')
+    .eq('id', projectId).eq('household_id', familyId).eq('project_type', 'image_check').maybeSingle()
+  if (!bildCheckProject?.trip_id) redirect(`${returnPath}?error=${encodeURIComponent('Diese Auswahl ist keiner Reise zugeordnet.')}`)
+
+  const { data: photo } = await lumiCore
+    .from('travel_content_project_photos').select('id, storage_path').eq('id', photoId).eq('project_id', projectId).maybeSingle()
+  if (!photo) redirect(`${returnPath}?error=${encodeURIComponent('Foto nicht gefunden.')}`)
+
+  const { count } = await lumiCore
+    .from('travel_memory_photos').select('id', { count: 'exact', head: true })
+    .eq('trip_id', bildCheckProject.trip_id).eq('is_selected', true)
+  if ((count ?? 0) >= MAX_SELECTED_PHOTOS_PER_TRIP)
+    redirect(`${returnPath}?error=${encodeURIComponent(`Für diese Reise sind bereits ${MAX_SELECTED_PHOTOS_PER_TRIP} Erinnerungen gespeichert. Bitte zuerst ein Bild aus der Galerie entfernen.`)}`)
+
+  const { data: downloaded, error: downloadError } = await lumiCore.storage.from('travel-documents').download(photo.storage_path)
+  if (downloadError || !downloaded) redirect(`${returnPath}?error=${encodeURIComponent('Foto konnte nicht geladen werden.')}`)
+
+  const buffer = Buffer.from(await downloaded.arrayBuffer())
+  const compressed = await compressImageForStorage(buffer)
+  const memoryPath = await toTravelDocumentsPath(`memories/${crypto.randomUUID()}.webp`)
+  if (!memoryPath) redirect(`${returnPath}?error=${encodeURIComponent('Household nicht gefunden.')}`)
+
+  const { error: uploadError } = await lumiCore.storage.from('travel-documents')
+    .upload(memoryPath, new Blob([new Uint8Array(compressed)], { type: 'image/webp' }), { contentType: 'image/webp', cacheControl: '31536000' })
+  if (uploadError) redirect(`${returnPath}?error=${encodeURIComponent('Speicherfehler: ' + uploadError.message)}`)
+
+  const { error: insertError } = await lumiCore.from('travel_memory_photos').insert({
+    household_id: familyId, trip_id: bildCheckProject.trip_id, storage_path: memoryPath, is_selected: true,
+  })
+  if (insertError) {
+    await lumiCore.storage.from('travel-documents').remove([memoryPath])
+    redirect(`${returnPath}?error=${encodeURIComponent('Speicherfehler: ' + insertError.message)}`)
+  }
+
+  redirect(`${returnPath}?galleryUploaded=1`)
 }
 
 /**

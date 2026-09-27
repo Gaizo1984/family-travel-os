@@ -5,7 +5,8 @@ import { createLumiCoreClient } from "@/lib/supabase/lumi-core-server";
 import { LUMI_CORE_DOCUMENTS_BUCKET } from "@/lib/lumi-core-storage/paths";
 import {
   createImageCheckUploadSlots, uploadImageCheckPhotos, runImageCheckAnalysis,
-  adoptImageCheckPhotoToSession, adoptImageCheckPhotoToReel, markImageCheckPhotoForVacationPost,
+  adoptImageCheckPhotoToSession, adoptImageCheckPhotoToReel, adoptImageCheckPhotoToGallery,
+  markImageCheckPhotoForVacationPost,
 } from "@/lib/actions/image-check";
 import { deleteContentSessionPhotosNow, deleteContentSessionProject } from "@/lib/actions/content-sessions";
 import { MAX_IMAGE_CHECK_PHOTOS } from "@/lib/content-session-limits";
@@ -37,10 +38,10 @@ export default async function ImageCheckProjectPage({
   searchParams,
 }: {
   params: Promise<{ projectId: string }>;
-  searchParams: Promise<{ error?: string; uploaded?: string }>;
+  searchParams: Promise<{ error?: string; uploaded?: string; galleryUploaded?: string }>;
 }) {
   const { projectId } = await params;
-  const { error, uploaded } = await searchParams;
+  const { error, uploaded, galleryUploaded } = await searchParams;
 
   const lumiCore = await createLumiCoreClient();
   const { data: project } = await lumiCore
@@ -126,6 +127,7 @@ export default async function ImageCheckProjectPage({
         </h1>
 
         {error && <Banner variant="error">{error}</Banner>}
+        {galleryUploaded && <Banner variant="success">Foto in der Galerie der Reise gespeichert.</Banner>}
         {uploaded && (
           <p className="mb-6" style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
             {uploaded} Foto{uploaded === "1" ? "" : "s"} hochgeladen.
@@ -194,6 +196,7 @@ export default async function ImageCheckProjectPage({
             runAnalysis={runImageCheckAnalysis}
             adoptToSession={adoptImageCheckPhotoToSession}
             adoptToReel={adoptImageCheckPhotoToReel}
+            adoptToGallery={adoptImageCheckPhotoToGallery}
             markForVacationPost={markImageCheckPhotoForVacationPost}
             hasTrip={Boolean(project.trip_id)}
             alreadyMarkedPhotoIds={alreadyMarkedPhotoIds}
